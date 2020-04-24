@@ -1,0 +1,13 @@
+[package]
+name = "unitermyx-rs"
+version = "0.1.0"
+authors = ["MotanGish <motangish@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+simple_logger = "1.6.0"
+specs = "0.16.1"
+windows = { path = "windows" }
+vk-engine = { path = "vk-engine" }
