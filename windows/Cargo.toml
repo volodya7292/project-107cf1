@@ -8,4 +8,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4.8"
-glfw = "0.37.0"
+
+[dependencies.glfw]
+version = "0.37.0"
+features = ["vulkan"]

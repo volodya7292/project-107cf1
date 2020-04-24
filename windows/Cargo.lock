@@ -40,6 +40,7 @@ dependencies = [
  "objc",
  "raw-window-handle",
  "semver",
+ "vk-sys",
  "winapi",
 ]
 
@@ -108,6 +109,12 @@ name = "semver-parser"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
+
+[[package]]
+name = "vk-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f5fd4a7d6d5d19808610583131c0aed271556527cad4cb71c436831a28e059"
 
 [[package]]
 name = "winapi"
