@@ -1,4 +1,5 @@
 pub mod entry;
+pub mod ffi;
 pub mod window;
 
 pub use crate::entry::Entry;

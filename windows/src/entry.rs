@@ -35,6 +35,9 @@ impl Entry {
     }
 
     pub fn create_window(&mut self, width: u32, height: u32, title: &str) -> Option<Window> {
+        self.glfw_entry
+            .window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
+
         let (mut window, receiver) =
             self.glfw_entry
                 .create_window(width, height, title, glfw::WindowMode::Windowed)?;
@@ -84,7 +87,7 @@ impl Entry {
         });
     }
 
-    pub fn main_loop(&mut self, windows: &[Window]) {
+    pub fn main_loop(&mut self, windows: &[&Window]) {
         loop {
             self.glfw_entry.poll_events();
 

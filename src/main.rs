@@ -1,4 +1,5 @@
 use std::slice;
+use vk_engine::Format;
 
 fn main() {
     simple_logger::init().unwrap();
@@ -6,7 +7,21 @@ fn main() {
     let mut windows = windows::Entry::new().unwrap();
     let mut window = windows.create_window(500, 500, "GOVNO").unwrap();
 
+    let windows_extensions = windows.get_required_vk_instance_extensions().unwrap();
+    let vke = vk_engine::Entry::new().unwrap();
+    let mut instance = vke
+        .create_instance("GOVNO!", windows_extensions.iter().map(String::as_str).collect())
+        .unwrap();
+
     //windows.set_fullscreen(&mut window, true);
 
-    windows.main_loop(slice::from_ref(&window));
+    let surface = instance.create_vk_surface(&window).unwrap();
+
+    let adapters = instance.enumerate_adapters(surface).unwrap();
+
+    //window.create_vk_surface(&instance).unwrap();
+
+    windows.main_loop(slice::from_ref(&&window));
+
+    instance.destroy_surface(surface);
 }

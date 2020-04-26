@@ -2,9 +2,9 @@
 # It is not intended for manual editing.
 [[package]]
 name = "ahash"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0989268a37e128d4d7a8028f1c60099430113fdbc70419010601ce51a228e4fe"
+checksum = "35b909d1c126f78ace756fc337133356c499eebeefcce930fa5fb018823f2b2d"
 dependencies = [
  "const-random",
 ]
@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0d737e0f947a1864e93d33fdef4af8445a00d1ed8dc0c8ddb73139ea6abf15"
+checksum = "61565ff7aaace3525556587bd2dc31d4a07071957be715e63ce7b1eccf51a8f4"
 dependencies = [
  "libc",
 ]
@@ -511,7 +511,9 @@ name = "vk-engine"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "lazy_static",
  "log",
+ "windows",
 ]
 
 [[package]]

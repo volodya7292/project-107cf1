@@ -10,6 +10,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitflags"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
+
+[[package]]
 name = "cc"
 version = "1.0.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -20,6 +26,53 @@ name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
+
+[[package]]
+name = "cmake"
+version = "0.1.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81fb25b677f8bf1eb325017cb6bb8452f87969db0fedb4f757b297bee78a7c62"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "glfw"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36ed2a51f1e1c5722b7a3724fc146cbfe27297584a4fbb2797ce487f62bb0320"
+dependencies = [
+ "bitflags",
+ "glfw-sys",
+ "libc",
+ "log",
+ "objc",
+ "raw-window-handle",
+ "semver",
+ "vk-sys",
+ "winapi",
+]
+
+[[package]]
+name = "glfw-sys"
+version = "3.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b567b13b593ec58ea912b2658ee6230ffe20a069fa5b771800acc69bb3a157e"
+dependencies = [
+ "cmake",
+]
+
+[[package]]
+name = "lazy_static"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+
+[[package]]
+name = "libc"
+version = "0.2.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99e85c08494b21a9054e7fe1374a732aeadaff3980b6990b94bfd3a70f690005"
 
 [[package]]
 name = "libloading"
@@ -41,12 +94,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "malloc_buf"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "objc"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
+dependencies = [
+ "malloc_buf",
+]
+
+[[package]]
+name = "raw-window-handle"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a441a7a6c80ad6473bd4b74ec1c9a4c951794285bf941c2126f607c72e48211"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "semver"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
+dependencies = [
+ "semver-parser",
+]
+
+[[package]]
+name = "semver-parser"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
+
+[[package]]
 name = "vk-engine"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "lazy_static",
  "log",
+ "windows",
 ]
+
+[[package]]
+name = "vk-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f5fd4a7d6d5d19808610583131c0aed271556527cad4cb71c436831a28e059"
 
 [[package]]
 name = "winapi"
@@ -69,3 +172,11 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows"
+version = "0.1.0"
+dependencies = [
+ "glfw",
+ "log",
+]
