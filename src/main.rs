@@ -1,4 +1,5 @@
 use std::slice;
+
 use vk_engine::Format;
 
 fn main() {
@@ -15,10 +16,12 @@ fn main() {
 
     //windows.set_fullscreen(&mut window, true);
 
-    let surface = instance.create_vk_surface(&window).unwrap();
+    let surface = instance.create_surface(&window).unwrap();
 
     let adapters = instance.enumerate_adapters(surface).unwrap();
+    let device = instance.create_device(&adapters[0]).unwrap();
 
+    //device.create_buffer::<u32>(32);
     //window.create_vk_surface(&instance).unwrap();
 
     windows.main_loop(slice::from_ref(&&window));

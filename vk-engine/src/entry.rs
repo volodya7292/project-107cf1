@@ -1,11 +1,12 @@
-use crate::entry::InstanceError::{AshError, VkError};
-use crate::utils;
-use crate::Instance;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
+
 use ash::version::EntryV1_0;
 use ash::vk;
 use log::{error, info, warn};
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
+
+use crate::utils;
+use crate::Instance;
 
 #[derive(Debug)]
 pub enum InstanceError {
@@ -15,13 +16,13 @@ pub enum InstanceError {
 
 impl From<ash::InstanceError> for InstanceError {
     fn from(err: ash::InstanceError) -> Self {
-        AshError(err)
+        InstanceError::AshError(err)
     }
 }
 
 impl From<vk::Result> for InstanceError {
     fn from(err: vk::Result) -> Self {
-        VkError(err)
+        InstanceError::VkError(err)
     }
 }
 

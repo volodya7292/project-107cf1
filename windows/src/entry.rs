@@ -1,6 +1,8 @@
-use crate::Window;
-use log::error;
 use std::cell::Cell;
+
+use log::error;
+
+use crate::Window;
 
 pub struct Entry {
     glfw_entry: glfw::Glfw,

@@ -140,9 +140,22 @@ name = "vk-engine"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "bitflags",
  "lazy_static",
  "log",
+ "vk-mem",
  "windows",
+]
+
+[[package]]
+name = "vk-mem"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c89db58563ea4fb34bd0394eb977c9c7ff7d16bf605f4eb945db7cab8c0c16f"
+dependencies = [
+ "ash",
+ "bitflags",
+ "cc",
 ]
 
 [[package]]

@@ -1,6 +1,8 @@
-use crate::Window;
-use glfw::Context;
 use std::ptr;
+
+use glfw::Context;
+
+use crate::Window;
 
 type VkInstance = usize;
 type VkSurfaceKHR = u64;
