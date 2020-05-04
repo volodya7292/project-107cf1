@@ -21,6 +21,8 @@ fn main() {
     let adapters = instance.enumerate_adapters(surface).unwrap();
     let device = instance.create_device(&adapters[0]).unwrap();
 
+    instance.govno();
+
     //device.create_buffer::<u32>(32);
     //window.create_vk_surface(&instance).unwrap();
 

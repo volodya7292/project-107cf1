@@ -4,8 +4,7 @@ use crate::{format, utils};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::mem;
-use std::os::raw::c_char;
-use std::os::raw::c_void;
+use std::os::{raw::c_void, raw::c_char};
 
 pub struct Instance {
     pub(crate) native: ash::Instance,
@@ -234,7 +233,7 @@ impl Instance {
                             .get_physical_device_format_properties(p_device, format.0)
                     };
                     if !props.optimal_tiling_features.contains(image_format_features)
-                        || !props.linear_tiling_features.contains(image_format_features)
+                        && !props.linear_tiling_features.contains(image_format_features)
                     {
                         return None;
                     }
@@ -247,7 +246,7 @@ impl Instance {
                             .get_physical_device_format_properties(p_device, format::DepthFormat.0)
                     };
                     if !props.optimal_tiling_features.contains(depth_format_features)
-                        || !props.linear_tiling_features.contains(depth_format_features)
+                        && !props.linear_tiling_features.contains(depth_format_features)
                     {
                         return None;
                     }
@@ -325,6 +324,10 @@ impl Instance {
 
     pub fn destroy_surface(&self, surface: vk::SurfaceKHR) {
         unsafe { self.surface_khr.as_ref().unwrap().destroy_surface(surface, None) };
+    }
+
+    pub fn govno(&mut self) {
+        print!("GOVNO SELF!");
     }
 }
 

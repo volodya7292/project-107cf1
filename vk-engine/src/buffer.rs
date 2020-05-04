@@ -10,7 +10,7 @@ pub(crate) struct Buffer<T: ?Sized> {
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) aligned_elem_size: u64,
-    pub(crate) size: u64,
+    pub(crate) bytesize: u64,
 }
 
 pub struct HostBuffer<T> {
@@ -20,10 +20,15 @@ pub struct HostBuffer<T> {
 
 impl<T> HostBuffer<T> {
     fn read(&self, first_element: u64, elements: &mut [T]) {
-        if (elements.len() as i64 * self.buffer.aligned_elem_size as i64)
-            > (self.buffer.size as i64 - (first_element * self.buffer.aligned_elem_size) as i64)
-        {
-            panic!("HostBuffer::read incorrect range!");
+        let read_count = (elements.len() as isize)
+            .min(
+                self.buffer.bytesize as isize / self.buffer.aligned_elem_size as isize
+                    - first_element as isize,
+            )
+            .max(0);
+
+        if read_count == 0 {
+            return;
         }
 
         if mem::size_of::<T>() == self.buffer.aligned_elem_size as usize {
@@ -31,17 +36,16 @@ impl<T> HostBuffer<T> {
                 ptr::copy_nonoverlapping(
                     (self.p_data as *const T).offset(first_element as isize),
                     elements.as_mut_ptr(),
-                    elements.len(),
+                    read_count as usize,
                 )
             };
         } else {
-            for i in 0..elements.len() {
+            for i in 0..read_count {
                 unsafe {
                     ptr::copy_nonoverlapping(
-                        (self.p_data as *const u8).offset(
-                            (first_element as isize + i as isize) * self.buffer.aligned_elem_size as isize,
-                        ),
-                        (elements.as_mut_ptr()).offset(first_element as isize + i as isize) as *mut u8,
+                        (self.p_data as *const u8)
+                            .offset((first_element as isize + i) * self.buffer.aligned_elem_size as isize),
+                        (elements.as_mut_ptr()).offset(first_element as isize + i) as *mut u8,
                         1,
                     );
                 }

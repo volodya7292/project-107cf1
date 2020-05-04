@@ -61,12 +61,12 @@ impl Device {
         }
 
         let aligned_elem_size = utils::make_mul_of(mem::size_of::<T>(), elem_align as usize);
-        let aligned_size = aligned_elem_size * size;
+        let bytesize = aligned_elem_size * size;
 
         let buffer_info = vk::BufferCreateInfo::builder()
             .usage(usage.0)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .size(aligned_size as vk::DeviceSize);
+            .size(bytesize as vk::DeviceSize);
 
         let allocation_create_info = vk_mem::AllocationCreateInfo {
             usage: mem_usage,
@@ -87,7 +87,7 @@ impl Device {
                 _type_marker: PhantomData,
                 native: unsafe { self.native.create_buffer(&buffer_info, None)? },
                 allocation: alloc,
-                size: aligned_size as u64,
+                bytesize: bytesize as u64,
                 aligned_elem_size: aligned_elem_size as u64,
             },
             alloc_info,
