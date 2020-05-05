@@ -1,11 +1,11 @@
 use crate::adapter::Adapter;
 use crate::{
     buffer::{Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
-    utils,
+    utils, Instance,
 };
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::{marker::PhantomData, mem, ptr};
+use std::{marker::PhantomData, mem, ptr, rc::Rc};
 
 #[derive(Debug)]
 pub enum DeviceError {
@@ -26,6 +26,7 @@ impl From<vk::Result> for DeviceError {
 }
 
 pub struct Device {
+    pub(crate) _instance: Rc<Instance>,
     pub(crate) adapter: Adapter,
     pub(crate) native: ash::Device,
     pub(crate) allocator: vk_mem::Allocator,
@@ -37,7 +38,7 @@ impl Device {
     }
 
     fn create_buffer<T>(
-        &self,
+        self: Rc<Self>,
         usage: BufferUsageFlags,
         size: usize,
         mem_usage: vk_mem::MemoryUsage,
@@ -84,18 +85,19 @@ impl Device {
 
         Ok((
             Buffer {
+                _device: self.clone(),
                 _type_marker: PhantomData,
                 native: unsafe { self.native.create_buffer(&buffer_info, None)? },
                 allocation: alloc,
-                bytesize: bytesize as u64,
                 aligned_elem_size: aligned_elem_size as u64,
+                bytesize: bytesize as u64,
             },
             alloc_info,
         ))
     }
 
     fn create_host_buffer<T>(
-        &self,
+        self: Rc<Self>,
         usage: BufferUsageFlags,
         size: usize,
     ) -> Result<HostBuffer<T>, DeviceError> {
@@ -111,7 +113,7 @@ impl Device {
     }
 
     fn create_device_buffer<T>(
-        &self,
+        self: Rc<Self>,
         usage: BufferUsageFlags,
         size: usize,
     ) -> Result<DeviceBuffer<T>, DeviceError> {

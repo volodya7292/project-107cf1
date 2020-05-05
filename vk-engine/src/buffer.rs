@@ -1,11 +1,13 @@
 use ash::vk;
-use std::{marker::PhantomData, mem, ptr};
+use std::{marker::PhantomData, mem, ptr, rc::Rc};
+use crate::device::Device;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BufferUsageFlags(pub(crate) vk::BufferUsageFlags);
 vk_bitflags_impl!(BufferUsageFlags, vk::BufferUsageFlags);
 
 pub(crate) struct Buffer<T: ?Sized> {
+    pub(crate) _device: Rc<Device>,
     pub(crate) _type_marker: PhantomData<T>,
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,

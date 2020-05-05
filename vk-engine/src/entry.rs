@@ -1,5 +1,5 @@
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
+use std::{rc::Rc, os::raw::{c_char, c_void}};
 
 use ash::version::EntryV1_0;
 use ash::vk;
@@ -83,7 +83,7 @@ impl Entry {
         &self,
         app_name: &str,
         mut required_extensions: Vec<&str>,
-    ) -> Result<Instance, InstanceError> {
+    ) -> Result<Rc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();
         let app_info = vk::ApplicationInfo::builder()
@@ -172,11 +172,11 @@ impl Entry {
             None
         };
 
-        Ok(Instance {
+        Ok(Rc::new(Instance {
             native: native_instance,
             debug_utils_ext,
             debug_utils_messenger,
             surface_khr,
-        })
+        }))
     }
 }

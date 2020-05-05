@@ -4,7 +4,7 @@ use crate::{format, utils};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::mem;
-use std::os::{raw::c_void, raw::c_char};
+use std::{rc::Rc, os::{raw::c_void, raw::c_char}};
 
 pub struct Instance {
     pub(crate) native: ash::Instance,
@@ -14,7 +14,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn create_surface(&mut self, window: &windows::Window) -> Result<vk::SurfaceKHR, vk::Result> {
+    pub fn create_surface(&self, window: &windows::Window) -> Result<vk::SurfaceKHR, vk::Result> {
         let instance_handle: usize = unsafe { mem::transmute(self.native.handle()) };
         let mut surface_handle: u64 = 0;
 
@@ -265,7 +265,7 @@ impl Instance {
             .collect())
     }
 
-    pub fn create_device(&self, adapter: &Adapter) -> Result<Device, vk::Result> {
+    pub fn create_device(self: &Rc<Self>, adapter: &Adapter) -> Result<Rc<Device>, vk::Result> {
         let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = vec![];
         let priorities = [1.0_f32; u8::MAX as usize];
 
@@ -315,19 +315,16 @@ impl Instance {
         };
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
-        Ok(Device {
+        Ok(Rc::new(Device {
+            _instance: self.clone(),
             adapter: adapter.clone(),
             native: native_device,
             allocator,
-        })
+        }))
     }
 
     pub fn destroy_surface(&self, surface: vk::SurfaceKHR) {
         unsafe { self.surface_khr.as_ref().unwrap().destroy_surface(surface, None) };
-    }
-
-    pub fn govno(&mut self) {
-        print!("GOVNO SELF!");
     }
 }
 

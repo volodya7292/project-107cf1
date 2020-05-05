@@ -1,16 +1,29 @@
 use std::slice;
 
 use vk_engine::Format;
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
+use raw_window_handle::HasRawWindowHandle;
 
 fn main() {
     simple_logger::init().unwrap();
+
+    //let event_loop = EventLoop::new();
+    //let ww = WindowBuilder::new().build(&event_loop).unwrap();
+    //let handle = ww.raw_window_handle();
+
+    //winit::platform::
+    //let ww = winit::Window::new(&events_loop).unwrap();
 
     let mut windows = windows::Entry::new().unwrap();
     let mut window = windows.create_window(500, 500, "GOVNO").unwrap();
 
     let windows_extensions = windows.get_required_vk_instance_extensions().unwrap();
     let vke = vk_engine::Entry::new().unwrap();
-    let mut instance = vke
+    let instance = vke
         .create_instance("GOVNO!", windows_extensions.iter().map(String::as_str).collect())
         .unwrap();
 
@@ -20,8 +33,6 @@ fn main() {
 
     let adapters = instance.enumerate_adapters(surface).unwrap();
     let device = instance.create_device(&adapters[0]).unwrap();
-
-    instance.govno();
 
     //device.create_buffer::<u32>(32);
     //window.create_vk_surface(&instance).unwrap();
