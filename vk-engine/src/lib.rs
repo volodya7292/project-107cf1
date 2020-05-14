@@ -7,6 +7,7 @@ mod utils;
 
 mod allocator;
 
+pub mod surface;
 pub mod adapter;
 pub mod buffer;
 pub mod cmd_list;

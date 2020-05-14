@@ -1,32 +1,42 @@
 use crate::adapter::Adapter;
 use crate::device::Device;
-use crate::{format, utils};
+use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
-use std::mem;
-use std::{rc::Rc, os::{raw::c_void, raw::c_char}};
+use std::{
+    os::{raw::c_char, raw::c_void},
+    rc::Rc,
+};
 
 pub struct Instance {
+    pub(crate) entry: Rc<Entry>,
     pub(crate) native: ash::Instance,
     pub(crate) debug_utils_ext: Option<ash::extensions::ext::DebugUtils>,
     pub(crate) debug_utils_messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub(crate) surface_khr: Option<ash::extensions::khr::Surface>,
 }
 
+pub fn enumerate_required_window_extensions(
+    window_handle: &impl raw_window_handle::HasRawWindowHandle,
+) -> Result<Vec<String>, vk::Result> {
+    let names = ash_window::enumerate_required_extensions(window_handle)?;
+    Ok(names
+        .iter()
+        .map(|&name| unsafe { utils::c_ptr_to_string(name.as_ptr()) })
+        .collect())
+}
+
 impl Instance {
-    pub fn create_surface(&self, window: &windows::Window) -> Result<vk::SurfaceKHR, vk::Result> {
-        let instance_handle: usize = unsafe { mem::transmute(self.native.handle()) };
-        let mut surface_handle: u64 = 0;
-
-        let result: vk::Result =
-            unsafe { mem::transmute(window.create_surface(instance_handle, &mut surface_handle)) };
-        let vk_surface: vk::SurfaceKHR = unsafe { mem::transmute(surface_handle) };
-
-        if result == vk::Result::SUCCESS {
-            Ok(vk_surface)
-        } else {
-            Err(result)
-        }
+    pub fn create_surface(
+        self: &Rc<Self>,
+        window_handle: &impl raw_window_handle::HasRawWindowHandle,
+    ) -> Result<Surface, vk::Result> {
+        Ok(Surface {
+            instance: Rc::clone(self),
+            native: unsafe {
+                ash_window::create_surface(&self.entry.ash_entry, &self.native, window_handle, None)?
+            },
+        })
     }
 
     fn enumerate_device_extension_names(
@@ -41,7 +51,7 @@ impl Instance {
         )
     }
 
-    pub fn enumerate_adapters(&self, surface: vk::SurfaceKHR) -> Result<Vec<Adapter>, vk::Result> {
+    pub fn enumerate_adapters(&self, surface: Surface) -> Result<Vec<Adapter>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
         Ok(physical_devices
@@ -55,11 +65,14 @@ impl Instance {
 
                 for (i, fam_prop) in queue_families.iter().enumerate() {
                     // Check for present usage
+
+                    // TODO: surface.get_physical_device_surface_support
+
                     let surface_supported = unsafe {
                         self.surface_khr
                             .as_ref()
                             .unwrap()
-                            .get_physical_device_surface_support(p_device, i as u32, surface)
+                            .get_physical_device_surface_support(p_device, i as u32, surface.native)
                             .unwrap()
                     };
 
@@ -316,15 +329,11 @@ impl Instance {
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
         Ok(Rc::new(Device {
-            _instance: self.clone(),
+            _instance: Rc::clone(self),
             adapter: adapter.clone(),
             native: native_device,
             allocator,
         }))
-    }
-
-    pub fn destroy_surface(&self, surface: vk::SurfaceKHR) {
-        unsafe { self.surface_khr.as_ref().unwrap().destroy_surface(surface, None) };
     }
 }
 

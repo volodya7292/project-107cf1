@@ -8,12 +8,13 @@
             "name": "(Windows) Запустить",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "target/debug/unitermyx-rs.exe",
+            "program": "target/debug/project-107cf1.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": false
+            "externalConsole": false,
+            "preLaunchTask": "rust: cargo build"
         }
     ]
 }

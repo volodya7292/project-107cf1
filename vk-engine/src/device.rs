@@ -38,9 +38,9 @@ impl Device {
     }
 
     fn create_buffer<T>(
-        self: Rc<Self>,
+        self: &Rc<Self>,
         usage: BufferUsageFlags,
-        size: usize,
+        size: u64,
         mem_usage: vk_mem::MemoryUsage,
     ) -> Result<(Buffer<T>, vk_mem::AllocationInfo), DeviceError> {
         let mut elem_align = 1;
@@ -62,7 +62,7 @@ impl Device {
         }
 
         let aligned_elem_size = utils::make_mul_of(mem::size_of::<T>(), elem_align as usize);
-        let bytesize = aligned_elem_size * size;
+        let bytesize = aligned_elem_size as u64 * size;
 
         let buffer_info = vk::BufferCreateInfo::builder()
             .usage(usage.0)
@@ -85,21 +85,22 @@ impl Device {
 
         Ok((
             Buffer {
-                _device: self.clone(),
+                _device: Rc::clone(self),
                 _type_marker: PhantomData,
                 native: unsafe { self.native.create_buffer(&buffer_info, None)? },
                 allocation: alloc,
                 aligned_elem_size: aligned_elem_size as u64,
+                size,
                 bytesize: bytesize as u64,
             },
             alloc_info,
         ))
     }
 
-    fn create_host_buffer<T>(
-        self: Rc<Self>,
+    pub fn create_host_buffer<T>(
+        self: &Rc<Self>,
         usage: BufferUsageFlags,
-        size: usize,
+        size: u64,
     ) -> Result<HostBuffer<T>, DeviceError> {
         let (buffer, alloc_info) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::CpuOnly)?;
 
@@ -112,10 +113,10 @@ impl Device {
         })
     }
 
-    fn create_device_buffer<T>(
-        self: Rc<Self>,
+    pub fn create_device_buffer<T>(
+        self: &Rc<Self>,
         usage: BufferUsageFlags,
-        size: usize,
+        size: u64,
     ) -> Result<DeviceBuffer<T>, DeviceError> {
         let (buffer, _) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::GpuOnly)?;
 

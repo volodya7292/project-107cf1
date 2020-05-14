@@ -27,7 +27,7 @@ impl From<vk::Result> for InstanceError {
 }
 
 pub struct Entry {
-    ash_entry: ash::Entry,
+    pub(crate) ash_entry: ash::Entry,
 }
 
 unsafe extern "system" fn vk_debug_callback(
@@ -55,10 +55,10 @@ unsafe extern "system" fn vk_debug_callback(
 }
 
 impl Entry {
-    pub fn new() -> Result<Entry, ash::LoadingError> {
-        Ok(Entry {
+    pub fn new() -> Result<Rc<Entry>, ash::LoadingError> {
+        Ok(Rc::new(Entry {
             ash_entry: ash::Entry::new()?,
-        })
+        }))
     }
 
     fn enumerate_instance_layer_names(&self) -> Result<Vec<String>, vk::Result> {
@@ -80,7 +80,7 @@ impl Entry {
     }
 
     pub fn create_instance(
-        &self,
+        self: &Rc<Self>,
         app_name: &str,
         mut required_extensions: Vec<&str>,
     ) -> Result<Rc<Instance>, InstanceError> {
@@ -173,6 +173,7 @@ impl Entry {
         };
 
         Ok(Rc::new(Instance {
+            entry: Rc::clone(self),
             native: native_instance,
             debug_utils_ext,
             debug_utils_messenger,

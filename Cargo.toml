@@ -1,5 +1,5 @@
 [package]
-name = "unitermyx-rs"
+name = "project-107cf1"
 version = "0.1.0"
 authors = ["MotanGish <motangish@gmail.com>"]
 edition = "2018"
@@ -9,7 +9,5 @@ edition = "2018"
 [dependencies]
 simple_logger = "1.6.0"
 specs = "0.16.1"
-winit = "0.22.1"
-raw-window-handle = "0.3.3"
-windows = { path = "windows" }
 vk-engine = { path = "vk-engine" }
+winit = "0.22.1"

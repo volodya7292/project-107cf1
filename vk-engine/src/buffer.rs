@@ -1,6 +1,7 @@
-use ash::vk;
-use std::{marker::PhantomData, mem, ptr, rc::Rc};
 use crate::device::Device;
+use ash::vk;
+use std::ops::{Index, IndexMut, Range};
+use std::{marker::PhantomData, mem, ptr, rc::Rc};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BufferUsageFlags(pub(crate) vk::BufferUsageFlags);
@@ -12,12 +13,121 @@ pub(crate) struct Buffer<T: ?Sized> {
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) aligned_elem_size: u64,
+    pub(crate) size: u64,
     pub(crate) bytesize: u64,
 }
 
 pub struct HostBuffer<T> {
     pub(crate) buffer: Buffer<T>,
     pub(crate) p_data: *mut u8,
+}
+
+impl<'a, T> IntoIterator for &'a HostBuffer<T> {
+    type Item = &'a mut T;
+    type IntoIter = HostBufferIterator<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        HostBufferIterator {
+            p_data: self.p_data,
+            stride: self.buffer.aligned_elem_size as usize,
+            size: self.buffer.size as usize,
+            _marker: PhantomData,
+            index: 0,
+        }
+    }
+}
+
+pub struct HostBufferIterator<'a, T> {
+    p_data: *mut u8,
+    stride: usize,
+    size: usize,
+    index: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for HostBufferIterator<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.size {
+            let curr_index = self.index;
+            self.index += 1;
+            Some(unsafe { &mut *(self.p_data.offset((self.stride * curr_index) as isize) as *mut T) })
+        } else {
+            None
+        }
+    }
+}
+
+// TODO: CONSIDER ALIGNMENT
+
+// impl<T> Index<Range<usize>> for HostBuffer<T> {
+//     type Output = [T];
+
+//     fn index(&self, range: Range<usize>) -> &Self::Output {
+//         if range.end as u64 >= self.buffer.size {
+//             panic!("VkBuffer: index {} out of range for slice of length {}", range.end, range.end - range.start);
+//         }
+//         unsafe {
+//             std::slice::from_raw_parts(
+//                 self.p_data
+//                     .offset(self.buffer.aligned_elem_size as isize * range.start as isize)
+//                     as *const T,
+//                 range.end - range.start,
+//             )
+//         }
+//     }
+// }
+
+// impl<T> IndexMut<Range<usize>> for HostBuffer<T> {
+//     fn index_mut(&mut self, range: Range<usize>) -> &mut Self::Output {
+//         if range.end as u64 >= self.buffer.size {
+//             panic!("VkBuffer: index {} out of range for slice of length {}", range.end, range.end - range.start);
+//         }
+//         unsafe {
+//             std::slice::from_raw_parts_mut(
+//                 self.p_data
+//                     .offset(self.buffer.aligned_elem_size as isize * range.start as isize)
+//                     as *mut T,
+//                 range.end - range.start,
+//             )
+//         }
+//     }
+// }
+
+impl<T> Index<usize> for HostBuffer<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        if index as u64 >= self.buffer.size {
+            panic!(
+                "VkBuffer: index out of bounds: the len is {} but the index is {}",
+                self.buffer.size, index
+            );
+        }
+
+        unsafe {
+            &*(self
+                .p_data
+                .offset(self.buffer.aligned_elem_size as isize * index as isize) as *const T)
+        }
+    }
+}
+
+impl<T> IndexMut<usize> for HostBuffer<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if index as u64 >= self.buffer.size {
+            panic!(
+                "VkBuffer: index out of bounds: the len is {} but the index is {}",
+                self.buffer.size, index
+            );
+        }
+        unsafe {
+            &mut *(self
+                .p_data
+                .offset(self.buffer.aligned_elem_size as isize * index as isize) as *mut T)
+        }
+    }
 }
 
 impl<T> HostBuffer<T> {
