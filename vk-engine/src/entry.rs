@@ -1,5 +1,8 @@
 use std::ffi::{CStr, CString};
-use std::{rc::Rc, os::raw::{c_char, c_void}};
+use std::{
+    os::raw::{c_char, c_void},
+    rc::Rc,
+};
 
 use ash::version::EntryV1_0;
 use ash::vk;
@@ -102,6 +105,7 @@ impl Entry {
             required_extensions.push("VK_EXT_debug_utils");
             preferred_extensions.push("VK_EXT_validation_features");
         }
+        required_extensions.push("VK_KHR_surface");
 
         // Filter layers
         let enabled_layers = utils::filter_names(&available_layers, &required_layers, true).unwrap();
@@ -163,14 +167,7 @@ impl Entry {
         };
 
         // Init Surface extension
-        let surface_khr = if ext_supported("VK_KHR_surface") {
-            Some(ash::extensions::khr::Surface::new(
-                &self.ash_entry,
-                &native_instance,
-            ))
-        } else {
-            None
-        };
+        let surface_khr = ash::extensions::khr::Surface::new(&self.ash_entry, &native_instance);
 
         Ok(Rc::new(Instance {
             entry: Rc::clone(self),

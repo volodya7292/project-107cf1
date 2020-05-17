@@ -1,8 +1,9 @@
-use ash::vk;
-use std::ffi::CString;
+use crate::{device::Device, surface::Surface, Instance};
+use ash::{version::InstanceV1_0, vk};
+use std::{ffi::CString, os::raw::c_char, rc::Rc};
 
-#[derive(Clone)]
 pub struct Adapter {
+    pub(crate) instance: Rc<Instance>,
     pub(crate) native: vk::PhysicalDevice,
     pub(crate) props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
@@ -13,6 +14,104 @@ pub struct Adapter {
 }
 
 impl Adapter {
+    pub fn create_device(self: &Rc<Self>) -> Result<Rc<Device>, vk::Result> {
+        let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = vec![];
+        let priorities = [1.0_f32; u8::MAX as usize];
+
+        for i in 0..self.queue_family_indices.len() {
+            let mut used_indices = Vec::<u8>::with_capacity(u8::MAX as usize);
+
+            for fam_index in self.queue_family_indices.iter() {
+                if fam_index[0] == i as u8 && !used_indices.contains(&fam_index[1]) {
+                    used_indices.push(fam_index[1]);
+                }
+            }
+            if used_indices.is_empty() {
+                continue;
+            }
+
+            let mut queue_info = vk::DeviceQueueCreateInfo::builder();
+            queue_info = queue_info
+                .queue_family_index(i as u32)
+                .queue_priorities(&priorities[0..used_indices.len()]);
+            queue_infos.push(queue_info.build());
+        }
+
+        let mut features12 = self.features12;
+        let enabled_extensions_raw: Vec<*const c_char> =
+            self.enabled_extensions.iter().map(|name| name.as_ptr()).collect();
+
+        let create_info = vk::DeviceCreateInfo::builder()
+            .queue_create_infos(&queue_infos)
+            .enabled_extension_names(&enabled_extensions_raw)
+            .enabled_features(&self.features)
+            .push_next(&mut features12);
+
+        let native_device = unsafe {
+            self.instance
+                .native
+                .create_device(self.native, &create_info, None)?
+        };
+
+        // Create allocator
+        let allocator_info = vk_mem::AllocatorCreateInfo {
+            physical_device: self.native,
+            device: native_device.clone(),
+            instance: self.instance.native.clone(),
+            flags: Default::default(),
+            preferred_large_heap_block_size: 0,
+            frame_in_use_count: 0,
+            heap_size_limits: None,
+        };
+        let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
+
+        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
+
+        Ok(Rc::new(Device {
+            adapter: Rc::clone(self),
+            native: native_device,
+            allocator,
+            swapchain_khr,
+        }))
+    }
+
+    pub(crate) fn get_surface_capabilities(
+        &self,
+        surface: &Surface,
+    ) -> Result<vk::SurfaceCapabilitiesKHR, vk::Result> {
+        let mut surface_capabs = unsafe {
+            self.instance
+                .surface_khr
+                .get_physical_device_surface_capabilities(self.native, surface.native)?
+        };
+        if surface_capabs.max_image_count == 0 {
+            surface_capabs.max_image_count = u32::MAX;
+        }
+        Ok(surface_capabs)
+    }
+
+    pub(crate) fn get_surface_formats(
+        &self,
+        surface: &Surface,
+    ) -> Result<Vec<vk::SurfaceFormatKHR>, vk::Result> {
+        Ok(unsafe {
+            self.instance
+                .surface_khr
+                .get_physical_device_surface_formats(self.native, surface.native)?
+        })
+    }
+
+    pub(crate) fn get_surface_present_modes(
+        &self,
+        surface: &Surface,
+    ) -> Result<Vec<vk::PresentModeKHR>, vk::Result> {
+        Ok(unsafe {
+            self.instance
+                .surface_khr
+                .get_physical_device_surface_present_modes(self.native, surface.native)?
+        })
+    }
+
     pub fn is_extension_enabled(&self, name: &str) -> bool {
         self.enabled_extensions.contains(&CString::new(name).unwrap())
     }

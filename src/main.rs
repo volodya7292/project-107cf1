@@ -3,11 +3,10 @@ use std::slice;
 use vk_engine::Format;
 use winit::window::WindowBuilder;
 
+use vk_engine::Instance;
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use slice::SliceIndex;
-
 fn main() {
     simple_logger::init().unwrap();
 
@@ -28,12 +27,14 @@ fn main() {
 
     let surface = instance.create_surface(&window).unwrap();
 
-    let adapters = instance.enumerate_adapters(surface).unwrap();
-    let device = instance.create_device(&adapters[0]).unwrap();
+    let adapters = instance.enumerate_adapters(&surface).unwrap();
+    let device = adapters[0].create_device().unwrap();
 
     //adapters.iter_mut()
 
-    let mut buf = device.create_host_buffer::<u32>(vk_engine::buffer::BufferUsageFlags::UNIFORM, 5).unwrap();
+    let mut buf = device
+        .create_host_buffer::<u32>(vk_engine::buffer::BufferUsageFlags::UNIFORM, 5)
+        .unwrap();
     buf[0] = 1u32;
     buf[1] = 2u32;
     buf[2] = 3u32;
@@ -45,11 +46,15 @@ fn main() {
     let v = Vec::<u32>::new();
     //let d = &v[2..5];
 
+    //buf.write(0, &[1u32]);
+    //buf.write(0, &[1u32]);
+
     for a in buf.into_iter() {
         println!("{}", a);
     }
 
-
+    let window_size = window.inner_size();
+    let swapchain = device.create_swapchain(&surface, (window_size.width, window_size.height), true);
 
     //println!("ITE {:?}", &buf[0..5]);
 

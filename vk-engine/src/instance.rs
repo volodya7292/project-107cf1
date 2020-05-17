@@ -1,10 +1,9 @@
 use crate::adapter::Adapter;
-use crate::device::Device;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::{
-    os::{raw::c_char, raw::c_void},
+    os::{raw::c_void},
     rc::Rc,
 };
 
@@ -13,7 +12,7 @@ pub struct Instance {
     pub(crate) native: ash::Instance,
     pub(crate) debug_utils_ext: Option<ash::extensions::ext::DebugUtils>,
     pub(crate) debug_utils_messenger: Option<vk::DebugUtilsMessengerEXT>,
-    pub(crate) surface_khr: Option<ash::extensions::khr::Surface>,
+    pub(crate) surface_khr: ash::extensions::khr::Surface,
 }
 
 pub fn enumerate_required_window_extensions(
@@ -30,13 +29,13 @@ impl Instance {
     pub fn create_surface(
         self: &Rc<Self>,
         window_handle: &impl raw_window_handle::HasRawWindowHandle,
-    ) -> Result<Surface, vk::Result> {
-        Ok(Surface {
+    ) -> Result<Rc<Surface>, vk::Result> {
+        Ok(Rc::new(Surface {
             instance: Rc::clone(self),
             native: unsafe {
                 ash_window::create_surface(&self.entry.ash_entry, &self.native, window_handle, None)?
             },
-        })
+        }))
     }
 
     fn enumerate_device_extension_names(
@@ -51,7 +50,7 @@ impl Instance {
         )
     }
 
-    pub fn enumerate_adapters(&self, surface: Surface) -> Result<Vec<Adapter>, vk::Result> {
+    pub fn enumerate_adapters(self: &Rc<Self>, surface: &Rc<Surface>) -> Result<Vec<Rc<Adapter>>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
         Ok(physical_devices
@@ -70,8 +69,6 @@ impl Instance {
 
                     let surface_supported = unsafe {
                         self.surface_khr
-                            .as_ref()
-                            .unwrap()
                             .get_physical_device_surface_support(p_device, i as u32, surface.native)
                             .unwrap()
                     };
@@ -209,7 +206,7 @@ impl Instance {
                 // Check formats
                 // ------------------------------------------------------------------------------------
                 // Buffer formats
-                for format in format::BufferFormats.iter() {
+                for format in format::BUFFER_FORMATS.iter() {
                     let props = unsafe {
                         self.native
                             .get_physical_device_format_properties(p_device, format.0)
@@ -240,7 +237,7 @@ impl Instance {
                     | vk::FormatFeatureFlags::TRANSFER_DST;
 
                 // Image formats
-                for format in format::ImageFormats.iter() {
+                for format in format::IMAGE_FORMATS.iter() {
                     let props = unsafe {
                         self.native
                             .get_physical_device_format_properties(p_device, format.0)
@@ -256,7 +253,7 @@ impl Instance {
                 {
                     let props = unsafe {
                         self.native
-                            .get_physical_device_format_properties(p_device, format::DepthFormat.0)
+                            .get_physical_device_format_properties(p_device, format::DEPTH_FORMAT.0)
                     };
                     if !props.optimal_tiling_features.contains(depth_format_features)
                         && !props.linear_tiling_features.contains(depth_format_features)
@@ -265,7 +262,8 @@ impl Instance {
                     }
                 }
 
-                Some(Adapter {
+                Some(Rc::new(Adapter {
+                    instance: Rc::clone(self),
                     native: p_device,
                     props,
                     enabled_extensions,
@@ -273,67 +271,9 @@ impl Instance {
                     features: enabled_features,
                     features12: enabled_features12,
                     queue_family_indices: queue_fam_indices,
-                })
+                }))
             })
             .collect())
-    }
-
-    pub fn create_device(self: &Rc<Self>, adapter: &Adapter) -> Result<Rc<Device>, vk::Result> {
-        let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = vec![];
-        let priorities = [1.0_f32; u8::MAX as usize];
-
-        for i in 0..adapter.queue_family_indices.len() {
-            let mut used_indices = Vec::<u8>::with_capacity(u8::MAX as usize);
-
-            for fam_index in adapter.queue_family_indices.iter() {
-                if fam_index[0] == i as u8 && !used_indices.contains(&fam_index[1]) {
-                    used_indices.push(fam_index[1]);
-                }
-            }
-            if used_indices.is_empty() {
-                continue;
-            }
-
-            let mut queue_info = vk::DeviceQueueCreateInfo::builder();
-            queue_info = queue_info
-                .queue_family_index(i as u32)
-                .queue_priorities(&priorities[0..used_indices.len()]);
-            queue_infos.push(queue_info.build());
-        }
-
-        let mut features12 = adapter.features12;
-        let enabled_extensions_raw: Vec<*const c_char> = adapter
-            .enabled_extensions
-            .iter()
-            .map(|name| name.as_ptr())
-            .collect();
-
-        let create_info = vk::DeviceCreateInfo::builder()
-            .queue_create_infos(&queue_infos)
-            .enabled_extension_names(&enabled_extensions_raw)
-            .enabled_features(&adapter.features)
-            .push_next(&mut features12);
-
-        let native_device = unsafe { self.native.create_device(adapter.native, &create_info, None)? };
-
-        // Create allocator
-        let allocator_info = vk_mem::AllocatorCreateInfo {
-            physical_device: adapter.native,
-            device: native_device.clone(),
-            instance: self.native.clone(),
-            flags: Default::default(),
-            preferred_large_heap_block_size: 0,
-            frame_in_use_count: 0,
-            heap_size_limits: None,
-        };
-        let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
-
-        Ok(Rc::new(Device {
-            _instance: Rc::clone(self),
-            adapter: adapter.clone(),
-            native: native_device,
-            allocator,
-        }))
     }
 }
 

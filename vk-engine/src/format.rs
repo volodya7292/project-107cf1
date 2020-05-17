@@ -19,12 +19,12 @@ impl Format {
     pub const RGB32_UINT: Self = Format(vk::Format::R32G32B32_UINT);
 }
 
-pub const BufferFormats: [Format; 0] = [];
-pub const ImageFormats: [Format; 2] = [Format::RGBA8_UNORM, Format::RGBA32_FLOAT];
-pub const DepthFormat: Format = Format::D32_FLOAT;
+pub const BUFFER_FORMATS: [Format; 0] = [];
+pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RGBA32_FLOAT];
+pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
 lazy_static! {
-    pub static ref FormatSizes: HashMap<Format, u8> = [
+    pub static ref FORMAT_SIZES: HashMap<Format, u8> = [
         (Format::UNDEFINED, 0),
         (Format::D32_FLOAT, 4),
         (Format::R32_UINT, 4),
