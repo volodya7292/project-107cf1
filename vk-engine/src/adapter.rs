@@ -112,6 +112,25 @@ impl Adapter {
         })
     }
 
+    pub(crate) fn get_image_format_properties(
+        &self,
+        format: vk::Format,
+        image_type: vk::ImageType,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+    ) -> Result<vk::ImageFormatProperties, vk::Result> {
+        Ok(unsafe {
+            self.instance.native.get_physical_device_image_format_properties(
+                self.native,
+                format,
+                image_type,
+                tiling,
+                usage,
+                vk::ImageCreateFlags::empty(),
+            )?
+        })
+    }
+
     pub fn is_extension_enabled(&self, name: &str) -> bool {
         self.enabled_extensions.contains(&CString::new(name).unwrap())
     }

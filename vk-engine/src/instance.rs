@@ -2,10 +2,7 @@ use crate::adapter::Adapter;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
-use std::{
-    os::{raw::c_void},
-    rc::Rc,
-};
+use std::{os::raw::c_void, rc::Rc};
 
 pub struct Instance {
     pub(crate) entry: Rc<Entry>,
@@ -242,9 +239,7 @@ impl Instance {
                         self.native
                             .get_physical_device_format_properties(p_device, format.0)
                     };
-                    if !props.optimal_tiling_features.contains(image_format_features)
-                        && !props.linear_tiling_features.contains(image_format_features)
-                    {
+                    if !props.optimal_tiling_features.contains(image_format_features) {
                         return None;
                     }
                 }
@@ -255,9 +250,7 @@ impl Instance {
                         self.native
                             .get_physical_device_format_properties(p_device, format::DEPTH_FORMAT.0)
                     };
-                    if !props.optimal_tiling_features.contains(depth_format_features)
-                        && !props.linear_tiling_features.contains(depth_format_features)
-                    {
+                    if !props.optimal_tiling_features.contains(depth_format_features) {
                         return None;
                     }
                 }

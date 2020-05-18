@@ -3,7 +3,7 @@ use std::slice;
 use vk_engine::Format;
 use winit::window::WindowBuilder;
 
-use vk_engine::Instance;
+use vk_engine::{image::ImageUsageFlags, Instance};
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -55,6 +55,8 @@ fn main() {
 
     let window_size = window.inner_size();
     let swapchain = device.create_swapchain(&surface, (window_size.width, window_size.height), true);
+
+    let image = device.create_image_2d(Format::RGBA16_UNORM, false, ImageUsageFlags::SAMPLED, (1024, 1024));
 
     //println!("ITE {:?}", &buf[0..5]);
 

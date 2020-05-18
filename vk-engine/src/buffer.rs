@@ -1,6 +1,6 @@
 use crate::device::Device;
 use ash::vk;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Index, IndexMut};
 use std::{marker::PhantomData, mem, ptr, rc::Rc};
 
 pub(crate) struct Buffer<T: ?Sized> {
