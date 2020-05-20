@@ -1,5 +1,3 @@
-use std::slice;
-
 use vk_engine::Format;
 use winit::window::WindowBuilder;
 
@@ -7,6 +5,7 @@ use vk_engine::{image::ImageUsageFlags, Instance};
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+
 fn main() {
     simple_logger::init().unwrap();
 
@@ -40,25 +39,22 @@ fn main() {
     buf[2] = 3u32;
     buf[3] = 4u32;
     buf[4] = 5u32;
-
-    //let d: &[u32] = &buf[0..5];
-
-    let v = Vec::<u32>::new();
-    //let d = &v[2..5];
-
-    //buf.write(0, &[1u32]);
-    //buf.write(0, &[1u32]);
-
     for a in buf.into_iter() {
         println!("{}", a);
     }
+    //println!("ITE {:?}", &buf[0..5]);
 
     let window_size = window.inner_size();
     let swapchain = device.create_swapchain(&surface, (window_size.width, window_size.height), true);
 
-    let image = device.create_image_2d(Format::RGBA16_UNORM, false, ImageUsageFlags::SAMPLED, (1024, 1024));
-
-    //println!("ITE {:?}", &buf[0..5]);
+    let image = device
+        .create_image_2d(
+            Format::RGBA16_UNORM,
+            false,
+            ImageUsageFlags::SAMPLED,
+            (1024, 1024),
+        )
+        .unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -87,9 +83,4 @@ fn main() {
             _ => (),
         }
     });
-
-    //device.create_buffer::<u32>(32);
-    //window.create_vk_surface(&instance).unwrap();
-
-    //windows.main_loop(slice::from_ref(&&window));
 }

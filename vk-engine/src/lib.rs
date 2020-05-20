@@ -30,3 +30,4 @@ pub mod queue;
 pub mod semaphore;
 pub mod surface;
 pub mod swapchain;
+pub mod pipeline;

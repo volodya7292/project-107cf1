@@ -57,7 +57,7 @@ impl Instance {
                 // ------------------------------------------------------------------------------------
                 let queue_families =
                     unsafe { self.native.get_physical_device_queue_family_properties(p_device) };
-                let mut queue_fam_indices: [[u8; 2]; 4] = [[u8::MAX, 0]; 4];
+                let mut queue_fam_indices: [[u32; 2]; 4] = [[u32::MAX, 0]; 4];
 
                 for (i, fam_prop) in queue_families.iter().enumerate() {
                     // Check for present usage
@@ -70,41 +70,41 @@ impl Instance {
                             .unwrap()
                     };
 
-                    if surface_supported && queue_fam_indices[3][0] == u8::MAX {
-                        queue_fam_indices[3] = [i as u8, 0]; // present
+                    if surface_supported && queue_fam_indices[3][0] == u32::MAX {
+                        queue_fam_indices[3] = [i as u32, 0]; // present
                     }
                     if fam_prop.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                        && queue_fam_indices[0][0] == u8::MAX
+                        && queue_fam_indices[0][0] == u32::MAX
                     {
-                        queue_fam_indices[0] = [i as u8, 0]; // graphics
+                        queue_fam_indices[0] = [i as u32, 0]; // graphics
                     } else if fam_prop.queue_flags.contains(vk::QueueFlags::COMPUTE)
-                        && queue_fam_indices[1][0] == u8::MAX
+                        && queue_fam_indices[1][0] == u32::MAX
                     {
-                        queue_fam_indices[1] = [i as u8, 0]; // compute
+                        queue_fam_indices[1] = [i as u32, 0]; // compute
                     } else if fam_prop.queue_flags.contains(vk::QueueFlags::TRANSFER)
-                        && queue_fam_indices[2][0] == u8::MAX
+                        && queue_fam_indices[2][0] == u32::MAX
                     {
-                        queue_fam_indices[2] = [i as u8, 0]; // transfer
+                        queue_fam_indices[2] = [i as u32, 0]; // transfer
                     }
 
-                    if queue_fam_indices[0][0] != u8::MAX
-                        && queue_fam_indices[1][0] != u8::MAX
-                        && queue_fam_indices[2][0] != u8::MAX
-                        && queue_fam_indices[3][0] != u8::MAX
+                    if queue_fam_indices[0][0] != u32::MAX
+                        && queue_fam_indices[1][0] != u32::MAX
+                        && queue_fam_indices[2][0] != u32::MAX
+                        && queue_fam_indices[3][0] != u32::MAX
                     {
                         break;
                     }
                 }
 
-                if queue_fam_indices[1][0] == u8::MAX {
+                if queue_fam_indices[1][0] == u32::MAX {
                     queue_fam_indices[1] = queue_fam_indices[0]; // compute -> graphics
                 }
-                if queue_fam_indices[2][0] == u8::MAX {
+                if queue_fam_indices[2][0] == u32::MAX {
                     queue_fam_indices[2] = queue_fam_indices[1]; // transfer -> compute
                 }
 
                 // The same queue(graphics) is used for rest if separate queues not available
-                if queue_fam_indices[0][0] == u8::MAX || queue_fam_indices[3][0] == u8::MAX {
+                if queue_fam_indices[0][0] == u32::MAX || queue_fam_indices[3][0] == u32::MAX {
                     return None;
                 }
 

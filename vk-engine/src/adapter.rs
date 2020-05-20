@@ -1,6 +1,8 @@
-use crate::{device::Device, surface::Surface, Instance};
-use ash::{version::InstanceV1_0, vk};
+use crate::{device::Device, surface::Surface, Instance, Queue};
+use ash::{version::{DeviceV1_0, InstanceV1_0}, vk};
 use std::{ffi::CString, os::raw::c_char, rc::Rc};
+use std::convert::TryInto;
+const queue_type_count: usize = 4;
 
 pub struct Adapter {
     pub(crate) instance: Rc<Instance>,
@@ -10,19 +12,19 @@ pub struct Adapter {
     pub(crate) props12: vk::PhysicalDeviceVulkan12Properties,
     pub(crate) features: vk::PhysicalDeviceFeatures,
     pub(crate) features12: vk::PhysicalDeviceVulkan12Features,
-    pub(crate) queue_family_indices: [[u8; 2]; 4],
+    pub(crate) queue_family_indices: [[u32; 2]; queue_type_count],
 }
 
 impl Adapter {
     pub fn create_device(self: &Rc<Self>) -> Result<Rc<Device>, vk::Result> {
-        let mut queue_infos: Vec<vk::DeviceQueueCreateInfo> = vec![];
+        let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(queue_type_count);
         let priorities = [1.0_f32; u8::MAX as usize];
 
-        for i in 0..self.queue_family_indices.len() {
-            let mut used_indices = Vec::<u8>::with_capacity(u8::MAX as usize);
+        for i in 0..queue_type_count {
+            let mut used_indices = Vec::<u32>::with_capacity(256);
 
             for fam_index in self.queue_family_indices.iter() {
-                if fam_index[0] == i as u8 && !used_indices.contains(&fam_index[1]) {
+                if fam_index[0] == i as u32 && !used_indices.contains(&fam_index[1]) {
                     used_indices.push(fam_index[1]);
                 }
             }
@@ -52,6 +54,20 @@ impl Adapter {
                 .native
                 .create_device(self.native, &create_info, None)?
         };
+        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
+
+        // Get queues
+        let mut queues = Vec::with_capacity(queue_type_count);
+        for queue_info in &queue_infos {
+            for i in 0..queue_info.queue_count {
+                queues.push(Queue {
+                    native_device: native_device.clone(),
+                    swapchain_khr: swapchain_khr.clone(),
+                    native: unsafe { native_device.get_device_queue(queue_info.queue_family_index, i) },
+                    family_index: queue_info.queue_family_index,
+                });
+            }
+        }
 
         // Create allocator
         let allocator_info = vk_mem::AllocatorCreateInfo {
@@ -65,13 +81,12 @@ impl Adapter {
         };
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
-        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
-
         Ok(Rc::new(Device {
             adapter: Rc::clone(self),
             native: native_device,
             allocator,
             swapchain_khr,
+            queues,
         }))
     }
 

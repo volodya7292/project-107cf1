@@ -4,7 +4,7 @@ use crate::{
     image::{ImageType, ImageUsageFlags},
     surface::Surface,
     swapchain::Swapchain,
-    utils, Format, Image,
+    utils, Format, Image, queue::QueueType, Queue,
 };
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -34,11 +34,16 @@ pub struct Device {
     pub(crate) native: ash::Device,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
+    pub(crate) queues: Vec<Queue>,
 }
 
 impl Device {
     pub fn is_extension_supported(&self, name: &str) -> bool {
         self.adapter.is_extension_enabled(name)
+    }
+
+    fn get_queue(&self, queue_type: QueueType) -> &Queue {
+        &self.queues[queue_type.0 as usize]
     }
 
     fn create_buffer<T>(
