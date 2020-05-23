@@ -1,8 +1,15 @@
-use crate::{device::Device, surface::Surface, Instance, Queue};
-use ash::{version::{DeviceV1_0, InstanceV1_0}, vk};
+use crate::{
+    device::{self, Device},
+    surface::Surface,
+    Instance, Queue,
+};
+use ash::{
+    version::{DeviceV1_0, InstanceV1_0},
+    vk,
+};
 use std::{ffi::CString, os::raw::c_char, rc::Rc};
-use std::convert::TryInto;
-const queue_type_count: usize = 4;
+
+pub(crate) const queue_type_count: usize = 4;
 
 pub struct Adapter {
     pub(crate) instance: Rc<Instance>,
@@ -49,30 +56,39 @@ impl Adapter {
             .enabled_features(&self.features)
             .push_next(&mut features12);
 
-        let native_device = unsafe {
-            self.instance
-                .native
-                .create_device(self.native, &create_info, None)?
-        };
-        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
+        let native_device =
+            Rc::new(unsafe {
+                self.instance
+                    .native
+                    .create_device(self.native, &create_info, None)?
+            });
+        let swapchain_khr =
+            ash::extensions::khr::Swapchain::new(&self.instance.native, native_device.as_ref());
 
         // Get queues
         let mut queues = Vec::with_capacity(queue_type_count);
         for queue_info in &queue_infos {
             for i in 0..queue_info.queue_count {
-                queues.push(Queue {
-                    native_device: native_device.clone(),
+                queues.push(Rc::new(Queue {
+                    native_device: Rc::clone(&native_device),
                     swapchain_khr: swapchain_khr.clone(),
                     native: unsafe { native_device.get_device_queue(queue_info.queue_family_index, i) },
+                    semaphore: device::create_semaphore(&native_device)?,
+                    timeline_sp: Rc::new(device::create_timeline_semaphore(&native_device)?),
                     family_index: queue_info.queue_family_index,
-                });
+                }));
             }
+        }
+
+        // Graphics queue always exists. Compute, transfer, present queues may be the same as the graphics queue.
+        for i in 0..(queue_type_count - queues.len()) {
+            queues.push(Rc::clone(&queues[self.queue_family_indices[i][1] as usize]));
         }
 
         // Create allocator
         let allocator_info = vk_mem::AllocatorCreateInfo {
             physical_device: self.native,
-            device: native_device.clone(),
+            device: native_device.as_ref().clone(),
             instance: self.instance.native.clone(),
             flags: Default::default(),
             preferred_large_heap_block_size: 0,

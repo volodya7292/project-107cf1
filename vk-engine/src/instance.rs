@@ -190,6 +190,7 @@ impl Instance {
                 require_feature12!(descriptor_binding_partially_bound);
                 require_feature12!(runtime_descriptor_array);
                 require_feature12!(separate_depth_stencil_layouts);
+                require_feature12!(timeline_semaphore);
 
                 enabled_features.robust_buffer_access =
                     available_features.robust_buffer_access & props12.robust_buffer_access_update_after_bind;

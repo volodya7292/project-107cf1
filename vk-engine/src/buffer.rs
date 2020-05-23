@@ -1,4 +1,4 @@
-use crate::device::Device;
+use crate::Device;
 use ash::vk;
 use std::ops::{Index, IndexMut};
 use std::{marker::PhantomData, mem, ptr, rc::Rc};

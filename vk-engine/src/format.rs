@@ -6,17 +6,17 @@ use std::collections::HashMap;
 pub struct Format(pub(crate) vk::Format);
 
 impl Format {
-    pub const UNDEFINED: Self = Format(vk::Format::UNDEFINED);
-    pub const D32_FLOAT: Self = Format(vk::Format::D32_SFLOAT);
-    pub const R32_UINT: Self = Format(vk::Format::R32_UINT);
-    pub const RG32_FLOAT: Self = Format(vk::Format::R32G32_SFLOAT);
-    pub const RGB16_FLOAT: Self = Format(vk::Format::R16G16B16_SFLOAT);
-    pub const RGB32_FLOAT: Self = Format(vk::Format::R32G32B32_SFLOAT);
-    pub const RGBA8_UNORM: Self = Format(vk::Format::R8G8B8A8_UNORM);
-    pub const RGBA16_UNORM: Self = Format(vk::Format::R16G16B16A16_UNORM);
-    pub const RGBA16_FLOAT: Self = Format(vk::Format::R16G16B16A16_SFLOAT);
-    pub const RGBA32_FLOAT: Self = Format(vk::Format::R32G32B32A32_SFLOAT);
-    pub const RGB32_UINT: Self = Format(vk::Format::R32G32B32_UINT);
+    pub const UNDEFINED: Self = Self(vk::Format::UNDEFINED);
+    pub const D32_FLOAT: Self = Self(vk::Format::D32_SFLOAT);
+    pub const R32_UINT: Self = Self(vk::Format::R32_UINT);
+    pub const RG32_FLOAT: Self = Self(vk::Format::R32G32_SFLOAT);
+    pub const RGB16_FLOAT: Self = Self(vk::Format::R16G16B16_SFLOAT);
+    pub const RGB32_FLOAT: Self = Self(vk::Format::R32G32B32_SFLOAT);
+    pub const RGBA8_UNORM: Self = Self(vk::Format::R8G8B8A8_UNORM);
+    pub const RGBA16_UNORM: Self = Self(vk::Format::R16G16B16A16_UNORM);
+    pub const RGBA16_FLOAT: Self = Self(vk::Format::R16G16B16A16_SFLOAT);
+    pub const RGBA32_FLOAT: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
+    pub const RGB32_UINT: Self = Self(vk::Format::R32G32B32_UINT);
 }
 
 pub const BUFFER_FORMATS: [Format; 0] = [];

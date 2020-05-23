@@ -2,12 +2,14 @@ use crate::adapter::Adapter;
 use crate::{
     buffer::{Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
     image::{ImageType, ImageUsageFlags},
+    queue::QueueType,
     surface::Surface,
     swapchain::Swapchain,
-    utils, Format, Image, queue::QueueType, Queue,
+    utils, Fence, Format, Image, Queue, Semaphore, TimelineSemaphore,
 };
 use ash::version::DeviceV1_0;
 use ash::vk;
+use std::cell::Cell;
 use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc};
 
 #[derive(Debug)]
@@ -31,10 +33,33 @@ impl From<vk::Result> for DeviceError {
 
 pub struct Device {
     pub(crate) adapter: Rc<Adapter>,
-    pub(crate) native: ash::Device,
+    pub(crate) native: Rc<ash::Device>,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
-    pub(crate) queues: Vec<Queue>,
+    pub(crate) queues: Vec<Rc<Queue>>,
+}
+
+pub(crate) fn create_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
+    let mut type_info = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(vk::SemaphoreType::BINARY);
+    let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
+    Ok(Semaphore {
+        native_device: Rc::clone(native_device),
+        native: unsafe { native_device.create_semaphore(&create_info, None)? },
+    })
+}
+
+pub(crate) fn create_timeline_semaphore(
+    native_device: &Rc<ash::Device>,
+) -> Result<TimelineSemaphore, vk::Result> {
+    let mut type_info = vk::SemaphoreTypeCreateInfo::builder()
+        .initial_value(0)
+        .semaphore_type(vk::SemaphoreType::TIMELINE);
+    let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
+    Ok(TimelineSemaphore {
+        native_device: Rc::clone(native_device),
+        native: unsafe { native_device.create_semaphore(&create_info, None)? },
+        last_signal_value: Cell::new(0),
+    })
 }
 
 impl Device {
@@ -42,8 +67,19 @@ impl Device {
         self.adapter.is_extension_enabled(name)
     }
 
-    fn get_queue(&self, queue_type: QueueType) -> &Queue {
+    pub fn get_queue(&self, queue_type: QueueType) -> &Queue {
         &self.queues[queue_type.0 as usize]
+    }
+
+    fn create_fence(self: &Rc<Self>, signaled: bool) -> Result<Fence, vk::Result> {
+        let mut create_info = vk::FenceCreateInfo::builder().build();
+        if signaled {
+            create_info.flags |= vk::FenceCreateFlags::SIGNALED;
+        }
+        Ok(Fence {
+            device: Rc::clone(self),
+            native: unsafe { self.native.create_fence(&create_info, None)? },
+        })
     }
 
     fn create_buffer<T>(
@@ -310,9 +346,11 @@ impl Device {
             .collect();
 
         Ok(Rc::new(Swapchain {
-            native: native_swapchain,
             device: Rc::clone(self),
+            native: native_swapchain,
+            semaphore: create_semaphore(&self.native)?,
             images,
+            curr_image: Cell::new(None),
         }))
     }
 }
@@ -320,6 +358,9 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         self.allocator.destroy();
-        unsafe { self.native.destroy_device(None) };
+        unsafe {
+            self.native.device_wait_idle().unwrap();
+            self.native.destroy_device(None);
+        }
     }
 }

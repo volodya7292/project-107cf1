@@ -1,13 +1,17 @@
-use vk_engine::Format;
+use vk_engine::{Format, PrimaryCmdList, Queue};
 use winit::window::WindowBuilder;
 
-use vk_engine::{image::ImageUsageFlags, Instance};
+use vk_engine::image::ImageUsageFlags;
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
+async fn shit() {}
+
 fn main() {
     simple_logger::init().unwrap();
+
+    let s = shit();
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -27,7 +31,9 @@ fn main() {
     let surface = instance.create_surface(&window).unwrap();
 
     let adapters = instance.enumerate_adapters(&surface).unwrap();
-    let device = adapters[0].create_device().unwrap();
+    let mut device = adapters[0].create_device().unwrap();
+
+    //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
     //adapters.iter_mut()
 
@@ -45,7 +51,9 @@ fn main() {
     //println!("ITE {:?}", &buf[0..5]);
 
     let window_size = window.inner_size();
-    let swapchain = device.create_swapchain(&surface, (window_size.width, window_size.height), true);
+    let swapchain = device
+        .create_swapchain(&surface, (window_size.width, window_size.height), true)
+        .unwrap();
 
     let image = device
         .create_image_2d(
@@ -55,6 +63,8 @@ fn main() {
             (1024, 1024),
         )
         .unwrap();
+    let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
+    let cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -79,6 +89,12 @@ fn main() {
                 // It's preferrable to render in this event rather than in MainEventsCleared, since
                 // rendering in here allows the program to gracefully handle redraws requested
                 // by the OS.
+
+                let (sw_image, success) = swapchain.acquire_image().unwrap();
+
+                //let queue = device.get_queue(Queue::TYPE_PRESENT);
+                //queue.present(sw_image, queue.get_semaphore(), 0).unwrap();
+                //println!("f");
             }
             _ => (),
         }
