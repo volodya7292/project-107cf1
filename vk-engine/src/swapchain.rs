@@ -6,37 +6,37 @@ use std::rc::Rc;
 pub struct Swapchain {
     pub(crate) device: Rc<Device>,
     pub(crate) native: vk::SwapchainKHR,
-    pub(crate) semaphore: Semaphore,
+    pub(crate) semaphore: Rc<Semaphore>,
     pub(crate) images: Vec<Image>,
     pub(crate) curr_image: Cell<Option<(u32, bool)>>,
 }
 
 impl Swapchain {
-    pub fn acquire_image(self: &Rc<Self>) -> Result<(SwapchainImage, bool), vk::Result> {
+    pub fn acquire_image(&self) -> Result<(SwapchainImage, bool), vk::Result> {
         if self.curr_image.get().is_none() {
-            self.curr_image.set(Some(unsafe {
+            let (index, success) = unsafe {
                 self.device.swapchain_khr.acquire_next_image(
                     self.native,
                     u64::MAX,
                     self.semaphore.native,
                     vk::Fence::default(),
                 )?
-            }));
+            };
+            self.curr_image.set(Some((index, !success)));
         }
 
-        let (index, success) = self.curr_image.get().unwrap();
-
+        let (index, optimal) = self.curr_image.get().unwrap();
         Ok((
             SwapchainImage {
-                swapchain: Rc::clone(self),
-                index: index,
+                swapchain: self,
+                index,
             },
-            success,
+            optimal,
         ))
     }
 
-    pub fn get_image(&self, index: u32) -> Option<&Image> {
-        self.images.get(index as usize)
+    pub fn get_semaphore(&self) -> Rc<Semaphore> {
+        Rc::clone(&self.semaphore)
     }
 }
 
@@ -46,7 +46,13 @@ impl Drop for Swapchain {
     }
 }
 
-pub struct SwapchainImage {
-    pub(crate) swapchain: Rc<Swapchain>,
+pub struct SwapchainImage<'a> {
+    pub(crate) swapchain: &'a Swapchain,
     pub(crate) index: u32,
+}
+
+impl SwapchainImage<'_> {
+    pub fn get_image(&self) -> &Image {
+        &self.swapchain.images[self.index as usize]
+    }
 }

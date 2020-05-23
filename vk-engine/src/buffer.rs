@@ -13,6 +13,9 @@ pub(crate) struct Buffer<T: ?Sized> {
     pub(crate) bytesize: u64,
 }
 
+#[derive(Clone)]
+pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
+
 pub struct HostBuffer<T> {
     pub(crate) buffer: Buffer<T>,
     pub(crate) p_data: *mut u8,

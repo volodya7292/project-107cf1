@@ -1,11 +1,8 @@
 use crate::adapter::Adapter;
+use crate::queue::{SubmitInfo, SubmitPacket};
 use crate::{
-    buffer::{Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
-    image::{ImageType, ImageUsageFlags},
-    queue::QueueType,
-    surface::Surface,
-    swapchain::Swapchain,
-    utils, Fence, Format, Image, Queue, Semaphore, TimelineSemaphore,
+    utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
+    {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -39,26 +36,38 @@ pub struct Device {
     pub(crate) queues: Vec<Rc<Queue>>,
 }
 
-pub(crate) fn create_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
-    let mut type_info = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(vk::SemaphoreType::BINARY);
+pub(crate) fn create_semaphore(
+    native_device: &Rc<ash::Device>,
+    sp_type: vk::SemaphoreType,
+) -> Result<Semaphore, vk::Result> {
+    let mut type_info = vk::SemaphoreTypeCreateInfo::builder()
+        .initial_value(0)
+        .semaphore_type(sp_type);
     let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
     Ok(Semaphore {
         native_device: Rc::clone(native_device),
         native: unsafe { native_device.create_semaphore(&create_info, None)? },
+        semaphore_type: sp_type,
+        last_signal_value: Cell::new(0),
     })
 }
 
-pub(crate) fn create_timeline_semaphore(
-    native_device: &Rc<ash::Device>,
-) -> Result<TimelineSemaphore, vk::Result> {
-    let mut type_info = vk::SemaphoreTypeCreateInfo::builder()
-        .initial_value(0)
-        .semaphore_type(vk::SemaphoreType::TIMELINE);
-    let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
-    Ok(TimelineSemaphore {
+pub(crate) fn create_binary_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
+    create_semaphore(native_device, vk::SemaphoreType::BINARY)
+}
+
+pub(crate) fn create_timeline_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
+    create_semaphore(native_device, vk::SemaphoreType::TIMELINE)
+}
+
+pub(crate) fn create_fence(native_device: &Rc<ash::Device>, signaled: bool) -> Result<Fence, vk::Result> {
+    let mut create_info = vk::FenceCreateInfo::builder().build();
+    if signaled {
+        create_info.flags |= vk::FenceCreateFlags::SIGNALED;
+    }
+    Ok(Fence {
         native_device: Rc::clone(native_device),
-        native: unsafe { native_device.create_semaphore(&create_info, None)? },
-        last_signal_value: Cell::new(0),
+        native: unsafe { native_device.create_fence(&create_info, None)? },
     })
 }
 
@@ -69,17 +78,6 @@ impl Device {
 
     pub fn get_queue(&self, queue_type: QueueType) -> &Queue {
         &self.queues[queue_type.0 as usize]
-    }
-
-    fn create_fence(self: &Rc<Self>, signaled: bool) -> Result<Fence, vk::Result> {
-        let mut create_info = vk::FenceCreateInfo::builder().build();
-        if signaled {
-            create_info.flags |= vk::FenceCreateFlags::SIGNALED;
-        }
-        Ok(Fence {
-            device: Rc::clone(self),
-            native: unsafe { self.native.create_fence(&create_info, None)? },
-        })
     }
 
     fn create_buffer<T>(
@@ -247,6 +245,7 @@ impl Device {
             native: image,
             allocation: alloc,
             owned_handle: true,
+            format,
             size,
         }))
     }
@@ -281,7 +280,7 @@ impl Device {
         surface: &Rc<Surface>,
         size: (u32, u32),
         vsync: bool,
-    ) -> Result<Rc<Swapchain>, DeviceError> {
+    ) -> Result<Swapchain, DeviceError> {
         let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
@@ -341,17 +340,29 @@ impl Device {
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
                 owned_handle: false,
+                format: Format(s_format.format),
                 size: (size.0, size.1, 1),
             })
             .collect();
 
-        Ok(Rc::new(Swapchain {
+        Ok(Swapchain {
             device: Rc::clone(self),
             native: native_swapchain,
-            semaphore: create_semaphore(&self.native)?,
+            semaphore: Rc::new(create_binary_semaphore(&self.native)?),
             images,
             curr_image: Cell::new(None),
-        }))
+        })
+    }
+
+    pub fn create_submit_packet(
+        self: &Rc<Self>,
+        submit_infos: &[SubmitInfo],
+    ) -> Result<SubmitPacket, vk::Result> {
+        Ok(SubmitPacket {
+            infos: submit_infos.to_vec(),
+            fence: create_fence(&self.native, false)?,
+            submitted: false,
+        })
     }
 }
 

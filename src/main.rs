@@ -1,7 +1,10 @@
-use vk_engine::{Format, PrimaryCmdList, Queue};
+use vk_engine::{AccessFlags, CmdList, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
 use winit::window::WindowBuilder;
 
+use std::mem::swap;
+use std::rc::Rc;
 use vk_engine::image::ImageUsageFlags;
+use vk_engine::queue::WaitSemaphore;
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -45,13 +48,13 @@ fn main() {
     buf[2] = 3u32;
     buf[3] = 4u32;
     buf[4] = 5u32;
-    for a in buf.into_iter() {
-        println!("{}", a);
-    }
+    // for a in buf.into_iter() {
+    //     println!("{}", a);
+    // }
     //println!("ITE {:?}", &buf[0..5]);
 
-    let window_size = window.inner_size();
-    let swapchain = device
+    let mut window_size = window.inner_size();
+    let mut swapchain = device
         .create_swapchain(&surface, (window_size.width, window_size.height), true)
         .unwrap();
 
@@ -63,8 +66,18 @@ fn main() {
             (1024, 1024),
         )
         .unwrap();
-    let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
-    let cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
+    let cmd_list = device
+        .get_queue(Queue::TYPE_GRAPHICS)
+        .create_primary_cmd_list()
+        .unwrap();
+    let dummy_cmd_list = device
+        .get_queue(Queue::TYPE_GRAPHICS)
+        .create_primary_cmd_list()
+        .unwrap();
+    dummy_cmd_list.begin(false).unwrap();
+    dummy_cmd_list.end().unwrap();
+
+    let mut surface_changed = false;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -77,24 +90,68 @@ fn main() {
                 println!("The close button was pressed; stopping");
                 *control_flow = ControlFlow::Exit;
             }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(new_size),
+                ..
+            } => {
+                surface_changed = true;
+                window_size = new_size;
+            }
             Event::MainEventsCleared => {
-                // Application update code.
-
-                // Queue a RedrawRequested event.
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
-                // Redraw the application.
-                //
-                // It's preferrable to render in this event rather than in MainEventsCleared, since
-                // rendering in here allows the program to gracefully handle redraws requested
-                // by the OS.
+                if surface_changed {
+                    swapchain = device
+                        .create_swapchain(&surface, (window_size.width, window_size.height), true)
+                        .unwrap();
+                }
 
-                let (sw_image, success) = swapchain.acquire_image().unwrap();
+                let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
+                let (sw_image, optimal) = swapchain.acquire_image().unwrap();
+                surface_changed = !optimal;
 
-                //let queue = device.get_queue(Queue::TYPE_PRESENT);
-                //queue.present(sw_image, queue.get_semaphore(), 0).unwrap();
-                //println!("f");
+                cmd_list.begin(true).unwrap();
+                cmd_list.barrier_image(
+                    PipelineStageFlags::TOP_OF_PIPE,
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
+                    &[sw_image.get_image().barrier_queue_level(
+                        AccessFlags::empty(),
+                        AccessFlags::empty(),
+                        ImageLayout::UNDEFINED,
+                        ImageLayout::PRESENT,
+                        graphics_queue,
+                        graphics_queue,
+                        0,
+                        1,
+                    )],
+                );
+                cmd_list.end().unwrap();
+
+                let mut submit_packet = device
+                    .create_submit_packet(&[SubmitInfo::new(
+                        &[WaitSemaphore {
+                            semaphore: swapchain.get_semaphore(),
+                            wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
+                            wait_value: 0,
+                        }],
+                        &[Rc::clone(&cmd_list)],
+                    )])
+                    .unwrap();
+                graphics_queue.submit(&mut submit_packet).unwrap();
+
+                let present_queue = device.get_queue(Queue::TYPE_PRESENT);
+                let optimal = present_queue
+                    .present(
+                        sw_image,
+                        graphics_queue.get_semaphore(),
+                        submit_packet.get_signal_value(0),
+                        &dummy_cmd_list,
+                    )
+                    .unwrap();
+                surface_changed = !optimal;
+
+                submit_packet.wait().unwrap();
             }
             _ => (),
         }

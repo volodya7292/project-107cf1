@@ -56,12 +56,11 @@ impl Adapter {
             .enabled_features(&self.features)
             .push_next(&mut features12);
 
-        let native_device =
-            Rc::new(unsafe {
-                self.instance
-                    .native
-                    .create_device(self.native, &create_info, None)?
-            });
+        let native_device = Rc::new(unsafe {
+            self.instance
+                .native
+                .create_device(self.native, &create_info, None)?
+        });
         let swapchain_khr =
             ash::extensions::khr::Swapchain::new(&self.instance.native, native_device.as_ref());
 
@@ -73,8 +72,9 @@ impl Adapter {
                     native_device: Rc::clone(&native_device),
                     swapchain_khr: swapchain_khr.clone(),
                     native: unsafe { native_device.get_device_queue(queue_info.queue_family_index, i) },
-                    semaphore: device::create_semaphore(&native_device)?,
+                    semaphore: device::create_binary_semaphore(&native_device)?,
                     timeline_sp: Rc::new(device::create_timeline_semaphore(&native_device)?),
+                    fence: device::create_fence(&native_device, false)?,
                     family_index: queue_info.queue_family_index,
                 }));
             }

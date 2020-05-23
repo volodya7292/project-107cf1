@@ -7,22 +7,16 @@ use std::{rc::Rc, slice};
 pub struct Semaphore {
     pub(crate) native_device: Rc<ash::Device>,
     pub(crate) native: vk::Semaphore,
-}
-
-impl Drop for Semaphore {
-    fn drop(&mut self) {
-        unsafe { self.native_device.destroy_semaphore(self.native, None) };
-    }
-}
-
-pub struct TimelineSemaphore {
-    pub(crate) native_device: Rc<ash::Device>,
-    pub(crate) native: vk::Semaphore,
+    pub(crate) semaphore_type: vk::SemaphoreType,
     pub(crate) last_signal_value: Cell<u64>,
 }
 
-impl TimelineSemaphore {
+impl Semaphore {
     pub fn wait(&self, value: u64) -> Result<(), vk::Result> {
+        if self.semaphore_type != vk::SemaphoreType::TIMELINE {
+            panic!("Semaphore type is not TIMELINE!");
+        }
+
         let wait_info = vk::SemaphoreWaitInfo::builder()
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
@@ -33,6 +27,10 @@ impl TimelineSemaphore {
     }
 
     pub fn signal(&self) -> Result<u64, vk::Result> {
+        if self.semaphore_type != vk::SemaphoreType::TIMELINE {
+            panic!("Semaphore type is not TIMELINE!");
+        }
+
         self.last_signal_value.set(self.last_signal_value.get() + 1);
 
         let signal_info = vk::SemaphoreSignalInfo::builder()
@@ -47,9 +45,11 @@ impl TimelineSemaphore {
     }
 }
 
-impl Drop for TimelineSemaphore {
+impl Drop for Semaphore {
     fn drop(&mut self) {
-        self.wait(self.last_signal_value.get());
+        if self.semaphore_type == vk::SemaphoreType::TIMELINE {
+            self.wait(self.last_signal_value.get()).unwrap();
+        }
         unsafe { self.native_device.destroy_semaphore(self.native, None) };
     }
 }
