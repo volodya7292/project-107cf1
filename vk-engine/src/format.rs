@@ -2,7 +2,7 @@ use ash::vk;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Format(pub(crate) vk::Format);
 
 impl Format {

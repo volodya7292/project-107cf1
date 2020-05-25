@@ -9,5 +9,12 @@ edition = "2018"
 [dependencies]
 simple_logger = "1.6.0"
 specs = "0.16.1"
-vk-engine = { path = "vk-engine" }
 winit = "0.22.1"
+vk-engine = { path = "vk-engine" }
+engine-3d = { path = "engine-3d" }
+
+[build-dependencies]
+serde = { version = "1.0.110", features = ["derive"] }
+serde_yaml = "0.8.12"
+glob = "0.3.0"
+res-encoder = { path = "res-encoder" }

@@ -26,6 +26,9 @@ pub use crate::renderpass::RenderPass;
 use crate::semaphore::Semaphore;
 pub use crate::surface::Surface;
 pub use crate::swapchain::Swapchain;
+pub use crate::shader::Shader;
+use crate::shader::ShaderBinding;
+pub use crate::shader::ShaderStage;
 
 #[macro_use]
 mod utils;
@@ -48,3 +51,4 @@ pub mod queue;
 pub mod renderpass;
 pub mod surface;
 pub mod swapchain;
+pub mod shader;

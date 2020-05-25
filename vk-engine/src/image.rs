@@ -57,6 +57,7 @@ impl Image {
         self.size
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn barrier_queue_level(
         &self,
         src_access_mask: AccessFlags,
@@ -93,6 +94,27 @@ impl Image {
                         .build(),
                 )
                 .build(),
+        )
+    }
+
+    pub fn barrier_queue(
+        &self,
+        src_access_mask: AccessFlags,
+        dst_access_mask: AccessFlags,
+        old_layout: ImageLayout,
+        new_layout: ImageLayout,
+        src_queue: &Queue,
+        dst_queue: &Queue,
+    ) -> ImageBarrier {
+        self.barrier_queue_level(
+            src_access_mask,
+            dst_access_mask,
+            old_layout,
+            new_layout,
+            src_queue,
+            dst_queue,
+            0,
+            vk::REMAINING_MIP_LEVELS,
         )
     }
 }

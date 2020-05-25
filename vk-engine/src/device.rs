@@ -1,12 +1,20 @@
-use crate::adapter::Adapter;
-use crate::queue::{SubmitInfo, SubmitPacket};
+use crate::shader::ShaderBindingType;
+use crate::Adapter;
 use crate::{
     utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
+use crate::{Shader, SubmitInfo, SubmitPacket};
+use crate::{ShaderBinding, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use spirv_cross::glsl;
+use spirv_cross::spirv;
+use std::any::Any;
 use std::cell::Cell;
+use std::collections::HashMap;
+use std::env::var;
+use std::hash::Hash;
 use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc};
 
 #[derive(Debug)]
@@ -14,6 +22,8 @@ pub enum DeviceError {
     VmaError(vk_mem::Error),
     VkError(vk::Result),
     SwapchainError(String),
+    SpirvError(spirv_cross::ErrorCode),
+    InvalidShader(String),
 }
 
 impl From<vk_mem::Error> for DeviceError {
@@ -25,6 +35,12 @@ impl From<vk_mem::Error> for DeviceError {
 impl From<vk::Result> for DeviceError {
     fn from(err: vk::Result) -> Self {
         DeviceError::VkError(err)
+    }
+}
+
+impl From<spirv_cross::ErrorCode> for DeviceError {
+    fn from(err: spirv_cross::ErrorCode) -> Self {
+        DeviceError::SpirvError(err)
     }
 }
 
@@ -134,7 +150,7 @@ impl Device {
                 allocation: alloc,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
-                bytesize: bytesize as u64,
+                _bytesize: bytesize as u64,
             },
             alloc_info,
         ))
@@ -280,7 +296,7 @@ impl Device {
         surface: &Rc<Surface>,
         size: (u32, u32),
         vsync: bool,
-    ) -> Result<Swapchain, DeviceError> {
+    ) -> Result<Rc<Swapchain>, DeviceError> {
         let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
@@ -345,14 +361,156 @@ impl Device {
             })
             .collect();
 
-        Ok(Swapchain {
+        Ok(Rc::new(Swapchain {
             device: Rc::clone(self),
             native: native_swapchain,
+            _surface: Rc::clone(surface),
             semaphore: Rc::new(create_binary_semaphore(&self.native)?),
             images,
             curr_image: Cell::new(None),
-        })
+        }))
     }
+
+    pub fn create_shader(
+        self: &Rc<Self>,
+        code: &[u8],
+        binding_types: &[(&str, ShaderBindingType)],
+    ) -> Result<Rc<Shader>, DeviceError> {
+        let binding_types_map: HashMap<&str, ShaderBindingType> = binding_types.iter().cloned().collect();
+
+        #[allow(clippy::cast_ptr_alignment)]
+        let code_words = unsafe {
+            std::slice::from_raw_parts(
+                code.as_ptr() as *const u32,
+                code.len() / std::mem::size_of::<u32>(),
+            )
+        };
+
+        let ast = spirv::Ast::<glsl::Target>::parse(&spirv::Module::from_words(code_words))?;
+        let entry_points = ast.get_entry_points()?;
+        let entry_point = entry_points
+            .first()
+            .ok_or_else(|| DeviceError::InvalidShader("Entry point not found!".to_string()))?;
+        let resources = ast.get_shader_resources()?;
+
+        macro_rules! binding_image_array_size {
+            ($res: ident, $img_type: ident, $desc_type: ident) => {{
+                let var_type = ast.get_type($res.id)?;
+                ShaderBinding {
+                    binding_type: vk::DescriptorType::$desc_type,
+                    id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                    count: match var_type {
+                        spirv::Type::$img_type { array } => {
+                            if array.is_empty() {
+                                1
+                            } else {
+                                65536
+                            }
+                        }
+                        _ => unreachable!(),
+                    },
+                }
+            }};
+        }
+
+        macro_rules! binding_buffer_array_size {
+            ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
+                let var_type = ast.get_type($res.id)?;
+                let shader_binding_type = binding_types_map
+                    .get($res.name.as_str())
+                    .or_else(|| Some(&ShaderBindingType::DEFAULT))
+                    .unwrap();
+                ShaderBinding {
+                    binding_type: if shader_binding_type == &ShaderBindingType::DEFAULT
+                        || shader_binding_type == &ShaderBindingType::DYNAMIC_UPDATE
+                    {
+                        vk::DescriptorType::$desc_type0
+                    } else {
+                        vk::DescriptorType::$desc_type1
+                    },
+                    id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                    count: match var_type {
+                        spirv::Type::Struct {
+                            member_types: _,
+                            array,
+                        } => {
+                            if array.is_empty() {
+                                1
+                            } else {
+                                65536
+                            }
+                        }
+                        _ => unreachable!(),
+                    },
+                }
+            }};
+        }
+
+        let stage = match entry_point.execution_model {
+            spirv::ExecutionModel::Vertex => ShaderStage::VERTEX,
+            spirv::ExecutionModel::Fragment => ShaderStage::PIXEL,
+            spirv::ExecutionModel::Geometry => ShaderStage::GEOMETRY,
+            spirv::ExecutionModel::GlCompute => ShaderStage::COMPUTE,
+            m => {
+                return Err(DeviceError::InvalidShader(format!(
+                    "Unsupported execution model {:?}",
+                    m
+                )))
+            }
+        };
+
+        let mut bindings = HashMap::new();
+
+        for res in &resources.sampled_images {
+            let binding = binding_image_array_size!(res, SampledImage, COMBINED_IMAGE_SAMPLER);
+            bindings.insert(res.name.clone(), binding);
+        }
+        for res in resources.storage_images {
+            let binding = binding_image_array_size!(res, Image, STORAGE_IMAGE);
+            bindings.insert(res.name.clone(), binding);
+        }
+        for res in &resources.uniform_buffers {
+            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER, UNIFORM_BUFFER_DYNAMIC);
+            bindings.insert(res.name.clone(), binding);
+        }
+        for res in &resources.storage_buffers {
+            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER, STORAGE_BUFFER_DYNAMIC);
+            bindings.insert(res.name.clone(), binding);
+        }
+
+        let mut push_constants = HashMap::new();
+        let mut push_constants_size = 0;
+        if !resources.push_constant_buffers.is_empty() {
+            let type_id = resources.push_constant_buffers[0].base_type_id;
+            push_constants_size = ast.get_declared_struct_size(type_id)?;
+
+            match ast.get_type(type_id)? {
+                spirv::Type::Struct {
+                    member_types,
+                    array: _,
+                } => {
+                    let ranges = ast.get_active_buffer_ranges(type_id)?;
+                    for (i, range) in ranges.iter().enumerate() {
+                        push_constants.insert(ast.get_member_name(type_id, i as u32)?, range.clone());
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
+
+        Ok(Rc::new(Shader {
+            device: Rc::clone(self),
+            native: unsafe { self.native.create_shader_module(&create_info, None)? },
+            stage,
+            bindings,
+            push_constants,
+            push_constants_size,
+        }))
+    }
+
+    pub fn create_graphics_pipeline(self: &Rc<Self>) {}
 
     pub fn create_submit_packet(
         self: &Rc<Self>,

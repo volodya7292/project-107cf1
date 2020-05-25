@@ -5,16 +5,13 @@ use std::mem::swap;
 use std::rc::Rc;
 use vk_engine::image::ImageUsageFlags;
 use vk_engine::queue::WaitSemaphore;
+use vk_engine::shader::ShaderBindingType;
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
-async fn shit() {}
-
 fn main() {
     simple_logger::init().unwrap();
-
-    let s = shit();
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -34,7 +31,7 @@ fn main() {
     let surface = instance.create_surface(&window).unwrap();
 
     let adapters = instance.enumerate_adapters(&surface).unwrap();
-    let mut device = adapters[0].create_device().unwrap();
+    let device = adapters[0].create_device().unwrap();
 
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
@@ -77,6 +74,11 @@ fn main() {
     dummy_cmd_list.begin(false).unwrap();
     dummy_cmd_list.end().unwrap();
 
+    /*let shader = device.create_shader(
+        include_bytes!("../res/shaders/cluster.frag.spv"),
+        &[("", ShaderBindingType::DEFAULT)],
+    );*/
+
     let mut surface_changed = false;
 
     event_loop.run(move |event, _, control_flow| {
@@ -105,6 +107,7 @@ fn main() {
                     swapchain = device
                         .create_swapchain(&surface, (window_size.width, window_size.height), true)
                         .unwrap();
+                    surface_changed = false;
                 }
 
                 let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
@@ -115,15 +118,13 @@ fn main() {
                 cmd_list.barrier_image(
                     PipelineStageFlags::TOP_OF_PIPE,
                     PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[sw_image.get_image().barrier_queue_level(
+                    &[sw_image.get_image().barrier_queue(
                         AccessFlags::empty(),
                         AccessFlags::empty(),
                         ImageLayout::UNDEFINED,
                         ImageLayout::PRESENT,
                         graphics_queue,
                         graphics_queue,
-                        0,
-                        1,
                     )],
                 );
                 cmd_list.end().unwrap();
@@ -150,6 +151,8 @@ fn main() {
                     )
                     .unwrap();
                 surface_changed = !optimal;
+
+                let dd = graphics_queue == present_queue;
 
                 submit_packet.wait().unwrap();
             }

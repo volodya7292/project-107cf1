@@ -9,7 +9,7 @@ use ash::{
 };
 use std::{ffi::CString, os::raw::c_char, rc::Rc};
 
-pub(crate) const queue_type_count: usize = 4;
+pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
 pub struct Adapter {
     pub(crate) instance: Rc<Instance>,
@@ -19,15 +19,15 @@ pub struct Adapter {
     pub(crate) props12: vk::PhysicalDeviceVulkan12Properties,
     pub(crate) features: vk::PhysicalDeviceFeatures,
     pub(crate) features12: vk::PhysicalDeviceVulkan12Features,
-    pub(crate) queue_family_indices: [[u32; 2]; queue_type_count],
+    pub(crate) queue_family_indices: [[u32; 2]; QUEUE_TYPE_COUNT],
 }
 
 impl Adapter {
     pub fn create_device(self: &Rc<Self>) -> Result<Rc<Device>, vk::Result> {
-        let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(queue_type_count);
+        let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(QUEUE_TYPE_COUNT);
         let priorities = [1.0_f32; u8::MAX as usize];
 
-        for i in 0..queue_type_count {
+        for i in 0..QUEUE_TYPE_COUNT {
             let mut used_indices = Vec::<u32>::with_capacity(256);
 
             for fam_index in self.queue_family_indices.iter() {
@@ -65,7 +65,7 @@ impl Adapter {
             ash::extensions::khr::Swapchain::new(&self.instance.native, native_device.as_ref());
 
         // Get queues
-        let mut queues = Vec::with_capacity(queue_type_count);
+        let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
         for queue_info in &queue_infos {
             for i in 0..queue_info.queue_count {
                 queues.push(Rc::new(Queue {
@@ -81,7 +81,7 @@ impl Adapter {
         }
 
         // Graphics queue always exists. Compute, transfer, present queues may be the same as the graphics queue.
-        for i in 0..(queue_type_count - queues.len()) {
+        for i in 0..(QUEUE_TYPE_COUNT - queues.len()) {
             queues.push(Rc::clone(&queues[self.queue_family_indices[i][1] as usize]));
         }
 

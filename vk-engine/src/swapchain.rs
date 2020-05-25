@@ -1,4 +1,4 @@
-use crate::{Device, Image, Semaphore};
+use crate::{Device, Image, Semaphore, Surface};
 use ash::vk;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -6,6 +6,7 @@ use std::rc::Rc;
 pub struct Swapchain {
     pub(crate) device: Rc<Device>,
     pub(crate) native: vk::SwapchainKHR,
+    pub(crate) _surface: Rc<Surface>,
     pub(crate) semaphore: Rc<Semaphore>,
     pub(crate) images: Vec<Image>,
     pub(crate) curr_image: Cell<Option<(u32, bool)>>,

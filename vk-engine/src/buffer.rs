@@ -10,7 +10,7 @@ pub(crate) struct Buffer<T: ?Sized> {
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
-    pub(crate) bytesize: u64,
+    pub(crate) _bytesize: u64,
 }
 
 #[derive(Clone)]

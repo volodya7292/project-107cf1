@@ -1,8 +1,7 @@
 use crate::swapchain::SwapchainImage;
-use crate::{pipeline::PipelineStageFlags, CmdList, Fence, Semaphore, Swapchain};
+use crate::{pipeline::PipelineStageFlags, CmdList, Fence, Semaphore};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::cell::Cell;
 use std::rc::Rc;
 use std::slice;
 
@@ -26,6 +25,8 @@ impl Queue {
     pub const TYPE_PRESENT: QueueType = QueueType(3);
 
     fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Rc<CmdList>, vk::Result> {
+        let d = self.native_device.handle() == self.native_device.handle();
+
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
         let native_pool = unsafe { self.native_device.create_command_pool(&create_info, None)? };
 
@@ -171,15 +172,23 @@ impl Queue {
             .wait_semaphores(slice::from_ref(&self.semaphore.native))
             .swapchains(slice::from_ref(&sw_image.swapchain.native))
             .image_indices(slice::from_ref(&sw_image.index));
-        let success = unsafe { self.swapchain_khr.queue_present(self.native, &present_info) }?;
+        let optimal = unsafe { !self.swapchain_khr.queue_present(self.native, &present_info)? };
         self.fence.wait()?;
 
         sw_image.swapchain.curr_image.set(None);
-        Ok(success)
+        Ok(optimal)
     }
 
     pub fn get_semaphore(&self) -> &Semaphore {
         &self.timeline_sp
+    }
+}
+
+impl PartialEq for Queue {
+    fn eq(&self, other: &Self) -> bool {
+        self.native_device.handle() == other.native_device.handle()
+            && self.native == other.native
+            && self.family_index == other.family_index
     }
 }
 

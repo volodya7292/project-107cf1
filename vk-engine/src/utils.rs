@@ -42,7 +42,7 @@ where
 }
 
 macro_rules! vk_bitflags_impl {
-    ( $name: ident, $flag_type: ty) => {
+    ($name: ident, $flag_type: ty) => {
         impl Default for $name {
             fn default() -> $name {
                 $name(<$flag_type>::default())
