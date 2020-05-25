@@ -395,7 +395,7 @@ impl Device {
 
         macro_rules! binding_image_array_size {
             ($res: ident, $img_type: ident, $desc_type: ident) => {{
-                let var_type = ast.get_type($res.id)?;
+                let var_type = ast.get_type($res.type_id)?;
                 ShaderBinding {
                     binding_type: vk::DescriptorType::$desc_type,
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
@@ -415,7 +415,7 @@ impl Device {
 
         macro_rules! binding_buffer_array_size {
             ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
-                let var_type = ast.get_type($res.id)?;
+                let var_type = ast.get_type($res.type_id)?;
                 let shader_binding_type = binding_types_map
                     .get($res.name.as_str())
                     .or_else(|| Some(&ShaderBindingType::DEFAULT))
@@ -465,7 +465,7 @@ impl Device {
             let binding = binding_image_array_size!(res, SampledImage, COMBINED_IMAGE_SAMPLER);
             bindings.insert(res.name.clone(), binding);
         }
-        for res in resources.storage_images {
+        for res in &resources.storage_images {
             let binding = binding_image_array_size!(res, Image, STORAGE_IMAGE);
             bindings.insert(res.name.clone(), binding);
         }
@@ -481,20 +481,14 @@ impl Device {
         let mut push_constants = HashMap::new();
         let mut push_constants_size = 0;
         if !resources.push_constant_buffers.is_empty() {
+            let id = resources.push_constant_buffers[0].id;
             let type_id = resources.push_constant_buffers[0].base_type_id;
-            push_constants_size = ast.get_declared_struct_size(type_id)?;
 
-            match ast.get_type(type_id)? {
-                spirv::Type::Struct {
-                    member_types,
-                    array: _,
-                } => {
-                    let ranges = ast.get_active_buffer_ranges(type_id)?;
-                    for (i, range) in ranges.iter().enumerate() {
-                        push_constants.insert(ast.get_member_name(type_id, i as u32)?, range.clone());
-                    }
-                }
-                _ => unreachable!(),
+            push_constants_size = ast.get_declared_struct_size(type_id)?;
+            let ranges = ast.get_active_buffer_ranges(id)?;
+
+            for (i, range) in ranges.iter().enumerate() {
+                push_constants.insert(ast.get_member_name(type_id, i as u32)?, range.clone());
             }
         }
 

@@ -5,16 +5,41 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(Windows) Запустить",
-            "type": "cppvsdbg",
+            "type": "lldb",
             "request": "launch",
-            "program": "target/debug/project-107cf1.exe",
+            "name": "Debug executable 'project-107cf1'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=project-107cf1",
+                    "--package=project-107cf1"
+                ],
+                "filter": {
+                    "name": "project-107cf1",
+                    "kind": "bin"
+                }
+            },
             "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "preLaunchTask": "rust: cargo build"
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'project-107cf1'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=project-107cf1",
+                    "--package=project-107cf1"
+                ],
+                "filter": {
+                    "name": "project-107cf1",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

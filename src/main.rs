@@ -1,14 +1,15 @@
-use vk_engine::{AccessFlags, CmdList, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
-use winit::window::WindowBuilder;
-
 use std::mem::swap;
 use std::rc::Rc;
-use vk_engine::image::ImageUsageFlags;
-use vk_engine::queue::WaitSemaphore;
-use vk_engine::shader::ShaderBindingType;
+
 use winit::dpi;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
+
+use vk_engine::image::ImageUsageFlags;
+use vk_engine::queue::WaitSemaphore;
+use vk_engine::shader::ShaderBindingType;
+use vk_engine::{AccessFlags, CmdList, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
 
 fn main() {
     simple_logger::init().unwrap();
@@ -74,10 +75,10 @@ fn main() {
     dummy_cmd_list.begin(false).unwrap();
     dummy_cmd_list.end().unwrap();
 
-    /*let shader = device.create_shader(
+    let shader = device.create_shader(
         include_bytes!("../res/shaders/cluster.frag.spv"),
         &[("", ShaderBindingType::DEFAULT)],
-    );*/
+    );
 
     let mut surface_changed = false;
 
