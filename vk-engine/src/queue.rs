@@ -25,8 +25,6 @@ impl Queue {
     pub const TYPE_PRESENT: QueueType = QueueType(3);
 
     fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Rc<CmdList>, vk::Result> {
-        let d = self.native_device.handle() == self.native_device.handle();
-
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
         let native_pool = unsafe { self.native_device.create_command_pool(&create_info, None)? };
 
@@ -148,7 +146,6 @@ impl Queue {
         sw_image: SwapchainImage,
         wait_semaphore: &Semaphore,
         wait_value: u64,
-        cmd_list: &CmdList,
     ) -> Result<bool, vk::Result> {
         let wait_dst_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
         let signal_value = 0u64;

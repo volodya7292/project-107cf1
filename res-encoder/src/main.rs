@@ -1,11 +1,13 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fmt::Formatter;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use std::{env, fs};
+use std::{env, fmt, fs};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /**
 File structure
@@ -22,6 +24,16 @@ struct ResFileStructure {
     modified: bool,
 }
 
+impl fmt::Debug for ResFileStructure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResFileStructure")
+            .field("entries", &self.entries)
+            .field("header_size", &self.header_size)
+            .field("data_size", &self.data_size)
+            .finish()
+    }
+}
+
 #[derive(Clone)]
 struct EntryInfo {
     path: PathBuf,
@@ -31,6 +43,17 @@ struct EntryInfo {
     offset: u64,
     // dir -> entry count, file -> file size
     size: u64,
+}
+
+impl fmt::Debug for EntryInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntryInfo")
+            .field("path", &self.path)
+            .field("name", &self.name)
+            .field("offset", &self.offset)
+            .field("size", &self.size)
+            .finish()
+    }
 }
 
 fn read_resources(read_dir: fs::ReadDir, timestamps: &mut HashMap<String, SystemTime>) -> ResFileStructure {
@@ -69,10 +92,10 @@ fn read_resources(read_dir: fs::ReadDir, timestamps: &mut HashMap<String, System
             let file_size = metadata.len();
             let modified_ts = metadata.modified().unwrap();
 
-            let path_str = dir_path.to_str().unwrap().to_string();
+            let path_canon = dir_path.canonicalize().unwrap();
 
             let modified;
-            match timestamps.entry(path_str) {
+            match timestamps.entry(path_canon.to_str().unwrap().to_owned()) {
                 Entry::Occupied(o) => {
                     if &modified_ts > o.get() {
                         modified = true;
@@ -107,7 +130,6 @@ fn read_resources(read_dir: fs::ReadDir, timestamps: &mut HashMap<String, System
     return res_file;
 }
 
-// TODO: add program version check (in timestamp file)
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -146,7 +168,8 @@ fn main() {
 
     // Read resources
     let mut res_file_struct = read_resources(res_path.read_dir().unwrap(), &mut timestamps);
-    res_file_struct.header_size += 8; // + u64 for header size var
+    println!("{:#?}", &res_file_struct);
+    res_file_struct.header_size += 4; // + sizeof(u32) for header size var
     let res_file_size = res_file_struct.header_size as u64 + res_file_struct.data_size;
     let file_outdated;
 
@@ -187,6 +210,7 @@ fn main() {
         .write_u32::<LittleEndian>(res_file_struct.header_size)
         .unwrap();
     let mut res_offset = res_file_struct.header_size as u64;
+
     for entry in &mut res_file_struct.entries {
         if entry.offset == 1 {
             entry.offset = res_offset;

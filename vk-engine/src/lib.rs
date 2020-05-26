@@ -1,5 +1,4 @@
 pub use crate::adapter::Adapter;
-use crate::buffer::Buffer;
 pub use crate::buffer::BufferBarrier;
 pub use crate::buffer::BufferUsageFlags;
 pub use crate::buffer::DeviceBuffer;
@@ -23,17 +22,18 @@ pub use crate::queue::QueueType;
 pub use crate::queue::SubmitInfo;
 pub use crate::queue::SubmitPacket;
 pub use crate::renderpass::RenderPass;
-use crate::semaphore::Semaphore;
+pub use crate::shader::Shader;
+pub use crate::shader::ShaderStage;
 pub use crate::surface::Surface;
 pub use crate::swapchain::Swapchain;
-pub use crate::shader::Shader;
+
+use crate::buffer::Buffer;
+use crate::semaphore::Semaphore;
 use crate::shader::ShaderBinding;
-pub use crate::shader::ShaderStage;
 
 #[macro_use]
 mod utils;
 
-mod allocator;
 mod fence;
 mod semaphore;
 
@@ -49,6 +49,6 @@ pub mod instance;
 pub mod pipeline;
 pub mod queue;
 pub mod renderpass;
+pub mod shader;
 pub mod surface;
 pub mod swapchain;
-pub mod shader;

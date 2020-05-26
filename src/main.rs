@@ -1,4 +1,4 @@
-use std::mem::swap;
+use std::path::Path;
 use std::rc::Rc;
 
 use winit::dpi;
@@ -9,10 +9,16 @@ use winit::window::WindowBuilder;
 use vk_engine::image::ImageUsageFlags;
 use vk_engine::queue::WaitSemaphore;
 use vk_engine::shader::ShaderBindingType;
-use vk_engine::{AccessFlags, CmdList, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
+use vk_engine::{AccessFlags, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
+
+use crate::resource_file::ResourceFile;
+
+mod resource_file;
 
 fn main() {
     simple_logger::init().unwrap();
+
+    let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -75,10 +81,8 @@ fn main() {
     dummy_cmd_list.begin(false).unwrap();
     dummy_cmd_list.end().unwrap();
 
-    let shader = device.create_shader(
-        include_bytes!("../res/shaders/cluster.frag.spv"),
-        &[("", ShaderBindingType::DEFAULT)],
-    );
+    let shader_spv = resources.read("shaders/cluster.frag.spv").unwrap();
+    let shader = device.create_shader(&shader_spv, &[("", ShaderBindingType::DEFAULT)]);
 
     let mut surface_changed = false;
 
@@ -148,7 +152,6 @@ fn main() {
                         sw_image,
                         graphics_queue.get_semaphore(),
                         submit_packet.get_signal_value(0),
-                        &dummy_cmd_list,
                     )
                     .unwrap();
                 surface_changed = !optimal;

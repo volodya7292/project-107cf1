@@ -10,11 +10,8 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
-use std::any::Any;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::env::var;
-use std::hash::Hash;
 use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc};
 
 #[derive(Debug)]

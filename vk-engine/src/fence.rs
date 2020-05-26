@@ -1,4 +1,3 @@
-use crate::Device;
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::{rc::Rc, slice};

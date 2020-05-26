@@ -60,7 +60,7 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                     continue;
                 }
 
-                fs::create_dir_all(dst_path.parent().unwrap());
+                fs::create_dir_all(dst_path.parent().unwrap()).unwrap();
 
                 let mut cmd = &mut Command::new("glslangValidator");
                 cmd = cmd
@@ -100,6 +100,8 @@ fn build_resources(src_dir: &Path, dst_file: &Path) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=work_dir/resources");
+
     compile_shaders(Path::new("src/shaders"), Path::new("res/shaders"));
     build_resources(Path::new("res"), Path::new("work_dir/resources"));
 }
