@@ -1,9 +1,8 @@
 mod resource_file;
 
 use crate::resource_file::ResourceFile;
-use std::cell::RefCell;
 use std::path::Path;
-use std::{mem, rc::Rc};
+use std::{rc::Rc};
 use vk_engine::ShaderBindingType;
 use vk_engine::WaitSemaphore;
 use vk_engine::{

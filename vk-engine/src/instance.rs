@@ -2,7 +2,7 @@ use crate::adapter::Adapter;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
-use std::{mem, os::raw::c_void, rc::Rc};
+use std::{os::raw::c_void, rc::Rc};
 
 pub struct Instance {
     pub(crate) entry: Rc<Entry>,

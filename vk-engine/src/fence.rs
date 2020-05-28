@@ -1,7 +1,6 @@
 use crate::device::DeviceWrapper;
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::cell::Cell;
 use std::{rc::Rc, slice};
 
 pub struct Fence {

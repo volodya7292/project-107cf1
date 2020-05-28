@@ -345,6 +345,16 @@ impl Device {
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
 
+        let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST;
+        if !surface_capabs.supported_usage_flags.contains(image_usage) {
+            return Err(DeviceError::SwapchainError("Image usage flags are not supported!".to_string()));
+        }
+
+        let composite_alpha = vk::CompositeAlphaFlagsKHR::OPAQUE;
+        if !surface_capabs.supported_composite_alpha.contains(composite_alpha) {
+            return Err(DeviceError::SwapchainError("Composite alpha not supported!".to_string()));
+        }
+
         // TODO: HDR metadata
 
         let size = (
@@ -356,10 +366,14 @@ impl Device {
                 .max(surface_capabs.min_image_extent.height),
         );
 
-        let s_format = surface_formats.iter().find(|&s_format| {
+        let mut s_format = surface_formats.iter().find(|&s_format| {
             s_format.format == vk::Format::R16G16B16A16_SFLOAT
                 && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
         });
+        if s_format.is_none() {
+            s_format = surface_formats.first();
+        }
+
         let s_format = match s_format {
             Some(a) => a,
             None => {
@@ -394,7 +408,7 @@ impl Device {
                 height: size.1,
             })
             .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST)
+            .image_usage(image_usage)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(surface_capabs.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -630,42 +644,6 @@ impl Device {
                 native_info
             })
             .collect();
-
-        /*
-
-        for (auto const& subpass : subpasses) {
-            auto color_index = static_cast<uint>(temp_attachments.size());
-
-            // Find color attachments
-            for (auto const& attachment : subpass.color_attachments) {
-                temp_attachments.push_back(attachment);
-                if (!VectorContains(color_attachments, attachment.attachment))
-                    color_attachments.push_back(attachment.attachment);
-            }
-
-            uint depth_index = UINT32_MAX;
-
-            // Find depth attachment
-            if (subpass.depth_attachment.attachment != UINT32_MAX) {
-                depth_index = static_cast<uint>(temp_attachments.size());
-                temp_attachments.push_back(subpass.depth_attachment);
-
-                if (!VectorContains(depth_attachments, subpass.depth_attachment.attachment))
-                    depth_attachments.push_back(subpass.depth_attachment.attachment);
-            }
-
-            // Create subpass desc
-            VkSubpassDescription desc = {
-                .pipelineBindPoint       = subpass.pipeline_bind_point,
-                .colorAttachmentCount    = static_cast<uint>(subpass.color_attachments.size()),
-                .pColorAttachments       = temp_attachments.data() + color_index,
-                .pDepthStencilAttachment = depth_index == UINT32_MAX ? nullptr : (temp_attachments.data() + depth_index),
-            };
-
-            native_subpasses.push_back(desc);
-        }
-
-         */
 
         let mut attachment_ref_count = 0;
         for subpass in subpasses {
