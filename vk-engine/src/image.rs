@@ -1,4 +1,6 @@
-use crate::{format, AccessFlags, Device, Format, Queue};
+use crate::swapchain::SwapchainWrapper;
+use crate::{AccessFlags, Device, Format, Queue};
+use ash::version::DeviceV1_0;
 use ash::vk;
 use std::rc::Rc;
 
@@ -38,8 +40,11 @@ pub struct ImageBarrier(pub(crate) vk::ImageMemoryBarrier);
 
 pub struct Image {
     pub(crate) device: Rc<Device>,
+    pub(crate) _swapchain_wrapper: Option<Rc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,
+    pub(crate) view: vk::ImageView,
+    pub(crate) aspect: vk::ImageAspectFlags,
     pub(crate) owned_handle: bool,
     pub(crate) format: Format,
     pub(crate) size: (u32, u32, u32),
@@ -69,12 +74,6 @@ impl Image {
         base_mip_level: u32,
         level_count: u32,
     ) -> ImageBarrier {
-        let aspect = if self.format == format::DEPTH_FORMAT {
-            vk::ImageAspectFlags::DEPTH
-        } else {
-            vk::ImageAspectFlags::COLOR
-        };
-
         ImageBarrier(
             vk::ImageMemoryBarrier::builder()
                 .src_access_mask(src_access_mask.0)
@@ -86,7 +85,7 @@ impl Image {
                 .image(self.native)
                 .subresource_range(
                     vk::ImageSubresourceRange::builder()
-                        .aspect_mask(aspect)
+                        .aspect_mask(self.aspect)
                         .base_mip_level(base_mip_level)
                         .level_count(level_count)
                         .base_array_layer(0)
@@ -121,6 +120,8 @@ impl Image {
 
 impl Drop for Image {
     fn drop(&mut self) {
+        unsafe { self.device.wrapper.0.destroy_image_view(self.view, None) };
+
         if self.owned_handle {
             self.device
                 .allocator

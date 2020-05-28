@@ -2,7 +2,7 @@ use crate::adapter::Adapter;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
-use std::{os::raw::c_void, rc::Rc};
+use std::{mem, os::raw::c_void, rc::Rc};
 
 pub struct Instance {
     pub(crate) entry: Rc<Entry>,
@@ -23,6 +23,10 @@ pub fn enumerate_required_window_extensions(
 }
 
 impl Instance {
+    pub fn handle(&self) -> vk::Instance {
+        self.native.handle()
+    }
+
     pub fn create_surface(
         self: &Rc<Self>,
         window_handle: &impl raw_window_handle::HasRawWindowHandle,
@@ -34,7 +38,7 @@ impl Instance {
             },
         }))
     }
-
+    
     fn enumerate_device_extension_names(
         &self,
         p_device: vk::PhysicalDevice,
@@ -47,7 +51,10 @@ impl Instance {
         )
     }
 
-    pub fn enumerate_adapters(self: &Rc<Self>, surface: &Rc<Surface>) -> Result<Vec<Rc<Adapter>>, vk::Result> {
+    pub fn enumerate_adapters(
+        self: &Rc<Self>,
+        surface: &Rc<Surface>,
+    ) -> Result<Vec<Rc<Adapter>>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
         Ok(physical_devices

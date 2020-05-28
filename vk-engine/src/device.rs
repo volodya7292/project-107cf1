@@ -1,11 +1,13 @@
-use crate::shader::ShaderBindingType;
-use crate::Adapter;
+use crate::swapchain::SwapchainWrapper;
+use crate::ShaderBindingType;
+use crate::Subpass;
+use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
     utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
-use crate::{Shader, SubmitInfo, SubmitPacket};
-use crate::{ShaderBinding, ShaderStage};
+use crate::{Adapter, SubpassDependency};
+use crate::{Attachment, ShaderBinding, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
@@ -41,16 +43,27 @@ impl From<spirv_cross::ErrorCode> for DeviceError {
     }
 }
 
+pub(crate) struct DeviceWrapper(pub(crate) ash::Device);
+
+impl Drop for DeviceWrapper {
+    fn drop(&mut self) {
+        unsafe {
+            self.0.device_wait_idle().unwrap();
+            self.0.destroy_device(None);
+        }
+    }
+}
+
 pub struct Device {
     pub(crate) adapter: Rc<Adapter>,
-    pub(crate) native: Rc<ash::Device>,
+    pub(crate) wrapper: Rc<DeviceWrapper>,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Rc<Queue>>,
 }
 
 pub(crate) fn create_semaphore(
-    native_device: &Rc<ash::Device>,
+    device_wrapper: &Rc<DeviceWrapper>,
     sp_type: vk::SemaphoreType,
 ) -> Result<Semaphore, vk::Result> {
     let mut type_info = vk::SemaphoreTypeCreateInfo::builder()
@@ -58,29 +71,27 @@ pub(crate) fn create_semaphore(
         .semaphore_type(sp_type);
     let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
     Ok(Semaphore {
-        native_device: Rc::clone(native_device),
-        native: unsafe { native_device.create_semaphore(&create_info, None)? },
+        device_wrapper: Rc::clone(device_wrapper),
+        native: unsafe { device_wrapper.0.create_semaphore(&create_info, None)? },
         semaphore_type: sp_type,
         last_signal_value: Cell::new(0),
     })
 }
 
-pub(crate) fn create_binary_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
-    create_semaphore(native_device, vk::SemaphoreType::BINARY)
+pub(crate) fn create_binary_semaphore(device_wrapper: &Rc<DeviceWrapper>) -> Result<Semaphore, vk::Result> {
+    create_semaphore(device_wrapper, vk::SemaphoreType::BINARY)
 }
 
-pub(crate) fn create_timeline_semaphore(native_device: &Rc<ash::Device>) -> Result<Semaphore, vk::Result> {
-    create_semaphore(native_device, vk::SemaphoreType::TIMELINE)
+pub(crate) fn create_timeline_semaphore(device_wrapper: &Rc<DeviceWrapper>) -> Result<Semaphore, vk::Result> {
+    create_semaphore(device_wrapper, vk::SemaphoreType::TIMELINE)
 }
 
-pub(crate) fn create_fence(native_device: &Rc<ash::Device>, signaled: bool) -> Result<Fence, vk::Result> {
+pub(crate) fn create_fence(device_wrapper: &Rc<DeviceWrapper>) -> Result<Fence, vk::Result> {
     let mut create_info = vk::FenceCreateInfo::builder().build();
-    if signaled {
-        create_info.flags |= vk::FenceCreateFlags::SIGNALED;
-    }
+    create_info.flags = vk::FenceCreateFlags::SIGNALED;
     Ok(Fence {
-        native_device: Rc::clone(native_device),
-        native: unsafe { native_device.create_fence(&create_info, None)? },
+        device_wrapper: Rc::clone(device_wrapper),
+        native: unsafe { device_wrapper.0.create_fence(&create_info, None)? },
     })
 }
 
@@ -181,6 +192,7 @@ impl Device {
     fn create_image(
         self: &Rc<Self>,
         image_type: ImageType,
+        view_type: vk::ImageViewType,
         format: Format,
         mipmaps: bool,
         usage: ImageUsageFlags,
@@ -253,10 +265,37 @@ impl Device {
             .allocator
             .create_image(&image_info, &allocation_create_info)?;
 
+        let aspect = if format == format::DEPTH_FORMAT {
+            vk::ImageAspectFlags::DEPTH
+        } else {
+            vk::ImageAspectFlags::COLOR
+        };
+        let view_info = vk::ImageViewCreateInfo::builder()
+            .image(image)
+            .view_type(view_type)
+            .format(format.0)
+            .components(vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            })
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: aspect,
+                base_mip_level: 0,
+                level_count: mip_levels,
+                base_array_layer: 0,
+                layer_count: array_layers,
+            });
+        let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
+
         Ok(Rc::new(Image {
             device: Rc::clone(self),
+            _swapchain_wrapper: None,
             native: image,
             allocation: alloc,
+            view,
+            aspect,
             owned_handle: true,
             format,
             size,
@@ -272,6 +311,7 @@ impl Device {
     ) -> Result<Rc<Image>, DeviceError> {
         self.create_image(
             Image::TYPE_2D,
+            vk::ImageViewType::TYPE_2D,
             format,
             mipmaps,
             usage,
@@ -285,7 +325,14 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Rc<Image>, DeviceError> {
-        self.create_image(Image::TYPE_2D, format, false, usage, preferred_size)
+        self.create_image(
+            Image::TYPE_2D,
+            vk::ImageViewType::TYPE_3D,
+            format,
+            false,
+            usage,
+            preferred_size,
+        )
     }
 
     pub fn create_swapchain(
@@ -299,6 +346,15 @@ impl Device {
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
 
         // TODO: HDR metadata
+
+        let size = (
+            size.0
+                .min(surface_capabs.max_image_extent.width)
+                .max(surface_capabs.min_image_extent.width),
+            size.1
+                .min(surface_capabs.max_image_extent.height)
+                .max(surface_capabs.min_image_extent.height),
+        );
 
         let s_format = surface_formats.iter().find(|&s_format| {
             s_format.format == vk::Format::R16G16B16A16_SFLOAT
@@ -345,25 +401,54 @@ impl Device {
             .present_mode(present_mode)
             .clipped(true);
 
-        let native_swapchain = unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? };
-        let images: Vec<Image> = unsafe { self.swapchain_khr.get_swapchain_images(native_swapchain)? }
-            .iter()
-            .map(|&native_image| Image {
+        let swapchain_wrapper = Rc::new(SwapchainWrapper {
+            device: Rc::clone(self),
+            native: unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? },
+        });
+
+        let images: Result<Vec<Rc<Image>>, vk::Result> = unsafe {
+            self.swapchain_khr
+                .get_swapchain_images(swapchain_wrapper.native)?
+        }
+        .iter()
+        .map(|&native_image| {
+            let view_info = vk::ImageViewCreateInfo::builder()
+                .image(native_image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(s_format.format)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                })
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+
+            Ok(Rc::new(Image {
                 device: Rc::clone(self),
+                _swapchain_wrapper: Some(Rc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
+                view: unsafe { self.wrapper.0.create_image_view(&view_info, None)? },
+                aspect: view_info.subresource_range.aspect_mask,
                 owned_handle: false,
                 format: Format(s_format.format),
                 size: (size.0, size.1, 1),
-            })
-            .collect();
+            }))
+        })
+        .collect();
 
         Ok(Rc::new(Swapchain {
-            device: Rc::clone(self),
-            native: native_swapchain,
+            wrapper: swapchain_wrapper,
             _surface: Rc::clone(surface),
-            semaphore: Rc::new(create_binary_semaphore(&self.native)?),
-            images,
+            semaphore: Rc::new(create_binary_semaphore(&self.wrapper)?),
+            images: images?,
             curr_image: Cell::new(None),
         }))
     }
@@ -493,7 +578,7 @@ impl Device {
 
         Ok(Rc::new(Shader {
             device: Rc::clone(self),
-            native: unsafe { self.native.create_shader_module(&create_info, None)? },
+            native: unsafe { self.wrapper.0.create_shader_module(&create_info, None)? },
             stage,
             bindings,
             push_constants,
@@ -501,7 +586,176 @@ impl Device {
         }))
     }
 
-    pub fn create_graphics_pipeline(self: &Rc<Self>) {}
+    pub fn create_render_pass(
+        self: &Rc<Self>,
+        attachments: &[Attachment],
+        subpasses: &[Subpass],
+        dependencies: &[SubpassDependency],
+    ) -> Result<Rc<RenderPass>, vk::Result> {
+        let native_attachments: Vec<vk::AttachmentDescription> = attachments
+            .iter()
+            .map(|info| {
+                let mut native_info = vk::AttachmentDescription::builder()
+                    .format(info.format.0)
+                    .samples(vk::SampleCountFlags::TYPE_1)
+                    .initial_layout(info.init_layout.0)
+                    .final_layout(info.final_layout.0)
+                    .build();
+                match info.load_store {
+                    LoadStore::None => {
+                        native_info.load_op = vk::AttachmentLoadOp::DONT_CARE;
+                        native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
+                    }
+                    LoadStore::InitSave => {
+                        native_info.load_op = vk::AttachmentLoadOp::LOAD;
+                        native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
+                    }
+                    LoadStore::InitClear => {
+                        native_info.load_op = vk::AttachmentLoadOp::CLEAR;
+                        native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
+                    }
+                    LoadStore::FinalSave => {
+                        native_info.load_op = vk::AttachmentLoadOp::DONT_CARE;
+                        native_info.store_op = vk::AttachmentStoreOp::STORE;
+                    }
+                    LoadStore::InitClearFinalSave => {
+                        native_info.load_op = vk::AttachmentLoadOp::CLEAR;
+                        native_info.store_op = vk::AttachmentStoreOp::STORE;
+                    }
+                    LoadStore::InitSaveFinalSave => {
+                        native_info.load_op = vk::AttachmentLoadOp::LOAD;
+                        native_info.store_op = vk::AttachmentStoreOp::STORE;
+                    }
+                }
+                native_info
+            })
+            .collect();
+
+        /*
+
+        for (auto const& subpass : subpasses) {
+            auto color_index = static_cast<uint>(temp_attachments.size());
+
+            // Find color attachments
+            for (auto const& attachment : subpass.color_attachments) {
+                temp_attachments.push_back(attachment);
+                if (!VectorContains(color_attachments, attachment.attachment))
+                    color_attachments.push_back(attachment.attachment);
+            }
+
+            uint depth_index = UINT32_MAX;
+
+            // Find depth attachment
+            if (subpass.depth_attachment.attachment != UINT32_MAX) {
+                depth_index = static_cast<uint>(temp_attachments.size());
+                temp_attachments.push_back(subpass.depth_attachment);
+
+                if (!VectorContains(depth_attachments, subpass.depth_attachment.attachment))
+                    depth_attachments.push_back(subpass.depth_attachment.attachment);
+            }
+
+            // Create subpass desc
+            VkSubpassDescription desc = {
+                .pipelineBindPoint       = subpass.pipeline_bind_point,
+                .colorAttachmentCount    = static_cast<uint>(subpass.color_attachments.size()),
+                .pColorAttachments       = temp_attachments.data() + color_index,
+                .pDepthStencilAttachment = depth_index == UINT32_MAX ? nullptr : (temp_attachments.data() + depth_index),
+            };
+
+            native_subpasses.push_back(desc);
+        }
+
+         */
+
+        let mut attachment_ref_count = 0;
+        for subpass in subpasses {
+            attachment_ref_count += subpass.color.len();
+            if subpass.depth.is_some() {
+                attachment_ref_count += 1;
+            }
+        }
+
+        let mut color_attachments = Vec::with_capacity(attachments.len());
+        let mut depth_attachments = Vec::with_capacity(attachments.len());
+
+        let mut native_attachment_refs = Vec::with_capacity(attachment_ref_count);
+        let mut native_subpass_descs = Vec::with_capacity(subpasses.len());
+
+        for subpass in subpasses {
+            // Color attachments
+            let color_att_ref_index = native_attachment_refs.len();
+            for color_attachment in subpass.color {
+                native_attachment_refs.push(
+                    vk::AttachmentReference::builder()
+                        .attachment(color_attachment.index)
+                        .layout(color_attachment.layout.0)
+                        .build(),
+                );
+
+                if !color_attachments.contains(&color_attachment.index) {
+                    color_attachments.push(color_attachment.index);
+                }
+            }
+
+            // Depth attachment
+            let depth_att_ref_index;
+            if let Some(depth_attachment) = &subpass.depth {
+                depth_att_ref_index = native_attachment_refs.len() as u32;
+                native_attachment_refs.push(
+                    vk::AttachmentReference::builder()
+                        .attachment(depth_attachment.index)
+                        .layout(depth_attachment.layout.0)
+                        .build(),
+                );
+
+                if !depth_attachments.contains(&depth_attachment.index) {
+                    depth_attachments.push(depth_attachment.index);
+                }
+            } else {
+                depth_att_ref_index = u32::MAX;
+            }
+
+            // Build description
+            let mut subpass_desc = vk::SubpassDescription::builder()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(
+                    &native_attachment_refs[color_att_ref_index..color_att_ref_index + subpass.color.len()],
+                );
+            if subpass.depth.is_some() {
+                subpass_desc = subpass_desc
+                    .depth_stencil_attachment(&native_attachment_refs[depth_att_ref_index as usize]);
+            }
+
+            native_subpass_descs.push(subpass_desc.build());
+        }
+
+        let native_dependencies: Vec<vk::SubpassDependency> = dependencies
+            .iter()
+            .map(|dep| {
+                vk::SubpassDependency::builder()
+                    .src_subpass(dep.src_subpass)
+                    .dst_subpass(dep.dst_subpass)
+                    .src_stage_mask(dep.src_stage_mask.0)
+                    .dst_stage_mask(dep.dst_stage_mask.0)
+                    .src_access_mask(dep.src_access_mask.0)
+                    .dst_access_mask(dep.dst_access_mask.0)
+                    .build()
+            })
+            .collect();
+
+        let create_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&native_attachments)
+            .subpasses(&native_subpass_descs)
+            .dependencies(&native_dependencies);
+
+        Ok(Rc::new(RenderPass {
+            device: Rc::clone(self),
+            native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
+            attachments: attachments.to_vec(),
+            color_attachments,
+            depth_attachments,
+        }))
+    }
 
     pub fn create_submit_packet(
         self: &Rc<Self>,
@@ -509,8 +763,7 @@ impl Device {
     ) -> Result<SubmitPacket, vk::Result> {
         Ok(SubmitPacket {
             infos: submit_infos.to_vec(),
-            fence: create_fence(&self.native, false)?,
-            submitted: false,
+            fence: create_fence(&self.wrapper)?,
         })
     }
 }
@@ -518,9 +771,5 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         self.allocator.destroy();
-        unsafe {
-            self.native.device_wait_idle().unwrap();
-            self.native.destroy_device(None);
-        }
     }
 }

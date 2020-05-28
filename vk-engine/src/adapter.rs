@@ -1,3 +1,4 @@
+use crate::device::DeviceWrapper;
 use crate::{
     device::{self, Device},
     surface::Surface,
@@ -56,25 +57,28 @@ impl Adapter {
             .enabled_features(&self.features)
             .push_next(&mut features12);
 
-        let native_device = Rc::new(unsafe {
+        let device_wrapper = Rc::new(DeviceWrapper(unsafe {
             self.instance
                 .native
                 .create_device(self.native, &create_info, None)?
-        });
-        let swapchain_khr =
-            ash::extensions::khr::Swapchain::new(&self.instance.native, native_device.as_ref());
+        }));
+        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &device_wrapper.0);
 
         // Get queues
         let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
         for queue_info in &queue_infos {
             for i in 0..queue_info.queue_count {
                 queues.push(Rc::new(Queue {
-                    native_device: Rc::clone(&native_device),
+                    device_wrapper: Rc::clone(&device_wrapper),
                     swapchain_khr: swapchain_khr.clone(),
-                    native: unsafe { native_device.get_device_queue(queue_info.queue_family_index, i) },
-                    semaphore: device::create_binary_semaphore(&native_device)?,
-                    timeline_sp: Rc::new(device::create_timeline_semaphore(&native_device)?),
-                    fence: device::create_fence(&native_device, false)?,
+                    native: unsafe {
+                        device_wrapper
+                            .0
+                            .get_device_queue(queue_info.queue_family_index, i)
+                    },
+                    semaphore: device::create_binary_semaphore(&device_wrapper)?,
+                    timeline_sp: Rc::new(device::create_timeline_semaphore(&device_wrapper)?),
+                    fence: device::create_fence(&device_wrapper)?,
                     family_index: queue_info.queue_family_index,
                 }));
             }
@@ -88,7 +92,7 @@ impl Adapter {
         // Create allocator
         let allocator_info = vk_mem::AllocatorCreateInfo {
             physical_device: self.native,
-            device: native_device.as_ref().clone(),
+            device: device_wrapper.0.clone(),
             instance: self.instance.native.clone(),
             flags: Default::default(),
             preferred_large_heap_block_size: 0,
@@ -99,7 +103,7 @@ impl Adapter {
 
         Ok(Rc::new(Device {
             adapter: Rc::clone(self),
-            native: native_device,
+            wrapper: device_wrapper,
             allocator,
             swapchain_khr,
             queues,
@@ -164,5 +168,10 @@ impl Adapter {
 
     pub fn is_extension_enabled(&self, name: &str) -> bool {
         self.enabled_extensions.contains(&CString::new(name).unwrap())
+    }
+
+    pub fn is_surface_valid(&self, surface: &Surface) -> Result<bool, vk::Result> {
+        let capabs = self.get_surface_capabilities(surface)?;
+        Ok(capabs.min_image_extent.width > 0 && capabs.min_image_extent.height > 0)
     }
 }

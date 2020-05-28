@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 simple_logger = "1.6.0"
 specs = "0.16.1"
-winit = "0.22.2"
+sdl2 = { version = "0.34.0", features = ["bundled", "raw-window-handle"] }
 byteorder = "1.3.4"
 vk-engine = { path = "vk-engine" }
 engine-3d = { path = "engine-3d" }

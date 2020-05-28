@@ -1,44 +1,50 @@
-use std::path::Path;
-use std::rc::Rc;
-
-use winit::dpi;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
-
-use vk_engine::image::ImageUsageFlags;
-use vk_engine::queue::WaitSemaphore;
-use vk_engine::shader::ShaderBindingType;
-use vk_engine::{AccessFlags, Format, ImageLayout, PipelineStageFlags, Queue, SubmitInfo};
+mod resource_file;
 
 use crate::resource_file::ResourceFile;
-
-mod resource_file;
+use std::cell::RefCell;
+use std::path::Path;
+use std::{mem, rc::Rc};
+use vk_engine::ShaderBindingType;
+use vk_engine::WaitSemaphore;
+use vk_engine::{
+    swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
+};
+use vk_engine::{ImageUsageFlags, Subpass};
+/*use winit::dpi;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;*/
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::rect::Rect;
+use vk_engine::render_pass::{AttachmentRef, ImageMod};
 
 fn main() {
     simple_logger::init().unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("GOVNO!")
-        .with_resizable(true)
-        .with_visible(true)
-        .with_inner_size(dpi::PhysicalSize::new(1280, 720))
-        .build(&event_loop)
+    let mut sdl_context = sdl2::init().unwrap();
+
+    let window = sdl_context
+        .video()
+        .unwrap()
+        .window("project-107cf1", 800, 600)
+        .resizable()
+        .position_centered()
+        .vulkan()
+        .build()
         .unwrap();
 
-    let windows_extensions = vk_engine::instance::enumerate_required_window_extensions(&window).unwrap();
+    let windows_extensions = window.vulkan_instance_extensions().unwrap(); //vk_engine::instance::enumerate_required_window_extensions(&window).unwrap();
     let vke = vk_engine::Entry::new().unwrap();
-    let instance = vke
-        .create_instance("GOVNO!", windows_extensions.iter().map(String::as_str).collect())
-        .unwrap();
+    let instance = vke.create_instance("GOVNO!", windows_extensions).unwrap();
 
     let surface = instance.create_surface(&window).unwrap();
 
     let adapters = instance.enumerate_adapters(&surface).unwrap();
-    let device = adapters[0].create_device().unwrap();
+    let adapter = adapters.first().unwrap();
+    let device = adapter.create_device().unwrap();
 
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
@@ -57,19 +63,28 @@ fn main() {
     // }
     //println!("ITE {:?}", &buf[0..5]);
 
-    let mut window_size = window.inner_size();
-    let mut swapchain = device
-        .create_swapchain(&surface, (window_size.width, window_size.height), true)
-        .unwrap();
+    let mut window_size = window.vulkan_drawable_size();
+    let mut swapchain = device.create_swapchain(&surface, window_size, true).unwrap();
 
-    let image = device
-        .create_image_2d(
-            Format::RGBA16_UNORM,
-            false,
-            ImageUsageFlags::SAMPLED,
-            (1024, 1024),
+    let render_pass = device
+        .create_render_pass(
+            &[Attachment {
+                format: Format::RGBA16_FLOAT,
+                init_layout: ImageLayout::UNDEFINED,
+                final_layout: ImageLayout::PRESENT,
+                load_store: LoadStore::FinalSave,
+            }],
+            &[Subpass {
+                color: &[AttachmentRef {
+                    index: 0,
+                    layout: ImageLayout::COLOR_ATTACHMENT,
+                }],
+                depth: None,
+            }],
+            &[],
         )
         .unwrap();
+
     let cmd_list = device
         .get_queue(Queue::TYPE_GRAPHICS)
         .create_primary_cmd_list()
@@ -82,42 +97,60 @@ fn main() {
     dummy_cmd_list.end().unwrap();
 
     let shader_spv = resources.read("shaders/cluster.frag.spv").unwrap();
-    let shader = device.create_shader(&shader_spv, &[("", ShaderBindingType::DEFAULT)]);
+    let shader = device
+        .create_shader(&shader_spv, &[("", ShaderBindingType::DEFAULT)])
+        .unwrap();
 
     let mut surface_changed = false;
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                println!("The close button was pressed; stopping");
-                *control_flow = ControlFlow::Exit;
-            }
-            Event::WindowEvent {
-                event: WindowEvent::Resized(new_size),
-                ..
-            } => {
-                surface_changed = true;
-                window_size = new_size;
-            }
-            Event::MainEventsCleared => {
-                window.request_redraw();
-            }
-            Event::RedrawRequested(_) => {
-                if surface_changed {
-                    swapchain = device
-                        .create_swapchain(&surface, (window_size.width, window_size.height), true)
-                        .unwrap();
-                    surface_changed = false;
+    let mut running = true;
+    while running {
+        for event in sdl_context.event_pump().unwrap().poll_iter() {
+            use sdl2::event::Event;
+            use sdl2::event::WindowEvent;
+            match event {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => {
+                    running = false;
                 }
+                Event::Window {
+                    timestamp: _,
+                    window_id: _,
+                    win_event,
+                } => match win_event {
+                    WindowEvent::Resized(width, height) => {
+                        surface_changed = true;
+                        window_size = (width as u32, height as u32);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
 
-                let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
-                let (sw_image, optimal) = swapchain.acquire_image().unwrap();
+        if adapter.is_surface_valid(&surface).unwrap() {
+            if surface_changed {
+                swapchain = device
+                    .create_swapchain(&surface, (window_size.0, window_size.1), true)
+                    .unwrap();
+                surface_changed = false;
+            }
+
+            let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
+
+            let acquire_result = swapchain.acquire_image();
+            if let Ok((sw_image, optimal)) = acquire_result {
                 surface_changed = !optimal;
+
+                /*let framebuffer = render_pass
+                .create_framebuffer(
+                    window_size,
+                    &[(0, ImageMod::OverrideImage(Rc::clone(&sw_image.get_image())))],
+                )
+                .unwrap();*/
 
                 cmd_list.begin(true).unwrap();
                 cmd_list.barrier_image(
@@ -147,20 +180,29 @@ fn main() {
                 graphics_queue.submit(&mut submit_packet).unwrap();
 
                 let present_queue = device.get_queue(Queue::TYPE_PRESENT);
-                let optimal = present_queue
-                    .present(
-                        sw_image,
-                        graphics_queue.get_semaphore(),
-                        submit_packet.get_signal_value(0),
-                    )
-                    .unwrap();
-                surface_changed = !optimal;
+                let result = present_queue.present(
+                    sw_image,
+                    graphics_queue.get_semaphore(),
+                    submit_packet.get_signal_value(0),
+                );
+
+                if let Ok(optimal) = result {
+                    surface_changed = !optimal;
+                } else {
+                    surface_changed = true;
+                }
 
                 let dd = graphics_queue == present_queue;
-
-                submit_packet.wait().unwrap();
+            } else {
+                match acquire_result {
+                    Err(swapchain::Error::IncompatibleSurface) => {
+                        surface_changed = true;
+                    }
+                    _ => {
+                        acquire_result.unwrap();
+                    }
+                }
             }
-            _ => (),
         }
-    });
+    }
 }

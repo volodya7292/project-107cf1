@@ -1,4 +1,4 @@
-use crate::{Instance};
+use crate::Instance;
 use ash::vk;
 use std::rc::Rc;
 

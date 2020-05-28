@@ -77,7 +77,7 @@ impl ResourceFile {
         let mut entry = ResourceEntry {
             offset,
             size,
-            data: Vec::new(),
+            data: vec![],
             entries: HashMap::new(),
         };
 

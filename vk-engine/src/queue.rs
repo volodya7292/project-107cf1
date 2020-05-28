@@ -1,7 +1,9 @@
-use crate::swapchain::SwapchainImage;
-use crate::{pipeline::PipelineStageFlags, CmdList, Fence, Semaphore};
+use crate::device::DeviceWrapper;
+use crate::SwapchainImage;
+use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::slice;
 
@@ -9,7 +11,7 @@ use std::slice;
 pub struct QueueType(pub(crate) u32);
 
 pub struct Queue {
-    pub(crate) native_device: Rc<ash::Device>,
+    pub(crate) device_wrapper: Rc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) native: vk::Queue,
     pub(crate) semaphore: Semaphore,
@@ -26,7 +28,7 @@ impl Queue {
 
     fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Rc<CmdList>, vk::Result> {
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
-        let native_pool = unsafe { self.native_device.create_command_pool(&create_info, None)? };
+        let native_pool = unsafe { self.device_wrapper.0.create_command_pool(&create_info, None)? };
 
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(native_pool)
@@ -34,11 +36,12 @@ impl Queue {
             .command_buffer_count(1);
 
         Ok(Rc::new(CmdList {
-            native_device: Rc::clone(&self.native_device),
+            device_wrapper: Rc::clone(&self.device_wrapper),
             pool: native_pool,
-            native: unsafe { self.native_device.allocate_command_buffers(&alloc_info)?[0] },
-            renderpass: None,
-            framebuffer: None,
+            native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
+            render_passes: RefCell::new(vec![]),
+            framebuffers: RefCell::new(vec![]),
+            secondary_cmd_lists: RefCell::new(vec![]),
         }))
     }
 
@@ -110,10 +113,13 @@ impl Queue {
             );
         }
 
+        fence.reset()?;
         unsafe {
-            self.native_device
-                .queue_submit(self.native, native_submit_infos.as_slice(), fence.native)
+            self.device_wrapper
+                .0
+                .queue_submit(self.native, native_submit_infos.as_slice(), fence.native)?
         }
+        Ok(())
     }
 
     pub fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
@@ -133,10 +139,7 @@ impl Queue {
             });
         }
 
-        packet.fence.reset()?;
         self.submit_infos(packet.infos.as_slice(), &packet.fence)?;
-
-        packet.submitted = true;
         self.timeline_sp.last_signal_value.set(last_signal_value);
         Ok(())
     }
@@ -146,7 +149,7 @@ impl Queue {
         sw_image: SwapchainImage,
         wait_semaphore: &Semaphore,
         wait_value: u64,
-    ) -> Result<bool, vk::Result> {
+    ) -> Result<bool, swapchain::Error> {
         let wait_dst_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
         let signal_value = 0u64;
         let mut submit_sp_info = vk::TimelineSemaphoreSubmitInfo::builder()
@@ -161,16 +164,29 @@ impl Queue {
 
         self.fence.reset()?;
         unsafe {
-            self.native_device
-                .queue_submit(self.native, slice::from_ref(&submit_info), self.fence.native)?
+            self.device_wrapper.0.queue_submit(
+                self.native,
+                slice::from_ref(&submit_info),
+                self.fence.native,
+            )?
         };
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&self.semaphore.native))
-            .swapchains(slice::from_ref(&sw_image.swapchain.native))
+            .swapchains(slice::from_ref(&sw_image.swapchain.wrapper.native))
             .image_indices(slice::from_ref(&sw_image.index));
-        let optimal = unsafe { !self.swapchain_khr.queue_present(self.native, &present_info)? };
+        let result = unsafe { self.swapchain_khr.queue_present(self.native, &present_info) };
         self.fence.wait()?;
+
+        let optimal = match result {
+            Ok(a) => !a,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                return Err(swapchain::Error::IncompatibleSurface);
+            }
+            Err(e) => {
+                return Err(swapchain::Error::VkError(e));
+            }
+        };
 
         sw_image.swapchain.curr_image.set(None);
         Ok(optimal)
@@ -183,7 +199,7 @@ impl Queue {
 
 impl PartialEq for Queue {
     fn eq(&self, other: &Self) -> bool {
-        self.native_device.handle() == other.native_device.handle()
+        self.device_wrapper.0.handle() == other.device_wrapper.0.handle()
             && self.native == other.native
             && self.family_index == other.family_index
     }
@@ -222,14 +238,12 @@ impl SubmitInfo {
 pub struct SubmitPacket {
     pub(crate) infos: Vec<SubmitInfo>,
     pub(crate) fence: Fence,
-    pub(crate) submitted: bool,
 }
 
 impl SubmitPacket {
     pub fn set(&mut self, infos: &[SubmitInfo]) -> Result<(), vk::Result> {
         self.wait()?;
         self.infos = infos.to_vec();
-        self.submitted = false;
         Ok(())
     }
 
@@ -238,10 +252,6 @@ impl SubmitPacket {
     }
 
     pub fn wait(&self) -> Result<(), vk::Result> {
-        if self.submitted {
-            self.fence.wait()
-        } else {
-            Ok(())
-        }
+        self.fence.wait()
     }
 }

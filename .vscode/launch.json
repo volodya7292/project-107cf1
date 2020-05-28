@@ -20,26 +20,8 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'project-107cf1'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=project-107cf1",
-                    "--package=project-107cf1"
-                ],
-                "filter": {
-                    "name": "project-107cf1",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}/work_dir",
+            "env": {"_NO_DEBUG_HEAP": "1"},
         }
     ]
 }

@@ -1,3 +1,4 @@
+use crate::device::DeviceWrapper;
 use ash::version::DeviceV1_0;
 use ash::version::DeviceV1_2;
 use ash::vk;
@@ -5,7 +6,7 @@ use std::cell::Cell;
 use std::{rc::Rc, slice};
 
 pub struct Semaphore {
-    pub(crate) native_device: Rc<ash::Device>,
+    pub(crate) device_wrapper: Rc<DeviceWrapper>,
     pub(crate) native: vk::Semaphore,
     pub(crate) semaphore_type: vk::SemaphoreType,
     pub(crate) last_signal_value: Cell<u64>,
@@ -21,8 +22,9 @@ impl Semaphore {
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
         unsafe {
-            self.native_device
-                .wait_semaphores(self.native_device.handle(), &wait_info, u64::MAX)
+            self.device_wrapper
+                .0
+                .wait_semaphores(self.device_wrapper.0.handle(), &wait_info, u64::MAX)
         }
     }
 
@@ -37,8 +39,9 @@ impl Semaphore {
             .semaphore(self.native)
             .value(self.last_signal_value.get());
         unsafe {
-            self.native_device
-                .signal_semaphore(self.native_device.handle(), &signal_info)?
+            self.device_wrapper
+                .0
+                .signal_semaphore(self.device_wrapper.0.handle(), &signal_info)?
         };
 
         Ok(self.last_signal_value.get())
@@ -50,6 +53,6 @@ impl Drop for Semaphore {
         if self.semaphore_type == vk::SemaphoreType::TIMELINE {
             self.wait(self.last_signal_value.get()).unwrap();
         }
-        unsafe { self.native_device.destroy_semaphore(self.native, None) };
+        unsafe { self.device_wrapper.0.destroy_semaphore(self.native, None) };
     }
 }
