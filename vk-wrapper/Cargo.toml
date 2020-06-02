@@ -1,5 +1,5 @@
 [package]
-name = "vk-engine"
+name = "vk-wrapper"
 version = "0.1.0"
 authors = ["MotanGish <motangish@gmail.com>"]
 edition = "2018"

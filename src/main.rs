@@ -1,42 +1,40 @@
 mod resource_file;
 
 use crate::resource_file::ResourceFile;
-use std::path::Path;
-use std::{rc::Rc};
-use vk_engine::ShaderBindingType;
-use vk_engine::WaitSemaphore;
-use vk_engine::{
-    swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
-};
-use vk_engine::{ImageUsageFlags, Subpass};
-/*use winit::dpi;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;*/
+use engine_3d::scene;
+use engine_3d::specs::Builder;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
-use vk_engine::render_pass::{AttachmentRef, ImageMod};
+use std::path::Path;
+use std::rc::Rc;
+use vk_wrapper::render_pass::{AttachmentRef, ImageMod};
+use vk_wrapper::ShaderBindingType;
+use vk_wrapper::WaitSemaphore;
+use vk_wrapper::{
+    swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
+};
+use vk_wrapper::{ImageUsageFlags, Subpass};
 
 fn main() {
     simple_logger::init().unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
-    let mut sdl_context = sdl2::init().unwrap();
+    let sdl_context = sdl2::init().unwrap();
 
     let window = sdl_context
         .video()
         .unwrap()
-        .window("project-107cf1", 800, 600)
+        .window("project-107cf1", 1280, 720)
         .resizable()
         .position_centered()
         .vulkan()
         .build()
         .unwrap();
 
-    let windows_extensions = window.vulkan_instance_extensions().unwrap(); //vk_engine::instance::enumerate_required_window_extensions(&window).unwrap();
-    let vke = vk_engine::Entry::new().unwrap();
+    let windows_extensions = window.vulkan_instance_extensions().unwrap();
+    let vke = vk_wrapper::Entry::new().unwrap();
     let instance = vke.create_instance("GOVNO!", windows_extensions).unwrap();
 
     let surface = instance.create_surface(&window).unwrap();
@@ -50,7 +48,7 @@ fn main() {
     //adapters.iter_mut()
 
     let mut buf = device
-        .create_host_buffer::<u32>(vk_engine::buffer::BufferUsageFlags::UNIFORM, 5)
+        .create_host_buffer::<u32>(vk_wrapper::buffer::BufferUsageFlags::UNIFORM, 5)
         .unwrap();
     buf[0] = 1u32;
     buf[1] = 2u32;
@@ -99,6 +97,9 @@ fn main() {
     let shader = device
         .create_shader(&shader_spv, &[("", ShaderBindingType::DEFAULT)])
         .unwrap();
+
+    let mut d = scene::new();
+    let ent = d.create_entity().build();
 
     let mut surface_changed = false;
 

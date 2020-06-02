@@ -9,20 +9,6 @@
           </mappings>
         </serverdata>
       </paths>
-      <paths name="WSL (0a1fff8e-6136-446d-ae18-0acea2d8d0f5)">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="WSL (b90e926d-16c7-420d-bd5f-51c68dc484ea)">
-        <serverdata>
-          <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
     </serverData>
   </component>
 </project>
