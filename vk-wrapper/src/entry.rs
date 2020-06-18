@@ -10,6 +10,7 @@ use log::{error, info, warn};
 
 use crate::utils;
 use crate::Instance;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum InstanceError {
@@ -86,7 +87,7 @@ impl Entry {
         self: &Rc<Self>,
         app_name: &str,
         mut required_extensions: Vec<&str>,
-    ) -> Result<Rc<Instance>, InstanceError> {
+    ) -> Result<Arc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();
         let app_info = vk::ApplicationInfo::builder()
@@ -169,7 +170,7 @@ impl Entry {
         // Init Surface extension
         let surface_khr = ash::extensions::khr::Surface::new(&self.ash_entry, &native_instance);
 
-        Ok(Rc::new(Instance {
+        Ok(Arc::new(Instance {
             entry: Rc::clone(self),
             native: native_instance,
             debug_utils_ext,

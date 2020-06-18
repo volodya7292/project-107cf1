@@ -8,12 +8,13 @@ use ash::{
     version::{DeviceV1_0, InstanceV1_0},
     vk,
 };
-use std::{ffi::CString, os::raw::c_char, rc::Rc};
+use std::sync::Arc;
+use std::{cell::Cell, ffi::CString, os::raw::c_char, rc::Rc};
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
 pub struct Adapter {
-    pub(crate) instance: Rc<Instance>,
+    pub(crate) instance: Arc<Instance>,
     pub(crate) native: vk::PhysicalDevice,
     pub(crate) props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
@@ -24,7 +25,7 @@ pub struct Adapter {
 }
 
 impl Adapter {
-    pub fn create_device(self: &Rc<Self>) -> Result<Rc<Device>, vk::Result> {
+    pub fn create_device(self: &Arc<Self>) -> Result<Arc<Device>, vk::Result> {
         let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(QUEUE_TYPE_COUNT);
         let priorities = [1.0_f32; u8::MAX as usize];
 
@@ -57,7 +58,7 @@ impl Adapter {
             .enabled_features(&self.features)
             .push_next(&mut features12);
 
-        let device_wrapper = Rc::new(DeviceWrapper(unsafe {
+        let device_wrapper = Arc::new(DeviceWrapper(unsafe {
             self.instance
                 .native
                 .create_device(self.native, &create_info, None)?
@@ -69,7 +70,7 @@ impl Adapter {
         for queue_info in &queue_infos {
             for i in 0..queue_info.queue_count {
                 queues.push(Rc::new(Queue {
-                    device_wrapper: Rc::clone(&device_wrapper),
+                    device_wrapper: Arc::clone(&device_wrapper),
                     swapchain_khr: swapchain_khr.clone(),
                     native: unsafe {
                         device_wrapper
@@ -101,12 +102,20 @@ impl Adapter {
         };
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
-        Ok(Rc::new(Device {
-            adapter: Rc::clone(self),
+        let pipeline_cache_info = vk::PipelineCacheCreateInfo::builder();
+        let pipeline_cache = unsafe {
+            device_wrapper
+                .0
+                .create_pipeline_cache(&pipeline_cache_info, None)?
+        };
+
+        Ok(Arc::new(Device {
+            adapter: Arc::clone(self),
             wrapper: device_wrapper,
             allocator,
             swapchain_khr,
             queues,
+            pipeline_cache: Cell::new(pipeline_cache),
         }))
     }
 

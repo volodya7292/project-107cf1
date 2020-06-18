@@ -3,10 +3,11 @@ use ash::version::DeviceV1_0;
 use ash::version::DeviceV1_2;
 use ash::vk;
 use std::cell::Cell;
-use std::{rc::Rc, slice};
+use std::sync::Arc;
+use std::slice;
 
 pub struct Semaphore {
-    pub(crate) device_wrapper: Rc<DeviceWrapper>,
+    pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) native: vk::Semaphore,
     pub(crate) semaphore_type: vk::SemaphoreType,
     pub(crate) last_signal_value: Cell<u64>,

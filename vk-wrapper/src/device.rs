@@ -1,20 +1,21 @@
-use crate::swapchain::SwapchainWrapper;
-use crate::ShaderBindingType;
+use crate::PipelineSignature;
 use crate::Subpass;
+use crate::SwapchainWrapper;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
     utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
-use crate::{Adapter, SubpassDependency};
-use crate::{Attachment, ShaderBinding, ShaderStage};
+use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
+use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::cell::Cell;
-use std::collections::HashMap;
-use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc};
+use std::collections::{hash_map, HashMap};
+use std::sync::Arc;
+use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
@@ -55,15 +56,16 @@ impl Drop for DeviceWrapper {
 }
 
 pub struct Device {
-    pub(crate) adapter: Rc<Adapter>,
-    pub(crate) wrapper: Rc<DeviceWrapper>,
+    pub(crate) adapter: Arc<Adapter>,
+    pub(crate) wrapper: Arc<DeviceWrapper>,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Rc<Queue>>,
+    pub(crate) pipeline_cache: Cell<vk::PipelineCache>,
 }
 
 pub(crate) fn create_semaphore(
-    device_wrapper: &Rc<DeviceWrapper>,
+    device_wrapper: &Arc<DeviceWrapper>,
     sp_type: vk::SemaphoreType,
 ) -> Result<Semaphore, vk::Result> {
     let mut type_info = vk::SemaphoreTypeCreateInfo::builder()
@@ -71,31 +73,37 @@ pub(crate) fn create_semaphore(
         .semaphore_type(sp_type);
     let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
     Ok(Semaphore {
-        device_wrapper: Rc::clone(device_wrapper),
+        device_wrapper: Arc::clone(device_wrapper),
         native: unsafe { device_wrapper.0.create_semaphore(&create_info, None)? },
         semaphore_type: sp_type,
         last_signal_value: Cell::new(0),
     })
 }
 
-pub(crate) fn create_binary_semaphore(device_wrapper: &Rc<DeviceWrapper>) -> Result<Semaphore, vk::Result> {
+pub(crate) fn create_binary_semaphore(device_wrapper: &Arc<DeviceWrapper>) -> Result<Semaphore, vk::Result> {
     create_semaphore(device_wrapper, vk::SemaphoreType::BINARY)
 }
 
-pub(crate) fn create_timeline_semaphore(device_wrapper: &Rc<DeviceWrapper>) -> Result<Semaphore, vk::Result> {
+pub(crate) fn create_timeline_semaphore(
+    device_wrapper: &Arc<DeviceWrapper>,
+) -> Result<Semaphore, vk::Result> {
     create_semaphore(device_wrapper, vk::SemaphoreType::TIMELINE)
 }
 
-pub(crate) fn create_fence(device_wrapper: &Rc<DeviceWrapper>) -> Result<Fence, vk::Result> {
+pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence, vk::Result> {
     let mut create_info = vk::FenceCreateInfo::builder().build();
     create_info.flags = vk::FenceCreateFlags::SIGNALED;
     Ok(Fence {
-        device_wrapper: Rc::clone(device_wrapper),
+        device_wrapper: Arc::clone(device_wrapper),
         native: unsafe { device_wrapper.0.create_fence(&create_info, None)? },
     })
 }
 
 impl Device {
+    pub fn get_adapter(&self) -> &Arc<Adapter> {
+        &self.adapter
+    }
+
     pub fn is_extension_supported(&self, name: &str) -> bool {
         self.adapter.is_extension_enabled(name)
     }
@@ -105,11 +113,11 @@ impl Device {
     }
 
     fn create_buffer<T>(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,
         mem_usage: vk_mem::MemoryUsage,
-    ) -> Result<(Buffer<T>, vk_mem::AllocationInfo), DeviceError> {
+    ) -> Result<(Buffer, vk_mem::AllocationInfo), DeviceError> {
         let mut elem_align = 1;
 
         if usage.intersects(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST)
@@ -152,8 +160,7 @@ impl Device {
 
         Ok((
             Buffer {
-                device: Rc::clone(self),
-                _type_marker: PhantomData,
+                device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
                 aligned_elem_size: aligned_elem_size as u64,
@@ -165,7 +172,7 @@ impl Device {
     }
 
     pub fn create_host_buffer<T>(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,
     ) -> Result<HostBuffer<T>, DeviceError> {
@@ -175,22 +182,23 @@ impl Device {
         if p_data == ptr::null_mut() {}
 
         Ok(HostBuffer {
-            buffer,
+            _type_marker: PhantomData,
+            buffer: Arc::new(buffer),
             p_data: alloc_info.get_mapped_data(),
         })
     }
 
     pub fn create_device_buffer<T>(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,
-    ) -> Result<DeviceBuffer<T>, DeviceError> {
+    ) -> Result<DeviceBuffer, DeviceError> {
         let (buffer, _) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::GpuOnly)?;
         Ok(DeviceBuffer { buffer })
     }
 
     fn create_image(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         image_type: ImageType,
         view_type: vk::ImageViewType,
         format: Format,
@@ -290,7 +298,7 @@ impl Device {
         let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
 
         Ok(Rc::new(Image {
-            device: Rc::clone(self),
+            device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
             allocation: alloc,
@@ -303,7 +311,7 @@ impl Device {
     }
 
     pub fn create_image_2d(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         format: Format,
         mipmaps: bool,
         usage: ImageUsageFlags,
@@ -320,7 +328,7 @@ impl Device {
     }
 
     pub fn create_image_3d(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         format: Format,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
@@ -336,7 +344,7 @@ impl Device {
     }
 
     pub fn create_swapchain(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         surface: &Rc<Surface>,
         size: (u32, u32),
         vsync: bool,
@@ -347,12 +355,16 @@ impl Device {
 
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST;
         if !surface_capabs.supported_usage_flags.contains(image_usage) {
-            return Err(DeviceError::SwapchainError("Image usage flags are not supported!".to_string()));
+            return Err(DeviceError::SwapchainError(
+                "Image usage flags are not supported!".to_string(),
+            ));
         }
 
         let composite_alpha = vk::CompositeAlphaFlagsKHR::OPAQUE;
         if !surface_capabs.supported_composite_alpha.contains(composite_alpha) {
-            return Err(DeviceError::SwapchainError("Composite alpha not supported!".to_string()));
+            return Err(DeviceError::SwapchainError(
+                "Composite alpha not supported!".to_string(),
+            ));
         }
 
         // TODO: HDR metadata
@@ -367,7 +379,7 @@ impl Device {
         );
 
         let mut s_format = surface_formats.iter().find(|&s_format| {
-            s_format.format == vk::Format::R16G16B16A16_SFLOAT
+            s_format.format == vk::Format::R8G8B8A8_UNORM
                 && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
         });
         if s_format.is_none() {
@@ -416,7 +428,7 @@ impl Device {
             .clipped(true);
 
         let swapchain_wrapper = Rc::new(SwapchainWrapper {
-            device: Rc::clone(self),
+            device: Arc::clone(self),
             native: unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? },
         });
 
@@ -445,7 +457,7 @@ impl Device {
                 });
 
             Ok(Rc::new(Image {
-                device: Rc::clone(self),
+                device: Arc::clone(self),
                 _swapchain_wrapper: Some(Rc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
@@ -467,13 +479,7 @@ impl Device {
         }))
     }
 
-    pub fn create_shader(
-        self: &Rc<Self>,
-        code: &[u8],
-        binding_types: &[(&str, ShaderBindingType)],
-    ) -> Result<Rc<Shader>, DeviceError> {
-        let binding_types_map: HashMap<&str, ShaderBindingType> = binding_types.iter().cloned().collect();
-
+    pub fn create_shader(self: &Arc<Self>, code: &[u8]) -> Result<Rc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
             std::slice::from_raw_parts(
@@ -510,20 +516,10 @@ impl Device {
         }
 
         macro_rules! binding_buffer_array_size {
-            ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
+            ($res: ident, $desc_type: ident) => {{
                 let var_type = ast.get_type($res.type_id)?;
-                let shader_binding_type = binding_types_map
-                    .get($res.name.as_str())
-                    .or_else(|| Some(&ShaderBindingType::DEFAULT))
-                    .unwrap();
                 ShaderBinding {
-                    binding_type: if shader_binding_type == &ShaderBindingType::DEFAULT
-                        || shader_binding_type == &ShaderBindingType::DYNAMIC_UPDATE
-                    {
-                        vk::DescriptorType::$desc_type0
-                    } else {
-                        vk::DescriptorType::$desc_type1
-                    },
+                    binding_type: vk::DescriptorType::$desc_type,
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::Struct {
@@ -566,11 +562,11 @@ impl Device {
             bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.uniform_buffers {
-            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER, UNIFORM_BUFFER_DYNAMIC);
+            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER);
             bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.storage_buffers {
-            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER, STORAGE_BUFFER_DYNAMIC);
+            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER);
             bindings.insert(res.name.clone(), binding);
         }
 
@@ -591,7 +587,7 @@ impl Device {
         let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
 
         Ok(Rc::new(Shader {
-            device: Rc::clone(self),
+            device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_shader_module(&create_info, None)? },
             stage,
             bindings,
@@ -601,7 +597,7 @@ impl Device {
     }
 
     pub fn create_render_pass(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         attachments: &[Attachment],
         subpasses: &[Subpass],
         dependencies: &[SubpassDependency],
@@ -727,7 +723,7 @@ impl Device {
             .dependencies(&native_dependencies);
 
         Ok(Rc::new(RenderPass {
-            device: Rc::clone(self),
+            device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
             attachments: attachments.to_vec(),
             color_attachments,
@@ -735,8 +731,142 @@ impl Device {
         }))
     }
 
+    pub fn create_pipeline_signature(
+        self: &Arc<Self>,
+        shaders: &[Rc<Shader>],
+    ) -> Result<Arc<PipelineSignature>, vk::Result> {
+        let mut native_bindings = Vec::<vk::DescriptorSetLayoutBinding>::new();
+        let mut binding_flags = Vec::<vk::DescriptorBindingFlagsEXT>::new();
+
+        let mut descriptor_sizes = Vec::<vk::DescriptorPoolSize>::new();
+        let mut descriptor_sizes_indices = HashMap::<vk::DescriptorType, u32>::new();
+        let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
+        let mut push_constant_ranges = HashMap::<ShaderStage, (u32, u32)>::new();
+        let mut push_constants_size = 0u32;
+
+        for shader in shaders {
+            for (_name, binding) in &shader.bindings {
+                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type) {
+                    entry.insert(descriptor_sizes.len() as u32);
+                    descriptor_sizes.push(
+                        vk::DescriptorPoolSize::builder()
+                            .ty(binding.binding_type)
+                            .descriptor_count(0)
+                            .build(),
+                    );
+                }
+
+                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type] as usize]
+                    .descriptor_count += binding.count;
+                binding_types.insert(binding.id, binding.binding_type);
+
+                native_bindings.push(
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(binding.id)
+                        .descriptor_type(binding.binding_type)
+                        .descriptor_count(binding.count)
+                        .stage_flags(shader.stage.0)
+                        .build(),
+                );
+
+                binding_flags.push(if binding.count > 1 {
+                    vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                } else {
+                    vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                });
+            }
+
+            if shader.push_constants_size > 0 {
+                push_constant_ranges.insert(shader.stage, (push_constants_size, shader.push_constants_size));
+                push_constants_size += shader.push_constants_size;
+            }
+        }
+
+        let mut binding_flags_info =
+            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags);
+
+        let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
+            .bindings(&native_bindings)
+            .push_next(&mut binding_flags_info);
+
+        Ok(Arc::new(PipelineSignature {
+            device: Arc::clone(self),
+            native: unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? },
+            descriptor_sizes,
+            descriptor_sizes_indices,
+            binding_types,
+            push_constant_ranges,
+            push_constants_size,
+        }))
+    }
+
+    pub fn load_pipeline_cache(&self, data: &[u8]) -> Result<(), vk::Result> {
+        unsafe {
+            self.wrapper
+                .0
+                .destroy_pipeline_cache(self.pipeline_cache.get(), None)
+        };
+        let create_info = vk::PipelineCacheCreateInfo::builder().initial_data(data);
+        self.pipeline_cache
+            .set(unsafe { self.wrapper.0.create_pipeline_cache(&create_info, None)? });
+        Ok(())
+    }
+
+    pub fn get_pipeline_cache(&self) -> Result<Vec<u8>, vk::Result> {
+        unsafe { self.wrapper.0.get_pipeline_cache_data(self.pipeline_cache.get()) }
+    }
+
+    pub fn create_graphics_pipeline(
+        self: &Arc<Self>,
+        render_pass: &Arc<RenderPass>,
+        subpass_index: u32,
+        primitive_topology: PrimitiveTopology,
+        depth_stencil: PipelineDepthStencil,
+        rasterization: PipelineRasterization,
+        pipeline_signature: &Arc<PipelineSignature>,
+    ) -> Result<Arc<Pipeline>, vk::Result> {
+        // Push constants
+        /*
+
+        std::vector<VkPushConstantRange> push_constant_ranges;
+        push_constant_ranges.reserve(signature->push_constants_ranges.size());
+
+        for (auto const& [shader_type, range] : signature->push_constants_ranges) {
+            push_constant_ranges.push_back(VkPushConstantRange {
+                .stageFlags = shader_type,
+                .offset     = range[0],
+                .size       = range[1],
+            });
+        }
+
+        */
+
+        let layout_create_info = vk::PipelineLayoutCreateInfo::builder();
+        let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
+
+        let create_info = vk::GraphicsPipelineCreateInfo::builder();
+        let native_pipeline = unsafe {
+            self.wrapper.0.create_graphics_pipelines(
+                self.pipeline_cache.get(),
+                slice::from_ref(&create_info),
+                None,
+            )
+        };
+        if let Err((_, err)) = native_pipeline {
+            return Err(err);
+        }
+        let pipeline = native_pipeline.unwrap()[0];
+
+        Ok(Arc::new(Pipeline {
+            device: Arc::clone(self),
+            layout,
+            native: pipeline,
+        }))
+    }
+
     pub fn create_submit_packet(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         submit_infos: &[SubmitInfo],
     ) -> Result<SubmitPacket, vk::Result> {
         Ok(SubmitPacket {
@@ -748,6 +878,11 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
+        unsafe {
+            self.wrapper
+                .0
+                .destroy_pipeline_cache(self.pipeline_cache.get(), None)
+        };
         self.allocator.destroy();
     }
 }

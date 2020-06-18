@@ -6,12 +6,13 @@ use ash::vk;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::slice;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueueType(pub(crate) u32);
 
 pub struct Queue {
-    pub(crate) device_wrapper: Rc<DeviceWrapper>,
+    pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) native: vk::Queue,
     pub(crate) semaphore: Semaphore,
@@ -36,7 +37,7 @@ impl Queue {
             .command_buffer_count(1);
 
         Ok(Rc::new(CmdList {
-            device_wrapper: Rc::clone(&self.device_wrapper),
+            device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
             native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
             render_passes: RefCell::new(vec![]),

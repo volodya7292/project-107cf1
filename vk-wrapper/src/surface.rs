@@ -1,9 +1,10 @@
 use crate::Instance;
 use ash::vk;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct Surface {
-    pub(crate) instance: Rc<Instance>,
+    pub(crate) instance: Arc<Instance>,
     pub(crate) native: vk::SurfaceKHR,
 }
 

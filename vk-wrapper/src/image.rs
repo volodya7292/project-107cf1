@@ -3,6 +3,7 @@ use crate::{AccessFlags, Device, Format, Queue};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImageUsageFlags(pub(crate) vk::ImageUsageFlags);
@@ -39,7 +40,7 @@ pub struct ImageType(pub(crate) vk::ImageType);
 pub struct ImageBarrier(pub(crate) vk::ImageMemoryBarrier);
 
 pub struct Image {
-    pub(crate) device: Rc<Device>,
+    pub(crate) device: Arc<Device>,
     pub(crate) _swapchain_wrapper: Option<Rc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,

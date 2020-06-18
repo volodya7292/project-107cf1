@@ -6,6 +6,7 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 pub enum LoadStore {
@@ -45,7 +46,7 @@ pub struct SubpassDependency {
 }
 
 pub struct RenderPass {
-    pub(crate) device: Rc<Device>,
+    pub(crate) device: Arc<Device>,
     pub(crate) native: vk::RenderPass,
     pub(crate) attachments: Vec<Attachment>,
     pub(crate) color_attachments: Vec<u32>,
@@ -65,7 +66,7 @@ pub enum ClearValue {
 
 impl RenderPass {
     pub fn create_framebuffer(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         size: (u32, u32),
         attachment_mods: &[(u32, ImageMod)],
     ) -> Result<Rc<Framebuffer>, DeviceError> {
@@ -121,8 +122,8 @@ impl RenderPass {
             .layers(1);
 
         Ok(Rc::new(Framebuffer {
-            device: Rc::clone(&self.device),
-            renderpass: Rc::clone(self),
+            device: Arc::clone(&self.device),
+            renderpass: Arc::clone(self),
             native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },
             images,
             size,

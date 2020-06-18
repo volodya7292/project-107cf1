@@ -3,8 +3,9 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::spirv;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ShaderStage(pub(crate) vk::ShaderStageFlags);
 
 impl ShaderStage {
@@ -15,12 +16,10 @@ impl ShaderStage {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-pub struct ShaderBindingType(u32);
+pub struct ShaderBindingMod(u32);
 
-impl ShaderBindingType {
-    pub const DEFAULT: Self = Self(0);
-    pub const DYNAMIC_RANGE: Self = Self(1);
-    pub const DYNAMIC_UPDATE: Self = Self(2);
+impl ShaderBindingMod {
+    pub const DYNAMIC_UPDATE: Self = Self(0);
 }
 
 pub(crate) struct ShaderBinding {
@@ -30,7 +29,7 @@ pub(crate) struct ShaderBinding {
 }
 
 pub struct Shader {
-    pub(crate) device: Rc<Device>,
+    pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
     pub(crate) bindings: HashMap<String, ShaderBinding>,

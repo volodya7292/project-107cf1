@@ -2,6 +2,7 @@ use crate::adapter::Adapter;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
+use std::sync::Arc;
 use std::{os::raw::c_void, rc::Rc};
 
 pub struct Instance {
@@ -28,17 +29,17 @@ impl Instance {
     }
 
     pub fn create_surface(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         window_handle: &impl raw_window_handle::HasRawWindowHandle,
     ) -> Result<Rc<Surface>, vk::Result> {
         Ok(Rc::new(Surface {
-            instance: Rc::clone(self),
+            instance: Arc::clone(self),
             native: unsafe {
                 ash_window::create_surface(&self.entry.ash_entry, &self.native, window_handle, None)?
             },
         }))
     }
-    
+
     fn enumerate_device_extension_names(
         &self,
         p_device: vk::PhysicalDevice,
@@ -52,9 +53,9 @@ impl Instance {
     }
 
     pub fn enumerate_adapters(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         surface: &Rc<Surface>,
-    ) -> Result<Vec<Rc<Adapter>>, vk::Result> {
+    ) -> Result<Vec<Arc<Adapter>>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
         Ok(physical_devices
@@ -263,8 +264,8 @@ impl Instance {
                     }
                 }
 
-                Some(Rc::new(Adapter {
-                    instance: Rc::clone(self),
+                Some(Arc::new(Adapter {
+                    instance: Arc::clone(self),
                     native: p_device,
                     props,
                     enabled_extensions,

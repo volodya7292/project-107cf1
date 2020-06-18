@@ -2,6 +2,7 @@ use crate::{Device, Image, Semaphore, Surface};
 use ash::vk;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -16,7 +17,7 @@ impl From<vk::Result> for Error {
 }
 
 pub(crate) struct SwapchainWrapper {
-    pub(crate) device: Rc<Device>,
+    pub(crate) device: Arc<Device>,
     pub(crate) native: vk::SwapchainKHR,
 }
 

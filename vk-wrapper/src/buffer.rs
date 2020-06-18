@@ -1,11 +1,11 @@
 use crate::Device;
 use ash::vk;
 use std::ops::{Index, IndexMut};
+use std::sync::Arc;
 use std::{marker::PhantomData, mem, ptr, rc::Rc};
 
-pub(crate) struct Buffer<T: ?Sized> {
-    pub(crate) device: Rc<Device>,
-    pub(crate) _type_marker: PhantomData<T>,
+pub(crate) struct Buffer {
+    pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) aligned_elem_size: u64,
@@ -14,10 +14,17 @@ pub(crate) struct Buffer<T: ?Sized> {
 }
 
 #[derive(Clone)]
+pub struct RawHostBuffer(Arc<Buffer>);
+
+unsafe impl Send for RawHostBuffer {}
+unsafe impl Sync for RawHostBuffer {}
+
+#[derive(Clone)]
 pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
 
 pub struct HostBuffer<T> {
-    pub(crate) buffer: Buffer<T>,
+    pub(crate) _type_marker: PhantomData<T>,
+    pub(crate) buffer: Arc<Buffer>,
     pub(crate) p_data: *mut u8,
 }
 
@@ -94,6 +101,10 @@ impl<T> IndexMut<usize> for HostBuffer<T> {
 }
 
 impl<T> HostBuffer<T> {
+    pub fn get_raw(&self) -> RawHostBuffer {
+        RawHostBuffer(Arc::clone(&self.buffer))
+    }
+
     pub fn read(&self, first_element: u64, elements: &mut [T]) {
         if first_element + elements.len() as u64 >= self.buffer.size {
             panic!(
@@ -159,6 +170,9 @@ impl<T> HostBuffer<T> {
     }
 }
 
+unsafe impl<T> Send for HostBuffer<T> {}
+unsafe impl<T> Sync for HostBuffer<T> {}
+
 impl<T> Drop for HostBuffer<T> {
     fn drop(&mut self) {
         self.buffer
@@ -169,12 +183,11 @@ impl<T> Drop for HostBuffer<T> {
     }
 }
 
-pub struct DeviceBuffer<T> {
-    pub(crate) buffer: Buffer<T>,
+pub struct DeviceBuffer {
+    pub(crate) buffer: Buffer,
 }
 
-
-impl<T> Drop for DeviceBuffer<T> {
+impl Drop for DeviceBuffer {
     fn drop(&mut self) {
         self.buffer
             .device

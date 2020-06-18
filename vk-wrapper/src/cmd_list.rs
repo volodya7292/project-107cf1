@@ -2,10 +2,11 @@ use crate::device::DeviceWrapper;
 use crate::{BufferBarrier, ClearValue, Framebuffer, ImageBarrier, PipelineStageFlags, RenderPass};
 use ash::{version::DeviceV1_0, vk};
 use std::cell::RefCell;
+use std::sync::Arc;
 use std::{rc::Rc, slice};
 
 pub struct CmdList {
-    pub(crate) device_wrapper: Rc<DeviceWrapper>,
+    pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) pool: vk::CommandPool,
     pub(crate) native: vk::CommandBuffer,
     pub(crate) render_passes: RefCell<Vec<Rc<RenderPass>>>,

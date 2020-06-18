@@ -1,15 +1,14 @@
+mod renderer;
 mod resource_file;
 
 use crate::resource_file::ResourceFile;
-use engine_3d::scene;
-use engine_3d::specs::Builder;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
+use specs::Builder;
 use std::path::Path;
-use std::rc::Rc;
 use vk_wrapper::render_pass::{AttachmentRef, ImageMod};
-use vk_wrapper::ShaderBindingType;
+use vk_wrapper::HostBuffer;
 use vk_wrapper::WaitSemaphore;
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
@@ -23,7 +22,7 @@ fn main() {
 
     let sdl_context = sdl2::init().unwrap();
 
-    let window = sdl_context
+    let mut window = sdl_context
         .video()
         .unwrap()
         .window("project-107cf1", 1280, 720)
@@ -43,6 +42,9 @@ fn main() {
     let adapter = adapters.first().unwrap();
     let device = adapter.create_device().unwrap();
 
+    let mut window_size = window.vulkan_drawable_size();
+    let mut renderer = renderer::new(&surface, window_size, true, &device).unwrap();
+
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
     //adapters.iter_mut()
@@ -55,12 +57,14 @@ fn main() {
     buf[2] = 3u32;
     buf[3] = 4u32;
     buf[4] = 5u32;
+
+    //let mut buf2: HostBuffer<u8> = buf;
+
     // for a in buf.into_iter() {
     //     println!("{}", a);
     // }
     //println!("ITE {:?}", &buf[0..5]);
 
-    let mut window_size = window.vulkan_drawable_size();
     let mut swapchain = device.create_swapchain(&surface, window_size, true).unwrap();
 
     let render_pass = device
@@ -94,14 +98,18 @@ fn main() {
     dummy_cmd_list.end().unwrap();
 
     let shader_spv = resources.read("shaders/cluster.frag.spv").unwrap();
-    let shader = device
-        .create_shader(&shader_spv, &[("", ShaderBindingType::DEFAULT)])
-        .unwrap();
+    let shader = device.create_shader(&shader_spv).unwrap();
 
-    let mut d = scene::new();
-    let ent = d.create_entity().build();
+    let mut scene = renderer.scene();
 
-    let mut surface_changed = false;
+    scene
+        .create_entity()
+        .with(renderer::component::Transform::new())
+        .build();
+    scene
+        .create_entity()
+        .with(renderer::component::Transform::new())
+        .build();
 
     let mut running = true;
     while running {
@@ -116,14 +124,32 @@ fn main() {
                 } => {
                     running = false;
                 }
+                Event::KeyDown {
+                    keycode: Some(Keycode::F11),
+                    ..
+                } => {
+                    if window.fullscreen_state() == sdl2::video::FullscreenType::True {
+                        window.set_fullscreen(sdl2::video::FullscreenType::Off).unwrap();
+                    } else {
+                        let mut curr_mode = sdl_context
+                            .video()
+                            .unwrap()
+                            .current_display_mode(window.display_index().unwrap())
+                            .unwrap();
+                        curr_mode.format = sdl2::pixels::PixelFormatEnum::RGBA32;
+
+                        window.set_display_mode(curr_mode).unwrap();
+                        window.set_fullscreen(sdl2::video::FullscreenType::True).unwrap();
+                    }
+                }
                 Event::Window {
                     timestamp: _,
                     window_id: _,
                     win_event,
                 } => match win_event {
-                    WindowEvent::Resized(width, height) => {
-                        surface_changed = true;
+                    WindowEvent::SizeChanged(width, height) => {
                         window_size = (width as u32, height as u32);
+                        renderer.on_resize(window_size);
                     }
                     _ => {}
                 },
@@ -131,78 +157,6 @@ fn main() {
             }
         }
 
-        if adapter.is_surface_valid(&surface).unwrap() {
-            if surface_changed {
-                swapchain = device
-                    .create_swapchain(&surface, (window_size.0, window_size.1), true)
-                    .unwrap();
-                surface_changed = false;
-            }
-
-            let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
-
-            let acquire_result = swapchain.acquire_image();
-            if let Ok((sw_image, optimal)) = acquire_result {
-                surface_changed = !optimal;
-
-                /*let framebuffer = render_pass
-                .create_framebuffer(
-                    window_size,
-                    &[(0, ImageMod::OverrideImage(Rc::clone(&sw_image.get_image())))],
-                )
-                .unwrap();*/
-
-                cmd_list.begin(true).unwrap();
-                cmd_list.barrier_image(
-                    PipelineStageFlags::TOP_OF_PIPE,
-                    PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[sw_image.get_image().barrier_queue(
-                        AccessFlags::empty(),
-                        AccessFlags::empty(),
-                        ImageLayout::UNDEFINED,
-                        ImageLayout::PRESENT,
-                        graphics_queue,
-                        graphics_queue,
-                    )],
-                );
-                cmd_list.end().unwrap();
-
-                let mut submit_packet = device
-                    .create_submit_packet(&[SubmitInfo::new(
-                        &[WaitSemaphore {
-                            semaphore: swapchain.get_semaphore(),
-                            wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
-                            wait_value: 0,
-                        }],
-                        &[Rc::clone(&cmd_list)],
-                    )])
-                    .unwrap();
-                graphics_queue.submit(&mut submit_packet).unwrap();
-
-                let present_queue = device.get_queue(Queue::TYPE_PRESENT);
-                let result = present_queue.present(
-                    sw_image,
-                    graphics_queue.get_semaphore(),
-                    submit_packet.get_signal_value(0),
-                );
-
-                if let Ok(optimal) = result {
-                    surface_changed = !optimal;
-                } else {
-                    surface_changed = true;
-                }
-
-                let dd = graphics_queue == present_queue;
-            } else {
-                match acquire_result {
-                    Err(swapchain::Error::IncompatibleSurface) => {
-                        surface_changed = true;
-                    }
-                    _ => {
-                        acquire_result.unwrap();
-                    }
-                }
-            }
-        }
+        renderer.on_draw();
     }
 }

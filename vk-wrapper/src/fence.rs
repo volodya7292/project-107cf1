@@ -1,10 +1,11 @@
 use crate::device::DeviceWrapper;
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::{rc::Rc, slice};
+use std::slice;
+use std::sync::Arc;
 
 pub struct Fence {
-    pub(crate) device_wrapper: Rc<DeviceWrapper>,
+    pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) native: vk::Fence,
 }
 
