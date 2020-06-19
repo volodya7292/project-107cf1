@@ -1,3 +1,4 @@
+use crate::queue::SignalSemaphore;
 use crate::PipelineSignature;
 use crate::Subpass;
 use crate::SwapchainWrapper;
@@ -163,6 +164,7 @@ impl Device {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
+                elem_size: mem::size_of::<T>() as u64,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
                 _bytesize: bytesize as u64,
@@ -203,9 +205,10 @@ impl Device {
         view_type: vk::ImageViewType,
         format: Format,
         mipmaps: bool,
+        max_anisotropy: f32,
         usage: ImageUsageFlags,
         mut size: (u32, u32, u32),
-    ) -> Result<Rc<Image>, DeviceError> {
+    ) -> Result<Arc<Image>, DeviceError> {
         let format_props = self.adapter.get_image_format_properties(
             format.0,
             image_type.0,
@@ -297,12 +300,38 @@ impl Device {
             });
         let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
 
-        Ok(Rc::new(Image {
+        let linear_filter_supported = self
+            .adapter
+            .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
+
+        let sampler_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::NEAREST)
+            .min_filter(if linear_filter_supported {
+                vk::Filter::LINEAR
+            } else {
+                vk::Filter::NEAREST
+            })
+            .mipmap_mode(if linear_filter_supported {
+                vk::SamplerMipmapMode::LINEAR
+            } else {
+                vk::SamplerMipmapMode::NEAREST
+            })
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .anisotropy_enable(max_anisotropy != 1f32)
+            .max_anisotropy(max_anisotropy)
+            .compare_enable(false)
+            .max_lod(mip_levels as f32 - 1f32)
+            .unnormalized_coordinates(false);
+
+        Ok(Arc::new(Image {
             device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
             allocation: alloc,
             view,
+            sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
             aspect,
             owned_handle: true,
             format,
@@ -314,14 +343,16 @@ impl Device {
         self: &Arc<Self>,
         format: Format,
         mipmaps: bool,
+        max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
-    ) -> Result<Rc<Image>, DeviceError> {
+    ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(
             Image::TYPE_2D,
             vk::ImageViewType::TYPE_2D,
             format,
             mipmaps,
+            max_anisotropy,
             usage,
             (preferred_size.0, preferred_size.1, 1),
         )
@@ -332,12 +363,13 @@ impl Device {
         format: Format,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
-    ) -> Result<Rc<Image>, DeviceError> {
+    ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(
-            Image::TYPE_2D,
+            Image::TYPE_3D,
             vk::ImageViewType::TYPE_3D,
             format,
             false,
+            1f32,
             usage,
             preferred_size,
         )
@@ -456,12 +488,26 @@ impl Device {
                     layer_count: 1,
                 });
 
+            let sampler_info = vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::NEAREST)
+                .min_filter(vk::Filter::NEAREST)
+                .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                .anisotropy_enable(true)
+                .max_anisotropy(1f32)
+                .compare_enable(false)
+                .max_lod(0f32)
+                .unnormalized_coordinates(false);
+
             Ok(Rc::new(Image {
                 device: Arc::clone(self),
                 _swapchain_wrapper: Some(Rc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
                 view: unsafe { self.wrapper.0.create_image_view(&view_info, None)? },
+                sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
                 aspect: view_info.subresource_range.aspect_mask,
                 owned_handle: false,
                 format: Format(s_format.format),
@@ -824,7 +870,7 @@ impl Device {
         primitive_topology: PrimitiveTopology,
         depth_stencil: PipelineDepthStencil,
         rasterization: PipelineRasterization,
-        pipeline_signature: &Arc<PipelineSignature>,
+        signature: &Arc<PipelineSignature>,
     ) -> Result<Arc<Pipeline>, vk::Result> {
         // Push constants
         /*
@@ -860,6 +906,8 @@ impl Device {
 
         Ok(Arc::new(Pipeline {
             device: Arc::clone(self),
+            render_pass: Some(Arc::clone(render_pass)),
+            signature: Arc::clone(signature),
             layout,
             native: pipeline,
         }))

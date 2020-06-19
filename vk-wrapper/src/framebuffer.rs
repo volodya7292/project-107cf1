@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 pub struct Framebuffer {
     pub(crate) device: Arc<Device>,
-    pub(crate) renderpass: Arc<RenderPass>,
+    pub(crate) render_pass: Arc<RenderPass>,
     pub(crate) native: vk::Framebuffer,
-    pub(crate) images: Vec<Rc<Image>>,
+    pub(crate) images: Vec<Arc<Image>>,
     pub(crate) size: (u32, u32),
 }
 

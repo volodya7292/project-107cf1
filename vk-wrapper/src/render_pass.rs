@@ -55,7 +55,7 @@ pub struct RenderPass {
 
 #[derive(Clone)]
 pub enum ImageMod {
-    OverrideImage(Rc<Image>),
+    OverrideImage(Arc<Image>),
     AdditionalUsage(ImageUsageFlags),
 }
 
@@ -75,7 +75,8 @@ impl RenderPass {
         let mut native_image_views = Vec::with_capacity(self.attachments.len());
 
         macro_rules! process_attachment {
-            ($attachment: ident, $attachment_mod: ident, $usage: ident) => {
+            ($attachment: ident, $attachment_mod: ident, $usage: expr) => {
+                let mut usage = $usage;
                 let mut override_image = None;
 
                 if let Some($attachment_mod) = attachment_mods.get(&$attachment) {
@@ -84,7 +85,7 @@ impl RenderPass {
                             override_image = Some(i);
                         }
                         ImageMod::AdditionalUsage(u) => {
-                            $usage |= *u;
+                            usage |= *u;
                         }
                     }
                 }
@@ -95,7 +96,8 @@ impl RenderPass {
                     self.device.create_image_2d(
                         self.attachments[*$attachment as usize].format,
                         false,
-                        $usage,
+                        1f32,
+                        usage,
                         size,
                     )?
                 };
@@ -106,12 +108,18 @@ impl RenderPass {
         }
 
         for color_attachment in &self.color_attachments {
-            let mut usage = ImageUsageFlags::COLOR_ATTACHMENT;
-            process_attachment!(color_attachment, attachment_mod, usage);
+            process_attachment!(
+                color_attachment,
+                attachment_mod,
+                ImageUsageFlags::COLOR_ATTACHMENT
+            );
         }
         for depth_attachment in &self.depth_attachments {
-            let mut usage = ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
-            process_attachment!(depth_attachment, attachment_mod, usage);
+            process_attachment!(
+                depth_attachment,
+                attachment_mod,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+            );
         }
 
         let create_info = vk::FramebufferCreateInfo::builder()
@@ -123,7 +131,7 @@ impl RenderPass {
 
         Ok(Rc::new(Framebuffer {
             device: Arc::clone(&self.device),
-            renderpass: Arc::clone(self),
+            render_pass: Arc::clone(self),
             native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },
             images,
             size,

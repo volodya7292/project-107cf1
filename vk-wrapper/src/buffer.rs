@@ -2,12 +2,13 @@ use crate::Device;
 use ash::vk;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
-use std::{marker::PhantomData, mem, ptr, rc::Rc};
+use std::{marker::PhantomData, mem, ptr};
 
 pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
+    pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
     pub(crate) _bytesize: u64,

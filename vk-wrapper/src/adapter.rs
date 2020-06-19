@@ -9,7 +9,7 @@ use ash::{
     vk,
 };
 use std::sync::Arc;
-use std::{cell::Cell, ffi::CString, os::raw::c_char, rc::Rc};
+use std::{cell::Cell, collections::HashMap, ffi::CString, os::raw::c_char, rc::Rc};
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
@@ -22,6 +22,7 @@ pub struct Adapter {
     pub(crate) features: vk::PhysicalDeviceFeatures,
     pub(crate) features12: vk::PhysicalDeviceVulkan12Features,
     pub(crate) queue_family_indices: [[u32; 2]; QUEUE_TYPE_COUNT],
+    pub(crate) formats_props: HashMap<vk::Format, vk::FormatProperties>,
 }
 
 impl Adapter {
@@ -182,5 +183,14 @@ impl Adapter {
     pub fn is_surface_valid(&self, surface: &Surface) -> Result<bool, vk::Result> {
         let capabs = self.get_surface_capabilities(surface)?;
         Ok(capabs.min_image_extent.width > 0 && capabs.min_image_extent.height > 0)
+    }
+
+    pub(crate) fn is_linear_filter_supported(&self, format: vk::Format, tiling: vk::ImageTiling) -> bool {
+        return if tiling == vk::ImageTiling::OPTIMAL {
+            self.formats_props[&format].optimal_tiling_features
+        } else {
+            self.formats_props[&format].linear_tiling_features
+        }
+        .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR);
     }
 }

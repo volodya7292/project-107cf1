@@ -1,9 +1,10 @@
 use crate::adapter::Adapter;
+use crate::format::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::sync::Arc;
-use std::{os::raw::c_void, rc::Rc};
+use std::{collections::HashMap, os::raw::c_void, rc::Rc, slice};
 
 pub struct Instance {
     pub(crate) entry: Rc<Entry>,
@@ -264,6 +265,17 @@ impl Instance {
                     }
                 }
 
+                let mut formats_props = HashMap::<vk::Format, vk::FormatProperties>::new();
+
+                // Get properties for each format
+                for (format, _size) in FORMAT_SIZES.iter() {
+                    let props = unsafe {
+                        self.native
+                            .get_physical_device_format_properties(p_device, format.0)
+                    };
+                    formats_props.insert(format.0, props);
+                }
+
                 Some(Arc::new(Adapter {
                     instance: Arc::clone(self),
                     native: p_device,
@@ -273,6 +285,7 @@ impl Instance {
                     features: enabled_features,
                     features12: enabled_features12,
                     queue_family_indices: queue_fam_indices,
+                    formats_props,
                 }))
             })
             .collect())

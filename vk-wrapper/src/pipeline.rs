@@ -1,4 +1,4 @@
-use crate::Device;
+use crate::{Device, PipelineSignature, RenderPass};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::Arc;
@@ -89,6 +89,8 @@ impl PipelineColorBlend {
 
 pub struct Pipeline {
     pub(crate) device: Arc<Device>,
+    pub(crate) render_pass: Option<Arc<RenderPass>>,
+    pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) layout: vk::PipelineLayout,
     pub(crate) native: vk::Pipeline,
 }

@@ -45,6 +45,7 @@ pub struct Image {
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) view: vk::ImageView,
+    pub(crate) sampler: vk::Sampler,
     pub(crate) aspect: vk::ImageAspectFlags,
     pub(crate) owned_handle: bool,
     pub(crate) format: Format,
@@ -121,8 +122,10 @@ impl Image {
 
 impl Drop for Image {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_image_view(self.view, None) };
-
+        unsafe {
+            self.device.wrapper.0.destroy_sampler(self.sampler, None);
+            self.device.wrapper.0.destroy_image_view(self.view, None);
+        }
         if self.owned_handle {
             self.device
                 .allocator
