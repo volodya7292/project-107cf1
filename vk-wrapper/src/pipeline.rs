@@ -93,6 +93,7 @@ pub struct Pipeline {
     pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) layout: vk::PipelineLayout,
     pub(crate) native: vk::Pipeline,
+    pub(crate) bind_point: vk::PipelineBindPoint,
 }
 
 impl Pipeline {

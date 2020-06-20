@@ -1,4 +1,4 @@
-use crate::Device;
+use crate::{Device, Format};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::spirv;
@@ -32,6 +32,7 @@ pub struct Shader {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
+    pub(crate) input_locations: HashMap<u32, Format>, // [location, format]
     pub(crate) bindings: HashMap<String, ShaderBinding>,
     pub(crate) push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,

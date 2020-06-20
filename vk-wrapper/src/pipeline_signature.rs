@@ -1,4 +1,4 @@
-use crate::{Device, PipelineInput, ShaderStage};
+use crate::{Device, PipelineInput, ShaderStage, Shader};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ pub struct PipelineSignature {
     pub(crate) binding_types: HashMap<u32, vk::DescriptorType>,
     pub(crate) push_constant_ranges: HashMap<ShaderStage, (u32, u32)>,
     pub(crate) push_constants_size: u32,
+    pub(crate) shaders: HashMap<ShaderStage, Arc<Shader>>,
 }
 
 impl PipelineSignature {

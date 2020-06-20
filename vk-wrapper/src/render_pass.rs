@@ -26,13 +26,15 @@ pub struct Attachment {
     pub load_store: LoadStore,
 }
 
+#[derive(Copy, Clone)]
 pub struct AttachmentRef {
     pub index: u32,
     pub layout: ImageLayout,
 }
 
-pub struct Subpass<'a> {
-    pub color: &'a [AttachmentRef],
+#[derive(Clone)]
+pub struct Subpass {
+    pub color: Vec<AttachmentRef>,
     pub depth: Option<AttachmentRef>,
 }
 
@@ -48,6 +50,7 @@ pub struct SubpassDependency {
 pub struct RenderPass {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::RenderPass,
+    pub(crate) subpasses: Vec<Subpass>,
     pub(crate) attachments: Vec<Attachment>,
     pub(crate) color_attachments: Vec<u32>,
     pub(crate) depth_attachments: Vec<u32>,

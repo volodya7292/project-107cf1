@@ -5,7 +5,7 @@ mod vertex_mesh;
 
 use crate::renderer::scene::Scene;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
 
 pub struct Renderer {
@@ -39,20 +39,24 @@ impl Renderer {
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
         let cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
 
-        cmd_list.begin(true).unwrap();
-        cmd_list.barrier_image(
-            vkw::PipelineStageFlags::TOP_OF_PIPE,
-            vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
-            &[sw_image.get_image().barrier_queue(
-                vkw::AccessFlags::empty(),
-                vkw::AccessFlags::empty(),
-                vkw::ImageLayout::UNDEFINED,
-                vkw::ImageLayout::PRESENT,
-                graphics_queue,
-                graphics_queue,
-            )],
-        );
-        cmd_list.end().unwrap();
+        {
+            let mut cmd_list = cmd_list.lock().unwrap();
+
+            cmd_list.begin(true).unwrap();
+            cmd_list.barrier_image(
+                vkw::PipelineStageFlags::TOP_OF_PIPE,
+                vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                &[sw_image.get_image().barrier_queue(
+                    vkw::AccessFlags::empty(),
+                    vkw::AccessFlags::empty(),
+                    vkw::ImageLayout::UNDEFINED,
+                    vkw::ImageLayout::PRESENT,
+                    graphics_queue,
+                    graphics_queue,
+                )],
+            );
+            cmd_list.end().unwrap();
+        }
 
         self.submit_packet = Some(
             self.device
@@ -62,7 +66,7 @@ impl Renderer {
                         wait_dst_mask: vkw::PipelineStageFlags::TOP_OF_PIPE,
                         wait_value: 0,
                     }],
-                    &[Rc::clone(&cmd_list)],
+                    &[Arc::clone(&cmd_list)],
                 )])
                 .unwrap(),
         );

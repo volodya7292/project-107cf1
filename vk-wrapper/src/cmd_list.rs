@@ -1,5 +1,8 @@
 use crate::device::DeviceWrapper;
-use crate::{BufferBarrier, ClearValue, Framebuffer, ImageBarrier, PipelineStageFlags, RenderPass};
+use crate::{
+    BufferBarrier, ClearValue, Framebuffer, ImageBarrier, Pipeline, PipelineInput, PipelineStageFlags,
+    RenderPass,
+};
 use ash::{version::DeviceV1_0, vk};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -12,6 +15,8 @@ pub struct CmdList {
     pub(crate) render_passes: RefCell<Vec<Rc<RenderPass>>>,
     pub(crate) framebuffers: RefCell<Vec<Rc<Framebuffer>>>,
     pub(crate) secondary_cmd_lists: RefCell<Vec<Rc<CmdList>>>,
+    pub(crate) pipelines: RefCell<Vec<Arc<Pipeline>>>,
+    pub(crate) pipeline_inputs: RefCell<Vec<Arc<PipelineInput>>>,
 }
 
 impl CmdList {
@@ -71,7 +76,7 @@ impl CmdList {
         Ok(())
     }
 
-    pub fn end(&self) -> Result<(), vk::Result> {
+    pub fn end(&mut self) -> Result<(), vk::Result> {
         unsafe { self.device_wrapper.0.end_command_buffer(self.native) }
     }
 
@@ -175,6 +180,32 @@ impl CmdList {
                 }),
             )
         };
+    }
+
+    pub fn bind_pipeline(&self, pipeline: &Arc<Pipeline>) {
+        unsafe {
+            self.device_wrapper
+                .0
+                .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
+        };
+        self.pipelines.borrow_mut().push(Arc::clone(pipeline));
+    }
+
+    pub fn bind_pipeline_input(&self, pipeline_input: &Arc<PipelineInput>) {
+        let pipelines = self.pipelines.borrow();
+        let last_pipeline = pipelines.last().unwrap();
+
+        unsafe {
+            self.device_wrapper.0.cmd_bind_descriptor_sets(
+                self.native,
+                last_pipeline.bind_point,
+                last_pipeline.layout,
+                0,
+                slice::from_ref(&pipeline_input.native),
+                &[],
+            )
+        };
+        self.pipeline_inputs.borrow_mut().push(Arc::clone(pipeline_input));
     }
 
     pub fn barrier_buffer_image(

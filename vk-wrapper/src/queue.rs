@@ -6,7 +6,7 @@ use ash::vk;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::slice;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueueType(pub(crate) u32);
@@ -27,7 +27,7 @@ impl Queue {
     pub const TYPE_TRANSFER: QueueType = QueueType(2);
     pub const TYPE_PRESENT: QueueType = QueueType(3);
 
-    fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Rc<CmdList>, vk::Result> {
+    fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
         let native_pool = unsafe { self.device_wrapper.0.create_command_pool(&create_info, None)? };
 
@@ -36,21 +36,23 @@ impl Queue {
             .level(level)
             .command_buffer_count(1);
 
-        Ok(Rc::new(CmdList {
+        Ok(Arc::new(Mutex::new(CmdList {
             device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
             native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
             render_passes: RefCell::new(vec![]),
             framebuffers: RefCell::new(vec![]),
             secondary_cmd_lists: RefCell::new(vec![]),
-        }))
+            pipelines: RefCell::new(vec![]),
+            pipeline_inputs: RefCell::new(vec![]),
+        })))
     }
 
-    pub fn create_primary_cmd_list(&self) -> Result<Rc<CmdList>, vk::Result> {
+    pub fn create_primary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
         self.create_cmd_list(vk::CommandBufferLevel::PRIMARY)
     }
 
-    pub fn create_secondary_cmd_list(&self) -> Result<Rc<CmdList>, vk::Result> {
+    pub fn create_secondary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
         self.create_cmd_list(vk::CommandBufferLevel::SECONDARY)
     }
 
@@ -84,7 +86,7 @@ impl Queue {
             }
             let cmd_buffer_index = command_buffers.len();
             for cmd_buffer in &info.cmd_lists {
-                command_buffers.push(cmd_buffer.native);
+                command_buffers.push(cmd_buffer.lock().unwrap().native);
             }
 
             native_sp_submit_infos.push(
@@ -222,12 +224,12 @@ pub struct SignalSemaphore {
 #[derive(Clone)]
 pub struct SubmitInfo {
     wait_semaphores: Vec<WaitSemaphore>,
-    cmd_lists: Vec<Rc<CmdList>>,
+    cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     signal_semaphores: Vec<SignalSemaphore>,
 }
 
 impl SubmitInfo {
-    pub fn new(wait_semaphores: &[WaitSemaphore], cmd_lists: &[Rc<CmdList>]) -> SubmitInfo {
+    pub fn new(wait_semaphores: &[WaitSemaphore], cmd_lists: &[Arc<Mutex<CmdList>>]) -> SubmitInfo {
         SubmitInfo {
             wait_semaphores: wait_semaphores.to_vec(),
             cmd_lists: cmd_lists.to_vec(),

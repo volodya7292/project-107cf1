@@ -1,3 +1,4 @@
+use crate::format::FORMAT_SIZES;
 use crate::queue::SignalSemaphore;
 use crate::PipelineSignature;
 use crate::Subpass;
@@ -16,7 +17,7 @@ use spirv_cross::spirv;
 use std::cell::Cell;
 use std::collections::{hash_map, HashMap};
 use std::sync::Arc;
-use std::{cmp, marker::PhantomData, mem, ptr, rc::Rc, slice};
+use std::{cmp, ffi::CStr, marker::PhantomData, mem, ptr, rc::Rc, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
@@ -25,6 +26,7 @@ pub enum DeviceError {
     SwapchainError(String),
     SpirvError(spirv_cross::ErrorCode),
     InvalidShader(String),
+    InvalidSignature(&'static str),
 }
 
 impl From<vk_mem::Error> for DeviceError {
@@ -525,7 +527,11 @@ impl Device {
         }))
     }
 
-    pub fn create_shader(self: &Arc<Self>, code: &[u8]) -> Result<Rc<Shader>, DeviceError> {
+    pub fn create_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        input_formats: &[(&str, Format)],
+    ) -> Result<Rc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
             std::slice::from_raw_parts(
@@ -597,6 +603,23 @@ impl Device {
             }
         };
 
+        let input_formats: HashMap<&str, Format> = input_formats.iter().cloned().collect();
+        let mut input_locations = HashMap::<u32, Format>::with_capacity(resources.stage_inputs.len());
+
+        if stage == ShaderStage::VERTEX {
+            for res in resources.stage_inputs {
+                let format = *input_formats
+                    .get(res.name.as_str())
+                    .ok_or(DeviceError::InvalidShader(format!(
+                        "Input format for {} not provided!",
+                        res.name
+                    )))?;
+                let location = ast.get_decoration(res.id, spirv::Decoration::Location).unwrap();
+
+                input_locations.insert(location, format);
+            }
+        }
+
         let mut bindings = HashMap::new();
 
         for res in &resources.sampled_images {
@@ -636,6 +659,7 @@ impl Device {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_shader_module(&create_info, None)? },
             stage,
+            input_locations,
             bindings,
             push_constants,
             push_constants_size,
@@ -704,7 +728,7 @@ impl Device {
         for subpass in subpasses {
             // Color attachments
             let color_att_ref_index = native_attachment_refs.len();
-            for color_attachment in subpass.color {
+            for color_attachment in &subpass.color {
                 native_attachment_refs.push(
                     vk::AttachmentReference::builder()
                         .attachment(color_attachment.index)
@@ -771,6 +795,7 @@ impl Device {
         Ok(Rc::new(RenderPass {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
+            subpasses: subpasses.into(),
             attachments: attachments.to_vec(),
             color_attachments,
             depth_attachments,
@@ -779,7 +804,7 @@ impl Device {
 
     pub fn create_pipeline_signature(
         self: &Arc<Self>,
-        shaders: &[Rc<Shader>],
+        shaders: &[Arc<Shader>],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
         let mut native_bindings = Vec::<vk::DescriptorSetLayoutBinding>::new();
         let mut binding_flags = Vec::<vk::DescriptorBindingFlagsEXT>::new();
@@ -836,6 +861,12 @@ impl Device {
             .bindings(&native_bindings)
             .push_next(&mut binding_flags_info);
 
+        let shaders: HashMap<ShaderStage, Arc<Shader>> = shaders
+            .iter()
+            .cloned()
+            .map(|shader| (shader.stage, shader))
+            .collect();
+
         Ok(Arc::new(PipelineSignature {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? },
@@ -844,6 +875,7 @@ impl Device {
             binding_types,
             push_constant_ranges,
             push_constants_size,
+            shaders,
         }))
     }
 
@@ -871,27 +903,151 @@ impl Device {
         depth_stencil: PipelineDepthStencil,
         rasterization: PipelineRasterization,
         signature: &Arc<PipelineSignature>,
-    ) -> Result<Arc<Pipeline>, vk::Result> {
+    ) -> Result<Arc<Pipeline>, DeviceError> {
         // Push constants
-        /*
+        let mut push_constant_ranges =
+            Vec::<vk::PushConstantRange>::with_capacity(signature.push_constant_ranges.len());
 
-        std::vector<VkPushConstantRange> push_constant_ranges;
-        push_constant_ranges.reserve(signature->push_constants_ranges.size());
-
-        for (auto const& [shader_type, range] : signature->push_constants_ranges) {
-            push_constant_ranges.push_back(VkPushConstantRange {
-                .stageFlags = shader_type,
-                .offset     = range[0],
-                .size       = range[1],
+        for (stage, range) in &signature.push_constant_ranges {
+            push_constant_ranges.push(vk::PushConstantRange {
+                stage_flags: stage.0,
+                offset: range.0,
+                size: range.1,
             });
         }
 
-        */
-
-        let layout_create_info = vk::PipelineLayoutCreateInfo::builder();
+        // Layout
+        let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(slice::from_ref(&signature.native))
+            .push_constant_ranges(&push_constant_ranges);
         let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
 
-        let create_info = vk::GraphicsPipelineCreateInfo::builder();
+        // Input assembly
+        let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .topology(primitive_topology.0)
+            .primitive_restart_enable(false);
+
+        // Find vertex shader
+        let vertex_shader = signature
+            .shaders
+            .get(&ShaderStage::VERTEX)
+            .ok_or(DeviceError::InvalidSignature("Vertex shader not provided!"))?;
+
+        // Vertex input
+        let mut vertex_binding_descs = Vec::<vk::VertexInputBindingDescription>::new();
+        let mut vertex_attrib_descs = Vec::<vk::VertexInputAttributeDescription>::new();
+
+        for (i, (location, format)) in vertex_shader.input_locations.iter().enumerate() {
+            let buffer_index = i as u32;
+
+            vertex_binding_descs.push(vk::VertexInputBindingDescription {
+                binding: buffer_index,
+                stride: FORMAT_SIZES[&format] as u32,
+                input_rate: vk::VertexInputRate::VERTEX,
+            });
+            vertex_attrib_descs.push(vk::VertexInputAttributeDescription {
+                location: *location,
+                binding: buffer_index,
+                format: format.0,
+                offset: 0,
+            });
+        }
+
+        let vertex_info = vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&vertex_binding_descs)
+            .vertex_attribute_descriptions(&vertex_attrib_descs);
+
+        // Rasterization
+        let rasterization_info = vk::PipelineRasterizationStateCreateInfo::builder()
+            .depth_clamp_enable(false)
+            .rasterizer_discard_enable(false)
+            .polygon_mode(vk::PolygonMode::FILL)
+            .cull_mode(if rasterization.cull_back_faces {
+                vk::CullModeFlags::BACK
+            } else {
+                vk::CullModeFlags::NONE
+            })
+            .front_face(vk::FrontFace::CLOCKWISE)
+            .depth_bias_enable(false)
+            .line_width(1.0);
+
+        // Multisample
+        let multisample_info = vk::PipelineMultisampleStateCreateInfo::builder()
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .sample_shading_enable(false)
+            .alpha_to_coverage_enable(false)
+            .alpha_to_one_enable(false);
+
+        // DepthStencil
+        let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+            .depth_test_enable(depth_stencil.depth_test)
+            .depth_write_enable(depth_stencil.depth_write)
+            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+            .depth_bounds_test_enable(false)
+            .stencil_test_enable(depth_stencil.stencil_test);
+
+        // Viewport
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 720.0,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        let scissor = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: vk::Extent2D {
+                width: 1280,
+                height: 720,
+            },
+        };
+        let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
+            .viewport_count(1)
+            .viewports(slice::from_ref(&viewport))
+            .scissors(slice::from_ref(&scissor));
+
+        // Color blend
+        let def_attachment = vk::PipelineColorBlendAttachmentState::builder()
+            .blend_enable(false)
+            .build();
+        let blend_attachments =
+            vec![def_attachment; render_pass.subpasses[subpass_index as usize].color.len()];
+        let color_blend_info = vk::PipelineColorBlendStateCreateInfo::builder()
+            .logic_op_enable(false)
+            .attachments(&blend_attachments);
+
+        // Dynamic
+        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+        let dynamic_info = vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_states);
+
+        // Shader stages
+        let stages: Vec<vk::PipelineShaderStageCreateInfo> = signature
+            .shaders
+            .iter()
+            .map(|(stage, shader)| {
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(stage.0)
+                    .module(shader.native)
+                    .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+                    .build()
+            })
+            .collect();
+
+        let create_info = vk::GraphicsPipelineCreateInfo::builder()
+            .stages(&stages)
+            .vertex_input_state(&vertex_info)
+            .input_assembly_state(&input_assembly_info)
+            .viewport_state(&viewport_info)
+            .rasterization_state(&rasterization_info)
+            .multisample_state(&multisample_info)
+            .depth_stencil_state(&depth_stencil_info)
+            .color_blend_state(&color_blend_info)
+            .dynamic_state(&dynamic_info)
+            .layout(layout)
+            .render_pass(render_pass.native)
+            .subpass(subpass_index);
+
         let native_pipeline = unsafe {
             self.wrapper.0.create_graphics_pipelines(
                 self.pipeline_cache.get(),
@@ -900,7 +1056,7 @@ impl Device {
             )
         };
         if let Err((_, err)) = native_pipeline {
-            return Err(err);
+            return Err(err.into());
         }
         let pipeline = native_pipeline.unwrap()[0];
 
@@ -910,6 +1066,62 @@ impl Device {
             signature: Arc::clone(signature),
             layout,
             native: pipeline,
+            bind_point: vk::PipelineBindPoint::GRAPHICS,
+        }))
+    }
+
+    pub fn create_compute_pipeline(
+        self: &Arc<Self>,
+        signature: &Arc<PipelineSignature>,
+    ) -> Result<Arc<Pipeline>, vk::Result> {
+        // Push constants
+        let mut push_constant_ranges =
+            Vec::<vk::PushConstantRange>::with_capacity(signature.push_constant_ranges.len());
+
+        for (stage, range) in &signature.push_constant_ranges {
+            push_constant_ranges.push(vk::PushConstantRange {
+                stage_flags: stage.0,
+                offset: range.0,
+                size: range.1,
+            });
+        }
+
+        // Layout
+        let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(slice::from_ref(&signature.native))
+            .push_constant_ranges(&push_constant_ranges);
+        let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
+
+        // Stage
+        let stage_info = vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .module(signature.shaders[&ShaderStage::COMPUTE].native)
+            .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+            .build();
+
+        let create_info = vk::ComputePipelineCreateInfo::builder()
+            .stage(stage_info)
+            .layout(layout);
+
+        let native_pipeline = unsafe {
+            self.wrapper.0.create_compute_pipelines(
+                self.pipeline_cache.get(),
+                slice::from_ref(&create_info),
+                None,
+            )
+        };
+        if let Err((_, err)) = native_pipeline {
+            return Err(err.into());
+        }
+        let pipeline = native_pipeline.unwrap()[0];
+
+        Ok(Arc::new(Pipeline {
+            device: Arc::clone(self),
+            render_pass: None,
+            signature: Arc::clone(signature),
+            layout,
+            native: pipeline,
+            bind_point: vk::PipelineBindPoint::COMPUTE,
         }))
     }
 

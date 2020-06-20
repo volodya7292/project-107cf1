@@ -76,7 +76,7 @@ fn main() {
                 load_store: LoadStore::FinalSave,
             }],
             &[Subpass {
-                color: &[AttachmentRef {
+                color: vec![AttachmentRef {
                     index: 0,
                     layout: ImageLayout::COLOR_ATTACHMENT,
                 }],
@@ -90,15 +90,19 @@ fn main() {
         .get_queue(Queue::TYPE_GRAPHICS)
         .create_primary_cmd_list()
         .unwrap();
-    let dummy_cmd_list = device
+    let mut dummy_cmd_list = device
         .get_queue(Queue::TYPE_GRAPHICS)
         .create_primary_cmd_list()
         .unwrap();
-    dummy_cmd_list.begin(false).unwrap();
-    dummy_cmd_list.end().unwrap();
+
+    {
+        let mut dummy_cmd_list = dummy_cmd_list.lock().unwrap();
+        dummy_cmd_list.begin(false).unwrap();
+        dummy_cmd_list.end().unwrap();
+    }
 
     let shader_spv = resources.read("shaders/cluster.frag.spv").unwrap();
-    let shader = device.create_shader(&shader_spv).unwrap();
+    let shader = device.create_shader(&shader_spv, &[]).unwrap();
 
     let mut scene = renderer.scene();
 
