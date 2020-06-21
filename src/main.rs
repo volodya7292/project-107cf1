@@ -8,12 +8,12 @@ use sdl2::rect::Rect;
 use specs::Builder;
 use std::path::Path;
 use vk_wrapper::render_pass::{AttachmentRef, ImageMod};
-use vk_wrapper::HostBuffer;
-use vk_wrapper::WaitSemaphore;
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
 };
+use vk_wrapper::{HostBuffer, PrimitiveTopology};
 use vk_wrapper::{ImageUsageFlags, Subpass};
+use vk_wrapper::{PipelineDepthStencil, PipelineRasterization, WaitSemaphore};
 
 fn main() {
     simple_logger::init().unwrap();
@@ -43,7 +43,7 @@ fn main() {
     let device = adapter.create_device().unwrap();
 
     let mut window_size = window.vulkan_drawable_size();
-    let mut renderer = renderer::new(&surface, window_size, true, &device).unwrap();
+    let mut renderer = renderer::new(&surface, window_size, true, &device, &mut resources).unwrap();
 
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
@@ -64,45 +64,6 @@ fn main() {
     //     println!("{}", a);
     // }
     //println!("ITE {:?}", &buf[0..5]);
-
-    let mut swapchain = device.create_swapchain(&surface, window_size, true).unwrap();
-
-    let render_pass = device
-        .create_render_pass(
-            &[Attachment {
-                format: Format::RGBA16_FLOAT,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT,
-                load_store: LoadStore::FinalSave,
-            }],
-            &[Subpass {
-                color: vec![AttachmentRef {
-                    index: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
-                }],
-                depth: None,
-            }],
-            &[],
-        )
-        .unwrap();
-
-    let cmd_list = device
-        .get_queue(Queue::TYPE_GRAPHICS)
-        .create_primary_cmd_list()
-        .unwrap();
-    let mut dummy_cmd_list = device
-        .get_queue(Queue::TYPE_GRAPHICS)
-        .create_primary_cmd_list()
-        .unwrap();
-
-    {
-        let mut dummy_cmd_list = dummy_cmd_list.lock().unwrap();
-        dummy_cmd_list.begin(false).unwrap();
-        dummy_cmd_list.end().unwrap();
-    }
-
-    let shader_spv = resources.read("shaders/cluster.frag.spv").unwrap();
-    let shader = device.create_shader(&shader_spv, &[]).unwrap();
 
     let mut scene = renderer.scene();
 

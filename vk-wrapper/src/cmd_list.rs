@@ -1,7 +1,7 @@
 use crate::device::DeviceWrapper;
 use crate::{
-    BufferBarrier, ClearValue, Framebuffer, ImageBarrier, Pipeline, PipelineInput, PipelineStageFlags,
-    RenderPass,
+    BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, ImageBarrier, Pipeline, PipelineInput,
+    PipelineStageFlags, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
 use std::cell::RefCell;
@@ -12,17 +12,20 @@ pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) pool: vk::CommandPool,
     pub(crate) native: vk::CommandBuffer,
-    pub(crate) render_passes: RefCell<Vec<Rc<RenderPass>>>,
-    pub(crate) framebuffers: RefCell<Vec<Rc<Framebuffer>>>,
-    pub(crate) secondary_cmd_lists: RefCell<Vec<Rc<CmdList>>>,
-    pub(crate) pipelines: RefCell<Vec<Arc<Pipeline>>>,
-    pub(crate) pipeline_inputs: RefCell<Vec<Arc<PipelineInput>>>,
+    pub(crate) render_passes: Vec<Arc<RenderPass>>,
+    pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
+    pub(crate) secondary_cmd_lists: Vec<Arc<CmdList>>,
+    pub(crate) pipelines: Vec<Arc<Pipeline>>,
+    pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
 }
 
 impl CmdList {
-    pub fn begin(&self, one_time_execution: bool) -> Result<(), vk::Result> {
-        self.framebuffers.borrow_mut().clear();
-        self.render_passes.borrow_mut().clear();
+    pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
+        self.render_passes.clear();
+        self.framebuffers.clear();
+        self.secondary_cmd_lists.clear();
+        self.pipelines.clear();
+        self.pipeline_inputs.clear();
 
         let mut begin_info = vk::CommandBufferBeginInfo::builder();
         if one_time_execution {
@@ -42,10 +45,10 @@ impl CmdList {
     }
 
     pub fn begin_secondary_graphics(
-        &self,
-        render_pass: &Rc<RenderPass>,
+        &mut self,
+        render_pass: &Arc<RenderPass>,
         subpass: u32,
-        framebuffer: Option<&Rc<Framebuffer>>,
+        framebuffer: Option<&Arc<Framebuffer>>,
     ) -> Result<(), vk::Result> {
         let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
             .render_pass(render_pass.native)
@@ -65,10 +68,10 @@ impl CmdList {
                 .begin_command_buffer(self.native, &begin_info)?;
         }
 
-        self.render_passes.borrow_mut().push(Rc::clone(render_pass));
+        self.render_passes.push(Arc::clone(render_pass));
 
         if let Some(framebuffer) = framebuffer {
-            self.framebuffers.borrow_mut().push(Rc::clone(framebuffer));
+            self.framebuffers.push(Arc::clone(framebuffer));
             self.set_viewport(framebuffer.size);
             self.set_scissor(framebuffer.size);
         }
@@ -81,9 +84,9 @@ impl CmdList {
     }
 
     pub fn begin_render_pass(
-        &self,
-        render_pass: &Rc<RenderPass>,
-        framebuffer: &Rc<Framebuffer>,
+        &mut self,
+        render_pass: &Arc<RenderPass>,
+        framebuffer: &Arc<Framebuffer>,
         clear_values: &[ClearValue],
         secondary_cmd_lists: bool,
     ) {
@@ -128,11 +131,16 @@ impl CmdList {
             )
         }
 
-        self.render_passes.borrow_mut().push(Rc::clone(render_pass));
-        self.framebuffers.borrow_mut().push(Rc::clone(framebuffer));
+        self.render_passes.push(Arc::clone(render_pass));
+        self.framebuffers.push(Arc::clone(framebuffer));
+
+        if !secondary_cmd_lists {
+            self.set_viewport(framebuffer.size);
+            self.set_scissor(framebuffer.size);
+        }
     }
 
-    pub fn next_subpass(&self, secondary_cmd_lists: bool) {
+    pub fn next_subpass(&mut self, secondary_cmd_lists: bool) {
         unsafe {
             self.device_wrapper.0.cmd_next_subpass(
                 self.native,
@@ -145,11 +153,11 @@ impl CmdList {
         };
     }
 
-    pub fn end_render_pass(&self) {
+    pub fn end_render_pass(&mut self) {
         unsafe { self.device_wrapper.0.cmd_end_render_pass(self.native) };
     }
 
-    pub fn set_viewport(&self, size: (u32, u32)) {
+    pub fn set_viewport(&mut self, size: (u32, u32)) {
         unsafe {
             self.device_wrapper.0.cmd_set_viewport(
                 self.native,
@@ -166,7 +174,7 @@ impl CmdList {
         };
     }
 
-    pub fn set_scissor(&self, size: (u32, u32)) {
+    pub fn set_scissor(&mut self, size: (u32, u32)) {
         unsafe {
             self.device_wrapper.0.cmd_set_scissor(
                 self.native,
@@ -182,17 +190,17 @@ impl CmdList {
         };
     }
 
-    pub fn bind_pipeline(&self, pipeline: &Arc<Pipeline>) {
+    pub fn bind_pipeline(&mut self, pipeline: &Arc<Pipeline>) {
         unsafe {
             self.device_wrapper
                 .0
                 .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
         };
-        self.pipelines.borrow_mut().push(Arc::clone(pipeline));
+        self.pipelines.push(Arc::clone(pipeline));
     }
 
-    pub fn bind_pipeline_input(&self, pipeline_input: &Arc<PipelineInput>) {
-        let pipelines = self.pipelines.borrow();
+    pub fn bind_pipeline_input(&mut self, pipeline_input: &Arc<PipelineInput>) {
+        let pipelines = &self.pipelines;
         let last_pipeline = pipelines.last().unwrap();
 
         unsafe {
@@ -205,11 +213,81 @@ impl CmdList {
                 &[],
             )
         };
-        self.pipeline_inputs.borrow_mut().push(Arc::clone(pipeline_input));
+        self.pipeline_inputs.push(Arc::clone(pipeline_input));
+    }
+
+    /// buffers (max: 16): [buffer, offset]
+    pub fn bind_vertex_buffer(&mut self, first_binding: u32, buffers: &[(Arc<DeviceBuffer>, u64)]) {
+        let mut native_buffers = [vk::Buffer::default(); 16];
+        let mut offsets = [0 as u64; 16];
+
+        for (i, (buffer, offset)) in buffers.iter().enumerate() {
+            native_buffers[i] = buffer.buffer.native;
+            offsets[i] = *offset;
+        }
+
+        unsafe {
+            self.device_wrapper.0.cmd_bind_vertex_buffers(
+                self.native,
+                first_binding,
+                &native_buffers[0..buffers.len()],
+                &offsets[0..buffers.len()],
+            )
+        };
+    }
+
+    pub fn bind_index_buffer(&mut self, buffer: &Arc<DeviceBuffer>, offset: u64) {
+        unsafe {
+            self.device_wrapper.0.cmd_bind_index_buffer(
+                self.native,
+                buffer.buffer.native,
+                offset,
+                vk::IndexType::UINT16,
+            )
+        };
+    }
+
+    pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
+        unsafe {
+            self.device_wrapper
+                .0
+                .cmd_draw(self.native, vertex_count, 1, first_vertex, 0)
+        };
+    }
+
+    pub fn draw_indexed(&mut self, index_count: u32, first_index: u32, vertex_offset: i32) {
+        unsafe {
+            self.device_wrapper
+                .0
+                .cmd_draw_indexed(self.native, index_count, 1, first_index, vertex_offset, 0)
+        };
+    }
+
+    pub fn copy_buffer_to_device<T>(
+        &mut self,
+        src_buffer: &HostBuffer<T>,
+        src_element_index: u64,
+        dst_buffer: &Arc<DeviceBuffer>,
+        dst_element_index: u64,
+        size: u64,
+    ) {
+        let region = vk::BufferCopy {
+            src_offset: src_element_index * src_buffer.buffer.aligned_elem_size,
+            dst_offset: dst_element_index * dst_buffer.buffer.aligned_elem_size,
+            size: size * src_buffer.buffer.aligned_elem_size,
+        };
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer(
+                self.native,
+                src_buffer.buffer.native,
+                dst_buffer.buffer.native,
+                slice::from_ref(&region),
+            )
+        };
     }
 
     pub fn barrier_buffer_image(
-        &self,
+        &mut self,
         src_stage_mask: PipelineStageFlags,
         dst_stage_mask: PipelineStageFlags,
         buffer_barriers: &[BufferBarrier],
@@ -234,7 +312,7 @@ impl CmdList {
     }
 
     pub fn barrier_image(
-        &self,
+        &mut self,
         src_stage_mask: PipelineStageFlags,
         dst_stage_mask: PipelineStageFlags,
         image_barriers: &[ImageBarrier],
@@ -242,7 +320,7 @@ impl CmdList {
         self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers)
     }
 
-    pub fn execute_secondary(&self, cmd_lists: &[Rc<CmdList>]) {
+    pub fn execute_secondary(&mut self, cmd_lists: &[Arc<CmdList>]) {
         let native_cmd_lists: Vec<vk::CommandBuffer> =
             cmd_lists.iter().map(|cmd_list| cmd_list.native).collect();
 
@@ -252,7 +330,7 @@ impl CmdList {
                 .cmd_execute_commands(self.native, &native_cmd_lists)
         };
 
-        self.secondary_cmd_lists.borrow_mut().extend_from_slice(cmd_lists);
+        self.secondary_cmd_lists.extend_from_slice(cmd_lists);
     }
 }
 

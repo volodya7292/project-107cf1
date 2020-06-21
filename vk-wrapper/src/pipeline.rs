@@ -31,6 +31,11 @@ impl AccessFlags {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PrimitiveTopology(pub(crate) vk::PrimitiveTopology);
 
+impl PrimitiveTopology {
+    pub const TRIANGLE_LIST: Self = Self(vk::PrimitiveTopology::TRIANGLE_LIST);
+    pub const TRIANGLE_STRIP: Self = Self(vk::PrimitiveTopology::TRIANGLE_STRIP);
+}
+
 pub struct PipelineDepthStencil {
     pub depth_test: bool,
     pub depth_write: bool,
@@ -94,13 +99,6 @@ pub struct Pipeline {
     pub(crate) layout: vk::PipelineLayout,
     pub(crate) native: vk::Pipeline,
     pub(crate) bind_point: vk::PipelineBindPoint,
-}
-
-impl Pipeline {
-    pub const TOPOLOGY_TRIANGLE_LIST: PrimitiveTopology =
-        PrimitiveTopology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    pub const TOPOLOGY_TRIANGLE_STRIP: PrimitiveTopology =
-        PrimitiveTopology(vk::PrimitiveTopology::TRIANGLE_STRIP);
 }
 
 impl Drop for Pipeline {

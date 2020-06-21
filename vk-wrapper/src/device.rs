@@ -139,7 +139,7 @@ impl Device {
             elem_align *= self.adapter.props.limits.min_storage_buffer_offset_alignment;
         }
 
-        let aligned_elem_size = utils::make_mul_of(mem::size_of::<T>(), elem_align as usize);
+        let aligned_elem_size = utils::make_mul_of_u64(mem::size_of::<T>() as u64, elem_align as u64);
         let bytesize = aligned_elem_size as u64 * size;
 
         let buffer_info = vk::BufferCreateInfo::builder()
@@ -196,9 +196,9 @@ impl Device {
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,
-    ) -> Result<DeviceBuffer, DeviceError> {
+    ) -> Result<Arc<DeviceBuffer>, DeviceError> {
         let (buffer, _) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::GpuOnly)?;
-        Ok(DeviceBuffer { buffer })
+        Ok(Arc::new(DeviceBuffer { buffer }))
     }
 
     fn create_image(
@@ -413,12 +413,9 @@ impl Device {
         );
 
         let mut s_format = surface_formats.iter().find(|&s_format| {
-            s_format.format == vk::Format::R8G8B8A8_UNORM
+            (s_format.format == vk::Format::R8G8B8A8_UNORM || s_format.format == vk::Format::B8G8R8A8_UNORM)
                 && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
         });
-        if s_format.is_none() {
-            s_format = surface_formats.first();
-        }
 
         let s_format = match s_format {
             Some(a) => a,
@@ -466,7 +463,7 @@ impl Device {
             native: unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? },
         });
 
-        let images: Result<Vec<Rc<Image>>, vk::Result> = unsafe {
+        let images: Result<Vec<Arc<Image>>, vk::Result> = unsafe {
             self.swapchain_khr
                 .get_swapchain_images(swapchain_wrapper.native)?
         }
@@ -503,7 +500,7 @@ impl Device {
                 .max_lod(0f32)
                 .unnormalized_coordinates(false);
 
-            Ok(Rc::new(Image {
+            Ok(Arc::new(Image {
                 device: Arc::clone(self),
                 _swapchain_wrapper: Some(Rc::clone(&swapchain_wrapper)),
                 native: native_image,
@@ -531,7 +528,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         input_formats: &[(&str, Format)],
-    ) -> Result<Rc<Shader>, DeviceError> {
+    ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
             std::slice::from_raw_parts(
@@ -655,7 +652,7 @@ impl Device {
 
         let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
 
-        Ok(Rc::new(Shader {
+        Ok(Arc::new(Shader {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_shader_module(&create_info, None)? },
             stage,
@@ -671,13 +668,15 @@ impl Device {
         attachments: &[Attachment],
         subpasses: &[Subpass],
         dependencies: &[SubpassDependency],
-    ) -> Result<Rc<RenderPass>, vk::Result> {
+    ) -> Result<Arc<RenderPass>, vk::Result> {
         let native_attachments: Vec<vk::AttachmentDescription> = attachments
             .iter()
             .map(|info| {
                 let mut native_info = vk::AttachmentDescription::builder()
                     .format(info.format.0)
                     .samples(vk::SampleCountFlags::TYPE_1)
+                    .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                    .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
                     .initial_layout(info.init_layout.0)
                     .final_layout(info.final_layout.0)
                     .build();
@@ -792,7 +791,7 @@ impl Device {
             .subpasses(&native_subpass_descs)
             .dependencies(&native_dependencies);
 
-        Ok(Rc::new(RenderPass {
+        Ok(Arc::new(RenderPass {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
             subpasses: subpasses.into(),
@@ -1010,6 +1009,12 @@ impl Device {
         // Color blend
         let def_attachment = vk::PipelineColorBlendAttachmentState::builder()
             .blend_enable(false)
+            .color_write_mask(
+                vk::ColorComponentFlags::R
+                    | vk::ColorComponentFlags::G
+                    | vk::ColorComponentFlags::B
+                    | vk::ColorComponentFlags::A,
+            )
             .build();
         let blend_attachments =
             vec![def_attachment; render_pass.subpasses[subpass_index as usize].color.len()];

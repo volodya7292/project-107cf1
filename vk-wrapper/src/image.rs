@@ -64,6 +64,10 @@ impl Image {
         self.size
     }
 
+    pub fn get_format(&self) -> Format {
+        self.format
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn barrier_queue_level(
         &self,

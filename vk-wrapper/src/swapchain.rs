@@ -31,11 +31,15 @@ pub struct Swapchain {
     pub(crate) wrapper: Rc<SwapchainWrapper>,
     pub(crate) _surface: Rc<Surface>,
     pub(crate) semaphore: Rc<Semaphore>,
-    pub(crate) images: Vec<Rc<Image>>,
+    pub(crate) images: Vec<Arc<Image>>,
     pub(crate) curr_image: Cell<Option<(u32, bool)>>,
 }
 
 impl Swapchain {
+    pub fn get_images(&self) -> &Vec<Arc<Image>> {
+        &self.images
+    }
+
     pub fn acquire_image(&self) -> Result<(SwapchainImage, bool), Error> {
         if self.curr_image.get().is_none() {
             let result = unsafe {
@@ -80,7 +84,11 @@ pub struct SwapchainImage<'a> {
 }
 
 impl SwapchainImage<'_> {
-    pub fn get_image(&self) -> &Rc<Image> {
+    pub fn get_image(&self) -> &Arc<Image> {
         &self.swapchain.images[self.index as usize]
+    }
+
+    pub fn get_index(&self) -> u32 {
+        self.index
     }
 }

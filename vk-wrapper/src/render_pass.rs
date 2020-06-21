@@ -72,7 +72,7 @@ impl RenderPass {
         self: &Arc<Self>,
         size: (u32, u32),
         attachment_mods: &[(u32, ImageMod)],
-    ) -> Result<Rc<Framebuffer>, DeviceError> {
+    ) -> Result<Arc<Framebuffer>, DeviceError> {
         let attachment_mods: HashMap<u32, ImageMod> = attachment_mods.iter().cloned().collect();
         let mut images = Vec::with_capacity(self.attachments.len());
         let mut native_image_views = Vec::with_capacity(self.attachments.len());
@@ -132,7 +132,7 @@ impl RenderPass {
             .height(size.1)
             .layers(1);
 
-        Ok(Rc::new(Framebuffer {
+        Ok(Arc::new(Framebuffer {
             device: Arc::clone(&self.device),
             render_pass: Arc::clone(self),
             native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },

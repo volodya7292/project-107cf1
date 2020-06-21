@@ -33,12 +33,10 @@ pub(crate) fn filter_names(v: &Vec<String>, f: &[&str], required: bool) -> Resul
 /// Make number multiple of another number
 /// # Examples
 /// make_mul_of(7, 4) -> 8;
+/// make_mul_of(8, 4) -> 8;
 /// make_mul_of(67, 8) -> 72
-pub(crate) fn make_mul_of<T>(number: T, multiplier: T) -> T
-where
-    T: Copy + ops::Add<Output = T> + ops::Sub<Output = T> + ops::Rem<Output = T>,
-{
-    number + (multiplier - (number % multiplier))
+pub(crate) fn make_mul_of_u64(number: u64, multiplier: u64) -> u64 {
+    ((number + multiplier - 1) / multiplier) * multiplier
 }
 
 macro_rules! vk_bitflags_impl {

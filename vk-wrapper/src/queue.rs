@@ -40,11 +40,11 @@ impl Queue {
             device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
             native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
-            render_passes: RefCell::new(vec![]),
-            framebuffers: RefCell::new(vec![]),
-            secondary_cmd_lists: RefCell::new(vec![]),
-            pipelines: RefCell::new(vec![]),
-            pipeline_inputs: RefCell::new(vec![]),
+            render_passes: vec![],
+            framebuffers: vec![],
+            secondary_cmd_lists: vec![],
+            pipelines: vec![],
+            pipeline_inputs: vec![],
         })))
     }
 
