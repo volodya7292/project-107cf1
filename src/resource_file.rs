@@ -8,6 +8,7 @@ use std::path::Path;
 use std::{fmt, io};
 
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum Error {
@@ -49,7 +50,7 @@ impl fmt::Debug for ResourceEntry {
 }
 
 pub struct ResourceFile {
-    buf_reader: BufReader<File>,
+    buf_reader: Mutex<BufReader<File>>,
     main_entry: ResourceEntry,
 }
 
@@ -110,9 +111,9 @@ impl ResourceFile {
         Ok(())
     }
 
-    pub fn open(path: &Path) -> Result<ResourceFile, Error> {
+    pub fn open(path: &Path) -> Result<Arc<ResourceFile>, Error> {
         let mut res_file = ResourceFile {
-            buf_reader: BufReader::new(File::open(path)?),
+            buf_reader: Mutex::new(BufReader::new(File::open(path)?)),
             main_entry: ResourceEntry {
                 offset: 0,
                 size: 0,
@@ -120,11 +121,12 @@ impl ResourceFile {
                 entries: HashMap::new(),
             },
         };
-
-        let header_size = res_file.buf_reader.read_u32::<LittleEndian>()?;
-        Self::read_entries_full(&mut res_file.buf_reader, header_size, &mut res_file.main_entry)?;
-
-        Ok(res_file)
+        {
+            let mut buf_reader = res_file.buf_reader.lock().unwrap();
+            let header_size = buf_reader.read_u32::<LittleEndian>()?;
+            Self::read_entries_full(&mut buf_reader, header_size, &mut res_file.main_entry)?;
+        }
+        Ok(Arc::new(res_file))
     }
 
     fn get_res_range(&self, filename: &str) -> Result<(u64, u64), Error> {
@@ -140,13 +142,34 @@ impl ResourceFile {
         return Ok((entry.offset, entry.size));
     }
 
-    pub fn read(&mut self, filename: &str) -> Result<Vec<u8>, Error> {
-        let range = self.get_res_range(filename)?;
+    fn read_range(&self, range: (u64, u64)) -> Result<Vec<u8>, Error> {
+        let mut buf_reader = self.buf_reader.lock().unwrap();
 
-        self.buf_reader.seek(SeekFrom::Start(range.0))?;
+        buf_reader.seek(SeekFrom::Start(range.0))?;
         let mut data = vec![0u8; range.1 as usize];
-        self.buf_reader.read(&mut data)?;
+        buf_reader.read(&mut data)?;
 
         Ok(data)
+    }
+
+    pub fn get(self: &Arc<Self>, filename: &str) -> Result<ResourceRef, Error> {
+        let range = self.get_res_range(filename)?;
+
+        Ok(ResourceRef {
+            res_file: Arc::clone(self),
+            range,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct ResourceRef {
+    res_file: Arc<ResourceFile>,
+    range: (u64, u64),
+}
+
+impl ResourceRef {
+    pub fn read(&self) -> Result<Vec<u8>, Error> {
+        self.res_file.read_range(self.range)
     }
 }

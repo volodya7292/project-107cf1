@@ -2,8 +2,7 @@ use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMesh;
 use nalgebra::Vector3;
 use std::collections::HashMap;
-use std::hash::Hasher;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use vk_wrapper as vkw;
 
 pub struct Transform {
@@ -34,7 +33,8 @@ impl specs::Component for VertexMeshRef {
 
 pub struct Renderer {
     mat_pipeline: Arc<MaterialPipeline>,
-    buffers: HashMap<u32, vkw::RawHostBuffer>, // binding id -> renderer impl-specific res index
+    buffers: HashMap<u32, vkw::RawHostBuffer>,
+    // binding id -> renderer impl-specific res index
     translucent: bool,
 }
 

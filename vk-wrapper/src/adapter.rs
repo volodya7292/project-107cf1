@@ -8,8 +8,8 @@ use ash::{
     version::{DeviceV1_0, InstanceV1_0},
     vk,
 };
-use std::sync::Arc;
-use std::{cell::Cell, collections::HashMap, ffi::CString, os::raw::c_char, rc::Rc};
+use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, ffi::CString, os::raw::c_char};
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
@@ -24,6 +24,10 @@ pub struct Adapter {
     pub(crate) queue_family_indices: [[u32; 2]; QUEUE_TYPE_COUNT],
     pub(crate) formats_props: HashMap<vk::Format, vk::FormatProperties>,
 }
+
+unsafe impl Send for Adapter {}
+
+unsafe impl Sync for Adapter {}
 
 impl Adapter {
     pub fn create_device(self: &Arc<Self>) -> Result<Arc<Device>, vk::Result> {
@@ -70,7 +74,7 @@ impl Adapter {
         let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
         for queue_info in &queue_infos {
             for i in 0..queue_info.queue_count {
-                queues.push(Rc::new(Queue {
+                queues.push(Arc::new(Queue {
                     device_wrapper: Arc::clone(&device_wrapper),
                     swapchain_khr: swapchain_khr.clone(),
                     native: unsafe {
@@ -79,7 +83,7 @@ impl Adapter {
                             .get_device_queue(queue_info.queue_family_index, i)
                     },
                     semaphore: device::create_binary_semaphore(&device_wrapper)?,
-                    timeline_sp: Rc::new(device::create_timeline_semaphore(&device_wrapper)?),
+                    timeline_sp: Arc::new(device::create_timeline_semaphore(&device_wrapper)?),
                     fence: device::create_fence(&device_wrapper)?,
                     family_index: queue_info.queue_family_index,
                 }));
@@ -88,7 +92,7 @@ impl Adapter {
 
         // Graphics queue always exists. Compute, transfer, present queues may be the same as the graphics queue.
         for i in 0..(QUEUE_TYPE_COUNT - queues.len()) {
-            queues.push(Rc::clone(&queues[self.queue_family_indices[i][1] as usize]));
+            queues.push(Arc::clone(&queues[self.queue_family_indices[i][1] as usize]));
         }
 
         // Create allocator
@@ -116,7 +120,7 @@ impl Adapter {
             allocator,
             swapchain_khr,
             queues,
-            pipeline_cache: Cell::new(pipeline_cache),
+            pipeline_cache: Mutex::new(pipeline_cache),
         }))
     }
 

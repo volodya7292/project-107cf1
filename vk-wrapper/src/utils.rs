@@ -1,5 +1,4 @@
 use std::ffi::{CStr, CString};
-use std::ops;
 use std::os::raw::c_char;
 
 pub(crate) unsafe fn c_ptr_to_string(ptr: *const c_char) -> String {

@@ -2,7 +2,6 @@ use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, Format, Queue};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -37,11 +36,14 @@ impl ImageLayout {
 pub struct ImageType(pub(crate) vk::ImageType);
 
 #[derive(Clone)]
-pub struct ImageBarrier(pub(crate) vk::ImageMemoryBarrier);
+pub struct ImageBarrier {
+    pub(crate) native: vk::ImageMemoryBarrier,
+    pub(crate) image: Arc<Image>,
+}
 
 pub struct Image {
     pub(crate) device: Arc<Device>,
-    pub(crate) _swapchain_wrapper: Option<Rc<SwapchainWrapper>>,
+    pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,
     pub(crate) view: vk::ImageView,
@@ -70,7 +72,7 @@ impl Image {
 
     #[allow(clippy::too_many_arguments)]
     pub fn barrier_queue_level(
-        &self,
+        self: &Arc<Self>,
         src_access_mask: AccessFlags,
         dst_access_mask: AccessFlags,
         old_layout: ImageLayout,
@@ -80,8 +82,8 @@ impl Image {
         base_mip_level: u32,
         level_count: u32,
     ) -> ImageBarrier {
-        ImageBarrier(
-            vk::ImageMemoryBarrier::builder()
+        ImageBarrier {
+            native: vk::ImageMemoryBarrier::builder()
                 .src_access_mask(src_access_mask.0)
                 .dst_access_mask(dst_access_mask.0)
                 .old_layout(old_layout.0)
@@ -99,11 +101,12 @@ impl Image {
                         .build(),
                 )
                 .build(),
-        )
+            image: Arc::clone(self),
+        }
     }
 
     pub fn barrier_queue(
-        &self,
+        self: &Arc<Self>,
         src_access_mask: AccessFlags,
         dst_access_mask: AccessFlags,
         old_layout: ImageLayout,

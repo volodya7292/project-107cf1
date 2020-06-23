@@ -10,6 +10,7 @@ pub use crate::device::DeviceError;
 pub use crate::entry::Entry;
 pub use crate::fence::Fence;
 pub use crate::format::Format;
+pub use crate::format::FORMAT_SIZES;
 pub use crate::framebuffer::Framebuffer;
 pub use crate::image::Image;
 pub use crate::image::ImageBarrier;

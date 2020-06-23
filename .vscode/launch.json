@@ -1,27 +1,29 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug executable 'project-107cf1'",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--bin=project-107cf1",
-                    "--package=project-107cf1"
-                ],
-                "filter": {
-                    "name": "project-107cf1",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}/work_dir",
-            "env": {"_NO_DEBUG_HEAP": "1"},
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'project-107cf1'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=project-107cf1",
+          "--package=project-107cf1"
+        ],
+        "filter": {
+          "name": "project-107cf1",
+          "kind": "bin"
         }
-    ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/work_dir",
+      "env": {
+        "_NO_DEBUG_HEAP": "1"
+      }
+    }
+  ]
 }

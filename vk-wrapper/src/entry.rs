@@ -1,8 +1,5 @@
 use std::ffi::{CStr, CString};
-use std::{
-    os::raw::{c_char, c_void},
-    rc::Rc,
-};
+use std::os::raw::{c_char, c_void};
 
 use ash::version::EntryV1_0;
 use ash::vk;
@@ -59,8 +56,8 @@ unsafe extern "system" fn vk_debug_callback(
 }
 
 impl Entry {
-    pub fn new() -> Result<Rc<Entry>, ash::LoadingError> {
-        Ok(Rc::new(Entry {
+    pub fn new() -> Result<Arc<Entry>, ash::LoadingError> {
+        Ok(Arc::new(Entry {
             ash_entry: ash::Entry::new()?,
         }))
     }
@@ -84,7 +81,7 @@ impl Entry {
     }
 
     pub fn create_instance(
-        self: &Rc<Self>,
+        self: &Arc<Self>,
         app_name: &str,
         mut required_extensions: Vec<&str>,
     ) -> Result<Arc<Instance>, InstanceError> {
@@ -171,7 +168,7 @@ impl Entry {
         let surface_khr = ash::extensions::khr::Surface::new(&self.ash_entry, &native_instance);
 
         Ok(Arc::new(Instance {
-            entry: Rc::clone(self),
+            entry: Arc::clone(self),
             native: native_instance,
             debug_utils_ext,
             debug_utils_messenger,

@@ -5,7 +5,6 @@ use crate::{
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]

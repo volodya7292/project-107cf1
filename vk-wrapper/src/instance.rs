@@ -1,13 +1,13 @@
 use crate::adapter::Adapter;
-use crate::format::FORMAT_SIZES;
+use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::sync::Arc;
-use std::{collections::HashMap, os::raw::c_void, rc::Rc, slice};
+use std::{collections::HashMap, os::raw::c_void};
 
 pub struct Instance {
-    pub(crate) entry: Rc<Entry>,
+    pub(crate) entry: Arc<Entry>,
     pub(crate) native: ash::Instance,
     pub(crate) debug_utils_ext: Option<ash::extensions::ext::DebugUtils>,
     pub(crate) debug_utils_messenger: Option<vk::DebugUtilsMessengerEXT>,
@@ -32,8 +32,8 @@ impl Instance {
     pub fn create_surface(
         self: &Arc<Self>,
         window_handle: &impl raw_window_handle::HasRawWindowHandle,
-    ) -> Result<Rc<Surface>, vk::Result> {
-        Ok(Rc::new(Surface {
+    ) -> Result<Arc<Surface>, vk::Result> {
+        Ok(Arc::new(Surface {
             instance: Arc::clone(self),
             native: unsafe {
                 ash_window::create_surface(&self.entry.ash_entry, &self.native, window_handle, None)?
@@ -55,7 +55,7 @@ impl Instance {
 
     pub fn enumerate_adapters(
         self: &Arc<Self>,
-        surface: &Rc<Surface>,
+        surface: &Arc<Surface>,
     ) -> Result<Vec<Arc<Adapter>>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
@@ -295,10 +295,9 @@ impl Instance {
 impl Drop for Instance {
     fn drop(&mut self) {
         unsafe {
-            self.debug_utils_ext
-                .as_ref()
-                .unwrap()
-                .destroy_debug_utils_messenger(self.debug_utils_messenger.unwrap(), None);
+            if let Some(debug_utils_ext) = &self.debug_utils_ext {
+                debug_utils_ext.destroy_debug_utils_messenger(self.debug_utils_messenger.unwrap(), None);
+            }
             self.native.destroy_instance(None);
         };
     }

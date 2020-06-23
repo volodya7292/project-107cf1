@@ -1,6 +1,5 @@
 use crate::Instance;
 use ash::vk;
-use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct Surface {

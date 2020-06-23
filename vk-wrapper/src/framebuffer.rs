@@ -1,7 +1,6 @@
 use crate::{Device, Image, RenderPass};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct Framebuffer {

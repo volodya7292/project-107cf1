@@ -1,8 +1,7 @@
-use crate::format::FORMAT_SIZES;
-use crate::queue::SignalSemaphore;
 use crate::PipelineSignature;
 use crate::Subpass;
 use crate::SwapchainWrapper;
+use crate::FORMAT_SIZES;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
     utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
@@ -14,10 +13,9 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
-use std::cell::Cell;
 use std::collections::{hash_map, HashMap};
-use std::sync::Arc;
-use std::{cmp, ffi::CStr, marker::PhantomData, mem, ptr, rc::Rc, slice};
+use std::sync::{Arc, Mutex};
+use std::{cmp, ffi::CStr, marker::PhantomData, mem, ptr, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
@@ -63,8 +61,8 @@ pub struct Device {
     pub(crate) wrapper: Arc<DeviceWrapper>,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
-    pub(crate) queues: Vec<Rc<Queue>>,
-    pub(crate) pipeline_cache: Cell<vk::PipelineCache>,
+    pub(crate) queues: Vec<Arc<Queue>>,
+    pub(crate) pipeline_cache: Mutex<vk::PipelineCache>,
 }
 
 pub(crate) fn create_semaphore(
@@ -79,7 +77,7 @@ pub(crate) fn create_semaphore(
         device_wrapper: Arc::clone(device_wrapper),
         native: unsafe { device_wrapper.0.create_semaphore(&create_info, None)? },
         semaphore_type: sp_type,
-        last_signal_value: Cell::new(0),
+        last_signal_value: Mutex::new(0),
     })
 }
 
@@ -120,7 +118,7 @@ impl Device {
         usage: BufferUsageFlags,
         size: u64,
         mem_usage: vk_mem::MemoryUsage,
-    ) -> Result<(Buffer, vk_mem::AllocationInfo), DeviceError> {
+    ) -> Result<(Arc<Buffer>, vk_mem::AllocationInfo), DeviceError> {
         let mut elem_align = 1;
 
         if usage.intersects(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST)
@@ -162,7 +160,7 @@ impl Device {
             .create_buffer(&buffer_info, &allocation_create_info)?;
 
         Ok((
-            Buffer {
+            Arc::new(Buffer {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
@@ -170,7 +168,7 @@ impl Device {
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
                 _bytesize: bytesize as u64,
-            },
+            }),
             alloc_info,
         ))
     }
@@ -187,7 +185,7 @@ impl Device {
 
         Ok(HostBuffer {
             _type_marker: PhantomData,
-            buffer: Arc::new(buffer),
+            buffer,
             p_data: alloc_info.get_mapped_data(),
         })
     }
@@ -379,10 +377,10 @@ impl Device {
 
     pub fn create_swapchain(
         self: &Arc<Self>,
-        surface: &Rc<Surface>,
+        surface: &Arc<Surface>,
         size: (u32, u32),
         vsync: bool,
-    ) -> Result<Rc<Swapchain>, DeviceError> {
+    ) -> Result<Arc<Swapchain>, DeviceError> {
         let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
@@ -416,13 +414,15 @@ impl Device {
             (s_format.format == vk::Format::R8G8B8A8_UNORM || s_format.format == vk::Format::B8G8R8A8_UNORM)
                 && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
         });
-
+        if s_format.is_none() {
+            s_format = surface_formats.first();
+        }
         let s_format = match s_format {
             Some(a) => a,
             None => {
                 return Err(DeviceError::SwapchainError(
                     "Swapchain format not found!".to_string(),
-                ))
+                ));
             }
         };
 
@@ -458,7 +458,7 @@ impl Device {
             .present_mode(present_mode)
             .clipped(true);
 
-        let swapchain_wrapper = Rc::new(SwapchainWrapper {
+        let swapchain_wrapper = Arc::new(SwapchainWrapper {
             device: Arc::clone(self),
             native: unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? },
         });
@@ -502,7 +502,7 @@ impl Device {
 
             Ok(Arc::new(Image {
                 device: Arc::clone(self),
-                _swapchain_wrapper: Some(Rc::clone(&swapchain_wrapper)),
+                _swapchain_wrapper: Some(Arc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
                 view: unsafe { self.wrapper.0.create_image_view(&view_info, None)? },
@@ -515,12 +515,12 @@ impl Device {
         })
         .collect();
 
-        Ok(Rc::new(Swapchain {
+        Ok(Arc::new(Swapchain {
             wrapper: swapchain_wrapper,
-            _surface: Rc::clone(surface),
-            semaphore: Rc::new(create_binary_semaphore(&self.wrapper)?),
+            _surface: Arc::clone(surface),
+            semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
             images: images?,
-            curr_image: Cell::new(None),
+            curr_image: Mutex::new(None),
         }))
     }
 
@@ -596,7 +596,7 @@ impl Device {
                 return Err(DeviceError::InvalidShader(format!(
                     "Unsupported execution model {:?}",
                     m
-                )))
+                )));
             }
         };
 
@@ -879,19 +879,18 @@ impl Device {
     }
 
     pub fn load_pipeline_cache(&self, data: &[u8]) -> Result<(), vk::Result> {
-        unsafe {
-            self.wrapper
-                .0
-                .destroy_pipeline_cache(self.pipeline_cache.get(), None)
-        };
+        let mut pipeline_cache = self.pipeline_cache.lock().unwrap();
+
+        unsafe { self.wrapper.0.destroy_pipeline_cache(*pipeline_cache, None) };
         let create_info = vk::PipelineCacheCreateInfo::builder().initial_data(data);
-        self.pipeline_cache
-            .set(unsafe { self.wrapper.0.create_pipeline_cache(&create_info, None)? });
+        *pipeline_cache = unsafe { self.wrapper.0.create_pipeline_cache(&create_info, None)? };
+
         Ok(())
     }
 
     pub fn get_pipeline_cache(&self) -> Result<Vec<u8>, vk::Result> {
-        unsafe { self.wrapper.0.get_pipeline_cache_data(self.pipeline_cache.get()) }
+        let pipeline_cache = self.pipeline_cache.lock().unwrap();
+        unsafe { self.wrapper.0.get_pipeline_cache_data(*pipeline_cache) }
     }
 
     pub fn create_graphics_pipeline(
@@ -1053,12 +1052,11 @@ impl Device {
             .render_pass(render_pass.native)
             .subpass(subpass_index);
 
+        let pipeline_cache = self.pipeline_cache.lock().unwrap();
         let native_pipeline = unsafe {
-            self.wrapper.0.create_graphics_pipelines(
-                self.pipeline_cache.get(),
-                slice::from_ref(&create_info),
-                None,
-            )
+            self.wrapper
+                .0
+                .create_graphics_pipelines(*pipeline_cache, slice::from_ref(&create_info), None)
         };
         if let Err((_, err)) = native_pipeline {
             return Err(err.into());
@@ -1067,7 +1065,7 @@ impl Device {
 
         Ok(Arc::new(Pipeline {
             device: Arc::clone(self),
-            render_pass: Some(Arc::clone(render_pass)),
+            _render_pass: Some(Arc::clone(render_pass)),
             signature: Arc::clone(signature),
             layout,
             native: pipeline,
@@ -1108,12 +1106,11 @@ impl Device {
             .stage(stage_info)
             .layout(layout);
 
+        let pipeline_cache = self.pipeline_cache.lock().unwrap();
         let native_pipeline = unsafe {
-            self.wrapper.0.create_compute_pipelines(
-                self.pipeline_cache.get(),
-                slice::from_ref(&create_info),
-                None,
-            )
+            self.wrapper
+                .0
+                .create_compute_pipelines(*pipeline_cache, slice::from_ref(&create_info), None)
         };
         if let Err((_, err)) = native_pipeline {
             return Err(err.into());
@@ -1122,7 +1119,7 @@ impl Device {
 
         Ok(Arc::new(Pipeline {
             device: Arc::clone(self),
-            render_pass: None,
+            _render_pass: None,
             signature: Arc::clone(signature),
             layout,
             native: pipeline,
@@ -1143,11 +1140,9 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        unsafe {
-            self.wrapper
-                .0
-                .destroy_pipeline_cache(self.pipeline_cache.get(), None)
-        };
+        let pipeline_cache = self.pipeline_cache.lock().unwrap();
+        unsafe { self.wrapper.0.destroy_pipeline_cache(*pipeline_cache, None) };
+
         self.allocator.destroy();
     }
 }

@@ -32,7 +32,8 @@ pub struct Shader {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
-    pub(crate) input_locations: HashMap<u32, Format>, // [location, format]
+    pub(crate) input_locations: HashMap<u32, Format>,
+    // [location, format]
     pub(crate) bindings: HashMap<String, ShaderBinding>,
     pub(crate) push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,

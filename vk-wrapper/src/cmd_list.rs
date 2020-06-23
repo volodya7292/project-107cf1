@@ -1,31 +1,40 @@
+use crate::buffer::Buffer;
 use crate::device::DeviceWrapper;
 use crate::{
-    BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, ImageBarrier, Pipeline, PipelineInput,
-    PipelineStageFlags, RenderPass,
+    BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
+    Pipeline, PipelineInput, PipelineStageFlags, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
-use std::cell::RefCell;
+use std::slice;
 use std::sync::Arc;
-use std::{rc::Rc, slice};
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) pool: vk::CommandPool,
     pub(crate) native: vk::CommandBuffer,
+    pub(crate) one_time_exec: bool,
     pub(crate) render_passes: Vec<Arc<RenderPass>>,
     pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
     pub(crate) secondary_cmd_lists: Vec<Arc<CmdList>>,
     pub(crate) pipelines: Vec<Arc<Pipeline>>,
     pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
+    pub(crate) buffers: Vec<Arc<Buffer>>,
+    pub(crate) images: Vec<Arc<Image>>,
 }
 
 impl CmdList {
-    pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
+    pub(crate) fn clear_resources(&mut self) {
         self.render_passes.clear();
         self.framebuffers.clear();
         self.secondary_cmd_lists.clear();
         self.pipelines.clear();
         self.pipeline_inputs.clear();
+        self.buffers.clear();
+        self.images.clear();
+    }
+
+    pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
+        self.clear_resources();
 
         let mut begin_info = vk::CommandBufferBeginInfo::builder();
         if one_time_execution {
@@ -41,6 +50,7 @@ impl CmdList {
                 .begin_command_buffer(self.native, &begin_info)?;
         }
 
+        self.one_time_exec = one_time_execution;
         Ok(())
     }
 
@@ -221,9 +231,12 @@ impl CmdList {
         let mut native_buffers = [vk::Buffer::default(); 16];
         let mut offsets = [0 as u64; 16];
 
+        self.buffers.reserve(buffers.len());
+
         for (i, (buffer, offset)) in buffers.iter().enumerate() {
             native_buffers[i] = buffer.buffer.native;
             offsets[i] = *offset;
+            self.buffers.push(Arc::clone(&buffer.buffer));
         }
 
         unsafe {
@@ -245,6 +258,7 @@ impl CmdList {
                 vk::IndexType::UINT16,
             )
         };
+        self.buffers.push(Arc::clone(&buffer.buffer));
     }
 
     pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
@@ -284,6 +298,47 @@ impl CmdList {
                 slice::from_ref(&region),
             )
         };
+        self.buffers
+            .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
+    }
+
+    pub fn copy_host_buffer_to_image(
+        &mut self,
+        src_buffer: &HostBuffer<u8>,
+        src_offset: u64,
+        dst_image: &Arc<Image>,
+        dst_image_layout: ImageLayout,
+    ) {
+        let region = vk::BufferImageCopy {
+            buffer_offset: src_offset,
+            buffer_row_length: dst_image.size.0,
+            buffer_image_height: dst_image.size.1,
+            image_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: dst_image.aspect,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            image_extent: vk::Extent3D {
+                width: dst_image.size.0,
+                height: dst_image.size.1,
+                depth: 1,
+            },
+        };
+
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer_to_image(
+                self.native,
+                src_buffer.buffer.native,
+                dst_image.native,
+                dst_image_layout.0,
+                slice::from_ref(&region),
+            )
+        };
+
+        self.buffers.push(Arc::clone(&src_buffer.buffer));
+        self.images.push(Arc::clone(dst_image));
     }
 
     pub fn barrier_buffer_image(
@@ -293,10 +348,26 @@ impl CmdList {
         buffer_barriers: &[BufferBarrier],
         image_barriers: &[ImageBarrier],
     ) {
-        let native_buffer_barriers: Vec<vk::BufferMemoryBarrier> =
-            buffer_barriers.to_vec().iter().map(|v| v.0).collect();
-        let native_image_barriers: Vec<vk::ImageMemoryBarrier> =
-            image_barriers.to_vec().iter().map(|v| v.0).collect();
+        self.buffers.reserve(buffer_barriers.len());
+        self.images.reserve(image_barriers.len());
+
+        let native_buffer_barriers: Vec<vk::BufferMemoryBarrier> = buffer_barriers
+            .to_vec()
+            .iter()
+            .map(|v| {
+                self.buffers.push(Arc::clone(&v.buffer));
+                v.native
+            })
+            .collect();
+
+        let native_image_barriers: Vec<vk::ImageMemoryBarrier> = image_barriers
+            .to_vec()
+            .iter()
+            .map(|v| {
+                self.images.push(Arc::clone(&v.image));
+                v.native
+            })
+            .collect();
 
         unsafe {
             self.device_wrapper.0.cmd_pipeline_barrier(

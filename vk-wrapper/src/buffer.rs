@@ -18,10 +18,14 @@ pub(crate) struct Buffer {
 pub struct RawHostBuffer(Arc<Buffer>);
 
 unsafe impl Send for RawHostBuffer {}
+
 unsafe impl Sync for RawHostBuffer {}
 
 #[derive(Clone)]
-pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
+pub struct BufferBarrier {
+    pub(crate) native: vk::BufferMemoryBarrier,
+    pub(crate) buffer: Arc<Buffer>,
+}
 
 pub struct HostBuffer<T> {
     pub(crate) _type_marker: PhantomData<T>,
@@ -172,6 +176,7 @@ impl<T> HostBuffer<T> {
 }
 
 unsafe impl<T> Send for HostBuffer<T> {}
+
 unsafe impl<T> Sync for HostBuffer<T> {}
 
 impl<T> Drop for HostBuffer<T> {
@@ -185,7 +190,7 @@ impl<T> Drop for HostBuffer<T> {
 }
 
 pub struct DeviceBuffer {
-    pub(crate) buffer: Buffer,
+    pub(crate) buffer: Arc<Buffer>,
 }
 
 impl Drop for DeviceBuffer {

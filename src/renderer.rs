@@ -1,42 +1,108 @@
 pub(crate) mod component;
 mod material_pipeline;
 mod scene;
+mod texture;
 mod vertex_mesh;
 
 use crate::renderer::scene::Scene;
-use crate::resource_file::ResourceFile;
+use crate::resource_file::{ResourceFile, ResourceRef};
+use image::GenericImageView;
+use rayon::prelude::*;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use vk_wrapper as vkw;
 use vk_wrapper::{
-    Attachment, AttachmentRef, BufferUsageFlags, ClearValue, DeviceBuffer, Format, Framebuffer, ImageLayout,
-    ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization, PipelineSignature,
-    PrimitiveTopology, Queue, QueueType, RenderPass, SubmitInfo, Subpass,
+    Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
+    ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
+    PipelineSignature, PrimitiveTopology, Queue, QueueType, RenderPass, SubmitInfo, Subpass, FORMAT_SIZES,
 };
 
 pub struct Renderer {
-    surface: Rc<vkw::Surface>,
-    swapchain: Rc<vkw::Swapchain>,
+    surface: Arc<vkw::Surface>,
+    swapchain: Arc<vkw::Swapchain>,
     surface_changed: bool,
     surface_size: (u32, u32),
-    vsync: bool,
+    settings: Settings,
     device: Arc<vkw::Device>,
     scene: Scene,
+    textures: Vec<Texture>,
     //submit_packet: Option<vkw::SubmitPacket>,
     sig: Arc<PipelineSignature>,
     pipe: Option<Arc<Pipeline>>,
     rp: Option<Arc<RenderPass>>,
     main_framebuffers: Vec<Arc<Framebuffer>>,
     vb: Arc<DeviceBuffer>,
+    texture_load_cmd_list: Arc<Mutex<CmdList>>,
+}
+
+#[derive(Copy, Clone)]
+pub struct Settings {
+    pub(crate) vsync: bool,
+    pub(crate) textures_gen_mipmaps: bool,
+    pub(crate) textures_max_anisotropy: f32,
+}
+
+pub struct Texture {
+    res_ref: ResourceRef,
+    image: Option<Arc<vkw::Image>>,
+    format: vkw::Format,
 }
 
 impl Renderer {
-    /*fn set_scene(&mut self, scene: Scene) {
-        self.scene = Some(scene);
-    }*/
+    pub fn add_texture(&mut self, res_ref: ResourceRef, format: vkw::Format) -> u16 {
+        self.textures.push(Texture {
+            res_ref,
+            image: None,
+            format,
+        });
+        (self.textures.len() - 1) as u16
+    }
+
+    fn load_texture(&mut self, index: u16) {
+        // Get resource reference
+        if let Some(texture) = self.textures.get_mut(index as usize) {
+            // Load resource
+            let bytes = texture.res_ref.read().unwrap();
+            let img = image::load_from_memory(&bytes).unwrap();
+
+            // Create staging buffer
+            let mut buffer = self
+                .device
+                .create_host_buffer::<u8>(
+                    vkw::BufferUsageFlags::TRANSFER_SRC,
+                    (img.width() * img.height() * FORMAT_SIZES[&texture.format] as u32) as u64,
+                )
+                .unwrap();
+            buffer.write(0, &img.to_bytes());
+
+            // Create image
+            texture.image = Some(
+                self.device
+                    .create_image_2d(
+                        texture.format,
+                        self.settings.textures_gen_mipmaps,
+                        self.settings.textures_max_anisotropy,
+                        vkw::ImageUsageFlags::SAMPLED,
+                        (img.width(), img.height()),
+                    )
+                    .unwrap(),
+            );
+
+            // Copy resource to image
+            let mut cl = self.texture_load_cmd_list.lock().unwrap();
+            cl.begin(true).unwrap();
+
+            cl.end().unwrap();
+        }
+    }
 
     pub fn scene(&mut self) -> &mut Scene {
         &mut self.scene
+    }
+
+    pub fn set_settings(&mut self, settings: Settings) {
+        // TODO
+        self.settings = settings;
     }
 
     pub fn on_resize(&mut self, new_size: (u32, u32)) {
@@ -106,7 +172,7 @@ impl Renderer {
         if adapter.is_surface_valid(surface).unwrap() {
             if self.surface_changed {
                 self.swapchain = device
-                    .create_swapchain(&self.surface, self.surface_size, self.vsync)
+                    .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
                     .unwrap();
                 self.create_main_framebuffers();
                 self.surface_changed = false;
@@ -198,20 +264,23 @@ impl Renderer {
 }
 
 pub fn new(
-    surface: &Rc<vkw::Surface>,
+    surface: &Arc<vkw::Surface>,
     size: (u32, u32),
-    vsync: bool,
+    settings: Settings,
     device: &Arc<vkw::Device>,
-    resources: &mut ResourceFile,
+    resources: &Arc<ResourceFile>,
 ) -> Result<Renderer, vkw::DeviceError> {
     let basic_vertex = device
         .create_shader(
-            &resources.read("shaders/basic.vert.spv").unwrap(),
+            &resources.get("shaders/basic.vert.spv").unwrap().read().unwrap(),
             &[("inPosition", Format::RGB32_FLOAT)],
         )
         .unwrap();
     let basic_pixel = device
-        .create_shader(&resources.read("shaders/basic.frag.spv").unwrap(), &[])
+        .create_shader(
+            &resources.get("shaders/basic.frag.spv").unwrap().read().unwrap(),
+            &[],
+        )
         .unwrap();
     let basic_signature = device
         .create_pipeline_signature(&[basic_vertex, basic_pixel])
@@ -246,19 +315,21 @@ pub fn new(
     submit.wait().unwrap();
 
     let mut renderer = Renderer {
-        surface: Rc::clone(surface),
-        swapchain: device.create_swapchain(surface, size, vsync)?,
+        surface: Arc::clone(surface),
+        swapchain: device.create_swapchain(surface, size, settings.vsync)?,
         surface_changed: false,
         surface_size: size,
-        vsync,
+        settings,
         device: Arc::clone(device),
         scene: scene::new(),
         //submit_packet: None,
+        textures: vec![],
         sig: basic_signature,
         pipe: None,
         rp: None,
         main_framebuffers: vec![],
         vb,
+        texture_load_cmd_list: graphics_queue.create_primary_cmd_list().unwrap(),
     };
     renderer.create_main_framebuffers();
 

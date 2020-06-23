@@ -94,7 +94,7 @@ impl PipelineColorBlend {
 
 pub struct Pipeline {
     pub(crate) device: Arc<Device>,
-    pub(crate) render_pass: Option<Arc<RenderPass>>,
+    pub(crate) _render_pass: Option<Arc<RenderPass>>,
     pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) layout: vk::PipelineLayout,
     pub(crate) native: vk::Pipeline,

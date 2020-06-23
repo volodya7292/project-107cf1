@@ -3,8 +3,6 @@ use crate::SwapchainImage;
 use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::slice;
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +14,7 @@ pub struct Queue {
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) native: vk::Queue,
     pub(crate) semaphore: Semaphore,
-    pub(crate) timeline_sp: Rc<Semaphore>,
+    pub(crate) timeline_sp: Arc<Semaphore>,
     pub(crate) fence: Fence,
     pub(crate) family_index: u32,
 }
@@ -40,11 +38,14 @@ impl Queue {
             device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
             native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
+            one_time_exec: false,
             render_passes: vec![],
             framebuffers: vec![],
             secondary_cmd_lists: vec![],
             pipelines: vec![],
             pipeline_inputs: vec![],
+            buffers: vec![],
+            images: vec![],
         })))
     }
 
@@ -126,24 +127,25 @@ impl Queue {
     }
 
     pub fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
-        let mut last_signal_value = self.timeline_sp.last_signal_value.get();
+        let mut sp_last_signal_value = self.timeline_sp.last_signal_value.lock().unwrap();
+        let mut new_last_signal_value = *sp_last_signal_value;
 
         for info in &mut packet.infos {
             info.wait_semaphores.push(WaitSemaphore {
-                semaphore: Rc::clone(&self.timeline_sp),
+                semaphore: Arc::clone(&self.timeline_sp),
                 wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
-                wait_value: last_signal_value,
+                wait_value: new_last_signal_value,
             });
 
-            last_signal_value += 1;
+            new_last_signal_value += 1;
             info.signal_semaphores.push(SignalSemaphore {
-                semaphore: Rc::clone(&self.timeline_sp),
-                signal_value: last_signal_value,
+                semaphore: Arc::clone(&self.timeline_sp),
+                signal_value: new_last_signal_value,
             });
         }
 
         self.submit_infos(packet.infos.as_slice(), &packet.fence)?;
-        self.timeline_sp.last_signal_value.set(last_signal_value);
+        *sp_last_signal_value = new_last_signal_value;
         Ok(())
     }
 
@@ -191,7 +193,7 @@ impl Queue {
             }
         };
 
-        sw_image.swapchain.curr_image.set(None);
+        *sw_image.swapchain.curr_image.lock().unwrap() = None;
         Ok(optimal)
     }
 
@@ -210,14 +212,14 @@ impl PartialEq for Queue {
 
 #[derive(Clone)]
 pub struct WaitSemaphore {
-    pub semaphore: Rc<Semaphore>,
+    pub semaphore: Arc<Semaphore>,
     pub wait_dst_mask: PipelineStageFlags,
     pub wait_value: u64,
 }
 
 #[derive(Clone)]
 pub struct SignalSemaphore {
-    pub semaphore: Rc<Semaphore>,
+    pub semaphore: Arc<Semaphore>,
     pub signal_value: u64,
 }
 
@@ -255,6 +257,23 @@ impl SubmitPacket {
     }
 
     pub fn wait(&self) -> Result<(), vk::Result> {
-        self.fence.wait()
+        self.fence.wait()?;
+
+        for info in &self.infos {
+            for cmd_list in &info.cmd_lists {
+                let mut cmd_list = cmd_list.lock().unwrap();
+                if cmd_list.one_time_exec {
+                    cmd_list.clear_resources();
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for SubmitPacket {
+    fn drop(&mut self) {
+        self.wait().unwrap();
     }
 }

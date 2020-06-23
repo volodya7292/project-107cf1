@@ -7,13 +7,8 @@ use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use specs::Builder;
 use std::path::Path;
-use vk_wrapper::render_pass::{AttachmentRef, ImageMod};
-use vk_wrapper::{
-    swapchain, AccessFlags, Attachment, Format, ImageLayout, LoadStore, PipelineStageFlags, Queue, SubmitInfo,
-};
 use vk_wrapper::{HostBuffer, PrimitiveTopology};
 use vk_wrapper::{ImageUsageFlags, Subpass};
-use vk_wrapper::{PipelineDepthStencil, PipelineRasterization, WaitSemaphore};
 
 fn main() {
     simple_logger::init().unwrap();
@@ -43,7 +38,14 @@ fn main() {
     let device = adapter.create_device().unwrap();
 
     let mut window_size = window.vulkan_drawable_size();
-    let mut renderer = renderer::new(&surface, window_size, true, &device, &mut resources).unwrap();
+
+    let renderer_settings = renderer::Settings {
+        vsync: true,
+        textures_gen_mipmaps: true,
+        textures_max_anisotropy: 1.0,
+    };
+    let mut renderer =
+        renderer::new(&surface, window_size, renderer_settings, &device, &mut resources).unwrap();
 
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
