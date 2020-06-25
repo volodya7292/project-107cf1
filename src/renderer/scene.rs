@@ -7,7 +7,7 @@ use specs::WorldExt;
 pub struct Entity(specs::Entity);
 
 pub struct Scene {
-    world: specs::World,
+    pub(crate) world: specs::World,
 }
 
 impl Scene {
@@ -19,6 +19,8 @@ impl Scene {
 pub fn new() -> Scene {
     let mut world = specs::World::new();
     world.register::<component::Transform>();
+    world.register::<component::VertexMeshRef>();
+    world.register::<component::Renderer>();
 
     Scene { world }
 }

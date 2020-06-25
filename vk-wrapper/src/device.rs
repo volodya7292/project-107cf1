@@ -15,12 +15,14 @@ use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::{hash_map, HashMap};
 use std::sync::{Arc, Mutex};
-use std::{cmp, ffi::CStr, marker::PhantomData, mem, ptr, slice};
+use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
     VmaError(vk_mem::Error),
     VkError(vk::Result),
+    ZeroBufferElementSize,
+    ZeroBufferSize,
     SwapchainError(String),
     SpirvError(spirv_cross::ErrorCode),
     InvalidShader(String),
@@ -113,19 +115,22 @@ impl Device {
         &self.queues[queue_type.0 as usize]
     }
 
-    fn create_buffer<T>(
+    fn create_buffer(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
+        elem_size: u64,
         size: u64,
         mem_usage: vk_mem::MemoryUsage,
     ) -> Result<(Arc<Buffer>, vk_mem::AllocationInfo), DeviceError> {
+        if elem_size == 0 {
+            return Err(DeviceError::ZeroBufferElementSize);
+        }
+        if size == 0 {
+            return Err(DeviceError::ZeroBufferSize);
+        }
+
         let mut elem_align = 1;
 
-        if usage.intersects(BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST)
-            && (elem_align % self.adapter.props.limits.optimal_buffer_copy_offset_alignment != 0)
-        {
-            elem_align *= self.adapter.props.limits.optimal_buffer_copy_offset_alignment;
-        }
         if usage.intersects(BufferUsageFlags::UNIFORM)
             && (elem_align % self.adapter.props.limits.min_uniform_buffer_offset_alignment != 0)
         {
@@ -137,7 +142,7 @@ impl Device {
             elem_align *= self.adapter.props.limits.min_storage_buffer_offset_alignment;
         }
 
-        let aligned_elem_size = utils::make_mul_of_u64(mem::size_of::<T>() as u64, elem_align as u64);
+        let aligned_elem_size = utils::make_mul_of_u64(elem_size, elem_align as u64);
         let bytesize = aligned_elem_size as u64 * size;
 
         let buffer_info = vk::BufferCreateInfo::builder()
@@ -164,7 +169,7 @@ impl Device {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
-                elem_size: mem::size_of::<T>() as u64,
+                elem_size,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
                 _bytesize: bytesize as u64,
@@ -178,10 +183,12 @@ impl Device {
         usage: BufferUsageFlags,
         size: u64,
     ) -> Result<HostBuffer<T>, DeviceError> {
-        let (buffer, alloc_info) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::CpuOnly)?;
-
-        let p_data = alloc_info.get_mapped_data();
-        if p_data == ptr::null_mut() {}
+        let (buffer, alloc_info) = self.create_buffer(
+            usage,
+            mem::size_of::<T>() as u64,
+            size,
+            vk_mem::MemoryUsage::CpuOnly,
+        )?;
 
         Ok(HostBuffer {
             _type_marker: PhantomData,
@@ -190,12 +197,13 @@ impl Device {
         })
     }
 
-    pub fn create_device_buffer<T>(
+    pub fn create_device_buffer(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
+        element_size: u64,
         size: u64,
     ) -> Result<Arc<DeviceBuffer>, DeviceError> {
-        let (buffer, _) = self.create_buffer::<T>(usage, size, vk_mem::MemoryUsage::GpuOnly)?;
+        let (buffer, _) = self.create_buffer(usage, element_size, size, vk_mem::MemoryUsage::GpuOnly)?;
         Ok(Arc::new(DeviceBuffer { buffer }))
     }
 

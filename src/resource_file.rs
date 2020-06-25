@@ -16,7 +16,7 @@ pub enum Error {
     Utf8Error(std::str::Utf8Error),
     InvalidHeader,
     EndOfHeader,
-    ResourceNotFound,
+    ResourceNotFound(String),
 }
 
 impl From<io::Error> for Error {
@@ -135,7 +135,7 @@ impl ResourceFile {
         for name in filename.split('/') {
             match entry.entries.get(name) {
                 Some(a) => entry = a,
-                _ => return Err(Error::ResourceNotFound),
+                _ => return Err(Error::ResourceNotFound(filename.to_owned())),
             }
         }
 

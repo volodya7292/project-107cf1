@@ -1,20 +1,26 @@
 pub(crate) mod component;
-mod material_pipeline;
+pub(crate) mod material_pipeline;
 mod scene;
 mod texture;
-mod vertex_mesh;
+#[macro_use]
+pub(crate) mod vertex_mesh;
 
 use crate::renderer::scene::Scene;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
+use specs::prelude::ParallelIterator;
+use specs::System;
+use specs::WorldExt;
+use std::mem;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
 use vk_wrapper as vkw;
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
     ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
-    PipelineSignature, PrimitiveTopology, Queue, QueueType, RenderPass, SubmitInfo, Subpass, FORMAT_SIZES,
+    PipelineSignature, PrimitiveTopology, Queue, QueueType, RenderPass, SubmitInfo, SubmitPacket, Subpass,
+    FORMAT_SIZES,
 };
 
 pub struct Renderer {
@@ -27,12 +33,13 @@ pub struct Renderer {
     scene: Scene,
     textures: Vec<Texture>,
     //submit_packet: Option<vkw::SubmitPacket>,
-    sig: Arc<PipelineSignature>,
-    pipe: Option<Arc<Pipeline>>,
-    rp: Option<Arc<RenderPass>>,
-    main_framebuffers: Vec<Arc<Framebuffer>>,
-    vb: Arc<DeviceBuffer>,
-    texture_load_cmd_list: Arc<Mutex<CmdList>>,
+    sig: Arc<vkw::PipelineSignature>,
+    pipe: Option<Arc<vkw::Pipeline>>,
+    rp: Option<Arc<vkw::RenderPass>>,
+    main_framebuffers: Vec<Arc<vkw::Framebuffer>>,
+    vb: Arc<vkw::DeviceBuffer>,
+    texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
+    texture_load_packet: vkw::SubmitPacket,
 }
 
 #[derive(Copy, Clone)]
@@ -48,7 +55,21 @@ pub struct Texture {
     format: vkw::Format,
 }
 
+/*struct RenderSystem;
+
+impl<'a> specs::System<'a> for RenderSystem {
+    type SystemData = (
+        specs::ReadStorage<'a, component::Transform>,
+        specs::ReadStorage<'a, component::Renderer>,
+    );
+
+    fn run(&mut self, (transform, renderer): Self::SystemData) {
+        for (trans, rend) in (&transform, &renderer).join() {}
+    }
+}
+*/
 impl Renderer {
+    /// Add texture to renderer
     pub fn add_texture(&mut self, res_ref: ResourceRef, format: vkw::Format) -> u16 {
         self.textures.push(Texture {
             res_ref,
@@ -58,8 +79,8 @@ impl Renderer {
         (self.textures.len() - 1) as u16
     }
 
-    fn load_texture(&mut self, index: u16) {
-        // Get resource reference
+    /// Texture must be loaded before use in a shader
+    pub fn load_texture(&mut self, index: u16) {
         if let Some(texture) = self.textures.get_mut(index as usize) {
             // Load resource
             let bytes = texture.res_ref.read().unwrap();
@@ -87,12 +108,52 @@ impl Renderer {
                     )
                     .unwrap(),
             );
+            let image = texture.image.as_ref().unwrap();
 
-            // Copy resource to image
-            let mut cl = self.texture_load_cmd_list.lock().unwrap();
-            cl.begin(true).unwrap();
+            let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
 
-            cl.end().unwrap();
+            // Record cmd list: copy resource to image
+            {
+                let mut cl = self.texture_load_cmd_list.lock().unwrap();
+                cl.begin(true).unwrap();
+                cl.barrier_image(
+                    vkw::PipelineStageFlags::TOP_OF_PIPE,
+                    vkw::PipelineStageFlags::TRANSFER,
+                    &[image.barrier_queue(
+                        vkw::AccessFlags::default(),
+                        vkw::AccessFlags::TRANSFER_WRITE,
+                        vkw::ImageLayout::UNDEFINED,
+                        vkw::ImageLayout::TRANSFER_DST,
+                        graphics_queue,
+                        graphics_queue,
+                    )],
+                );
+                cl.copy_host_buffer_to_image(&buffer, 0, &image, vkw::ImageLayout::TRANSFER_DST);
+                cl.barrier_image(
+                    vkw::PipelineStageFlags::TRANSFER,
+                    vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                    &[image.barrier_queue(
+                        vkw::AccessFlags::TRANSFER_WRITE,
+                        vkw::AccessFlags::default(),
+                        vkw::ImageLayout::TRANSFER_DST,
+                        vkw::ImageLayout::SHADER_READ,
+                        graphics_queue,
+                        graphics_queue,
+                    )],
+                );
+                cl.end().unwrap();
+            }
+
+            // Submit work
+            graphics_queue.submit(&mut self.texture_load_packet).unwrap();
+            self.texture_load_packet.wait().unwrap();
+        }
+    }
+
+    /// Unload unused texture to free GPU memory
+    pub fn unload_texture(&mut self, index: u16) {
+        if let Some(texture) = self.textures.get_mut(index as usize) {
+            texture.image = None;
         }
     }
 
@@ -113,6 +174,15 @@ impl Renderer {
     pub fn on_update(&self) {}
 
     fn on_render(&mut self, sw_image: &vkw::SwapchainImage) -> u64 {
+        self.scene
+            .world
+            .read_component::<component::Renderer>()
+            .as_slice()
+            .into_par_iter()
+            .for_each(|o| {
+                println!("obj");
+            });
+
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
         let cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
 
@@ -294,8 +364,9 @@ pub fn new(
     vbh[2] = nalgebra::Vector3::<f32>::new(0.5, 0.5, 0.0);
 
     let vb = device
-        .create_device_buffer::<nalgebra::Vector3<f32>>(
+        .create_device_buffer(
             BufferUsageFlags::VERTEX | BufferUsageFlags::TRANSFER_DST,
+            mem::size_of::<nalgebra::Vector3<f32>>() as u64,
             3,
         )
         .unwrap();
@@ -314,6 +385,11 @@ pub fn new(
     graphics_queue.submit(&mut submit).unwrap();
     submit.wait().unwrap();
 
+    let texture_load_cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
+    let texture_load_packet = device
+        .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&texture_load_cmd_list)])])
+        .unwrap();
+
     let mut renderer = Renderer {
         surface: Arc::clone(surface),
         swapchain: device.create_swapchain(surface, size, settings.vsync)?,
@@ -323,13 +399,14 @@ pub fn new(
         device: Arc::clone(device),
         scene: scene::new(),
         //submit_packet: None,
-        textures: vec![],
+        textures: Vec::with_capacity(65536),
         sig: basic_signature,
         pipe: None,
         rp: None,
         main_framebuffers: vec![],
         vb,
-        texture_load_cmd_list: graphics_queue.create_primary_cmd_list().unwrap(),
+        texture_load_cmd_list,
+        texture_load_packet,
     };
     renderer.create_main_framebuffers();
 

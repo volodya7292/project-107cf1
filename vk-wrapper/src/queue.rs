@@ -169,11 +169,9 @@ impl Queue {
 
         self.fence.reset()?;
         unsafe {
-            self.device_wrapper.0.queue_submit(
-                self.native,
-                slice::from_ref(&submit_info),
-                self.fence.native,
-            )?
+            self.device_wrapper
+                .0
+                .queue_submit(self.native, &[submit_info.build()], self.fence.native)?
         };
 
         let present_info = vk::PresentInfoKHR::builder()

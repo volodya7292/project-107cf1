@@ -1,14 +1,27 @@
+#[macro_use]
 mod renderer;
 mod resource_file;
 
+use crate::renderer::component;
+use crate::renderer::material_pipeline;
+use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::resource_file::ResourceFile;
+use nalgebra::Vector3;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
-use specs::Builder;
+use specs::{Builder, WorldExt};
 use std::path::Path;
+use vk_wrapper as vkw;
 use vk_wrapper::{HostBuffer, PrimitiveTopology};
 use vk_wrapper::{ImageUsageFlags, Subpass};
+
+#[derive(Default)]
+pub struct BasicVertex {
+    position: nalgebra::Vector3<f32>,
+}
+
+vertex_impl!(BasicVertex, position);
 
 fn main() {
     simple_logger::init().unwrap();
@@ -47,6 +60,42 @@ fn main() {
     let mut renderer =
         renderer::new(&surface, window_size, renderer_settings, &device, &mut resources).unwrap();
 
+    let index = renderer.add_texture(
+        resources.get("textures/test_texture.jpg").unwrap(),
+        vkw::Format::RGBA8_UNORM,
+    );
+    renderer.load_texture(index);
+
+    let triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
+    triangle_mesh.set_vertices(
+        &[
+            BasicVertex {
+                position: Vector3::new(0.0, -0.5, 0.0),
+            },
+            BasicVertex {
+                position: Vector3::new(-0.5, 0.5, 0.0),
+            },
+            BasicVertex {
+                position: Vector3::new(0.5, 0.5, 0.0),
+            },
+        ],
+        &[],
+    );
+
+    let entity = renderer
+        .scene()
+        .create_entity()
+        .with(component::Transform::default())
+        .with(component::VertexMeshRef::new(triangle_mesh.get_raw()))
+        .with(component::Renderer::new(&device, material_pipeline::new(), false))
+        .build();
+
+    {
+        let mut comps = renderer.scene().world.write_component::<component::Transform>();
+        let mut trans = comps.get_mut(entity).unwrap();
+        *trans = component::Transform::default();
+    }
+
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 
     //adapters.iter_mut()
@@ -66,17 +115,6 @@ fn main() {
     //     println!("{}", a);
     // }
     //println!("ITE {:?}", &buf[0..5]);
-
-    let mut scene = renderer.scene();
-
-    scene
-        .create_entity()
-        .with(renderer::component::Transform::new())
-        .build();
-    scene
-        .create_entity()
-        .with(renderer::component::Transform::new())
-        .build();
 
     let mut running = true;
     while running {

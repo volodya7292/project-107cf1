@@ -5,7 +5,6 @@ use crate::{
     Pipeline, PipelineInput, PipelineStageFlags, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
-use std::slice;
 use std::sync::Arc;
 
 pub struct CmdList {
@@ -172,14 +171,14 @@ impl CmdList {
             self.device_wrapper.0.cmd_set_viewport(
                 self.native,
                 0,
-                slice::from_ref(&vk::Viewport {
+                &[vk::Viewport {
                     x: 0f32,
                     y: size.1 as f32 - 1f32,
                     width: size.0 as f32,
                     height: -(size.1 as f32),
                     min_depth: 0f32,
                     max_depth: 1f32,
-                }),
+                }],
             )
         };
     }
@@ -189,13 +188,13 @@ impl CmdList {
             self.device_wrapper.0.cmd_set_scissor(
                 self.native,
                 0,
-                slice::from_ref(&vk::Rect2D {
+                &[vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: vk::Extent2D {
                         width: size.0,
                         height: size.1,
                     },
-                }),
+                }],
             )
         };
     }
@@ -219,7 +218,7 @@ impl CmdList {
                 last_pipeline.bind_point,
                 last_pipeline.layout,
                 0,
-                slice::from_ref(&pipeline_input.native),
+                &[pipeline_input.native],
                 &[],
             )
         };
@@ -295,7 +294,7 @@ impl CmdList {
                 self.native,
                 src_buffer.buffer.native,
                 dst_buffer.buffer.native,
-                slice::from_ref(&region),
+                &[region],
             )
         };
         self.buffers
@@ -333,7 +332,7 @@ impl CmdList {
                 src_buffer.buffer.native,
                 dst_image.native,
                 dst_image_layout.0,
-                slice::from_ref(&region),
+                &[region],
             )
         };
 

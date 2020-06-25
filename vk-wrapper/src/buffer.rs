@@ -14,6 +14,15 @@ pub(crate) struct Buffer {
     pub(crate) _bytesize: u64,
 }
 
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        self.device
+            .allocator
+            .destroy_buffer(self.native, &self.allocation)
+            .unwrap();
+    }
+}
+
 #[derive(Clone)]
 pub struct RawHostBuffer(Arc<Buffer>);
 
@@ -111,7 +120,7 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn read(&self, first_element: u64, elements: &mut [T]) {
-        if first_element + elements.len() as u64 >= self.buffer.size {
+        if first_element + elements.len() as u64 > self.buffer.size {
             panic!(
                 "VkBuffer: index {} out of range for slice of length {}",
                 first_element + elements.len() as u64,
@@ -143,7 +152,7 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn write(&mut self, first_element: u64, elements: &[T]) {
-        if first_element + elements.len() as u64 >= self.buffer.size {
+        if first_element + elements.len() as u64 > self.buffer.size {
             panic!(
                 "VkBuffer: index {} out of range for slice of length {}",
                 first_element + elements.len() as u64,
@@ -179,28 +188,8 @@ unsafe impl<T> Send for HostBuffer<T> {}
 
 unsafe impl<T> Sync for HostBuffer<T> {}
 
-impl<T> Drop for HostBuffer<T> {
-    fn drop(&mut self) {
-        self.buffer
-            .device
-            .allocator
-            .destroy_buffer(self.buffer.native, &self.buffer.allocation)
-            .unwrap();
-    }
-}
-
 pub struct DeviceBuffer {
     pub(crate) buffer: Arc<Buffer>,
-}
-
-impl Drop for DeviceBuffer {
-    fn drop(&mut self) {
-        self.buffer
-            .device
-            .allocator
-            .destroy_buffer(self.buffer.native, &self.buffer.allocation)
-            .unwrap();
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
