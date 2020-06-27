@@ -715,6 +715,7 @@ dependencies = [
  "glob",
  "image",
  "nalgebra",
+ "num_cpus",
  "rayon",
  "res-encoder",
  "sdl2",

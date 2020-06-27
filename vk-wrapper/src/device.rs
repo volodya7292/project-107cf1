@@ -1,5 +1,3 @@
-use crate::PipelineSignature;
-use crate::Subpass;
 use crate::SwapchainWrapper;
 use crate::FORMAT_SIZES;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
@@ -9,6 +7,8 @@ use crate::{
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
+use crate::{PipelineSignature, ShaderBindingMod};
+use crate::{QueryPool, Subpass};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
@@ -383,6 +383,17 @@ impl Device {
         )
     }
 
+    pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
+        let create_info = vk::QueryPoolCreateInfo::builder()
+            .query_type(vk::QueryType::OCCLUSION)
+            .query_count(query_count);
+
+        Ok(Arc::new(QueryPool {
+            device: Arc::clone(self),
+            native: unsafe { self.wrapper.0.create_query_pool(&create_info, None)? },
+        }))
+    }
+
     pub fn create_swapchain(
         self: &Arc<Self>,
         surface: &Arc<Surface>,
@@ -536,6 +547,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         input_formats: &[(&str, Format)],
+        binding_types: &[(&str, ShaderBindingMod)],
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
@@ -551,6 +563,8 @@ impl Device {
             .first()
             .ok_or_else(|| DeviceError::InvalidShader("Entry point not found!".to_string()))?;
         let resources = ast.get_shader_resources()?;
+
+        let binding_types_map: HashMap<&str, ShaderBindingMod> = binding_types.iter().cloned().collect();
 
         macro_rules! binding_image_array_size {
             ($res: ident, $img_type: ident, $desc_type: ident) => {{
@@ -573,10 +587,20 @@ impl Device {
         }
 
         macro_rules! binding_buffer_array_size {
-            ($res: ident, $desc_type: ident) => {{
+            ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
                 let var_type = ast.get_type($res.type_id)?;
+                let shader_binding_type = binding_types_map
+                    .get($res.name.as_str())
+                    .or_else(|| Some(&ShaderBindingMod::DEFAULT))
+                    .unwrap();
                 ShaderBinding {
-                    binding_type: vk::DescriptorType::$desc_type,
+                    binding_type: if shader_binding_type == &ShaderBindingMod::DEFAULT
+                        || shader_binding_type == &ShaderBindingMod::DYNAMIC_UPDATE
+                    {
+                        vk::DescriptorType::$desc_type0
+                    } else {
+                        vk::DescriptorType::$desc_type1
+                    },
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::Struct {
@@ -636,11 +660,11 @@ impl Device {
             bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.uniform_buffers {
-            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER);
+            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER, UNIFORM_BUFFER_DYNAMIC);
             bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.storage_buffers {
-            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER);
+            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER, STORAGE_BUFFER_DYNAMIC);
             bindings.insert(res.name.clone(), binding);
         }
 

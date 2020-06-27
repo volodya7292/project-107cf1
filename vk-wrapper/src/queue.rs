@@ -46,6 +46,7 @@ impl Queue {
             pipeline_inputs: vec![],
             buffers: vec![],
             images: vec![],
+            query_pools: Default::default(),
         })))
     }
 

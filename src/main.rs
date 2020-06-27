@@ -83,18 +83,17 @@ fn main() {
     );
 
     let entity = renderer
-        .scene()
-        .create_entity()
+        .add_entity()
         .with(component::Transform::default())
         .with(component::VertexMeshRef::new(triangle_mesh.get_raw()))
         .with(component::Renderer::new(&device, material_pipeline::new(), false))
         .build();
 
-    {
+    /*{
         let mut comps = renderer.scene().world.write_component::<component::Transform>();
         let mut trans = comps.get_mut(entity).unwrap();
         *trans = component::Transform::default();
-    }
+    }*/
 
     //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
 

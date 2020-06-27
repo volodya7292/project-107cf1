@@ -182,17 +182,12 @@ impl Instance {
                 }
 
                 require_feature!(sampler_anisotropy);
-                require_feature!(shader_uniform_buffer_array_dynamic_indexing);
                 require_feature!(shader_sampled_image_array_dynamic_indexing);
                 require_feature!(shader_storage_buffer_array_dynamic_indexing);
                 require_feature!(shader_storage_image_array_dynamic_indexing);
 
                 require_feature12!(descriptor_indexing);
-                require_feature12!(shader_uniform_buffer_array_non_uniform_indexing);
                 require_feature12!(shader_sampled_image_array_non_uniform_indexing);
-                require_feature12!(shader_storage_buffer_array_non_uniform_indexing);
-                require_feature12!(shader_storage_image_array_non_uniform_indexing);
-                require_feature12!(descriptor_binding_uniform_buffer_update_after_bind);
                 require_feature12!(descriptor_binding_sampled_image_update_after_bind);
                 require_feature12!(descriptor_binding_storage_image_update_after_bind);
                 require_feature12!(descriptor_binding_storage_buffer_update_after_bind);

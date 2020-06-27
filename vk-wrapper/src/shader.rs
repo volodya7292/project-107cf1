@@ -19,7 +19,9 @@ impl ShaderStage {
 pub struct ShaderBindingMod(u32);
 
 impl ShaderBindingMod {
-    pub const DYNAMIC_UPDATE: Self = Self(0);
+    pub const DEFAULT: Self = Self(0);
+    pub const DYNAMIC_OFFSET: Self = Self(1);
+    pub const DYNAMIC_UPDATE: Self = Self(2);
 }
 
 pub(crate) struct ShaderBinding {

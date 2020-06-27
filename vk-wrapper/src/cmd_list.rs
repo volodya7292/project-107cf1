@@ -2,9 +2,10 @@ use crate::buffer::Buffer;
 use crate::device::DeviceWrapper;
 use crate::{
     BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
-    Pipeline, PipelineInput, PipelineStageFlags, RenderPass,
+    Pipeline, PipelineInput, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct CmdList {
@@ -19,6 +20,7 @@ pub struct CmdList {
     pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
     pub(crate) buffers: Vec<Arc<Buffer>>,
     pub(crate) images: Vec<Arc<Image>>,
+    pub(crate) query_pools: Vec<Arc<QueryPool>>,
 }
 
 impl CmdList {
@@ -30,6 +32,7 @@ impl CmdList {
         self.pipeline_inputs.clear();
         self.buffers.clear();
         self.images.clear();
+        self.query_pools.clear();
     }
 
     pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
@@ -55,6 +58,7 @@ impl CmdList {
 
     pub fn begin_secondary_graphics(
         &mut self,
+        one_time_execution: bool,
         render_pass: &Arc<RenderPass>,
         subpass: u32,
         framebuffer: Option<&Arc<Framebuffer>>,
@@ -64,9 +68,13 @@ impl CmdList {
             .subpass(subpass)
             .framebuffer(framebuffer.map_or(vk::Framebuffer::default(), |fb| fb.native));
 
-        let begin_info = vk::CommandBufferBeginInfo::builder()
+        let mut begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
-            .inheritance_info(&inheritance_info);
+            .inheritance_info(&inheritance_info)
+            .build();
+        if one_time_execution {
+            begin_info.flags |= vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT;
+        }
 
         unsafe {
             self.device_wrapper
@@ -164,6 +172,26 @@ impl CmdList {
 
     pub fn end_render_pass(&mut self) {
         unsafe { self.device_wrapper.0.cmd_end_render_pass(self.native) };
+    }
+
+    pub fn begin_query(&mut self, query_pool: &Arc<QueryPool>, query: u32) {
+        unsafe {
+            self.device_wrapper.0.cmd_begin_query(
+                self.native,
+                query_pool.native,
+                query,
+                vk::QueryControlFlags::default(),
+            );
+        };
+        self.query_pools.push(Arc::clone(query_pool));
+    }
+
+    pub fn end_query(&mut self, query: u32) {
+        unsafe {
+            self.device_wrapper
+                .0
+                .cmd_end_query(self.native, self.query_pools.last().unwrap().native, query)
+        };
     }
 
     pub fn set_viewport(&mut self, size: (u32, u32)) {

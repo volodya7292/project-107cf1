@@ -15,9 +15,9 @@ pub struct Transform {
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            position: Vector3::new(0_f32, 0_f32, 0_f32),
-            rotation: Vector3::new(0_f32, 0_f32, 0_f32),
-            scale: Vector3::new(1_f32, 1_f32, 1_f32),
+            position: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Vector3::new(0.0, 0.0, 0.0),
+            scale: Vector3::new(1.0, 1.0, 1.0),
             changed: true,
         }
     }
@@ -47,12 +47,12 @@ impl specs::Component for VertexMeshRef {
 
 pub struct Renderer {
     mat_pipeline: Arc<MaterialPipeline>,
-
-    uniform_buffer: Arc<vkw::DeviceBuffer>,
+    uniform_buffer_offset: u64,
 
     //buffers: HashMap<u32, vkw::RawHostBuffer>,
     // binding id -> renderer impl-specific res index
     translucent: bool,
+    visible_on_camera: bool,
     changed: bool,
 }
 
@@ -64,14 +64,9 @@ impl Renderer {
     ) -> Renderer {
         Self {
             mat_pipeline,
-            uniform_buffer: device
-                .create_device_buffer(
-                    vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
-                    0,
-                    1, // TODO
-                )
-                .unwrap(),
+            uniform_buffer_offset: 0,
             translucent,
+            visible_on_camera: false,
             changed: true,
         }
     }

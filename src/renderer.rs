@@ -1,15 +1,16 @@
 pub(crate) mod component;
 pub(crate) mod material_pipeline;
-mod scene;
 mod texture;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
-use crate::renderer::scene::Scene;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
+use specs::storage::Entries;
+use specs::world::Entities;
+use specs::Join;
 use specs::System;
 use specs::WorldExt;
 use std::mem;
@@ -19,18 +20,18 @@ use vk_wrapper as vkw;
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
     ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
-    PipelineSignature, PrimitiveTopology, Queue, QueueType, RenderPass, SubmitInfo, SubmitPacket, Subpass,
-    FORMAT_SIZES,
+    PipelineSignature, PrimitiveTopology, QueryPool, Queue, QueueType, RenderPass, SubmitInfo, SubmitPacket,
+    Subpass, FORMAT_SIZES,
 };
 
 pub struct Renderer {
+    world: specs::World,
     surface: Arc<vkw::Surface>,
-    swapchain: Arc<vkw::Swapchain>,
+    swapchain: Option<Arc<vkw::Swapchain>>,
     surface_changed: bool,
     surface_size: (u32, u32),
     settings: Settings,
     device: Arc<vkw::Device>,
-    scene: Scene,
     textures: Vec<Texture>,
     //submit_packet: Option<vkw::SubmitPacket>,
     sig: Arc<vkw::PipelineSignature>,
@@ -40,6 +41,10 @@ pub struct Renderer {
     vb: Arc<vkw::DeviceBuffer>,
     texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
     texture_load_packet: vkw::SubmitPacket,
+    quary_pool: Arc<QueryPool>,
+    secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
+    depth_render_pass: Arc<RenderPass>,
+    depth_framebuffer: Option<Arc<Framebuffer>>,
 }
 
 #[derive(Copy, Clone)]
@@ -69,6 +74,10 @@ impl<'a> specs::System<'a> for RenderSystem {
 }
 */
 impl Renderer {
+    pub fn add_entity(&mut self) -> specs::EntityBuilder {
+        self.world.create_entity()
+    }
+
     /// Add texture to renderer
     pub fn add_texture(&mut self, res_ref: ResourceRef, format: vkw::Format) -> u16 {
         self.textures.push(Texture {
@@ -157,10 +166,6 @@ impl Renderer {
         }
     }
 
-    pub fn scene(&mut self) -> &mut Scene {
-        &mut self.scene
-    }
-
     pub fn set_settings(&mut self, settings: Settings) {
         // TODO
         self.settings = settings;
@@ -169,21 +174,57 @@ impl Renderer {
     pub fn on_resize(&mut self, new_size: (u32, u32)) {
         self.surface_size = new_size;
         self.surface_changed = true;
+
+        self.depth_framebuffer = Some(self.depth_render_pass.create_framebuffer(new_size, &[]).unwrap());
     }
 
-    pub fn on_update(&self) {}
+    pub fn on_update(&mut self) {
+        self.world.maintain();
+    }
 
     fn on_render(&mut self, sw_image: &vkw::SwapchainImage) -> u64 {
-        self.scene
-            .world
-            .read_component::<component::Renderer>()
-            .as_slice()
-            .into_par_iter()
-            .for_each(|o| {
-                println!("obj");
+        let objects = self.world.read_component::<component::Renderer>();
+        let objects: Vec<&component::Renderer> = objects.join().collect();
+        let object_count = objects.len();
+        let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
+
+        self.secondary_cmd_lists
+            .par_iter()
+            .enumerate()
+            .for_each(|(i, cmd_list)| {
+                let mut cmd_list = cmd_list.lock().unwrap();
+
+                cmd_list
+                    .begin_secondary_graphics(
+                        true,
+                        &self.depth_render_pass,
+                        0,
+                        Some(self.depth_framebuffer.as_ref().unwrap()),
+                    )
+                    .unwrap();
+
+                for j in 0..draw_count_step {
+                    let entity_index = i * draw_count_step + j;
+                    if entity_index >= object_count {
+                        break;
+                    }
+
+                    let obj = objects[entity_index];
+
+                    cmd_list.begin_query(&self.quary_pool, entity_index as u32);
+
+                    
+
+                    cmd_list.end_query(entity_index as u32);
+                }
+
+                cmd_list.end().unwrap();
             });
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+
+        // -------------------------------------------------------------------------------------
+
         let cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
 
         {
@@ -221,7 +262,7 @@ impl Renderer {
             .device
             .create_submit_packet(&[vkw::SubmitInfo::new(
                 &[vkw::WaitSemaphore {
-                    semaphore: self.swapchain.get_semaphore(),
+                    semaphore: self.swapchain.as_ref().unwrap().get_semaphore(),
                     wait_dst_mask: vkw::PipelineStageFlags::TOP_OF_PIPE,
                     wait_value: 0,
                 }],
@@ -241,14 +282,16 @@ impl Renderer {
 
         if adapter.is_surface_valid(surface).unwrap() {
             if self.surface_changed {
-                self.swapchain = device
-                    .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
-                    .unwrap();
+                self.swapchain = Some(
+                    device
+                        .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
+                        .unwrap(),
+                );
                 self.create_main_framebuffers();
                 self.surface_changed = false;
             }
 
-            let swapchain = self.swapchain.clone();
+            let swapchain = self.swapchain.clone().unwrap();
             let acquire_result = swapchain.acquire_image();
 
             if let Ok((sw_image, optimal)) = acquire_result {
@@ -282,7 +325,7 @@ impl Renderer {
     fn create_main_framebuffers(&mut self) {
         self.main_framebuffers.clear();
 
-        let images = self.swapchain.get_images();
+        let images = self.swapchain.as_ref().unwrap().get_images();
 
         self.rp = Some(
             self.device
@@ -340,15 +383,22 @@ pub fn new(
     device: &Arc<vkw::Device>,
     resources: &Arc<ResourceFile>,
 ) -> Result<Renderer, vkw::DeviceError> {
+    let mut world = specs::World::new();
+    world.register::<component::Transform>();
+    world.register::<component::VertexMeshRef>();
+    world.register::<component::Renderer>();
+
     let basic_vertex = device
         .create_shader(
             &resources.get("shaders/basic.vert.spv").unwrap().read().unwrap(),
             &[("inPosition", Format::RGB32_FLOAT)],
+            &[],
         )
         .unwrap();
     let basic_pixel = device
         .create_shader(
             &resources.get("shaders/basic.frag.spv").unwrap().read().unwrap(),
+            &[],
             &[],
         )
         .unwrap();
@@ -390,14 +440,36 @@ pub fn new(
         .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&texture_load_cmd_list)])])
         .unwrap();
 
+    let mut secondary_cmd_lists = vec![];
+    for _ in 0..num_cpus::get() {
+        secondary_cmd_lists.push(graphics_queue.create_secondary_cmd_list()?);
+    }
+
+    let depth_render_pass = device.create_render_pass(
+        &[vkw::Attachment {
+            format: vkw::Format::D32_FLOAT,
+            init_layout: vkw::ImageLayout::UNDEFINED,
+            final_layout: vkw::ImageLayout::DEPTH_READ,
+            load_store: LoadStore::InitClearFinalSave,
+        }],
+        &[vkw::Subpass {
+            color: vec![],
+            depth: Some(AttachmentRef {
+                index: 0,
+                layout: vkw::ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+            }),
+        }],
+        &[],
+    )?;
+
     let mut renderer = Renderer {
+        world,
         surface: Arc::clone(surface),
-        swapchain: device.create_swapchain(surface, size, settings.vsync)?,
+        swapchain: None,
         surface_changed: false,
         surface_size: size,
         settings,
         device: Arc::clone(device),
-        scene: scene::new(),
         //submit_packet: None,
         textures: Vec::with_capacity(65536),
         sig: basic_signature,
@@ -407,8 +479,12 @@ pub fn new(
         vb,
         texture_load_cmd_list,
         texture_load_packet,
+        quary_pool: device.create_query_pool(65536)?,
+        secondary_cmd_lists,
+        depth_render_pass,
+        depth_framebuffer: None,
     };
-    renderer.create_main_framebuffers();
+    renderer.on_resize(size);
 
     Ok(renderer)
 }
