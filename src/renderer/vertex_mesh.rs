@@ -84,10 +84,12 @@ pub struct RawVertexMesh {
     indexed: bool,
     staging_buffer: vkw::HostBuffer<u8>,
     buffer: Arc<vkw::DeviceBuffer>,
-    vertex_count: u32,
-    aabb: (na::Vector3<f32>, na::Vector3<f32>),
     vertex_size: u32,
+    vertex_count: u32,
+    index_count: u32,
+    aabb: (na::Vector3<f32>, na::Vector3<f32>),
     binding_buffers: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
+    indices_offset: u64,
     changed: bool,
 }
 
@@ -186,10 +188,12 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
             indexed,
             staging_buffer,
             buffer,
-            vertex_count: vertices.len() as u32,
-            aabb,
             vertex_size: mem::size_of::<VertexT>() as u32,
+            vertex_count: vertices.len() as u32,
+            index_count: indices.len() as u32,
+            aabb,
             binding_buffers,
+            indices_offset: indices_offset as u64,
             changed: false,
         })));
     }
@@ -236,29 +240,20 @@ impl VertexMeshCreate for vkw::Device {
 }
 
 pub trait VertexMeshCmdList {
-    fn bind_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>);
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<Mutex<RawVertexMesh>>);
 }
 
 impl VertexMeshCmdList for vkw::CmdList {
-    fn bind_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
-        /*
-
-        std::vector<uint64> binding_offsets = Mesh->binding_offsets;
-        if (BindingCount == UINT32_MAX)
-            BindingCount = binding_offsets.size() - FirstBinding;
-
-        if (BindingCount == 0 || BindingCount > binding_offsets.size())
-            Utils::LogError("RECmdList::BindVertexMesh "s + Mesh->name + " FirstBinding: "s + String(FirstBinding)
-                            + " BindingCount: "s + String(BindingCount));
-
-        BindVertexBuffer(Mesh->buffer, FirstBinding,
-                        std::vector(binding_offsets.begin() + FirstBinding, binding_offsets.begin() + FirstBinding + BindingCount));
-
-        if (Mesh->Indexed)
-            BindIndexBuffer(Mesh->buffer, Mesh->indices_offset);
-
-        */
-
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<Mutex<RawVertexMesh>>) {
+        let vertex_mesh = vertex_mesh.lock().unwrap();
+        
         self.bind_vertex_buffers(0, &vertex_mesh.binding_buffers);
+
+        if vertex_mesh.indexed {
+            self.bind_index_buffer(&vertex_mesh.buffer, vertex_mesh.indices_offset);
+            self.draw_indexed(vertex_mesh.index_count, 0, 0);
+        } else {
+            self.draw(vertex_mesh.vertex_count, 0);
+        }
     }
 }

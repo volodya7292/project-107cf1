@@ -62,15 +62,17 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
 
                 fs::create_dir_all(dst_path.parent().unwrap()).unwrap();
 
+                let entry_str = entry.to_str().unwrap();
+
                 let mut cmd = &mut Command::new("glslangValidator");
                 cmd = cmd
                     .arg("--spirv-val")
                     .arg("--target-env")
                     .arg("vulkan1.2")
                     .arg("-o")
-                    .arg(dst_path_s)
+                    .arg(dst_path_s.clone())
                     .arg("-V")
-                    .arg(entry.to_str().unwrap());
+                    .arg(entry_str);
 
                 if cfg!(debug_assertions) {
                     cmd = cmd.arg("-g").arg("-Od");
@@ -79,7 +81,28 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                 let output = cmd.output().unwrap();
                 println!("{}", String::from_utf8_lossy(&output.stdout));
 
+                if !output.status.success() {
+                    panic!("Failed to compile shader");
+                }
+
                 if !cfg!(debug_assertions) {
+                    let mut cmd = &mut Command::new("spirv-opt");
+                    cmd = cmd
+                        .arg(dst_path_s.clone())
+                        .arg("--target-env")
+                        .arg("vulkan1.2")
+                        .arg("--upgrade-memory-model")
+                        .arg("-o")
+                        .arg(entry_str)
+                        .arg("-O")
+                        .arg(entry_str);
+
+                    if cfg!(debug_assertions) {
+                        cmd = cmd.arg("-g").arg("-Od");
+                    }
+
+                    let output = cmd.output().unwrap();
+                    println!("{}", String::from_utf8_lossy(&output.stdout));
                     // TODO: optimize with spirv-opt
                 }
             }
@@ -102,6 +125,6 @@ fn build_resources(src_dir: &Path, dst_file: &Path) {
 fn main() {
     println!("cargo:rerun-if-changed=work_dir/resources");
 
-    compile_shaders(Path::new("src/shaders"), Path::new("res/shaders"));
+    compile_shaders(Path::new("src/renderer/shaders"), Path::new("res/shaders"));
     build_resources(Path::new("res"), Path::new("work_dir/resources"));
 }

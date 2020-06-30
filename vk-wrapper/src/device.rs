@@ -569,8 +569,13 @@ impl Device {
         macro_rules! binding_image_array_size {
             ($res: ident, $img_type: ident, $desc_type: ident) => {{
                 let var_type = ast.get_type($res.type_id)?;
+                let shader_binding_mod = binding_types_map
+                    .get($res.name.as_str())
+                    .or_else(|| Some(&ShaderBindingMod::DEFAULT))
+                    .unwrap();
                 ShaderBinding {
                     binding_type: vk::DescriptorType::$desc_type,
+                    binding_mod: *shader_binding_mod,
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::$img_type { array } => {
@@ -589,18 +594,19 @@ impl Device {
         macro_rules! binding_buffer_array_size {
             ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
                 let var_type = ast.get_type($res.type_id)?;
-                let shader_binding_type = binding_types_map
+                let shader_binding_mod = binding_types_map
                     .get($res.name.as_str())
                     .or_else(|| Some(&ShaderBindingMod::DEFAULT))
                     .unwrap();
                 ShaderBinding {
-                    binding_type: if shader_binding_type == &ShaderBindingMod::DEFAULT
-                        || shader_binding_type == &ShaderBindingMod::DYNAMIC_UPDATE
+                    binding_type: if shader_binding_mod == &ShaderBindingMod::DEFAULT
+                        || shader_binding_mod == &ShaderBindingMod::DYNAMIC_UPDATE
                     {
                         vk::DescriptorType::$desc_type0
                     } else {
                         vk::DescriptorType::$desc_type1
                     },
+                    binding_mod: *shader_binding_mod,
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::Struct {
@@ -874,7 +880,11 @@ impl Device {
                 binding_flags.push(if binding.count > 1 {
                     vk::DescriptorBindingFlags::PARTIALLY_BOUND
                 } else {
-                    vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                    if binding.binding_mod == ShaderBindingMod::DYNAMIC_UPDATE {
+                        vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                    } else {
+                        vk::DescriptorBindingFlags::default()
+                    }
                 });
             }
 

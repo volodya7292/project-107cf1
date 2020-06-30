@@ -4,19 +4,15 @@ mod texture;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
+use crate::renderer::vertex_mesh::VertexMeshCmdList;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
-use specs::storage::Storage;
-use specs::storage::StorageEntry;
-use specs::world::Entities;
-use specs::System;
 use specs::WorldExt;
 use specs::{Builder, Join};
 use std::mem;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
@@ -27,25 +23,34 @@ use vk_wrapper::{
 
 pub struct Renderer {
     world: specs::World,
+
     surface: Arc<vkw::Surface>,
     swapchain: Option<Arc<vkw::Swapchain>>,
     surface_changed: bool,
     surface_size: (u32, u32),
     settings: Settings,
     device: Arc<vkw::Device>,
+
     textures: Vec<Texture>,
+    texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
+    texture_load_packet: vkw::SubmitPacket,
+
     //submit_packet: Option<vkw::SubmitPacket>,
     sig: Arc<vkw::PipelineSignature>,
     pipe: Option<Arc<vkw::Pipeline>>,
     rp: Option<Arc<vkw::RenderPass>>,
-    main_framebuffers: Vec<Arc<vkw::Framebuffer>>,
     vb: Arc<vkw::DeviceBuffer>,
-    texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
-    texture_load_packet: vkw::SubmitPacket,
-    quary_pool: Arc<QueryPool>,
+
+    main_framebuffers: Vec<Arc<vkw::Framebuffer>>,
+
+    query_pool: Arc<QueryPool>,
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
+
     depth_render_pass: Arc<RenderPass>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
+    depth_pipeline_r: Arc<Pipeline>,
+    depth_pipeline_rw: Arc<Pipeline>,
+
     active_camera: specs::Entity,
 }
 
@@ -206,16 +211,15 @@ impl Renderer {
             .par_iter()
             .enumerate()
             .for_each(|(i, cmd_list)| {
-                let mut cmd_list = cmd_list.lock().unwrap();
+                let mut cl = cmd_list.lock().unwrap();
 
-                cmd_list
-                    .begin_secondary_graphics(
-                        true,
-                        &self.depth_render_pass,
-                        0,
-                        Some(self.depth_framebuffer.as_ref().unwrap()),
-                    )
-                    .unwrap();
+                cl.begin_secondary_graphics(
+                    true,
+                    &self.depth_render_pass,
+                    0,
+                    Some(self.depth_framebuffer.as_ref().unwrap()),
+                )
+                .unwrap();
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -225,20 +229,26 @@ impl Renderer {
 
                     let (transform, renderer, mesh_ref) = objects[entity_index];
 
-                    let vertex_mesh = mesh_ref.vertex_mesh().lock().unwrap();
-                    let aabb = vertex_mesh.aabb();
+                    let vertex_mesh = mesh_ref.vertex_mesh();
+                    let aabb = {
+                        let vertex_mesh = vertex_mesh.lock().unwrap();
+                        vertex_mesh.aabb().clone()
+                    };
 
                     let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position();
                     let radius = ((aabb.1 - aabb.0).component_mul(transform.scale()) * 0.5).magnitude();
 
-                    cmd_list.begin_query(&self.quary_pool, entity_index as u32);
+                    cl.begin_query(&self.query_pool, entity_index as u32);
 
-                    if active_camera.is_sphere_visible(center_position, radius) {}
+                    if active_camera.is_sphere_visible(center_position, radius) {
+                        //cl.bind_pipeline(pipeline);
+                        //cl.bind_and_draw_vertex_mesh(&vertex_mesh);
+                    }
 
-                    cmd_list.end_query(entity_index as u32);
+                    cl.end_query(entity_index as u32);
                 }
 
-                cmd_list.end().unwrap();
+                cl.end().unwrap();
             });
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
@@ -488,6 +498,32 @@ pub fn new(
         }],
         &[],
     )?;
+    let depth_vertex = device.create_shader(
+        &resources.get("shaders/depth.vert.spv").unwrap().read().unwrap(),
+        &[("inPosition", vkw::Format::RGB32_FLOAT)],
+        &[],
+    )?;
+    let depth_signature = device.create_pipeline_signature(&[depth_vertex])?;
+    let depth_pipeline_r = device.create_graphics_pipeline(
+        &depth_render_pass,
+        0,
+        vkw::PrimitiveTopology::TRIANGLE_LIST,
+        vkw::PipelineDepthStencil::new()
+            .depth_test(true)
+            .depth_write(false),
+        vkw::PipelineRasterization::new().cull_back_faces(true),
+        &depth_signature,
+    )?;
+    let depth_pipeline_rw = device.create_graphics_pipeline(
+        &depth_render_pass,
+        0,
+        vkw::PrimitiveTopology::TRIANGLE_LIST,
+        vkw::PipelineDepthStencil::new()
+            .depth_test(true)
+            .depth_write(true),
+        vkw::PipelineRasterization::new().cull_back_faces(true),
+        &depth_signature,
+    )?;
 
     let mut renderer = Renderer {
         world,
@@ -499,17 +535,19 @@ pub fn new(
         device: Arc::clone(device),
         //submit_packet: None,
         textures: Vec::with_capacity(65536),
+        texture_load_cmd_list,
+        texture_load_packet,
         sig: basic_signature,
         pipe: None,
         rp: None,
-        main_framebuffers: vec![],
         vb,
-        texture_load_cmd_list,
-        texture_load_packet,
-        quary_pool: device.create_query_pool(65536)?,
+        main_framebuffers: vec![],
+        query_pool: device.create_query_pool(65536)?,
         secondary_cmd_lists,
         depth_render_pass,
         depth_framebuffer: None,
+        depth_pipeline_r,
+        depth_pipeline_rw,
         active_camera,
     };
     renderer.on_resize(size);
