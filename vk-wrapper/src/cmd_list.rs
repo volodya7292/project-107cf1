@@ -254,9 +254,9 @@ impl CmdList {
     }
 
     /// buffers (max: 16): [buffer, offset]
-    pub fn bind_vertex_buffer(&mut self, first_binding: u32, buffers: &[(Arc<DeviceBuffer>, u64)]) {
+    pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(Arc<DeviceBuffer>, u64)]) {
         let mut native_buffers = [vk::Buffer::default(); 16];
-        let mut offsets = [0 as u64; 16];
+        let mut offsets = [0u64; 16];
 
         self.buffers.reserve(buffers.len());
 

@@ -4,12 +4,13 @@ mod resource_file;
 
 use crate::renderer::component;
 use crate::renderer::material_pipeline;
-use crate::renderer::vertex_mesh::VertexMeshCreate;
+use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
 use crate::resource_file::ResourceFile;
 use nalgebra::Vector3;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
+use specs::prelude::*;
 use specs::{Builder, WorldExt};
 use std::path::Path;
 use vk_wrapper as vkw;
@@ -66,7 +67,7 @@ fn main() {
     );
     renderer.load_texture(index);
 
-    let triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
+    let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(
         &[
             BasicVertex {
@@ -85,7 +86,9 @@ fn main() {
     let entity = renderer
         .add_entity()
         .with(component::Transform::default())
-        .with(component::VertexMeshRef::new(triangle_mesh.get_raw()))
+        .with(component::VertexMeshRef::new(
+            triangle_mesh.raw().as_ref().unwrap(),
+        ))
         .with(component::Renderer::new(&device, material_pipeline::new(), false))
         .build();
 

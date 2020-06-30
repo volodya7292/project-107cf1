@@ -8,11 +8,12 @@ use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
-use specs::storage::Entries;
+use specs::storage::Storage;
+use specs::storage::StorageEntry;
 use specs::world::Entities;
-use specs::Join;
 use specs::System;
 use specs::WorldExt;
+use specs::{Builder, Join};
 use std::mem;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
@@ -45,6 +46,7 @@ pub struct Renderer {
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     depth_render_pass: Arc<RenderPass>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
+    active_camera: specs::Entity,
 }
 
 #[derive(Copy, Clone)]
@@ -76,6 +78,10 @@ impl<'a> specs::System<'a> for RenderSystem {
 impl Renderer {
     pub fn add_entity(&mut self) -> specs::EntityBuilder {
         self.world.create_entity()
+    }
+
+    pub fn set_active_camera(&mut self, entity: specs::Entity) {
+        self.active_camera = entity;
     }
 
     /// Add texture to renderer
@@ -183,8 +189,16 @@ impl Renderer {
     }
 
     fn on_render(&mut self, sw_image: &vkw::SwapchainImage) -> u64 {
-        let objects = self.world.read_component::<component::Renderer>();
-        let objects: Vec<&component::Renderer> = objects.join().collect();
+        let camera_component = self.world.read_component::<component::Camera>();
+        let active_camera = camera_component.get(self.active_camera).unwrap();
+
+        let transform_component = self.world.read_component::<component::Transform>();
+        let renderer_component = self.world.read_component::<component::Renderer>();
+        let mesh_ref_component = self.world.read_component::<component::VertexMeshRef>();
+
+        let objects: Vec<_> = (&transform_component, &renderer_component, &mesh_ref_component)
+            .join()
+            .collect();
         let object_count = objects.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
@@ -209,11 +223,17 @@ impl Renderer {
                         break;
                     }
 
-                    let obj = objects[entity_index];
+                    let (transform, renderer, mesh_ref) = objects[entity_index];
+
+                    let vertex_mesh = mesh_ref.vertex_mesh().lock().unwrap();
+                    let aabb = vertex_mesh.aabb();
+
+                    let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position();
+                    let radius = ((aabb.1 - aabb.0).component_mul(transform.scale()) * 0.5).magnitude();
 
                     cmd_list.begin_query(&self.quary_pool, entity_index as u32);
 
-                    
+                    if active_camera.is_sphere_visible(center_position, radius) {}
 
                     cmd_list.end_query(entity_index as u32);
                 }
@@ -238,7 +258,7 @@ impl Renderer {
             );
 
             cmd_list.bind_pipeline(self.pipe.as_ref().unwrap());
-            cmd_list.bind_vertex_buffer(0, &[(Arc::clone(&self.vb), 0)]);
+            cmd_list.bind_vertex_buffers(0, &[(Arc::clone(&self.vb), 0)]);
             cmd_list.draw(3, 0);
 
             cmd_list.end_render_pass();
@@ -387,6 +407,13 @@ pub fn new(
     world.register::<component::Transform>();
     world.register::<component::VertexMeshRef>();
     world.register::<component::Renderer>();
+    world.register::<component::Camera>();
+
+    // TODO
+    let active_camera = world
+        .create_entity()
+        .with(component::Camera::new(1.0, 90.0, 0.1, 1000.0))
+        .build();
 
     let basic_vertex = device
         .create_shader(
@@ -483,6 +510,7 @@ pub fn new(
         secondary_cmd_lists,
         depth_render_pass,
         depth_framebuffer: None,
+        active_camera,
     };
     renderer.on_resize(size);
 

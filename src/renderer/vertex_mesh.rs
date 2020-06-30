@@ -1,7 +1,8 @@
 use nalgebra as na;
+use nalgebra::SimdPartialOrd;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use std::{mem, slice};
+use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::{Device, DeviceError, Format};
 
@@ -16,13 +17,36 @@ pub trait VertexMember {
 }
 
 pub trait Vertex {
-    fn get_member_info(name: &str) -> Option<(u32, vkw::Format)>;
+    fn attributes() -> Vec<(u32, vkw::Format)>;
+    fn member_info(name: &str) -> Option<(u32, vkw::Format)>;
+    fn position(&self) -> &na::Vector3<f32>;
 }
 
 macro_rules! vertex_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
         impl $crate::renderer::vertex_mesh::Vertex for $vertex {
-            fn get_member_info(name: &str) -> Option<(u32, vkw::Format)> {
+            fn attributes() -> Vec<(u32, vkw::Format)> {
+                use crate::renderer::vertex_mesh::VertexMember;
+
+                let mut attribs = vec![];
+                let dummy = <$vertex>::default();
+
+                $(
+                    fn get_format<T: VertexMember>(_: &T) -> vkw::Format { T::vk_format() }
+
+                    let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
+                    let format = get_format(&dummy.$member_name);
+
+                    attribs.push((
+                        offset as u32,
+                        format,
+                    ));
+                )*
+
+                attribs
+            }
+
+            fn member_info(name: &str) -> Option<(u32, vkw::Format)> {
                 use crate::renderer::vertex_mesh::VertexMember;
 
                 $(
@@ -42,6 +66,10 @@ macro_rules! vertex_impl {
                     }
                 )*
             }
+
+            fn position(&self) -> &nalgebra::Vector3<f32> {
+                &self.position
+            }
         }
     )
 }
@@ -54,74 +82,116 @@ impl VertexMember for na::Vector3<f32> {
 
 pub struct RawVertexMesh {
     indexed: bool,
-    staging_buffer: Option<vkw::HostBuffer<u8>>,
-    buffer: Option<Arc<vkw::DeviceBuffer>>,
+    staging_buffer: vkw::HostBuffer<u8>,
+    buffer: Arc<vkw::DeviceBuffer>,
     vertex_count: u32,
+    aabb: (na::Vector3<f32>, na::Vector3<f32>),
+    vertex_size: u32,
+    binding_buffers: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
     changed: bool,
+}
+
+impl RawVertexMesh {
+    pub fn aabb(&self) -> &(na::Vector3<f32>, na::Vector3<f32>) {
+        &self.aabb
+    }
 }
 
 pub struct VertexMesh<VertexT: Vertex> {
     _type_marker: PhantomData<VertexT>,
     device: Arc<Device>,
-    raw: Arc<Mutex<RawVertexMesh>>,
+    raw: Option<Arc<Mutex<RawVertexMesh>>>,
 }
 
 impl<VertexT: Vertex> VertexMesh<VertexT> {
-    pub fn get_raw(&self) -> Arc<Mutex<RawVertexMesh>> {
-        Arc::clone(&self.raw)
+    pub fn raw(&self) -> &Option<Arc<Mutex<RawVertexMesh>>> {
+        &self.raw
     }
 
-    pub fn set_vertices(&self, vertices: &[VertexT], indices: &[u16]) {
+    pub fn set_vertices(&mut self, vertices: &[VertexT], indices: &[u16]) {
         if vertices.is_empty() {
             return;
         }
 
-        let mut raw = self.raw.lock().unwrap();
+        let indexed = indices.len() > 0;
 
         let vertex_size = mem::size_of::<VertexT>();
         let index_size = mem::size_of::<u16>();
         let buffer_size = vertices.len() * vertex_size + indices.len() * index_size;
 
-        let vertices_offset = 0;
         let indices_offset = vertex_size * vertices.len();
 
         // Create host buffer
-        raw.staging_buffer = Some(
-            self.device
-                .create_host_buffer::<u8>(vkw::BufferUsageFlags::TRANSFER_SRC, buffer_size as u64)
-                .unwrap(),
-        );
-
-        // Copy vertices
-        raw.staging_buffer
-            .as_mut()
-            .unwrap()
-            .write(vertices_offset, unsafe {
-                slice::from_raw_parts(vertices.as_ptr() as *const u8, vertex_size * vertices.len())
-            });
+        let mut staging_buffer = self
+            .device
+            .create_host_buffer::<u8>(vkw::BufferUsageFlags::TRANSFER_SRC, buffer_size as u64)
+            .unwrap();
 
         let mut usage_flags = vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::VERTEX;
-
-        // Copy indices
-        if indices.len() > 0 {
-            raw.staging_buffer
-                .as_mut()
-                .unwrap()
-                .write(indices_offset as u64, unsafe {
-                    slice::from_raw_parts(indices.as_ptr() as *const u8, index_size * indices.len())
-                });
-            raw.indexed = true;
+        if indexed {
             usage_flags |= vkw::BufferUsageFlags::INDEX;
         }
 
         // Create device buffer
-        raw.buffer = Some(
-            self.device
-                .create_device_buffer(usage_flags, 1, buffer_size as u64)
-                .unwrap(),
-        );
+        let buffer = self
+            .device
+            .create_device_buffer(usage_flags, 1, buffer_size as u64)
+            .unwrap();
 
-        raw.changed = true;
+        // Copy vertices
+        let attribs = VertexT::attributes();
+        let mut binding_buffers = vec![];
+
+        for (vertex_offset, format) in attribs {
+            let buffer_offset = vertex_offset as isize * vertices.len() as isize;
+            let format_size = vkw::FORMAT_SIZES[&format] as isize;
+
+            for (i, vertex) in vertices.iter().enumerate() {
+                let vertex_bytes = unsafe {
+                    slice::from_raw_parts(vertex as *const VertexT as *const u8, mem::size_of::<VertexT>())
+                };
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        vertex_bytes.as_ptr(),
+                        staging_buffer
+                            .as_mut_ptr()
+                            .offset(buffer_offset + format_size * i as isize),
+                        vertex_bytes.len(),
+                    );
+                }
+            }
+
+            // Set binging buffers
+            binding_buffers.push((Arc::clone(&buffer), buffer_offset as u64));
+        }
+
+        // Copy indices
+        if indices.len() > 0 {
+            staging_buffer.write(indices_offset as u64, unsafe {
+                slice::from_raw_parts(indices.as_ptr() as *const u8, index_size * indices.len())
+            });
+        }
+
+        // Calculate bounds
+        let mut aabb = (
+            (*vertices[0].position()).clone(),
+            (*vertices[0].position()).clone(),
+        );
+        for vertex in &vertices[1..] {
+            aabb.0 = aabb.0.inf(vertex.position());
+            aabb.1 = aabb.1.sup(vertex.position());
+        }
+
+        self.raw = Some(Arc::new(Mutex::new(RawVertexMesh {
+            indexed,
+            staging_buffer,
+            buffer,
+            vertex_count: vertices.len() as u32,
+            aabb,
+            vertex_size: mem::size_of::<VertexT>() as u32,
+            binding_buffers,
+            changed: false,
+        })));
     }
 
     /*pub fn set_component<T: VertexMember>(&mut self, member_name: &str, values: &[T]) -> Result<(), Error> {
@@ -141,22 +211,54 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
 }
 
 pub trait VertexMeshCreate {
-    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>)
-        -> Result<VertexMesh<VertexT>, vkw::DeviceError>;
+    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error>;
 }
 
 impl VertexMeshCreate for vkw::Device {
-    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, DeviceError> {
+    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error> {
+        const POS_FORMAT: vkw::Format = vkw::Format::RGB32_FLOAT;
+
+        let pos_info =
+            VertexT::member_info("position").ok_or(Error::VertexMemberNotFound("position".to_owned()))?;
+        if pos_info.1 != POS_FORMAT {
+            return Err(Error::IncorrectVertexMemberFormat(format!(
+                "{:?} != {:?}",
+                pos_info.1, POS_FORMAT
+            )));
+        }
+
         Ok(VertexMesh {
             _type_marker: PhantomData,
             device: Arc::clone(self),
-            raw: Arc::new(Mutex::new(RawVertexMesh {
-                indexed: false,
-                staging_buffer: None,
-                buffer: None,
-                vertex_count: 0,
-                changed: false,
-            })),
+            raw: None,
         })
+    }
+}
+
+pub trait VertexMeshCmdList {
+    fn bind_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>);
+}
+
+impl VertexMeshCmdList for vkw::CmdList {
+    fn bind_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
+        /*
+
+        std::vector<uint64> binding_offsets = Mesh->binding_offsets;
+        if (BindingCount == UINT32_MAX)
+            BindingCount = binding_offsets.size() - FirstBinding;
+
+        if (BindingCount == 0 || BindingCount > binding_offsets.size())
+            Utils::LogError("RECmdList::BindVertexMesh "s + Mesh->name + " FirstBinding: "s + String(FirstBinding)
+                            + " BindingCount: "s + String(BindingCount));
+
+        BindVertexBuffer(Mesh->buffer, FirstBinding,
+                        std::vector(binding_offsets.begin() + FirstBinding, binding_offsets.begin() + FirstBinding + BindingCount));
+
+        if (Mesh->Indexed)
+            BindIndexBuffer(Mesh->buffer, Mesh->indices_offset);
+
+        */
+
+        self.bind_vertex_buffers(0, &vertex_mesh.binding_buffers);
     }
 }

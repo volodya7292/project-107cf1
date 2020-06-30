@@ -115,8 +115,16 @@ impl<T> IndexMut<usize> for HostBuffer<T> {
 }
 
 impl<T> HostBuffer<T> {
-    pub fn get_raw(&self) -> RawHostBuffer {
+    pub fn raw(&self) -> RawHostBuffer {
         RawHostBuffer(Arc::clone(&self.buffer))
+    }
+
+    pub fn as_ptr(&self) -> *const T {
+        self.p_data as *const T
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.p_data as *mut T
     }
 
     pub fn read(&self, first_element: u64, elements: &mut [T]) {
