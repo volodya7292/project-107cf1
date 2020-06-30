@@ -58,15 +58,15 @@ impl Image {
     pub const TYPE_2D: ImageType = ImageType(vk::ImageType::TYPE_2D);
     pub const TYPE_3D: ImageType = ImageType(vk::ImageType::TYPE_3D);
 
-    pub fn get_size_2d(&self) -> (u32, u32) {
+    pub fn size_2d(&self) -> (u32, u32) {
         (self.size.0, self.size.1)
     }
 
-    pub fn get_size(&self) -> (u32, u32, u32) {
+    pub fn size(&self) -> (u32, u32, u32) {
         self.size
     }
 
-    pub fn get_format(&self) -> Format {
+    pub fn format(&self) -> Format {
         self.format
     }
 

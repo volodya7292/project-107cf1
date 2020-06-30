@@ -361,7 +361,7 @@ impl Renderer {
             self.device
                 .create_render_pass(
                     &[Attachment {
-                        format: images[0].get_format(),
+                        format: images[0].format(),
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::PRESENT,
                         load_store: LoadStore::InitClearFinalSave,
@@ -397,7 +397,7 @@ impl Renderer {
                     .as_ref()
                     .unwrap()
                     .create_framebuffer(
-                        self.surface_size,
+                        images[0].size_2d(),
                         &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
                     )
                     .unwrap(),
