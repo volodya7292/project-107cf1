@@ -182,6 +182,7 @@ impl Instance {
                 }
 
                 require_feature!(sampler_anisotropy);
+                require_feature!(shader_uniform_buffer_array_dynamic_indexing);
                 require_feature!(shader_sampled_image_array_dynamic_indexing);
                 require_feature!(shader_storage_buffer_array_dynamic_indexing);
                 require_feature!(shader_storage_image_array_dynamic_indexing);

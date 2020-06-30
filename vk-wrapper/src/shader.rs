@@ -26,6 +26,7 @@ impl ShaderBindingMod {
 
 pub(crate) struct ShaderBinding {
     pub(crate) binding_type: vk::DescriptorType,
+    pub(crate) binding_mod: ShaderBindingMod,
     pub(crate) id: u32,
     pub(crate) count: u32,
 }

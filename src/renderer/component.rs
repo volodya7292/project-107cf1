@@ -51,22 +51,13 @@ pub struct Camera {
 
 impl Camera {
     pub fn new(aspect: f32, fovy: f32, near: f32, far: f32) -> Camera {
-        let position = Vector3::default();
-        let rotation = Vector3::default();
-
         let projection = Perspective3::new(aspect, fovy, near, far);
-
-        // TODO
-        let tra = Translation3::new(0.0, 0.0, 3.0);
-        let rot = UnitQuaternion::identity();
-        // TODO
-
-        let view = Isometry3::from_parts(tra, rot);
+        let view = Isometry3::identity();
         let proj_view_mat = projection.as_matrix() * view.to_homogeneous();
 
         // Calculate frustum
         let mut frustum = [Vector4::<f32>::default(); 6];
-
+        
         for i in 0..6 {
             let plane = &mut frustum[i];
             let sign = ((1 - i as i32 % 2) * 2 - 1) as f32;
@@ -79,8 +70,8 @@ impl Camera {
         }
 
         Camera {
-            position,
-            rotation,
+            position: Vector3::default(),
+            rotation: Vector3::default(),
             fovy,
             near,
             far,

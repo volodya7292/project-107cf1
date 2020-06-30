@@ -1,9 +1,8 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
-
 use ash::version::EntryV1_0;
 use ash::vk;
 use log::{error, info, warn};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 
 use crate::utils;
 use crate::Instance;
