@@ -40,7 +40,6 @@ unsafe extern "system" fn vk_debug_callback(
     let msg = CStr::from_ptr((*p_callback_data).p_message);
 
     let msg_type = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "G",
         vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "VAL",
         vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "PERF",
         _ => "",
@@ -136,8 +135,7 @@ impl Entry {
                     | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
             )
             .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
                     | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
             )
             .pfn_user_callback(Some(vk_debug_callback));
