@@ -85,6 +85,7 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                     panic!("Failed to compile shader");
                 }
 
+                // Optimize shader
                 if !cfg!(debug_assertions) {
                     let mut cmd = &mut Command::new("spirv-opt");
                     cmd = cmd
@@ -97,13 +98,12 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                         .arg("-O")
                         .arg(entry_str);
 
-                    if cfg!(debug_assertions) {
-                        cmd = cmd.arg("-g").arg("-Od");
-                    }
-
                     let output = cmd.output().unwrap();
                     println!("{}", String::from_utf8_lossy(&output.stdout));
-                    // TODO: optimize with spirv-opt
+
+                    if !output.status.success() {
+                        panic!("Failed to optimize shader");
+                    }
                 }
             }
         }

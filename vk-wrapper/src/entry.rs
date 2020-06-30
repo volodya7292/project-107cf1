@@ -1,9 +1,8 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
-
 use ash::version::EntryV1_0;
 use ash::vk;
 use log::{error, info, warn};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 
 use crate::utils;
 use crate::Instance;
@@ -40,7 +39,6 @@ unsafe extern "system" fn vk_debug_callback(
     let msg = CStr::from_ptr((*p_callback_data).p_message);
 
     let msg_type = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "G",
         vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "VAL",
         vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "PERF",
         _ => "",
@@ -136,8 +134,7 @@ impl Entry {
                     | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
             )
             .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
                     | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
             )
             .pfn_user_callback(Some(vk_debug_callback));
