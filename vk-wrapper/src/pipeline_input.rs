@@ -1,4 +1,4 @@
-use crate::{Device, DeviceBuffer, Image, ImageLayout, PipelineSignature};
+use crate::{DescriptorPool, Device, DeviceBuffer, Image, ImageLayout, PipelineSignature};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
@@ -18,12 +18,8 @@ pub struct Binding {
 }
 
 pub struct PipelineInput {
-    pub(crate) device: Arc<Device>,
-    pub(crate) signature: Arc<PipelineSignature>,
-    pub(crate) pool: vk::DescriptorPool,
+    pub(crate) pool: Arc<DescriptorPool>,
     pub(crate) native: vk::DescriptorSet,
-    pub(crate) used_buffers: HashMap<(u32, u32), Arc<DeviceBuffer>>,
-    pub(crate) used_images: HashMap<(u32, u32), Arc<Image>>,
 }
 
 impl PipelineInput {
@@ -37,7 +33,7 @@ impl PipelineInput {
                 .dst_set(self.native)
                 .dst_binding(binding.id)
                 .dst_array_element(binding.array_index)
-                .descriptor_type(self.signature.binding_types[&binding.id]);
+                .descriptor_type(self.pool.signature.binding_types[&binding.id]);
 
             match &binding.res {
                 BindingRes::Buffer(buffer) => {
@@ -48,8 +44,10 @@ impl PipelineInput {
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
 
-                    self.used_buffers
-                        .insert((binding.id, binding.array_index), Arc::clone(buffer));
+                    self.pool.used_buffers.lock().unwrap().insert(
+                        (self.pool.descriptor_set, binding.id, binding.array_index),
+                        Arc::clone(buffer),
+                    );
                 }
                 BindingRes::BufferRange(buffer, offset, range) => {
                     native_buffer_infos.push(vk::DescriptorBufferInfo {
@@ -59,8 +57,10 @@ impl PipelineInput {
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
 
-                    self.used_buffers
-                        .insert((binding.id, binding.array_index), Arc::clone(buffer));
+                    self.pool.used_buffers.lock().unwrap().insert(
+                        (self.pool.descriptor_set, binding.id, binding.array_index),
+                        Arc::clone(buffer),
+                    );
                 }
                 BindingRes::Image(image, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
@@ -70,20 +70,22 @@ impl PipelineInput {
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
 
-                    self.used_images
-                        .insert((binding.id, binding.array_index), Arc::clone(image));
+                    self.pool.used_images.lock().unwrap().insert(
+                        (self.pool.descriptor_set, binding.id, binding.array_index),
+                        Arc::clone(image),
+                    );
                 }
             }
 
             native_writes.push(write_info.build());
         }
 
-        unsafe { self.device.wrapper.0.update_descriptor_sets(&native_writes, &[]) };
-    }
-}
-
-impl Drop for PipelineInput {
-    fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_descriptor_pool(self.pool, None) };
+        unsafe {
+            self.pool
+                .device
+                .wrapper
+                .0
+                .update_descriptor_sets(&native_writes, &[])
+        };
     }
 }

@@ -576,6 +576,9 @@ impl Device {
                 ShaderBinding {
                     binding_type: vk::DescriptorType::$desc_type,
                     binding_mod: *shader_binding_mod,
+                    descriptor_set: ast
+                        .get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                        .unwrap(),
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::$img_type { array } => {
@@ -607,6 +610,9 @@ impl Device {
                         vk::DescriptorType::$desc_type1
                     },
                     binding_mod: *shader_binding_mod,
+                    descriptor_set: ast
+                        .get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                        .unwrap(),
                     id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     count: match var_type {
                         spirv::Type::Struct {
@@ -843,17 +849,23 @@ impl Device {
         self: &Arc<Self>,
         shaders: &[Arc<Shader>],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
-        let mut native_bindings = Vec::<vk::DescriptorSetLayoutBinding>::new();
-        let mut binding_flags = Vec::<vk::DescriptorBindingFlagsEXT>::new();
+        /// MAX 4 descriptor sets
+        // [descriptor_set, bindings]
+        let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
+        let mut binding_flags: [Vec<vk::DescriptorBindingFlagsEXT>; 4] = Default::default();
+        let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
+        let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
 
-        let mut descriptor_sizes = Vec::<vk::DescriptorPoolSize>::new();
-        let mut descriptor_sizes_indices = HashMap::<vk::DescriptorType, u32>::new();
         let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
         let mut push_constant_ranges = HashMap::<ShaderStage, (u32, u32)>::new();
         let mut push_constants_size = 0u32;
 
         for shader in shaders {
             for (_name, binding) in &shader.bindings {
+                let set = binding.descriptor_set as usize;
+                let descriptor_sizes = &mut descriptor_sizes[set];
+                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+
                 if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type) {
                     entry.insert(descriptor_sizes.len() as u32);
                     descriptor_sizes.push(
@@ -868,7 +880,7 @@ impl Device {
                     .descriptor_count += binding.count;
                 binding_types.insert(binding.id, binding.binding_type);
 
-                native_bindings.push(
+                native_bindings[set].push(
                     vk::DescriptorSetLayoutBinding::builder()
                         .binding(binding.id)
                         .descriptor_type(binding.binding_type)
@@ -877,15 +889,12 @@ impl Device {
                         .build(),
                 );
 
-                let mut flags = vk::DescriptorBindingFlags::default();
-                if binding.binding_mod == ShaderBindingMod::DYNAMIC_UPDATE {
-                    flags |= vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
-                }
+                let mut flags = vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
                 if binding.count > 1 {
                     flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
                 }
 
-                binding_flags.push(flags);
+                binding_flags[set].push(flags);
             }
 
             if shader.push_constants_size > 0 {
@@ -894,13 +903,21 @@ impl Device {
             }
         }
 
-        let mut binding_flags_info =
-            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags);
+        let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
 
-        let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
-            .bindings(&native_bindings)
-            .push_next(&mut binding_flags_info);
+        for (i, bindings) in native_bindings.iter().enumerate() {
+            if !bindings.is_empty() {
+                let mut binding_flags_info =
+                    vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
+
+                let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                    .bindings(bindings)
+                    .push_next(&mut binding_flags_info);
+
+                native_descriptor_sets[i] =
+                    unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? };
+            }
+        }
 
         let shaders: HashMap<ShaderStage, Arc<Shader>> = shaders
             .iter()
@@ -910,9 +927,8 @@ impl Device {
 
         Ok(Arc::new(PipelineSignature {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? },
+            native: native_descriptor_sets,
             descriptor_sizes,
-            descriptor_sizes_indices,
             binding_types,
             push_constant_ranges,
             push_constants_size,
@@ -957,8 +973,15 @@ impl Device {
         }
 
         // Layout
+        let set_layouts: Vec<vk::DescriptorSetLayout> = signature
+            .native
+            .iter()
+            .cloned()
+            .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
+            .collect();
+
         let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(slice::from_ref(&signature.native))
+            .set_layouts(&set_layouts)
             .push_constant_ranges(&push_constant_ranges);
         let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
 
@@ -1132,8 +1155,15 @@ impl Device {
         }
 
         // Layout
+        let set_layouts: Vec<vk::DescriptorSetLayout> = signature
+            .native
+            .iter()
+            .cloned()
+            .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
+            .collect();
+
         let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(slice::from_ref(&signature.native))
+            .set_layouts(&set_layouts)
             .push_constant_ranges(&push_constant_ranges);
         let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
 
