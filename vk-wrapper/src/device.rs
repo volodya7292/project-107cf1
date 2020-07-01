@@ -877,15 +877,15 @@ impl Device {
                         .build(),
                 );
 
-                binding_flags.push(if binding.count > 1 {
-                    vk::DescriptorBindingFlags::PARTIALLY_BOUND
-                } else {
-                    if binding.binding_mod == ShaderBindingMod::DYNAMIC_UPDATE {
-                        vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
-                    } else {
-                        vk::DescriptorBindingFlags::default()
-                    }
-                });
+                let mut flags = vk::DescriptorBindingFlags::default();
+                if binding.binding_mod == ShaderBindingMod::DYNAMIC_UPDATE {
+                    flags |= vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
+                }
+                if binding.count > 1 {
+                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                }
+
+                binding_flags.push(flags);
             }
 
             if shader.push_constants_size > 0 {

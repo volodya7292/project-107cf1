@@ -71,8 +71,6 @@ impl Instance {
                 for (i, fam_prop) in queue_families.iter().enumerate() {
                     // Check for present usage
 
-                    // TODO: surface.get_physical_device_surface_support
-
                     let surface_supported = unsafe {
                         self.surface_khr
                             .get_physical_device_surface_support(p_device, i as u32, surface.native)
@@ -188,10 +186,7 @@ impl Instance {
                 require_feature!(shader_storage_image_array_dynamic_indexing);
 
                 require_feature12!(descriptor_indexing);
-                require_feature12!(shader_sampled_image_array_non_uniform_indexing);
-                require_feature12!(descriptor_binding_sampled_image_update_after_bind);
-                require_feature12!(descriptor_binding_storage_image_update_after_bind);
-                require_feature12!(descriptor_binding_storage_buffer_update_after_bind);
+                require_feature12!(descriptor_binding_update_unused_while_pending);
                 require_feature12!(descriptor_binding_partially_bound);
                 require_feature12!(runtime_descriptor_array);
                 require_feature12!(separate_depth_stencil_layouts);

@@ -18,7 +18,6 @@ pub struct PipelineSignature {
 impl PipelineSignature {
     pub fn create_input(self: &Arc<Self>) -> Result<Arc<PipelineInput>, vk::Result> {
         let pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(1)
             .pool_sizes(&self.descriptor_sizes);
         let pool = unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None)? };
