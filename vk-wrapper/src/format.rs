@@ -19,7 +19,9 @@ impl Format {
     pub const RGB32_UINT: Self = Self(vk::Format::R32G32B32_UINT);
 }
 
+// TODO
 pub const BUFFER_FORMATS: [Format; 0] = [];
+// TODO
 pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RGBA32_FLOAT];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 

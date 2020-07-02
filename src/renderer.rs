@@ -1,6 +1,7 @@
 pub(crate) mod component;
 pub(crate) mod material_pipeline;
-mod texture;
+//mod texture;
+mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
@@ -115,10 +116,10 @@ impl Renderer {
     pub fn load_texture(&mut self, index: u16) {
         // TODO: generate mipmaps if needed
 
-        /// 1. load texture
-        /// 2. find space for it
-        /// 3. defragment atlas if needed (make some textures smaller)
-        /// 4. copy texture to atlas
+        // 1. load texture
+        // 2. find space for it
+        // 3. defragment atlas if needed (make some textures smaller)
+        // 4. copy texture to atlas
 
         /*if let Some(texture) = self.textures.get_mut(index as usize) {
             // Load resource
