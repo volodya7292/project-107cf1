@@ -1,10 +1,9 @@
 use nalgebra as na;
-use nalgebra::SimdPartialOrd;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::{Device, DeviceError, Format};
+use vk_wrapper::{Device, Format};
 
 #[derive(Debug)]
 pub enum Error {
@@ -246,7 +245,7 @@ pub trait VertexMeshCmdList {
 impl VertexMeshCmdList for vkw::CmdList {
     fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<Mutex<RawVertexMesh>>) {
         let vertex_mesh = vertex_mesh.lock().unwrap();
-        
+
         self.bind_vertex_buffers(0, &vertex_mesh.binding_buffers);
 
         if vertex_mesh.indexed {

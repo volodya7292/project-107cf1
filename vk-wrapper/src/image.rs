@@ -52,6 +52,7 @@ pub struct Image {
     pub(crate) owned_handle: bool,
     pub(crate) format: Format,
     pub(crate) size: (u32, u32, u32),
+    pub(crate) mip_levels: u32,
 }
 
 impl Image {
@@ -68,6 +69,10 @@ impl Image {
 
     pub fn format(&self) -> Format {
         self.format
+    }
+
+    pub fn mip_levels(&self) -> u32 {
+        self.mip_levels
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -344,6 +344,7 @@ impl Device {
             owned_handle: true,
             format,
             size,
+            mip_levels,
         }))
     }
 
@@ -530,6 +531,7 @@ impl Device {
                 owned_handle: false,
                 format: Format(s_format.format),
                 size: (size.0, size.1, 1),
+                mip_levels: 1,
             }))
         })
         .collect();

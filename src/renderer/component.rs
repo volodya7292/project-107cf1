@@ -57,7 +57,7 @@ impl Camera {
 
         // Calculate frustum
         let mut frustum = [Vector4::<f32>::default(); 6];
-        
+
         for i in 0..6 {
             let plane = &mut frustum[i];
             let sign = ((1 - i as i32 % 2) * 2 - 1) as f32;
@@ -105,7 +105,7 @@ impl specs::Component for Transform {
 }
 
 pub struct VertexMeshRef {
-    vertex_mesh: Arc<Mutex<RawVertexMesh>>,
+    pub(in crate::renderer) vertex_mesh: Arc<Mutex<RawVertexMesh>>,
     changed: bool,
 }
 
@@ -115,10 +115,6 @@ impl VertexMeshRef {
             vertex_mesh: Arc::clone(vertex_mesh),
             changed: true,
         }
-    }
-
-    pub fn vertex_mesh(&self) -> &Arc<Mutex<RawVertexMesh>> {
-        &self.vertex_mesh
     }
 }
 
@@ -132,7 +128,7 @@ pub struct Renderer {
 
     //buffers: HashMap<u32, vkw::RawHostBuffer>,
     // binding id -> renderer impl-specific res index
-    translucent: bool,
+    pub(in crate::renderer) translucent: bool,
     changed: bool,
 }
 

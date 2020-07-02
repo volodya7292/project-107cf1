@@ -4,7 +4,6 @@ mod texture;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
-use crate::renderer::vertex_mesh::VertexMeshCmdList;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
@@ -13,6 +12,7 @@ use specs::WorldExt;
 use specs::{Builder, Join};
 use std::mem;
 use std::sync::{Arc, Mutex};
+use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
@@ -31,6 +31,7 @@ pub struct Renderer {
     settings: Settings,
     device: Arc<vkw::Device>,
 
+    texture_atlases: [Arc<vkw::Image>; 4],
     textures: Vec<Texture>,
     texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
     texture_load_packet: vkw::SubmitPacket,
@@ -61,10 +62,20 @@ pub struct Settings {
     pub(crate) textures_max_anisotropy: f32,
 }
 
+pub struct TextureAtlasType(u32);
+
+impl TextureAtlasType {
+    pub const ALBEDO: Self = Self(0);
+    pub const SPECULAR: Self = Self(1);
+    pub const EMISSION: Self = Self(2);
+    pub const NORMAL: Self = Self(3);
+}
+
 pub struct Texture {
     res_ref: ResourceRef,
-    image: Option<Arc<vkw::Image>>,
-    format: vkw::Format,
+    bounds: (u32, u32, u32, u32),
+    loaded: bool,
+    atlas_type: TextureAtlasType,
 }
 
 /*struct RenderSystem;
@@ -90,18 +101,26 @@ impl Renderer {
     }
 
     /// Add texture to renderer
-    pub fn add_texture(&mut self, res_ref: ResourceRef, format: vkw::Format) -> u16 {
+    pub fn add_texture(&mut self, res_ref: ResourceRef, atlas_type: TextureAtlasType) -> u16 {
         self.textures.push(Texture {
             res_ref,
-            image: None,
-            format,
+            bounds: (0, 0, 0, 0),
+            loaded: false,
+            atlas_type,
         });
         (self.textures.len() - 1) as u16
     }
 
     /// Texture must be loaded before use in a shader
     pub fn load_texture(&mut self, index: u16) {
-        if let Some(texture) = self.textures.get_mut(index as usize) {
+        // TODO: generate mipmaps if needed
+
+        /// 1. load texture
+        /// 2. find space for it
+        /// 3. defragment atlas if needed (make some textures smaller)
+        /// 4. copy texture to atlas
+
+        /*if let Some(texture) = self.textures.get_mut(index as usize) {
             // Load resource
             let bytes = texture.res_ref.read().unwrap();
             let img = image::load_from_memory(&bytes).unwrap();
@@ -167,13 +186,13 @@ impl Renderer {
             // Submit work
             graphics_queue.submit(&mut self.texture_load_packet).unwrap();
             self.texture_load_packet.wait().unwrap();
-        }
+        }*/
     }
 
     /// Unload unused texture to free GPU memory
     pub fn unload_texture(&mut self, index: u16) {
         if let Some(texture) = self.textures.get_mut(index as usize) {
-            texture.image = None;
+            texture.loaded = false;
         }
     }
 
@@ -229,7 +248,7 @@ impl Renderer {
 
                     let (transform, renderer, mesh_ref) = objects[entity_index];
 
-                    let vertex_mesh = mesh_ref.vertex_mesh();
+                    let vertex_mesh = &mesh_ref.vertex_mesh;
                     let aabb = {
                         let vertex_mesh = vertex_mesh.lock().unwrap();
                         vertex_mesh.aabb().clone()
@@ -241,7 +260,12 @@ impl Renderer {
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
                     if active_camera.is_sphere_visible(center_position, radius) {
-                        //cl.bind_pipeline(pipeline);
+                        if renderer.translucent {
+                            cl.bind_pipeline(&self.depth_pipeline_r);
+                        } else {
+                            cl.bind_pipeline(&self.depth_pipeline_rw);
+                        }
+
                         //cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
@@ -525,6 +549,52 @@ pub fn new(
         &depth_signature,
     )?;
 
+    // TODO: dynamic size depending on settings
+    let atlas_size = (1024, 1024);
+
+    let texture_atlases = [
+        // albedo
+        device
+            .create_image_2d(
+                vkw::Format::RGBA8_UNORM,
+                settings.textures_gen_mipmaps,
+                settings.textures_max_anisotropy,
+                vkw::ImageUsageFlags::SAMPLED,
+                atlas_size,
+            )
+            .unwrap(),
+        // specular
+        device
+            .create_image_2d(
+                vkw::Format::RGBA8_UNORM,
+                settings.textures_gen_mipmaps,
+                settings.textures_max_anisotropy,
+                vkw::ImageUsageFlags::SAMPLED,
+                atlas_size,
+            )
+            .unwrap(),
+        // emission
+        device
+            .create_image_2d(
+                vkw::Format::RGBA8_UNORM,
+                settings.textures_gen_mipmaps,
+                settings.textures_max_anisotropy,
+                vkw::ImageUsageFlags::SAMPLED,
+                atlas_size,
+            )
+            .unwrap(),
+        // normal
+        device
+            .create_image_2d(
+                vkw::Format::RGBA16_UNORM,
+                settings.textures_gen_mipmaps,
+                settings.textures_max_anisotropy,
+                vkw::ImageUsageFlags::SAMPLED,
+                atlas_size,
+            )
+            .unwrap(),
+    ];
+
     let mut renderer = Renderer {
         world,
         surface: Arc::clone(surface),
@@ -534,6 +604,7 @@ pub fn new(
         settings,
         device: Arc::clone(device),
         //submit_packet: None,
+        texture_atlases,
         textures: Vec::with_capacity(65536),
         texture_load_cmd_list,
         texture_load_packet,

@@ -63,7 +63,7 @@ fn main() {
 
     let index = renderer.add_texture(
         resources.get("textures/test_texture.jpg").unwrap(),
-        vkw::Format::RGBA8_UNORM,
+        renderer::TextureAtlasType::ALBEDO,
     );
     renderer.load_texture(index);
 

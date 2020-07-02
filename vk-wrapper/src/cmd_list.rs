@@ -5,7 +5,6 @@ use crate::{
     Pipeline, PipelineInput, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
-use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct CmdList {
@@ -236,7 +235,7 @@ impl CmdList {
         self.pipelines.push(Arc::clone(pipeline));
     }
 
-    pub fn bind_pipeline_input(&mut self, pipeline_input: &Arc<PipelineInput>) {
+    pub fn bind_pipeline_input(&mut self, set_id: u32, pipeline_input: &Arc<PipelineInput>) {
         let pipelines = &self.pipelines;
         let last_pipeline = pipelines.last().unwrap();
 
@@ -245,7 +244,7 @@ impl CmdList {
                 self.native,
                 last_pipeline.bind_point,
                 last_pipeline.layout,
-                0,
+                set_id,
                 &[pipeline_input.native],
                 &[],
             )

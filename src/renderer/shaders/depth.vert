@@ -6,10 +6,10 @@
 layout(location = 0) in vec3 inPosition;
 
 // Payload
-layout(binding = 0) uniform camera_data {
+layout(set = 0, binding = 0) uniform camera_data {
     Camera camera;
 };
-layout(binding = 1) uniform per_object_data {
+layout(set = 1, binding = 1) uniform per_object_data {
     mat4 model;
 };
 

@@ -1,7 +1,6 @@
 use crate::Device;
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::mem;
 use std::sync::Arc;
 
 pub struct QueryPool {

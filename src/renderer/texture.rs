@@ -1,4 +1,3 @@
-use crate::renderer::Renderer;
 use crate::resource_file;
 use crate::resource_file::ResourceFile;
 use std::sync::{Arc, Mutex};
