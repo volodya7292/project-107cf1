@@ -212,7 +212,7 @@ impl Device {
         image_type: ImageType,
         view_type: vk::ImageViewType,
         format: Format,
-        mipmaps: bool,
+        max_mip_levels: u32,
         max_anisotropy: f32,
         usage: ImageUsageFlags,
         mut size: (u32, u32, u32),
@@ -223,15 +223,6 @@ impl Device {
             vk::ImageTiling::OPTIMAL,
             usage.0,
         )?;
-
-        let (mip_levels, usage) = if mipmaps {
-            (
-                ((cmp::min(size.0, size.1) as f64).log2().floor() as u32).min(format_props.max_mip_levels),
-                usage.0 | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
-            )
-        } else {
-            (1u32, usage.0)
-        };
 
         size.0 = size.0.min(format_props.max_extent.width);
         size.1 = size.1.min(format_props.max_extent.height);
@@ -257,6 +248,7 @@ impl Device {
                 1,
             )
         };
+        let mip_levels = max_mip_levels.min(format_props.max_mip_levels);
 
         let image_info = vk::ImageCreateInfo::builder()
             .image_type(image_type.0)
@@ -266,7 +258,7 @@ impl Device {
             .array_layers(array_layers)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
-            .usage(usage)
+            .usage(usage.0)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
@@ -351,7 +343,7 @@ impl Device {
     pub fn create_image_2d(
         self: &Arc<Self>,
         format: Format,
-        mipmaps: bool,
+        max_mip_levels: u32,
         max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
@@ -360,7 +352,7 @@ impl Device {
             Image::TYPE_2D,
             vk::ImageViewType::TYPE_2D,
             format,
-            mipmaps,
+            max_mip_levels,
             max_anisotropy,
             usage,
             (preferred_size.0, preferred_size.1, 1),
@@ -377,7 +369,7 @@ impl Device {
             Image::TYPE_3D,
             vk::ImageViewType::TYPE_3D,
             format,
-            false,
+            1,
             1f32,
             usage,
             preferred_size,

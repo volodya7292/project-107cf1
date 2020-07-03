@@ -5,6 +5,7 @@ mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
+use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
 use rayon::prelude::*;
@@ -32,10 +33,7 @@ pub struct Renderer {
     settings: Settings,
     device: Arc<vkw::Device>,
 
-    texture_atlases: [Arc<vkw::Image>; 4],
-    textures: Vec<Texture>,
-    texture_load_cmd_list: Arc<Mutex<vkw::CmdList>>,
-    texture_load_packet: vkw::SubmitPacket,
+    texture_atlases: [TextureAtlas; 4],
 
     //submit_packet: Option<vkw::SubmitPacket>,
     sig: Arc<vkw::PipelineSignature>,
@@ -56,9 +54,16 @@ pub struct Renderer {
     active_camera: specs::Entity,
 }
 
+pub enum TextureQuality {
+    LOW,
+    MEDIUM,
+    HIGH,
+}
+
 #[derive(Copy, Clone)]
 pub struct Settings {
     pub(crate) vsync: bool,
+    pub(crate) texture_quality: TextureQuality,
     pub(crate) textures_gen_mipmaps: bool,
     pub(crate) textures_max_anisotropy: f32,
 }
@@ -70,13 +75,6 @@ impl TextureAtlasType {
     pub const SPECULAR: Self = Self(1);
     pub const EMISSION: Self = Self(2);
     pub const NORMAL: Self = Self(3);
-}
-
-pub struct Texture {
-    res_ref: ResourceRef,
-    bounds: (u32, u32, u32, u32),
-    loaded: bool,
-    atlas_type: TextureAtlasType,
 }
 
 /*struct RenderSystem;
@@ -103,13 +101,14 @@ impl Renderer {
 
     /// Add texture to renderer
     pub fn add_texture(&mut self, res_ref: ResourceRef, atlas_type: TextureAtlasType) -> u16 {
-        self.textures.push(Texture {
+        unimplemented!()
+        /*self.textures.push(Texture {
             res_ref,
             bounds: (0, 0, 0, 0),
             loaded: false,
             atlas_type,
         });
-        (self.textures.len() - 1) as u16
+        (self.textures.len() - 1) as u16*/
     }
 
     /// Texture must be loaded before use in a shader
@@ -192,9 +191,9 @@ impl Renderer {
 
     /// Unload unused texture to free GPU memory
     pub fn unload_texture(&mut self, index: u16) {
-        if let Some(texture) = self.textures.get_mut(index as usize) {
+        /*if let Some(texture) = self.textures.get_mut(index as usize) {
             texture.loaded = false;
-        }
+        }*/
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
@@ -226,6 +225,8 @@ impl Renderer {
             .collect();
         let object_count = objects.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
+
+        // FIXME: SORT RENDERABLE OBJECTS BEFORE OCCLUSION QUERY
 
         self.secondary_cmd_lists
             .par_iter()
@@ -555,45 +556,45 @@ pub fn new(
 
     let texture_atlases = [
         // albedo
-        device
-            .create_image_2d(
-                vkw::Format::RGBA8_UNORM,
-                settings.textures_gen_mipmaps,
-                settings.textures_max_anisotropy,
-                vkw::ImageUsageFlags::SAMPLED,
-                atlas_size,
-            )
-            .unwrap(),
+        texture_atlas::new(
+            &device,
+            vkw::Format::RGBA8_UNORM,
+            settings.textures_gen_mipmaps,
+            settings.textures_max_anisotropy,
+            1,
+            128,
+        )
+        .unwrap(),
         // specular
-        device
-            .create_image_2d(
-                vkw::Format::RGBA8_UNORM,
-                settings.textures_gen_mipmaps,
-                settings.textures_max_anisotropy,
-                vkw::ImageUsageFlags::SAMPLED,
-                atlas_size,
-            )
-            .unwrap(),
+        texture_atlas::new(
+            &device,
+            vkw::Format::RGBA8_UNORM,
+            settings.textures_gen_mipmaps,
+            settings.textures_max_anisotropy,
+            1,
+            128,
+        )
+        .unwrap(),
         // emission
-        device
-            .create_image_2d(
-                vkw::Format::RGBA8_UNORM,
-                settings.textures_gen_mipmaps,
-                settings.textures_max_anisotropy,
-                vkw::ImageUsageFlags::SAMPLED,
-                atlas_size,
-            )
-            .unwrap(),
+        texture_atlas::new(
+            &device,
+            vkw::Format::RGBA8_UNORM,
+            settings.textures_gen_mipmaps,
+            settings.textures_max_anisotropy,
+            1,
+            128,
+        )
+        .unwrap(),
         // normal
-        device
-            .create_image_2d(
-                vkw::Format::RGBA16_UNORM,
-                settings.textures_gen_mipmaps,
-                settings.textures_max_anisotropy,
-                vkw::ImageUsageFlags::SAMPLED,
-                atlas_size,
-            )
-            .unwrap(),
+        texture_atlas::new(
+            &device,
+            vkw::Format::RGBA16_UNORM,
+            settings.textures_gen_mipmaps,
+            settings.textures_max_anisotropy,
+            1,
+            128,
+        )
+        .unwrap(),
     ];
 
     let mut renderer = Renderer {
@@ -606,9 +607,6 @@ pub fn new(
         device: Arc::clone(device),
         //submit_packet: None,
         texture_atlases,
-        textures: Vec::with_capacity(65536),
-        texture_load_cmd_list,
-        texture_load_packet,
         sig: basic_signature,
         pipe: None,
         rp: None,

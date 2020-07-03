@@ -97,7 +97,7 @@ impl RenderPass {
                 } else {
                     self.device.create_image_2d(
                         self.attachments[*$attachment as usize].format,
-                        false,
+                        1,
                         1f32,
                         usage,
                         size,

@@ -367,6 +367,131 @@ impl CmdList {
         self.images.push(Arc::clone(dst_image));
     }
 
+    pub fn copy_image_2d(
+        &mut self,
+        src_image: &Arc<Image>,
+        src_image_layout: ImageLayout,
+        src_offset: (u32, u32),
+        src_mip_level: u32,
+        dst_image: &Arc<Image>,
+        dst_image_layout: ImageLayout,
+        dst_offset: (u32, u32),
+        dst_mip_level: u32,
+        size: (u32, u32),
+    ) {
+        let region = vk::ImageCopy {
+            src_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: src_image.aspect,
+                mip_level: src_mip_level,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            src_offset: vk::Offset3D {
+                x: src_offset.0 as i32,
+                y: src_offset.1 as i32,
+                z: 0,
+            },
+            dst_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: dst_image.aspect,
+                mip_level: dst_mip_level,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            dst_offset: vk::Offset3D {
+                x: dst_offset.0 as i32,
+                y: dst_offset.1 as i32,
+                z: 0,
+            },
+            extent: vk::Extent3D {
+                width: size.0,
+                height: size.1,
+                depth: 1,
+            },
+        };
+
+        unsafe {
+            self.device_wrapper.0.cmd_copy_image(
+                self.native,
+                src_image.native,
+                src_image_layout.0,
+                dst_image.native,
+                dst_image_layout.0,
+                &[region],
+            );
+        };
+
+        self.images
+            .extend_from_slice(&[Arc::clone(src_image), Arc::clone(dst_image)]);
+    }
+
+    pub fn blit_image_2d(
+        &mut self,
+        src_image: &Arc<Image>,
+        src_image_layout: ImageLayout,
+        src_offset: (u32, u32),
+        src_size: (u32, u32),
+        src_mip_level: u32,
+        dst_image: &Arc<Image>,
+        dst_image_layout: ImageLayout,
+        dst_offset: (u32, u32),
+        dst_size: (u32, u32),
+        dst_mip_level: u32,
+    ) {
+        let region = vk::ImageBlit {
+            src_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: src_image.aspect,
+                mip_level: src_mip_level,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            src_offsets: [
+                vk::Offset3D {
+                    x: src_offset.0 as i32,
+                    y: src_offset.1 as i32,
+                    z: 0,
+                },
+                vk::Offset3D {
+                    x: (src_offset.0 + src_size.0) as i32,
+                    y: (src_offset.1 + src_size.1) as i32,
+                    z: 1,
+                },
+            ],
+            dst_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: dst_image.aspect,
+                mip_level: dst_mip_level,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            dst_offsets: [
+                vk::Offset3D {
+                    x: dst_offset.0 as i32,
+                    y: dst_offset.1 as i32,
+                    z: 0,
+                },
+                vk::Offset3D {
+                    x: (dst_offset.0 + dst_size.0) as i32,
+                    y: (dst_offset.1 + dst_size.1) as i32,
+                    z: 1,
+                },
+            ],
+        };
+
+        unsafe {
+            self.device_wrapper.0.cmd_blit_image(
+                self.native,
+                src_image.native,
+                src_image_layout.0,
+                dst_image.native,
+                dst_image_layout.0,
+                &[region],
+                vk::Filter::NEAREST,
+            )
+        };
+
+        self.images
+            .extend_from_slice(&[Arc::clone(src_image), Arc::clone(dst_image)]);
+    }
+
     pub fn barrier_buffer_image(
         &mut self,
         src_stage_mask: PipelineStageFlags,
