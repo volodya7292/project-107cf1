@@ -348,19 +348,15 @@ impl Renderer {
         let camera_component = self.world.read_component::<component::Camera>();
         let active_camera = camera_component.get(self.active_camera).unwrap();
 
-        let transform_component = self.world.read_component::<component::Transform>();
-        let renderer_component = self.world.read_component::<component::Renderer>();
-        let mesh_ref_component = self.world.read_component::<component::VertexMeshRef>();
+        let transform_comp = self.world.read_component::<component::Transform>();
+        let renderer_comp = self.world.read_component::<component::Renderer>();
+        let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
 
-        //let cmd = transform_component.get();
-
-        let objects: Vec<_> = (&transform_component, &renderer_component, &mesh_ref_component)
-            .join()
-            .collect();
-        let object_count = objects.len();
+        /*let objects: Vec<_> = (&transform_component, &renderer_component, &mesh_ref_component)
+        .join()
+        .collect();*/
+        let object_count = self.sorted_render_entities.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
-
-        // FIXME: SORT RENDERABLE OBJECTS BEFORE OCCLUSION QUERY
 
         self.secondary_cmd_lists
             .par_iter()
@@ -382,7 +378,19 @@ impl Renderer {
                         break;
                     }
 
-                    let (transform, renderer, mesh_ref) = objects[entity_index];
+                    let entity = self.sorted_render_entities[entity_index];
+
+                    let transform = transform_comp.get(entity);
+                    let renderer = renderer_comp.get(entity);
+                    let mesh_ref = mesh_ref_comp.get(entity);
+
+                    if transform.is_none() || renderer.is_none() || mesh_ref.is_none() {
+                        continue;
+                    }
+
+                    let transform = transform.unwrap();
+                    let renderer = renderer.unwrap();
+                    let mesh_ref = mesh_ref.unwrap();
 
                     let vertex_mesh = &mesh_ref.vertex_mesh;
                     let aabb = {
