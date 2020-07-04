@@ -80,6 +80,10 @@ impl Camera {
         }
     }
 
+    pub fn position(&self) -> &Vector3<f32> {
+        &self.position
+    }
+
     pub fn is_sphere_visible(&self, pos: Vector3<f32>, radius: f32) -> bool {
         for i in 0..6 {
             if self.frustum[i].x * pos.x
@@ -148,5 +152,5 @@ impl Renderer {
 }
 
 impl specs::Component for Renderer {
-    type Storage = specs::VecStorage<Self>;
+    type Storage = specs::FlaggedStorage<Self, specs::VecStorage<Self>>;
 }

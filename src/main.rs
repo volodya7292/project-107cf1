@@ -2,9 +2,9 @@
 mod renderer;
 mod resource_file;
 
-use crate::renderer::component;
 use crate::renderer::material_pipeline;
 use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
+use crate::renderer::{component, TextureQuality};
 use crate::resource_file::ResourceFile;
 use nalgebra::Vector3;
 use sdl2::keyboard::Keycode;
@@ -55,6 +55,7 @@ fn main() {
 
     let renderer_settings = renderer::Settings {
         vsync: true,
+        texture_quality: TextureQuality::LOW,
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };

@@ -843,7 +843,7 @@ impl Device {
         self: &Arc<Self>,
         shaders: &[Arc<Shader>],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
-        /// MAX 4 descriptor sets
+        // MAX 4 descriptor sets
         // [descriptor_set, bindings]
         let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
         let mut binding_flags: [Vec<vk::DescriptorBindingFlagsEXT>; 4] = Default::default();

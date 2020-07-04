@@ -1,9 +1,9 @@
-use crate::{DescriptorPool, Device, PipelineInput, Shader, ShaderStage};
+use crate::{DescriptorPool, Device, Shader, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
-use std::{slice, sync::Arc};
 
 pub struct PipelineSignature {
     pub(crate) device: Arc<Device>,

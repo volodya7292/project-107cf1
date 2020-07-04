@@ -1,7 +1,6 @@
-use crate::{DescriptorPool, Device, DeviceBuffer, Image, ImageLayout, PipelineSignature};
+use crate::{DescriptorPool, DeviceBuffer, Image, ImageLayout};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::collections::HashMap;
 use std::{slice, sync::Arc};
 
 pub enum BindingRes {

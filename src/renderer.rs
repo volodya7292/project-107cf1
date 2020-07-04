@@ -8,12 +8,15 @@ pub(crate) mod vertex_mesh;
 use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
+use order_stat;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
+use specs::storage::ComponentEvent;
 use specs::WorldExt;
 use specs::{Builder, Join};
-use std::mem;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::{cmp, mem};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
 use vk_wrapper::{
@@ -23,8 +26,13 @@ use vk_wrapper::{
     Subpass, FORMAT_SIZES,
 };
 
+const DISTANCE_SORT_PER_UPDATE: u32 = 128;
+
 pub struct Renderer {
     world: specs::World,
+    renderer_cmp_reader: specs::ReaderId<specs::storage::ComponentEvent>,
+    sorted_render_entities: Vec<specs::Entity>,
+    sort_count: u32,
 
     surface: Arc<vkw::Surface>,
     swapchain: Option<Arc<vkw::Swapchain>>,
@@ -54,6 +62,7 @@ pub struct Renderer {
     active_camera: specs::Entity,
 }
 
+#[derive(Copy, Clone)]
 pub enum TextureQuality {
     LOW,
     MEDIUM,
@@ -101,7 +110,6 @@ impl Renderer {
 
     /// Add texture to renderer
     pub fn add_texture(&mut self, res_ref: ResourceRef, atlas_type: TextureAtlasType) -> u16 {
-        unimplemented!()
         /*self.textures.push(Texture {
             res_ref,
             bounds: (0, 0, 0, 0),
@@ -109,6 +117,7 @@ impl Renderer {
             atlas_type,
         });
         (self.textures.len() - 1) as u16*/
+        0
     }
 
     /// Texture must be loaded before use in a shader
@@ -209,7 +218,130 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
+        let mut removed_entity_count = 0;
+
+        // Add new objects to sort
+        {
+            let entities = self.world.entities();
+            let renderer_comp = self.world.read_component::<component::Renderer>();
+            let renderer_comp_events = renderer_comp.channel().read(&mut self.renderer_cmp_reader);
+
+            let mut inserted = specs::BitSet::new();
+
+            for event in renderer_comp_events {
+                match event {
+                    ComponentEvent::Inserted(i) => {
+                        inserted.add(*i);
+                    }
+                    ComponentEvent::Removed(_) => {
+                        removed_entity_count += 1;
+                    }
+                    _ => {}
+                }
+            }
+
+            for (entity, _comp, _) in (&entities, &renderer_comp, &inserted).join() {
+                self.sorted_render_entities.push(entity);
+            }
+        }
+
         self.world.maintain();
+
+        // Replace removed(dead) entities with alive ones
+        {
+            let mut swap_entities = Vec::<specs::Entity>::with_capacity(removed_entity_count);
+            let mut new_len = self.sorted_render_entities.len();
+
+            // Find alive entities for replacement
+            for &entity in self.sorted_render_entities.iter().rev() {
+                if self.world.is_alive(entity) {
+                    if removed_entity_count > swap_entities.len() {
+                        swap_entities.push(entity);
+                    } else {
+                        break;
+                    }
+                }
+                new_len -= 1;
+            }
+
+            // Resize vector to trim swapped entities
+            if !self.sorted_render_entities.is_empty() {
+                let def_entity = self.sorted_render_entities[0];
+                self.sorted_render_entities.resize(new_len, def_entity);
+            }
+
+            // Swap entities
+            for entity in &mut self.sorted_render_entities {
+                if !self.world.is_alive(*entity) {
+                    *entity = swap_entities.remove(swap_entities.len() - 1);
+                }
+            }
+
+            // Add the rest of swap_entities that were not swapped due to resized vector
+            self.sorted_render_entities.extend(swap_entities);
+        }
+
+        // Sort render objects from front to back (for Z rejection & occlusion queries)
+        {
+            let camera_comp = self.world.read_component::<component::Camera>();
+            let transform_comp = self.world.read_component::<component::Transform>();
+            let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
+
+            let camera_pos = *camera_comp.get(self.active_camera).unwrap().position();
+
+            let sort_slice = &mut self.sorted_render_entities[(self.sort_count as usize)..];
+            let to_sort_count = sort_slice.len().min(DISTANCE_SORT_PER_UPDATE as usize);
+
+            if to_sort_count > 0 {
+                order_stat::kth_by(sort_slice, to_sort_count - 1, |&a, &b| {
+                    let a_transform = transform_comp.get(a);
+                    let a_mesh_ref = mesh_ref_comp.get(a);
+                    let b_transform = transform_comp.get(b);
+                    let b_mesh_ref = mesh_ref_comp.get(b);
+
+                    if a_transform.is_none()
+                        || a_mesh_ref.is_none()
+                        || b_transform.is_none()
+                        || b_mesh_ref.is_none()
+                    {
+                        return cmp::Ordering::Equal;
+                    }
+
+                    let a_transform = a_transform.unwrap();
+                    let a_mesh_ref = a_mesh_ref.unwrap();
+                    let b_transform = b_transform.unwrap();
+                    let b_mesh_ref = b_mesh_ref.unwrap();
+
+                    let a_pos = {
+                        let vertex_mesh = &a_mesh_ref.vertex_mesh;
+                        let aabb = {
+                            let vertex_mesh = vertex_mesh.lock().unwrap();
+                            *vertex_mesh.aabb()
+                        };
+                        (aabb.0 + aabb.1) * 0.5 + a_transform.position()
+                    };
+                    let b_pos = {
+                        let vertex_mesh = &b_mesh_ref.vertex_mesh;
+                        let aabb = {
+                            let vertex_mesh = vertex_mesh.lock().unwrap();
+                            *vertex_mesh.aabb()
+                        };
+                        (aabb.0 + aabb.1) * 0.5 + b_transform.position()
+                    };
+
+                    if (a_pos - camera_pos).magnitude() < (b_pos - camera_pos).magnitude() {
+                        cmp::Ordering::Less
+                    } else {
+                        cmp::Ordering::Greater
+                    }
+                });
+            }
+
+            self.sort_count += to_sort_count as u32;
+            if self.sort_count >= self.sorted_render_entities.len() as u32 {
+                self.sort_count = 0;
+            }
+        }
     }
 
     fn on_render(&mut self, sw_image: &vkw::SwapchainImage) -> u64 {
@@ -219,6 +351,8 @@ impl Renderer {
         let transform_component = self.world.read_component::<component::Transform>();
         let renderer_component = self.world.read_component::<component::Renderer>();
         let mesh_ref_component = self.world.read_component::<component::VertexMeshRef>();
+
+        //let cmd = transform_component.get();
 
         let objects: Vec<_> = (&transform_component, &renderer_component, &mesh_ref_component)
             .join()
@@ -253,7 +387,7 @@ impl Renderer {
                     let vertex_mesh = &mesh_ref.vertex_mesh;
                     let aabb = {
                         let vertex_mesh = vertex_mesh.lock().unwrap();
-                        vertex_mesh.aabb().clone()
+                        *vertex_mesh.aabb()
                     };
 
                     let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position();
@@ -444,6 +578,7 @@ pub fn new(
     world.register::<component::VertexMeshRef>();
     world.register::<component::Renderer>();
     world.register::<component::Camera>();
+    let renderer_cmp_reader = world.write_component::<component::Renderer>().register_reader();
 
     // TODO
     let active_camera = world
@@ -599,6 +734,9 @@ pub fn new(
 
     let mut renderer = Renderer {
         world,
+        renderer_cmp_reader,
+        sorted_render_entities: vec![],
+        sort_count: 0,
         surface: Arc::clone(surface),
         swapchain: None,
         surface_changed: false,
