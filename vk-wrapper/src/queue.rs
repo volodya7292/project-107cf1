@@ -143,14 +143,23 @@ impl Queue {
             });
 
             new_last_signal_value += 1;
-            info.signal_semaphores.push(SignalSemaphore {
+            let signal_sp = SignalSemaphore {
                 semaphore: Arc::clone(&self.timeline_sp),
                 signal_value: new_last_signal_value,
-            });
+            };
+            info.signal_semaphores.push(signal_sp.clone());
+            info.completion_signal_sp = Some(signal_sp);
         }
 
         self.submit_infos(packet.infos.as_slice(), &packet.fence)?;
         *sp_last_signal_value = new_last_signal_value;
+
+        // Remove implicitly added semaphores
+        for info in &mut packet.infos {
+            info.wait_semaphores.remove(info.wait_semaphores.len() - 1);
+            info.signal_semaphores.remove(info.signal_semaphores.len() - 1);
+        }
+
         Ok(())
     }
 
@@ -231,6 +240,7 @@ pub struct SubmitInfo {
     wait_semaphores: Vec<WaitSemaphore>,
     cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     signal_semaphores: Vec<SignalSemaphore>,
+    completion_signal_sp: Option<SignalSemaphore>,
 }
 
 impl SubmitInfo {
@@ -239,6 +249,7 @@ impl SubmitInfo {
             wait_semaphores: wait_semaphores.to_vec(),
             cmd_lists: cmd_lists.to_vec(),
             signal_semaphores: vec![],
+            completion_signal_sp: None,
         }
     }
 
@@ -272,8 +283,9 @@ impl SubmitPacket {
         Ok(())
     }
 
-    pub fn get_signal_value(&self, submit_index: u32) -> u64 {
-        self.infos[submit_index as usize].signal_semaphores[0].signal_value
+    pub fn get_signal_value(&self, submit_index: u32) -> Option<u64> {
+        let sp = self.infos[submit_index as usize].completion_signal_sp.as_ref()?;
+        Some(sp.signal_value)
     }
 
     pub fn wait(&self) -> Result<(), vk::Result> {

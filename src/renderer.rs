@@ -54,7 +54,7 @@ pub struct Renderer {
     vb: Arc<DeviceBuffer>,
 
     staging_buffer: HostBuffer<u8>,
-    staging_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
+    staging_copy_cl: Arc<Mutex<CmdList>>,
     staging_copy_submit: SubmitPacket,
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
@@ -224,20 +224,6 @@ impl Renderer {
         }*/
     }
 
-    fn acquire_staging_cl(&mut self) -> Result<Arc<Mutex<CmdList>>, vkw::DeviceError> {
-        if self.staging_cmd_lists.is_empty() {
-            self.device
-                .get_queue(Queue::TYPE_GRAPHICS)
-                .create_primary_cmd_list()
-        } else {
-            Ok(self.staging_cmd_lists.remove(self.staging_cmd_lists.len() - 1))
-        }
-    }
-
-    fn release_staging_cl(&mut self, cl: Arc<Mutex<CmdList>>) {
-        self.staging_cmd_lists.push(cl);
-    }
-
     pub fn set_settings(&mut self, settings: Settings) {
         // TODO
         self.settings = settings;
@@ -378,9 +364,7 @@ impl Renderer {
             }
         }
 
-        let mut copy_submits = vec![];
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-        let graphics_sp = graphics_queue.get_semaphore();
 
         // Update camera uniform buffers
         {
@@ -417,7 +401,19 @@ impl Renderer {
 
         // Update device buffers
         {
-            self.staging_copy_submit.set(&copy_submits).unwrap();
+            {
+                let mut cl = self.staging_copy_cl.lock().unwrap();
+                cl.begin(true).unwrap();
+                cl.copy_buffer_to_device(
+                    &self.staging_buffer,
+                    0,
+                    &self.camera_uniform_buffer,
+                    0,
+                    mem::size_of::<CameraInfo>() as u64,
+                );
+                cl.end().unwrap();
+            }
+
             graphics_queue.submit(&mut self.staging_copy_submit).unwrap();
             self.staging_copy_submit.wait().unwrap();
         }
@@ -551,7 +547,7 @@ impl Renderer {
             .unwrap();
         graphics_queue.submit(&mut packet).unwrap();
 
-        packet.get_signal_value(0)
+        packet.get_signal_value(0).unwrap()
     }
 
     pub fn on_draw(&mut self) {
@@ -840,7 +836,7 @@ pub fn new(
         rp: None,
         vb,
         staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
-        staging_cmd_lists: vec![],
+        staging_copy_cl,
         staging_copy_submit,
         sw_framebuffers: vec![],
         query_pool: device.create_query_pool(65536)?,
