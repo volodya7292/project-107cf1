@@ -39,6 +39,10 @@ impl Semaphore {
 
         Ok(*last_signal_value)
     }
+
+    pub fn last_signal_value(&self) -> u64 {
+        *self.last_signal_value.lock().unwrap()
+    }
 }
 
 impl Drop for Semaphore {

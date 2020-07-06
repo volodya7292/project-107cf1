@@ -1,6 +1,6 @@
 use crate::device::DeviceWrapper;
-use crate::SwapchainImage;
 use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
+use crate::{DeviceError, SwapchainImage};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::slice;
@@ -25,7 +25,7 @@ impl Queue {
     pub const TYPE_TRANSFER: QueueType = QueueType(2);
     pub const TYPE_PRESENT: QueueType = QueueType(3);
 
-    fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
+    fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
         let native_pool = unsafe { self.device_wrapper.0.create_command_pool(&create_info, None)? };
 
@@ -50,11 +50,11 @@ impl Queue {
         })))
     }
 
-    pub fn create_primary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
+    pub fn create_primary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
         self.create_cmd_list(vk::CommandBufferLevel::PRIMARY)
     }
 
-    pub fn create_secondary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, vk::Result> {
+    pub fn create_secondary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
         self.create_cmd_list(vk::CommandBufferLevel::SECONDARY)
     }
 
@@ -128,6 +128,10 @@ impl Queue {
     }
 
     pub fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
+        if packet.infos.is_empty() {
+            return Ok(());
+        }
+
         let mut sp_last_signal_value = self.timeline_sp.last_signal_value.lock().unwrap();
         let mut new_last_signal_value = *sp_last_signal_value;
 
@@ -196,8 +200,8 @@ impl Queue {
         Ok(optimal)
     }
 
-    pub fn get_semaphore(&self) -> &Semaphore {
-        &self.timeline_sp
+    pub fn get_semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.timeline_sp)
     }
 }
 
@@ -237,6 +241,14 @@ impl SubmitInfo {
             signal_semaphores: vec![],
         }
     }
+
+    pub fn get_wait_semaphores(&self) -> &[WaitSemaphore] {
+        &self.wait_semaphores
+    }
+
+    pub fn get_wait_semaphores_mut(&mut self) -> &mut [WaitSemaphore] {
+        &mut self.wait_semaphores
+    }
 }
 
 pub struct SubmitPacket {
@@ -245,6 +257,15 @@ pub struct SubmitPacket {
 }
 
 impl SubmitPacket {
+    pub fn get(&self) -> &[SubmitInfo] {
+        &self.infos
+    }
+
+    pub fn get_mut(&mut self) -> Result<&mut [SubmitInfo], vk::Result> {
+        self.wait()?;
+        Ok(&mut self.infos)
+    }
+
     pub fn set(&mut self, infos: &[SubmitInfo]) -> Result<(), vk::Result> {
         self.wait()?;
         self.infos = infos.to_vec();

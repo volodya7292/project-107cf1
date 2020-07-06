@@ -1,7 +1,7 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use nalgebra as na;
-use nalgebra::{Isometry3, Perspective3, Translation3, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{Isometry3, Matrix4, Perspective3, Translation3, UnitQuaternion, Vector3, Vector4};
 use sdl2::render::UpdateTextureYUVError::InvalidPlaneLength;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -42,6 +42,7 @@ impl Default for Transform {
 pub struct Camera {
     position: Vector3<f32>,
     rotation: Vector3<f32>,
+    aspect: f32,
     fovy: f32,
     near: f32,
     far: f32,
@@ -72,6 +73,7 @@ impl Camera {
         Camera {
             position: Vector3::default(),
             rotation: Vector3::default(),
+            aspect,
             fovy,
             near,
             far,
@@ -80,8 +82,25 @@ impl Camera {
         }
     }
 
+    pub fn projection(&self) -> Matrix4<f32> {
+        *Perspective3::new(self.aspect, self.fovy, self.near, self.far).as_matrix()
+    }
+
+    pub fn view(&self) -> Matrix4<f32> {
+        let translation = Translation3::from(self.position);
+        let rotation = UnitQuaternion::from_scaled_axis(self.rotation);
+        Isometry3::from_parts(translation, rotation).to_homogeneous()
+    }
+
     pub fn position(&self) -> &Vector3<f32> {
         &self.position
+    }
+
+    pub fn direction(&self) -> Vector3<f32> {
+        let view = self.view();
+        let identity = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
+        let dir = view * identity;
+        Vector3::from(dir.fixed_rows::<na::U3>(0))
     }
 
     pub fn is_sphere_visible(&self, pos: Vector3<f32>, radius: f32) -> bool {

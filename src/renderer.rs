@@ -8,6 +8,8 @@ pub(crate) mod vertex_mesh;
 use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use image::GenericImageView;
+use nalgebra as na;
+use nalgebra::{Matrix4, Vector3, Vector4};
 use order_stat;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
@@ -16,14 +18,16 @@ use specs::WorldExt;
 use specs::{Builder, Join};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::{cmp, mem};
+use std::{cmp, mem, slice};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
+use vk_wrapper::{swapchain, HostBuffer, SwapchainImage};
 use vk_wrapper::{
-    Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, DeviceBuffer, Format, Framebuffer,
-    ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
-    PipelineSignature, PrimitiveTopology, QueryPool, Queue, QueueType, RenderPass, SubmitInfo, SubmitPacket,
-    Subpass, FORMAT_SIZES,
+    Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
+    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineInput,
+    PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue,
+    QueueType, RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
+    FORMAT_SIZES,
 };
 
 const DISTANCE_SORT_PER_UPDATE: u32 = 128;
@@ -34,22 +38,26 @@ pub struct Renderer {
     sorted_render_entities: Vec<specs::Entity>,
     sort_count: u32,
 
-    surface: Arc<vkw::Surface>,
-    swapchain: Option<Arc<vkw::Swapchain>>,
+    surface: Arc<Surface>,
+    swapchain: Option<Arc<Swapchain>>,
     surface_changed: bool,
     surface_size: (u32, u32),
     settings: Settings,
-    device: Arc<vkw::Device>,
+    device: Arc<Device>,
 
     texture_atlases: [TextureAtlas; 4],
 
-    //submit_packet: Option<vkw::SubmitPacket>,
-    sig: Arc<vkw::PipelineSignature>,
-    pipe: Option<Arc<vkw::Pipeline>>,
-    rp: Option<Arc<vkw::RenderPass>>,
-    vb: Arc<vkw::DeviceBuffer>,
+    //submit_packet: Option<SubmitPacket>,
+    sig: Arc<PipelineSignature>,
+    pipe: Option<Arc<Pipeline>>,
+    rp: Option<Arc<RenderPass>>,
+    vb: Arc<DeviceBuffer>,
 
-    main_framebuffers: Vec<Arc<vkw::Framebuffer>>,
+    staging_buffer: HostBuffer<u8>,
+    staging_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
+    staging_copy_submit: SubmitPacket,
+
+    sw_framebuffers: Vec<Arc<Framebuffer>>,
 
     query_pool: Arc<QueryPool>,
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
@@ -58,8 +66,10 @@ pub struct Renderer {
     depth_framebuffer: Option<Arc<Framebuffer>>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
+    depth_camera_input: Arc<PipelineInput>,
 
     active_camera: specs::Entity,
+    camera_uniform_buffer: Arc<DeviceBuffer>,
 }
 
 #[derive(Copy, Clone)]
@@ -84,6 +94,15 @@ impl TextureAtlasType {
     pub const SPECULAR: Self = Self(1);
     pub const EMISSION: Self = Self(2);
     pub const NORMAL: Self = Self(3);
+}
+
+pub struct CameraInfo {
+    pos: Vector4<f32>,
+    dir: Vector4<f32>,
+    proj: Matrix4<f32>,
+    view: Matrix4<f32>,
+    proj_view: Matrix4<f32>,
+    //vec4 info;// .x - FovY
 }
 
 /*struct RenderSystem;
@@ -138,7 +157,7 @@ impl Renderer {
             let mut buffer = self
                 .device
                 .create_host_buffer::<u8>(
-                    vkw::BufferUsageFlags::TRANSFER_SRC,
+                    BufferUsageFlags::TRANSFER_SRC,
                     (img.width() * img.height() * FORMAT_SIZES[&texture.format] as u32) as u64,
                 )
                 .unwrap();
@@ -151,40 +170,40 @@ impl Renderer {
                         texture.format,
                         self.settings.textures_gen_mipmaps,
                         self.settings.textures_max_anisotropy,
-                        vkw::ImageUsageFlags::SAMPLED,
+                        ImageUsageFlags::SAMPLED,
                         (img.width(), img.height()),
                     )
                     .unwrap(),
             );
             let image = texture.image.as_ref().unwrap();
 
-            let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
             // Record cmd list: copy resource to image
             {
                 let mut cl = self.texture_load_cmd_list.lock().unwrap();
                 cl.begin(true).unwrap();
                 cl.barrier_image(
-                    vkw::PipelineStageFlags::TOP_OF_PIPE,
-                    vkw::PipelineStageFlags::TRANSFER,
+                    PipelineStageFlags::TOP_OF_PIPE,
+                    PipelineStageFlags::TRANSFER,
                     &[image.barrier_queue(
-                        vkw::AccessFlags::default(),
-                        vkw::AccessFlags::TRANSFER_WRITE,
-                        vkw::ImageLayout::UNDEFINED,
-                        vkw::ImageLayout::TRANSFER_DST,
+                        AccessFlags::default(),
+                        AccessFlags::TRANSFER_WRITE,
+                        ImageLayout::UNDEFINED,
+                        ImageLayout::TRANSFER_DST,
                         graphics_queue,
                         graphics_queue,
                     )],
                 );
-                cl.copy_host_buffer_to_image(&buffer, 0, &image, vkw::ImageLayout::TRANSFER_DST);
+                cl.copy_host_buffer_to_image(&buffer, 0, &image, ImageLayout::TRANSFER_DST);
                 cl.barrier_image(
-                    vkw::PipelineStageFlags::TRANSFER,
-                    vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                    PipelineStageFlags::TRANSFER,
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
                     &[image.barrier_queue(
-                        vkw::AccessFlags::TRANSFER_WRITE,
-                        vkw::AccessFlags::default(),
-                        vkw::ImageLayout::TRANSFER_DST,
-                        vkw::ImageLayout::SHADER_READ,
+                        AccessFlags::TRANSFER_WRITE,
+                        AccessFlags::default(),
+                        ImageLayout::TRANSFER_DST,
+                        ImageLayout::SHADER_READ,
                         graphics_queue,
                         graphics_queue,
                     )],
@@ -203,6 +222,20 @@ impl Renderer {
         /*if let Some(texture) = self.textures.get_mut(index as usize) {
             texture.loaded = false;
         }*/
+    }
+
+    fn acquire_staging_cl(&mut self) -> Result<Arc<Mutex<CmdList>>, vkw::DeviceError> {
+        if self.staging_cmd_lists.is_empty() {
+            self.device
+                .get_queue(Queue::TYPE_GRAPHICS)
+                .create_primary_cmd_list()
+        } else {
+            Ok(self.staging_cmd_lists.remove(self.staging_cmd_lists.len() - 1))
+        }
+    }
+
+    fn release_staging_cl(&mut self, cl: Arc<Mutex<CmdList>>) {
+        self.staging_cmd_lists.push(cl);
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
@@ -281,13 +314,15 @@ impl Renderer {
             self.sorted_render_entities.extend(swap_entities);
         }
 
+        let camera_comp = self.world.read_component::<component::Camera>();
+        let camera = camera_comp.get(self.active_camera).unwrap();
+
         // Sort render objects from front to back (for Z rejection & occlusion queries)
         {
-            let camera_comp = self.world.read_component::<component::Camera>();
             let transform_comp = self.world.read_component::<component::Transform>();
             let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
 
-            let camera_pos = *camera_comp.get(self.active_camera).unwrap().position();
+            let camera_pos = camera.position().clone();
 
             let sort_slice = &mut self.sorted_render_entities[(self.sort_count as usize)..];
             let to_sort_count = sort_slice.len().min(DISTANCE_SORT_PER_UPDATE as usize);
@@ -342,9 +377,53 @@ impl Renderer {
                 self.sort_count = 0;
             }
         }
+
+        let mut copy_submits = vec![];
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+        let graphics_sp = graphics_queue.get_semaphore();
+
+        // Update camera uniform buffers
+        {
+            let cam_pos = camera.position();
+            let cam_dir = camera.direction();
+            let proj = camera.projection();
+            let view = camera.view();
+
+            let camera_info = CameraInfo {
+                pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                proj,
+                view,
+                proj_view: proj * view,
+            };
+
+            self.staging_buffer.write(0, unsafe {
+                slice::from_raw_parts(
+                    &camera_info as *const CameraInfo as *const u8,
+                    mem::size_of::<CameraInfo>(),
+                )
+            });
+
+            // TODO
+            /*copy_submits.push(SubmitInfo::new(
+                &[WaitSemaphore {
+                    semaphore: Arc::clone(&graphics_sp),
+                    wait_dst_mask: PipelineStageFlags::BOTTOM_OF_PIPE,
+                    wait_value: 0,
+                }],
+                &[],
+            ));*/
+        }
+
+        // Update device buffers
+        {
+            self.staging_copy_submit.set(&copy_submits).unwrap();
+            graphics_queue.submit(&mut self.staging_copy_submit).unwrap();
+            self.staging_copy_submit.wait().unwrap();
+        }
     }
 
-    fn on_render(&mut self, sw_image: &vkw::SwapchainImage) -> u64 {
+    fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
         let camera_component = self.world.read_component::<component::Camera>();
         let active_camera = camera_component.get(self.active_camera).unwrap();
 
@@ -371,6 +450,9 @@ impl Renderer {
                     Some(self.depth_framebuffer.as_ref().unwrap()),
                 )
                 .unwrap();
+
+                cl.bind_pipeline(&self.depth_pipeline_r);
+                cl.bind_pipeline_input(0, &self.depth_camera_input);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -419,7 +501,7 @@ impl Renderer {
                 cl.end().unwrap();
             });
 
-        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
         // -------------------------------------------------------------------------------------
 
@@ -430,7 +512,7 @@ impl Renderer {
             cmd_list.begin(true).unwrap();
             cmd_list.begin_render_pass(
                 self.rp.as_ref().unwrap(),
-                &self.main_framebuffers[sw_image.get_index() as usize],
+                &self.sw_framebuffers[sw_image.get_index() as usize],
                 &[ClearValue::ColorF32([0.1, 0.1, 0.1, 1.0])],
                 false,
             );
@@ -442,13 +524,13 @@ impl Renderer {
             cmd_list.end_render_pass();
 
             /*cmd_list.barrier_image(
-                vkw::PipelineStageFlags::TOP_OF_PIPE,
-                vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
                 &[sw_image.get_image().barrier_queue(
-                    vkw::AccessFlags::empty(),
-                    vkw::AccessFlags::empty(),
-                    vkw::ImageLayout::UNDEFINED,
-                    vkw::ImageLayout::PRESENT,
+                    AccessFlags::empty(),
+                    AccessFlags::empty(),
+                    ImageLayout::UNDEFINED,
+                    ImageLayout::PRESENT,
                     graphics_queue,
                     graphics_queue,
                 )],
@@ -458,10 +540,10 @@ impl Renderer {
 
         let mut packet = self
             .device
-            .create_submit_packet(&[vkw::SubmitInfo::new(
-                &[vkw::WaitSemaphore {
+            .create_submit_packet(&[SubmitInfo::new(
+                &[WaitSemaphore {
                     semaphore: self.swapchain.as_ref().unwrap().get_semaphore(),
-                    wait_dst_mask: vkw::PipelineStageFlags::TOP_OF_PIPE,
+                    wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
                     wait_value: 0,
                 }],
                 &[Arc::clone(&cmd_list)],
@@ -475,7 +557,7 @@ impl Renderer {
     pub fn on_draw(&mut self) {
         let device = self.device.clone();
         let adapter = device.get_adapter();
-        let graphics_queue = device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+        let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
         let surface = &self.surface;
 
         if adapter.is_surface_valid(surface).unwrap() {
@@ -500,16 +582,16 @@ impl Renderer {
                 self.on_update();
                 let wait_value = self.on_render(&sw_image);
 
-                let present_queue = self.device.get_queue(vkw::Queue::TYPE_PRESENT);
+                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
                 if !present_queue
-                    .present(sw_image, graphics_queue.get_semaphore(), wait_value)
+                    .present(sw_image, &graphics_queue.get_semaphore(), wait_value)
                     .unwrap_or(false)
                 {
                     self.surface_changed = true;
                 }
             } else {
                 match acquire_result {
-                    Err(vkw::swapchain::Error::IncompatibleSurface) => {
+                    Err(swapchain::Error::IncompatibleSurface) => {
                         self.surface_changed = true;
                     }
                     _ => {
@@ -521,7 +603,7 @@ impl Renderer {
     }
 
     fn create_main_framebuffers(&mut self) {
-        self.main_framebuffers.clear();
+        self.sw_framebuffers.clear();
 
         let images = self.swapchain.as_ref().unwrap().get_images();
 
@@ -560,7 +642,7 @@ impl Renderer {
         );
 
         for img in images {
-            self.main_framebuffers.push(
+            self.sw_framebuffers.push(
                 self.rp
                     .as_ref()
                     .unwrap()
@@ -575,10 +657,10 @@ impl Renderer {
 }
 
 pub fn new(
-    surface: &Arc<vkw::Surface>,
+    surface: &Arc<Surface>,
     size: (u32, u32),
     settings: Settings,
-    device: &Arc<vkw::Device>,
+    device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
 ) -> Result<Renderer, vkw::DeviceError> {
     let mut world = specs::World::new();
@@ -652,45 +734,41 @@ pub fn new(
     }
 
     let depth_render_pass = device.create_render_pass(
-        &[vkw::Attachment {
-            format: vkw::Format::D32_FLOAT,
-            init_layout: vkw::ImageLayout::UNDEFINED,
-            final_layout: vkw::ImageLayout::DEPTH_READ,
+        &[Attachment {
+            format: Format::D32_FLOAT,
+            init_layout: ImageLayout::UNDEFINED,
+            final_layout: ImageLayout::DEPTH_READ,
             load_store: LoadStore::InitClearFinalSave,
         }],
-        &[vkw::Subpass {
+        &[Subpass {
             color: vec![],
             depth: Some(AttachmentRef {
                 index: 0,
-                layout: vkw::ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
             }),
         }],
         &[],
     )?;
     let depth_vertex = device.create_shader(
         &resources.get("shaders/depth.vert.spv").unwrap().read().unwrap(),
-        &[("inPosition", vkw::Format::RGB32_FLOAT)],
+        &[("inPosition", Format::RGB32_FLOAT)],
         &[],
     )?;
     let depth_signature = device.create_pipeline_signature(&[depth_vertex])?;
     let depth_pipeline_r = device.create_graphics_pipeline(
         &depth_render_pass,
         0,
-        vkw::PrimitiveTopology::TRIANGLE_LIST,
-        vkw::PipelineDepthStencil::new()
-            .depth_test(true)
-            .depth_write(false),
-        vkw::PipelineRasterization::new().cull_back_faces(true),
+        PrimitiveTopology::TRIANGLE_LIST,
+        PipelineDepthStencil::new().depth_test(true).depth_write(false),
+        PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
     let depth_pipeline_rw = device.create_graphics_pipeline(
         &depth_render_pass,
         0,
-        vkw::PrimitiveTopology::TRIANGLE_LIST,
-        vkw::PipelineDepthStencil::new()
-            .depth_test(true)
-            .depth_write(true),
-        vkw::PipelineRasterization::new().cull_back_faces(true),
+        PrimitiveTopology::TRIANGLE_LIST,
+        PipelineDepthStencil::new().depth_test(true).depth_write(true),
+        PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
 
@@ -701,7 +779,7 @@ pub fn new(
         // albedo
         texture_atlas::new(
             &device,
-            vkw::Format::RGBA8_UNORM,
+            Format::RGBA8_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             1,
@@ -711,7 +789,7 @@ pub fn new(
         // specular
         texture_atlas::new(
             &device,
-            vkw::Format::RGBA8_UNORM,
+            Format::RGBA8_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             1,
@@ -721,7 +799,7 @@ pub fn new(
         // emission
         texture_atlas::new(
             &device,
-            vkw::Format::RGBA8_UNORM,
+            Format::RGBA8_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             1,
@@ -731,7 +809,7 @@ pub fn new(
         // normal
         texture_atlas::new(
             &device,
-            vkw::Format::RGBA16_UNORM,
+            Format::RGBA16_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             1,
@@ -739,6 +817,10 @@ pub fn new(
         )
         .unwrap(),
     ];
+
+    let staging_copy_cl = graphics_queue.create_primary_cmd_list()?;
+    let staging_copy_submit =
+        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_copy_cl)])])?;
 
     let mut renderer = Renderer {
         world,
@@ -757,14 +839,23 @@ pub fn new(
         pipe: None,
         rp: None,
         vb,
-        main_framebuffers: vec![],
+        staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
+        staging_cmd_lists: vec![],
+        staging_copy_submit,
+        sw_framebuffers: vec![],
         query_pool: device.create_query_pool(65536)?,
         secondary_cmd_lists,
         depth_render_pass,
         depth_framebuffer: None,
         depth_pipeline_r,
         depth_pipeline_rw,
+        depth_camera_input: depth_signature.create_pool(0, 1)?.get_input(0)?,
         active_camera,
+        camera_uniform_buffer: device.create_device_buffer(
+            BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
+            mem::size_of::<CameraInfo>() as u64,
+            1,
+        )?,
     };
     renderer.on_resize(size);
 
