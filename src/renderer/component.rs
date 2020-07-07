@@ -2,10 +2,10 @@ use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use nalgebra as na;
 use nalgebra::{Isometry3, Matrix4, Perspective3, Translation3, UnitQuaternion, Vector3, Vector4};
-use sdl2::render::UpdateTextureYUVError::InvalidPlaneLength;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
+use vk_wrapper::{DeviceBuffer, PipelineInput};
 
 pub struct Transform {
     position: Vector3<f32>,
@@ -146,24 +146,32 @@ impl specs::Component for VertexMeshRef {
 }
 
 pub struct Renderer {
-    mat_pipeline: Arc<MaterialPipeline>,
-    uniform_buffer_offset: u64,
+    pub(in crate::renderer) mat_pipeline: Arc<MaterialPipeline>,
+    pub(in crate::renderer) pipelines_inputs: Vec<Arc<PipelineInput>>,
 
+    pub(in crate::renderer) uniform_buffer: Arc<DeviceBuffer>,
     //buffers: HashMap<u32, vkw::RawHostBuffer>,
     // binding id -> renderer impl-specific res index
     pub(in crate::renderer) translucent: bool,
-    changed: bool,
+    pub(in crate::renderer) changed: bool,
 }
 
 impl Renderer {
     pub fn new(
         device: &Arc<vkw::Device>,
-        mat_pipeline: Arc<MaterialPipeline>,
+        mat_pipeline: &Arc<MaterialPipeline>,
         translucent: bool,
     ) -> Renderer {
         Self {
-            mat_pipeline,
-            uniform_buffer_offset: 0,
+            mat_pipeline: Arc::clone(&mat_pipeline),
+            pipelines_inputs: vec![],
+            uniform_buffer: device
+                .create_device_buffer(
+                    vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
+                    mat_pipeline.uniform_buffer_size() as u64,
+                    1,
+                )
+                .unwrap(),
             translucent,
             changed: true,
         }

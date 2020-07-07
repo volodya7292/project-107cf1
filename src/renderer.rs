@@ -1,5 +1,7 @@
 pub(crate) mod component;
+#[macro_use]
 pub(crate) mod material_pipeline;
+pub mod material_pipelines;
 //mod texture;
 mod texture_atlas;
 #[macro_use]
@@ -14,14 +16,17 @@ use order_stat;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
 use specs::storage::ComponentEvent;
+use specs::storage::MutableParallelRestriction;
+use specs::storage::RestrictedStorage;
 use specs::WorldExt;
-use specs::{Builder, Join};
+use specs::{Builder, Join, ParJoin};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::{cmp, mem, slice};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
-use vk_wrapper::{swapchain, HostBuffer, SwapchainImage};
+use vk_wrapper::pipeline_input::{Binding, BindingRes};
+use vk_wrapper::{swapchain, DescriptorPool, HostBuffer, SwapchainImage};
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
     Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineInput,
@@ -60,6 +65,7 @@ pub struct Renderer {
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
     query_pool: Arc<QueryPool>,
+    query_pool_buffer: HostBuffer<u8>,
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
 
     depth_render_pass: Arc<RenderPass>,
@@ -67,6 +73,8 @@ pub struct Renderer {
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
     depth_camera_input: Arc<PipelineInput>,
+    depth_model_inputs: Arc<DescriptorPool>,
+    depth_cmd_list: Arc<Mutex<CmdList>>,
 
     active_camera: specs::Entity,
     camera_uniform_buffer: Arc<DeviceBuffer>,
@@ -118,6 +126,7 @@ impl<'a> specs::System<'a> for RenderSystem {
     }
 }
 */
+
 impl Renderer {
     pub fn add_entity(&mut self) -> specs::EntityBuilder {
         self.world.create_entity()
@@ -364,6 +373,52 @@ impl Renderer {
             }
         }
 
+        // Update pipeline inputs
+        {
+            self.depth_camera_input.update(&[Binding {
+                id: 0,
+                array_index: 0,
+                res: BindingRes::Buffer(Arc::clone(&self.camera_uniform_buffer)),
+            }]);
+
+            let mut renderer_comp = self.world.write_component::<component::Renderer>();
+
+            (&mut renderer_comp.par_restrict_mut())
+                .par_join()
+                .for_each(|mut comps| {
+                    let renderer = comps.get_unchecked();
+
+                    if renderer.changed {
+                        let renderer = comps.get_mut_unchecked();
+                        let mat_pipeline = &renderer.mat_pipeline;
+                        let inputs = &mut renderer.pipelines_inputs;
+
+                        inputs.clear();
+
+                        let depth_input = self.depth_model_inputs.allocate_input().unwrap();
+                        depth_input.update(&[Binding {
+                            id: 0,
+                            array_index: 0,
+                            res: BindingRes::BufferRange(
+                                Arc::clone(&renderer.uniform_buffer),
+                                mat_pipeline.uniform_buffer_offset_model() as u64,
+                                mem::size_of::<na::Matrix4<f32>>() as u64,
+                            ),
+                        }]);
+
+                        inputs.push(depth_input);
+
+                        renderer.changed = false;
+                    }
+                });
+        }
+
+        // Update device buffers of vertex meshes
+        {
+            let mut mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
+            // TODO
+        }
+
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
         // Update camera uniform buffers
@@ -387,20 +442,15 @@ impl Renderer {
                     mem::size_of::<CameraInfo>(),
                 )
             });
-
-            // TODO
-            /*copy_submits.push(SubmitInfo::new(
-                &[WaitSemaphore {
-                    semaphore: Arc::clone(&graphics_sp),
-                    wait_dst_mask: PipelineStageFlags::BOTTOM_OF_PIPE,
-                    wait_value: 0,
-                }],
-                &[],
-            ));*/
         }
 
         // Update device buffers
         {
+            /*while true {
+
+                break;
+            }*/
+
             {
                 let mut cl = self.staging_copy_cl.lock().unwrap();
                 cl.begin(true).unwrap();
@@ -488,7 +538,8 @@ impl Renderer {
                             cl.bind_pipeline(&self.depth_pipeline_rw);
                         }
 
-                        //cl.bind_and_draw_vertex_mesh(&vertex_mesh);
+                        cl.bind_pipeline_input(1, &renderer.pipelines_inputs[0]);
+                        cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
                     cl.end_query(entity_index as u32);
@@ -497,7 +548,35 @@ impl Renderer {
                 cl.end().unwrap();
             });
 
+        // Record depth cmd list
+        {
+            let object_count = self.sorted_render_entities.len() as u32;
+
+            let mut cl = self.depth_cmd_list.lock().unwrap();
+            cl.begin(true).unwrap();
+            cl.reset_query_pool(&self.query_pool, 0, object_count);
+            cl.begin_render_pass(
+                &self.depth_render_pass,
+                self.depth_framebuffer.as_ref().unwrap(),
+                &[ClearValue::Depth(1.0)],
+                true,
+            );
+            cl.execute_secondary(&self.secondary_cmd_lists);
+            cl.end_render_pass();
+            cl.copy_query_pool_results_to_host(&self.query_pool, 0, object_count, &self.query_pool_buffer, 0);
+            cl.end().unwrap();
+        }
+
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+
+        let mut depth_packet = self
+            .device
+            .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&self.depth_cmd_list)])])
+            .unwrap();
+        graphics_queue.submit(&mut depth_packet).unwrap();
+
+        // TODO: Make more efficient
+        depth_packet.wait().unwrap();
 
         // -------------------------------------------------------------------------------------
 
@@ -840,12 +919,18 @@ pub fn new(
         staging_copy_submit,
         sw_framebuffers: vec![],
         query_pool: device.create_query_pool(65536)?,
+        query_pool_buffer: device.create_host_buffer(
+            vkw::BufferUsageFlags::TRANSFER_DST,
+            (mem::size_of::<u32>() * 65535) as u64,
+        )?,
         secondary_cmd_lists,
         depth_render_pass,
         depth_framebuffer: None,
         depth_pipeline_r,
         depth_pipeline_rw,
-        depth_camera_input: depth_signature.create_pool(0, 1)?.get_input(0)?,
+        depth_camera_input: depth_signature.create_pool(0, 1)?.allocate_input()?,
+        depth_model_inputs: depth_signature.create_pool(1, 65535)?,
+        depth_cmd_list: graphics_queue.create_primary_cmd_list()?,
         active_camera,
         camera_uniform_buffer: device.create_device_buffer(
             BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,

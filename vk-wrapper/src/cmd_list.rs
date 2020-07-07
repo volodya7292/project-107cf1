@@ -5,7 +5,7 @@ use crate::{
     Pipeline, PipelineInput, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -14,7 +14,7 @@ pub struct CmdList {
     pub(crate) one_time_exec: bool,
     pub(crate) render_passes: Vec<Arc<RenderPass>>,
     pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
-    pub(crate) secondary_cmd_lists: Vec<Arc<CmdList>>,
+    pub(crate) secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     pub(crate) pipelines: Vec<Arc<Pipeline>>,
     pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
     pub(crate) buffers: Vec<Arc<Buffer>>,
@@ -191,6 +191,18 @@ impl CmdList {
                 .0
                 .cmd_end_query(self.native, self.query_pools.last().unwrap().native, query)
         };
+    }
+
+    pub fn reset_query_pool(&mut self, query_pool: &Arc<QueryPool>, first_query: u32, query_count: u32) {
+        unsafe {
+            self.device_wrapper.0.cmd_reset_query_pool(
+                self.native,
+                query_pool.native,
+                first_query,
+                query_count,
+            )
+        };
+        self.query_pools.push(Arc::clone(query_pool));
     }
 
     pub fn set_viewport(&mut self, size: (u32, u32)) {
@@ -492,6 +504,30 @@ impl CmdList {
             .extend_from_slice(&[Arc::clone(src_image), Arc::clone(dst_image)]);
     }
 
+    pub fn copy_query_pool_results_to_host(
+        &mut self,
+        query_pool: &Arc<QueryPool>,
+        first_query: u32,
+        query_count: u32,
+        dst_buffer: &HostBuffer<u8>,
+        dst_offset: u64,
+    ) {
+        unsafe {
+            self.device_wrapper.0.cmd_copy_query_pool_results(
+                self.native,
+                query_pool.native,
+                first_query,
+                query_count,
+                dst_buffer.buffer.native,
+                dst_offset,
+                0,
+                vk::QueryResultFlags::WAIT,
+            )
+        };
+        self.query_pools.push(Arc::clone(query_pool));
+        self.buffers.push(Arc::clone(&dst_buffer.buffer));
+    }
+
     pub fn barrier_buffer_image(
         &mut self,
         src_stage_mask: PipelineStageFlags,
@@ -542,9 +578,11 @@ impl CmdList {
         self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers)
     }
 
-    pub fn execute_secondary(&mut self, cmd_lists: &[Arc<CmdList>]) {
-        let native_cmd_lists: Vec<vk::CommandBuffer> =
-            cmd_lists.iter().map(|cmd_list| cmd_list.native).collect();
+    pub fn execute_secondary(&mut self, cmd_lists: &[Arc<Mutex<CmdList>>]) {
+        let native_cmd_lists: Vec<vk::CommandBuffer> = cmd_lists
+            .iter()
+            .map(|cmd_list| cmd_list.lock().unwrap().native)
+            .collect();
 
         unsafe {
             self.device_wrapper

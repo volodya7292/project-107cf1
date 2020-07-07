@@ -9,7 +9,7 @@ layout(location = 0) in vec3 inPosition;
 layout(set = 0, binding = 0) uniform camera_data {
     Camera camera;
 };
-layout(set = 1, binding = 1) uniform per_object_data {
+layout(set = 1, binding = 0) uniform per_object_data {
     mat4 model;
 };
 

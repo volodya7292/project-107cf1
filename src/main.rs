@@ -2,9 +2,9 @@
 mod renderer;
 mod resource_file;
 
-use crate::renderer::material_pipeline;
 use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
 use crate::renderer::{component, TextureQuality};
+use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
 use nalgebra::Vector3;
 use sdl2::keyboard::Keycode;
@@ -68,6 +68,8 @@ fn main() {
     );
     renderer.load_texture(index);
 
+    let mat_pipelines = material_pipelines::create(&device);
+
     let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(
         &[
@@ -90,7 +92,7 @@ fn main() {
         .with(component::VertexMeshRef::new(
             triangle_mesh.raw().as_ref().unwrap(),
         ))
-        .with(component::Renderer::new(&device, material_pipeline::new(), false))
+        .with(component::Renderer::new(&device, &mat_pipelines.basic(), false))
         .build();
 
     /*{

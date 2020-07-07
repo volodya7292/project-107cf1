@@ -21,18 +21,21 @@ impl PipelineSignature {
         set_id: u32,
         max_inputs: u32,
     ) -> Result<Arc<DescriptorPool>, vk::Result> {
+        let mut pool_sizes = self.descriptor_sizes[set_id as usize].clone();
+        for mut pool_size in &mut pool_sizes {
+            pool_size.descriptor_count *= max_inputs;
+        }
+
         let pool_info = vk::DescriptorPoolCreateInfo::builder()
             .max_sets(max_inputs)
-            .pool_sizes(&self.descriptor_sizes[set_id as usize]);
+            .pool_sizes(&pool_sizes);
 
         Ok(Arc::new(DescriptorPool {
             device: Arc::clone(&self.device),
             signature: Arc::clone(&self),
             descriptor_set: set_id,
             native: unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None)? },
-            inputs: Mutex::new(vec![None; max_inputs as usize]),
-            used_buffers: Default::default(),
-            used_images: Default::default(),
+            free_sets: Mutex::new(Vec::with_capacity(65535)),
         }))
     }
 }
