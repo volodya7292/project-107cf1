@@ -74,13 +74,13 @@ fn main() {
     triangle_mesh.set_vertices(
         &[
             BasicVertex {
-                position: Vector3::new(0.0, -0.5, 0.0),
+                position: Vector3::new(0.0, -0.5, -3.0),
             },
             BasicVertex {
-                position: Vector3::new(-0.5, 0.5, 0.0),
+                position: Vector3::new(-0.5, 0.5, -3.0),
             },
             BasicVertex {
-                position: Vector3::new(0.5, 0.5, 0.0),
+                position: Vector3::new(0.5, 0.5, -3.0),
             },
         ],
         &[],

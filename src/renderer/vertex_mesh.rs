@@ -81,15 +81,15 @@ impl VertexMember for na::Vector3<f32> {
 
 pub struct RawVertexMesh {
     indexed: bool,
-    staging_buffer: vkw::HostBuffer<u8>,
-    buffer: Arc<vkw::DeviceBuffer>,
+    pub(in crate::renderer) staging_buffer: vkw::HostBuffer<u8>,
+    pub(in crate::renderer) buffer: Arc<vkw::DeviceBuffer>,
     vertex_size: u32,
     vertex_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
-    binding_buffers: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
+    bindings: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
     indices_offset: u64,
-    changed: bool,
+    pub(in crate::renderer) changed: bool,
 }
 
 impl RawVertexMesh {
@@ -141,7 +141,7 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
 
         // Copy vertices
         let attribs = VertexT::attributes();
-        let mut binding_buffers = vec![];
+        let mut bindings = vec![];
 
         for (vertex_offset, format) in attribs {
             let buffer_offset = vertex_offset as isize * vertices.len() as isize;
@@ -163,7 +163,7 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
             }
 
             // Set binging buffers
-            binding_buffers.push((Arc::clone(&buffer), buffer_offset as u64));
+            bindings.push((Arc::clone(&buffer), buffer_offset as u64));
         }
 
         // Copy indices
@@ -191,9 +191,9 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
             vertex_count: vertices.len() as u32,
             index_count: indices.len() as u32,
             aabb,
-            binding_buffers,
+            bindings,
             indices_offset: indices_offset as u64,
-            changed: false,
+            changed: true,
         })));
     }
 
@@ -246,7 +246,7 @@ impl VertexMeshCmdList for vkw::CmdList {
     fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<Mutex<RawVertexMesh>>) {
         let vertex_mesh = vertex_mesh.lock().unwrap();
 
-        self.bind_vertex_buffers(0, &vertex_mesh.binding_buffers);
+        self.bind_vertex_buffers(0, &vertex_mesh.bindings);
 
         if vertex_mesh.indexed {
             self.bind_index_buffer(&vertex_mesh.buffer, vertex_mesh.indices_offset);

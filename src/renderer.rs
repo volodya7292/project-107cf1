@@ -110,7 +110,7 @@ pub struct CameraInfo {
     proj: Matrix4<f32>,
     view: Matrix4<f32>,
     proj_view: Matrix4<f32>,
-    //vec4 info;// .x - FovY
+    info: Vector4<f32>, // .x - FovY
 }
 
 /*struct RenderSystem;
@@ -233,6 +233,55 @@ impl Renderer {
         }*/
     }
 
+    /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
+    fn update_device_buffers(&mut self, updates: &[(Vec<u8>, Arc<DeviceBuffer>, u64)]) {
+        if updates.is_empty() {
+            return;
+        }
+
+        let update_count = updates.len();
+
+        self.staging_copy_cl.lock().unwrap().begin(true).unwrap();
+
+        let mut used_size = 0;
+        let mut i = 0;
+
+        loop {
+            let update = &updates[i];
+            let copy_size = update.0.len();
+            let new_used_size = used_size + copy_size;
+
+            if copy_size > 0 && new_used_size < self.staging_buffer.size() as usize {
+                self.staging_buffer.write(used_size as u64, &update.0);
+                self.staging_copy_cl.lock().unwrap().copy_buffer_to_device(
+                    &self.staging_buffer,
+                    used_size as u64,
+                    &update.1,
+                    update.2,
+                    copy_size as u64,
+                );
+                used_size = new_used_size;
+                i += 1;
+            }
+
+            if i == update_count || new_used_size > self.staging_buffer.size() as usize {
+                self.staging_copy_cl.lock().unwrap().end().unwrap();
+
+                self.device
+                    .get_queue(Queue::TYPE_GRAPHICS)
+                    .submit(&mut self.staging_copy_submit)
+                    .unwrap();
+                self.staging_copy_submit.wait().unwrap();
+
+                if i == update_count {
+                    break;
+                } else if i < update_count {
+                    self.staging_copy_cl.lock().unwrap().begin(true).unwrap();
+                }
+            }
+        }
+    }
+
     pub fn set_settings(&mut self, settings: Settings) {
         // TODO
         self.settings = settings;
@@ -249,6 +298,7 @@ impl Renderer {
         let mut removed_entity_count = 0;
 
         // Add new objects to sort
+        // -------------------------------------------------------------------------------------------------------------
         {
             let entities = self.world.entities();
             let renderer_comp = self.world.read_component::<component::Renderer>();
@@ -276,6 +326,7 @@ impl Renderer {
         self.world.maintain();
 
         // Replace removed(dead) entities with alive ones
+        // -------------------------------------------------------------------------------------------------------------
         {
             let mut swap_entities = Vec::<specs::Entity>::with_capacity(removed_entity_count);
             let mut new_len = self.sorted_render_entities.len();
@@ -309,14 +360,14 @@ impl Renderer {
             self.sorted_render_entities.extend(swap_entities);
         }
 
-        let camera_comp = self.world.read_component::<component::Camera>();
-        let camera = camera_comp.get(self.active_camera).unwrap();
-
         // Sort render objects from front to back (for Z rejection & occlusion queries)
+        // -------------------------------------------------------------------------------------------------------------
         {
+            let camera_comp = self.world.read_component::<component::Camera>();
             let transform_comp = self.world.read_component::<component::Transform>();
             let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
 
+            let camera = camera_comp.get(self.active_camera).unwrap();
             let camera_pos = camera.position().clone();
 
             let sort_slice = &mut self.sorted_render_entities[(self.sort_count as usize)..];
@@ -374,6 +425,7 @@ impl Renderer {
         }
 
         // Update pipeline inputs
+        // -------------------------------------------------------------------------------------------------------------
         {
             self.depth_camera_input.update(&[Binding {
                 id: 0,
@@ -413,60 +465,111 @@ impl Renderer {
                 });
         }
 
-        // Update device buffers of vertex meshes
-        {
-            let mut mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
-            // TODO
-        }
-
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
-        // Update camera uniform buffers
+        // Update device buffers of vertex meshes
+        // -------------------------------------------------------------------------------------------------------------
         {
-            let cam_pos = camera.position();
-            let cam_dir = camera.direction();
-            let proj = camera.projection();
-            let view = camera.view();
+            let mut mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
 
-            let camera_info = CameraInfo {
-                pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
-                dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
-                proj,
-                view,
-                proj_view: proj * view,
-            };
+            self.staging_copy_cl.lock().unwrap().begin(true).unwrap();
 
-            self.staging_buffer.write(0, unsafe {
-                slice::from_raw_parts(
-                    &camera_info as *const CameraInfo as *const u8,
-                    mem::size_of::<CameraInfo>(),
-                )
+            (&mut mesh_ref_comp).par_join().for_each(|mesh_ref| {
+                let mut vertex_mesh = mesh_ref.vertex_mesh.lock().unwrap();
+
+                if vertex_mesh.changed {
+                    let mut cl = self.staging_copy_cl.lock().unwrap();
+                    cl.copy_buffer_to_device(
+                        &vertex_mesh.staging_buffer,
+                        0,
+                        &vertex_mesh.buffer,
+                        0,
+                        vertex_mesh.staging_buffer.size(),
+                    );
+
+                    vertex_mesh.changed = false;
+                }
             });
-        }
 
-        // Update device buffers
-        {
-            /*while true {
-
-                break;
-            }*/
-
-            {
-                let mut cl = self.staging_copy_cl.lock().unwrap();
-                cl.begin(true).unwrap();
-                cl.copy_buffer_to_device(
-                    &self.staging_buffer,
-                    0,
-                    &self.camera_uniform_buffer,
-                    0,
-                    mem::size_of::<CameraInfo>() as u64,
-                );
-                cl.end().unwrap();
-            }
+            self.staging_copy_cl.lock().unwrap().end().unwrap();
 
             graphics_queue.submit(&mut self.staging_copy_submit).unwrap();
+            // TODO: Make more efficient
             self.staging_copy_submit.wait().unwrap();
         }
+
+        // Check for transform updates
+        // -------------------------------------------------------------------------------------------------------------
+        let mut buffer_updates = Mutex::new(vec![]);
+        {
+            let mut transform_comp = self.world.write_component::<component::Transform>();
+            let mut renderer_comp = self.world.read_component::<component::Renderer>();
+
+            (&mut transform_comp.par_restrict_mut(), &renderer_comp)
+                .par_join()
+                .for_each(|(mut transform_comps, renderer)| {
+                    let transform = transform_comps.get_unchecked();
+                    if transform.changed {
+                        let transform = transform_comps.get_mut_unchecked();
+
+                        let matrix = transform.matrix();
+                        let matrix_bytes = unsafe {
+                            slice::from_raw_parts(
+                                &matrix as *const na::Matrix4<f32> as *const u8,
+                                mem::size_of::<na::Matrix4<f32>>(),
+                            )
+                            .to_vec()
+                        };
+
+                        buffer_updates.lock().unwrap().push((
+                            matrix_bytes,
+                            Arc::clone(&renderer.uniform_buffer),
+                            renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
+                        ));
+
+                        transform.changed = false;
+                    }
+                });
+        }
+
+        self.update_device_buffers(buffer_updates.lock().unwrap().as_slice());
+
+        // Update camera uniform buffers
+        // -------------------------------------------------------------------------------------------------------------
+        {
+            let camera_info = {
+                let camera_comp = self.world.read_component::<component::Camera>();
+                let camera = camera_comp.get(self.active_camera).unwrap();
+
+                let cam_pos = camera.position();
+                let cam_dir = camera.direction();
+                let proj = camera.projection();
+                let view = camera.view();
+
+                CameraInfo {
+                    pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                    dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                    proj,
+                    view,
+                    proj_view: proj * view,
+                    info: Vector4::new(camera.fovy(), 0.0, 0.0, 0.0),
+                }
+            };
+
+            self.update_device_buffers(&[(
+                unsafe {
+                    slice::from_raw_parts(
+                        &camera_info as *const CameraInfo as *const u8,
+                        mem::size_of::<CameraInfo>(),
+                    )
+                    .to_vec()
+                },
+                Arc::clone(&self.camera_uniform_buffer),
+                0,
+            )]);
+        }
+
+        // TODO: separate renderer-defined uniform buffer for each object for transform & skinning
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
@@ -908,7 +1011,6 @@ pub fn new(
         surface_size: size,
         settings,
         device: Arc::clone(device),
-        //submit_packet: None,
         texture_atlases,
         sig: basic_signature,
         pipe: None,

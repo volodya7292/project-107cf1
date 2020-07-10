@@ -323,9 +323,13 @@ impl CmdList {
         dst_element_index: u64,
         size: u64,
     ) {
+        if size == 0 {
+            return;
+        }
+
         let region = vk::BufferCopy {
             src_offset: src_element_index * src_buffer.buffer.aligned_elem_size,
-            dst_offset: dst_element_index * dst_buffer.buffer.aligned_elem_size,
+            dst_offset: dst_element_index * src_buffer.buffer.aligned_elem_size,
             size: size * src_buffer.buffer.aligned_elem_size,
         };
         unsafe {

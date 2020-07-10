@@ -119,6 +119,10 @@ impl<T> HostBuffer<T> {
         RawHostBuffer(Arc::clone(&self.buffer))
     }
 
+    pub fn size(&self) -> u64 {
+        self.buffer.size
+    }
+
     pub fn as_ptr(&self) -> *const T {
         self.p_data as *const T
     }

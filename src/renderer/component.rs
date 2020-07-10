@@ -1,20 +1,32 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use nalgebra as na;
-use nalgebra::{Isometry3, Matrix4, Perspective3, Translation3, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{
+    Affine3, Isometry, Isometry3, Matrix4, Perspective3, Rotation3, Similarity3, Transform3, Translation3,
+    UnitQuaternion, Vector3, Vector4,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
 use vk_wrapper::{DeviceBuffer, PipelineInput};
 
 pub struct Transform {
-    position: Vector3<f32>,
-    rotation: Vector3<f32>,
-    scale: Vector3<f32>,
-    changed: bool,
+    pub(in crate::renderer) position: Vector3<f32>,
+    pub(in crate::renderer) rotation: Vector3<f32>,
+    pub(in crate::renderer) scale: Vector3<f32>,
+    pub(in crate::renderer) changed: bool,
 }
 
 impl Transform {
+    pub fn matrix(&self) -> Matrix4<f32> {
+        let mut mat = Matrix4::<f32>::identity();
+        mat.prepend_translation_mut(&self.position);
+        mat *=
+            Rotation3::from_euler_angles(self.rotation.x, self.rotation.y, self.rotation.z).to_homogeneous();
+        mat.prepend_nonuniform_scaling_mut(&self.scale);
+        mat
+    }
+
     pub fn position(&self) -> &Vector3<f32> {
         &self.position
     }
@@ -101,6 +113,10 @@ impl Camera {
         let identity = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
         let dir = view * identity;
         Vector3::from(dir.fixed_rows::<na::U3>(0))
+    }
+
+    pub fn fovy(&self) -> f32 {
+        self.fovy
     }
 
     pub fn is_sphere_visible(&self, pos: Vector3<f32>, radius: f32) -> bool {
