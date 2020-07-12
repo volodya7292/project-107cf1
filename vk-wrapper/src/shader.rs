@@ -24,12 +24,21 @@ impl ShaderBindingMod {
     pub const DYNAMIC_UPDATE: Self = Self(2);
 }
 
-pub(crate) struct ShaderBinding {
-    pub(crate) binding_type: vk::DescriptorType,
-    pub(crate) binding_mod: ShaderBindingMod,
-    pub(crate) descriptor_set: u32,
-    pub(crate) id: u32,
-    pub(crate) count: u32,
+pub struct BindingType(pub(crate) vk::DescriptorType);
+
+impl BindingType {
+    pub const UNIFORM_BUFFER: Self = Self(vk::DescriptorType::UNIFORM_BUFFER);
+    pub const STORAGE_BUFFER: Self = Self(vk::DescriptorType::STORAGE_BUFFER);
+    pub const SAMPLED_IMAGE: Self = Self(vk::DescriptorType::SAMPLED_IMAGE);
+    pub const STORAGE_IMAGE: Self = Self(vk::DescriptorType::STORAGE_IMAGE);
+}
+
+pub struct ShaderBinding {
+    pub binding_type: BindingType,
+    pub binding_mod: ShaderBindingMod,
+    pub descriptor_set: u32,
+    pub id: u32,
+    pub count: u32,
 }
 
 pub struct Shader {

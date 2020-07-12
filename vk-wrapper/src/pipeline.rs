@@ -96,16 +96,28 @@ pub struct Pipeline {
     pub(crate) device: Arc<Device>,
     pub(crate) _render_pass: Option<Arc<RenderPass>>,
     pub(crate) signature: Arc<PipelineSignature>,
-    pub(crate) layout: vk::PipelineLayout,
     pub(crate) native: vk::Pipeline,
     pub(crate) bind_point: vk::PipelineBindPoint,
+}
+
+impl Pipeline {
+    pub fn signature(&self) -> Arc<PipelineSignature> {
+        Arc::clone(&self.signature)
+    }
+}
+
+impl Eq for Pipeline {}
+
+impl PartialEq for Pipeline {
+    fn eq(&self, other: &Self) -> bool {
+        (self as *const Pipeline) == (other as *const Pipeline)
+    }
 }
 
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
             self.device.wrapper.0.destroy_pipeline(self.native, None);
-            self.device.wrapper.0.destroy_pipeline_layout(self.layout, None);
         }
     }
 }

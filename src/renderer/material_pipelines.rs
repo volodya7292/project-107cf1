@@ -1,23 +1,38 @@
 use crate::renderer::material_pipeline;
 use crate::renderer::material_pipeline::MaterialPipeline;
+use crate::resource_file::ResourceFile;
 use nalgebra as na;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 
 pub struct MaterialPipelines {
-    basic: Arc<MaterialPipeline>,
+    triag: Arc<MaterialPipeline>,
 }
 
 impl MaterialPipelines {
-    pub fn basic(&self) -> Arc<MaterialPipeline> {
-        Arc::clone(&self.basic)
+    pub fn triag(&self) -> Arc<MaterialPipeline> {
+        Arc::clone(&self.triag)
     }
 }
 
-pub fn create(device: &Arc<vkw::Device>) -> MaterialPipelines {
-    let basic = material_pipeline::new::<BasicUniformInfo>();
+pub fn create(resources: &Arc<ResourceFile>, device: &Arc<vkw::Device>) -> MaterialPipelines {
+    let triag_vertex = device
+        .create_shader(
+            &resources.get("shaders/triag.vert.spv").unwrap().read().unwrap(),
+            &[("inPosition", vkw::Format::RGB32_FLOAT)],
+            &[],
+        )
+        .unwrap();
+    let triag_g_pixel = device
+        .create_shader(
+            &resources.get("shaders/triag.frag.spv").unwrap().read().unwrap(),
+            &[],
+            &[],
+        )
+        .unwrap();
+    let triag = material_pipeline::new::<BasicUniformInfo>(device, &triag_vertex, &triag_g_pixel);
 
-    MaterialPipelines { basic }
+    MaterialPipelines { triag }
 }
 
 #[derive(Default)]

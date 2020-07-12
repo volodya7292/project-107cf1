@@ -11,6 +11,12 @@ pub struct Framebuffer {
     pub(crate) size: (u32, u32),
 }
 
+impl Framebuffer {
+    pub fn get_image(&self, index: u32) -> Arc<Image> {
+        Arc::clone(&self.images[index as usize])
+    }
+}
+
 impl Drop for Framebuffer {
     fn drop(&mut self) {
         unsafe { self.device.wrapper.0.destroy_framebuffer(self.native, None) };

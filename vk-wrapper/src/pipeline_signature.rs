@@ -8,6 +8,7 @@ use std::sync::Mutex;
 pub struct PipelineSignature {
     pub(crate) device: Arc<Device>,
     pub(crate) native: [vk::DescriptorSetLayout; 4],
+    pub(crate) pipeline_layout: vk::PipelineLayout,
     pub(crate) descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4],
     pub(crate) binding_types: HashMap<u32, vk::DescriptorType>,
     pub(crate) push_constant_ranges: HashMap<ShaderStage, (u32, u32)>,
@@ -42,6 +43,13 @@ impl PipelineSignature {
 
 impl Drop for PipelineSignature {
     fn drop(&mut self) {
+        unsafe {
+            self.device
+                .wrapper
+                .0
+                .destroy_pipeline_layout(self.pipeline_layout, None)
+        };
+
         for native_set_layout in &self.native {
             if *native_set_layout != vk::DescriptorSetLayout::default() {
                 unsafe {

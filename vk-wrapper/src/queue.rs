@@ -43,6 +43,7 @@ impl Queue {
             framebuffers: vec![],
             secondary_cmd_lists: vec![],
             pipelines: vec![],
+            pipeline_signatures: vec![],
             pipeline_inputs: vec![],
             buffers: vec![],
             images: vec![],

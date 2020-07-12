@@ -2,7 +2,7 @@ use crate::buffer::Buffer;
 use crate::device::DeviceWrapper;
 use crate::{
     BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
-    Pipeline, PipelineInput, PipelineStageFlags, QueryPool, RenderPass,
+    Pipeline, PipelineInput, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
 use std::sync::{Arc, Mutex};
@@ -16,6 +16,7 @@ pub struct CmdList {
     pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
     pub(crate) secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     pub(crate) pipelines: Vec<Arc<Pipeline>>,
+    pub(crate) pipeline_signatures: Vec<Arc<PipelineSignature>>,
     pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
     pub(crate) buffers: Vec<Arc<Buffer>>,
     pub(crate) images: Vec<Arc<Image>>,
@@ -28,6 +29,7 @@ impl CmdList {
         self.framebuffers.clear();
         self.secondary_cmd_lists.clear();
         self.pipelines.clear();
+        self.pipeline_signatures.clear();
         self.pipeline_inputs.clear();
         self.buffers.clear();
         self.images.clear();
@@ -238,30 +240,47 @@ impl CmdList {
         };
     }
 
-    pub fn bind_pipeline(&mut self, pipeline: &Arc<Pipeline>) {
+    /// Returns whether pipeline is already bound
+    pub fn bind_pipeline(&mut self, pipeline: &Arc<Pipeline>) -> bool {
+        if !self.pipelines.is_empty() && pipeline == self.pipelines.last().unwrap() {
+            return true;
+        }
         unsafe {
             self.device_wrapper
                 .0
                 .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
         };
         self.pipelines.push(Arc::clone(pipeline));
+        false
     }
 
-    pub fn bind_pipeline_input(&mut self, set_id: u32, pipeline_input: &Arc<PipelineInput>) {
-        let pipelines = &self.pipelines;
-        let last_pipeline = pipelines.last().unwrap();
-
+    fn bind_pipeline_input(
+        &mut self,
+        signature: &Arc<PipelineSignature>,
+        bind_point: vk::PipelineBindPoint,
+        set_id: u32,
+        pipeline_input: &Arc<PipelineInput>,
+    ) {
         unsafe {
             self.device_wrapper.0.cmd_bind_descriptor_sets(
                 self.native,
-                last_pipeline.bind_point,
-                last_pipeline.layout,
+                bind_point,
+                signature.pipeline_layout,
                 set_id,
                 &[pipeline_input.native],
                 &[],
             )
         };
         self.pipeline_inputs.push(Arc::clone(pipeline_input));
+    }
+
+    pub fn bind_graphics_input(
+        &mut self,
+        signature: &Arc<PipelineSignature>,
+        set_id: u32,
+        pipeline_input: &Arc<PipelineInput>,
+    ) {
+        self.bind_pipeline_input(signature, vk::PipelineBindPoint::GRAPHICS, set_id, pipeline_input);
     }
 
     /// buffers (max: 16): [buffer, offset]

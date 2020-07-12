@@ -2,7 +2,7 @@ use crate::SwapchainWrapper;
 use crate::FORMAT_SIZES;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
-    utils, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
+    utils, BindingType, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
@@ -568,7 +568,7 @@ impl Device {
                     .or_else(|| Some(&ShaderBindingMod::DEFAULT))
                     .unwrap();
                 ShaderBinding {
-                    binding_type: vk::DescriptorType::$desc_type,
+                    binding_type: BindingType(vk::DescriptorType::$desc_type),
                     binding_mod: *shader_binding_mod,
                     descriptor_set: ast
                         .get_decoration($res.id, spirv::Decoration::DescriptorSet)
@@ -599,9 +599,9 @@ impl Device {
                     binding_type: if shader_binding_mod == &ShaderBindingMod::DEFAULT
                         || shader_binding_mod == &ShaderBindingMod::DYNAMIC_UPDATE
                     {
-                        vk::DescriptorType::$desc_type0
+                        BindingType(vk::DescriptorType::$desc_type0)
                     } else {
-                        vk::DescriptorType::$desc_type1
+                        BindingType(vk::DescriptorType::$desc_type1)
                     },
                     binding_mod: *shader_binding_mod,
                     descriptor_set: ast
@@ -860,24 +860,25 @@ impl Device {
                 let descriptor_sizes = &mut descriptor_sizes[set];
                 let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
 
-                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type) {
+                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
+                {
                     entry.insert(descriptor_sizes.len() as u32);
                     descriptor_sizes.push(
                         vk::DescriptorPoolSize::builder()
-                            .ty(binding.binding_type)
+                            .ty(binding.binding_type.0)
                             .descriptor_count(0)
                             .build(),
                     );
                 }
 
-                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type] as usize]
+                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
                     .descriptor_count += binding.count;
-                binding_types.insert(binding.id, binding.binding_type);
+                binding_types.insert(binding.id, binding.binding_type.0);
 
                 native_bindings[set].push(
                     vk::DescriptorSetLayoutBinding::builder()
                         .binding(binding.id)
-                        .descriptor_type(binding.binding_type)
+                        .descriptor_type(binding.binding_type.0)
                         .descriptor_count(binding.count)
                         .stage_flags(shader.stage.0)
                         .build(),
@@ -919,14 +920,134 @@ impl Device {
             .map(|shader| (shader.stage, shader))
             .collect();
 
+        let pipeline_layout = {
+            // Push constants
+            let mut native_push_constant_ranges =
+                Vec::<vk::PushConstantRange>::with_capacity(push_constant_ranges.len());
+
+            for (stage, range) in &push_constant_ranges {
+                native_push_constant_ranges.push(vk::PushConstantRange {
+                    stage_flags: stage.0,
+                    offset: range.0,
+                    size: range.1,
+                });
+            }
+
+            // Layout
+            let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
+                .iter()
+                .cloned()
+                .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
+                .collect();
+
+            let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
+                .set_layouts(&set_layouts)
+                .push_constant_ranges(&native_push_constant_ranges);
+            unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? }
+        };
+
         Ok(Arc::new(PipelineSignature {
             device: Arc::clone(self),
             native: native_descriptor_sets,
+            pipeline_layout,
             descriptor_sizes,
             binding_types,
             push_constant_ranges,
             push_constants_size,
             shaders,
+        }))
+    }
+
+    pub fn create_custom_pipeline_signature(
+        self: &Arc<Self>,
+        bindings: &[(ShaderStage, &[ShaderBinding])],
+    ) -> Result<Arc<PipelineSignature>, vk::Result> {
+        let bindings: HashMap<ShaderStage, &[ShaderBinding]> = bindings.iter().cloned().collect();
+
+        // MAX 4 descriptor sets
+        // [descriptor_set, bindings]
+        let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
+        let mut binding_flags: [Vec<vk::DescriptorBindingFlagsEXT>; 4] = Default::default();
+        let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
+        let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
+
+        let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
+
+        for (stage, &bindings) in &bindings {
+            for binding in bindings {
+                let set = binding.descriptor_set as usize;
+                let descriptor_sizes = &mut descriptor_sizes[set];
+                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+
+                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
+                {
+                    entry.insert(descriptor_sizes.len() as u32);
+                    descriptor_sizes.push(
+                        vk::DescriptorPoolSize::builder()
+                            .ty(binding.binding_type.0)
+                            .descriptor_count(0)
+                            .build(),
+                    );
+                }
+
+                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
+                    .descriptor_count += binding.count;
+                binding_types.insert(binding.id, binding.binding_type.0);
+
+                native_bindings[set].push(
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(binding.id)
+                        .descriptor_type(binding.binding_type.0)
+                        .descriptor_count(binding.count)
+                        .stage_flags(stage.0)
+                        .build(),
+                );
+
+                let mut flags = vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
+                if binding.count > 1 {
+                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                }
+
+                binding_flags[set].push(flags);
+            }
+        }
+
+        let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
+
+        for (i, bindings) in native_bindings.iter().enumerate() {
+            if !bindings.is_empty() {
+                let mut binding_flags_info =
+                    vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
+
+                let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                    .bindings(bindings)
+                    .push_next(&mut binding_flags_info);
+
+                native_descriptor_sets[i] =
+                    unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? };
+            }
+        }
+
+        let pipeline_layout = {
+            let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
+                .iter()
+                .cloned()
+                .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
+                .collect();
+
+            let layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
+            unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? }
+        };
+
+        Ok(Arc::new(PipelineSignature {
+            device: Arc::clone(self),
+            native: native_descriptor_sets,
+            pipeline_layout,
+            descriptor_sizes,
+            binding_types,
+            push_constant_ranges: Default::default(),
+            push_constants_size: 0,
+            shaders: Default::default(),
         }))
     }
 
@@ -954,31 +1075,6 @@ impl Device {
         rasterization: PipelineRasterization,
         signature: &Arc<PipelineSignature>,
     ) -> Result<Arc<Pipeline>, DeviceError> {
-        // Push constants
-        let mut push_constant_ranges =
-            Vec::<vk::PushConstantRange>::with_capacity(signature.push_constant_ranges.len());
-
-        for (stage, range) in &signature.push_constant_ranges {
-            push_constant_ranges.push(vk::PushConstantRange {
-                stage_flags: stage.0,
-                offset: range.0,
-                size: range.1,
-            });
-        }
-
-        // Layout
-        let set_layouts: Vec<vk::DescriptorSetLayout> = signature
-            .native
-            .iter()
-            .cloned()
-            .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
-            .collect();
-
-        let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&set_layouts)
-            .push_constant_ranges(&push_constant_ranges);
-        let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
-
         // Input assembly
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(primitive_topology.0)
@@ -1107,7 +1203,7 @@ impl Device {
             .depth_stencil_state(&depth_stencil_info)
             .color_blend_state(&color_blend_info)
             .dynamic_state(&dynamic_info)
-            .layout(layout)
+            .layout(signature.pipeline_layout)
             .render_pass(render_pass.native)
             .subpass(subpass_index);
 
@@ -1126,7 +1222,6 @@ impl Device {
             device: Arc::clone(self),
             _render_pass: Some(Arc::clone(render_pass)),
             signature: Arc::clone(signature),
-            layout,
             native: pipeline,
             bind_point: vk::PipelineBindPoint::GRAPHICS,
         }))
@@ -1136,31 +1231,6 @@ impl Device {
         self: &Arc<Self>,
         signature: &Arc<PipelineSignature>,
     ) -> Result<Arc<Pipeline>, vk::Result> {
-        // Push constants
-        let mut push_constant_ranges =
-            Vec::<vk::PushConstantRange>::with_capacity(signature.push_constant_ranges.len());
-
-        for (stage, range) in &signature.push_constant_ranges {
-            push_constant_ranges.push(vk::PushConstantRange {
-                stage_flags: stage.0,
-                offset: range.0,
-                size: range.1,
-            });
-        }
-
-        // Layout
-        let set_layouts: Vec<vk::DescriptorSetLayout> = signature
-            .native
-            .iter()
-            .cloned()
-            .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
-            .collect();
-
-        let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&set_layouts)
-            .push_constant_ranges(&push_constant_ranges);
-        let layout = unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? };
-
         // Stage
         let stage_info = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE)
@@ -1170,7 +1240,7 @@ impl Device {
 
         let create_info = vk::ComputePipelineCreateInfo::builder()
             .stage(stage_info)
-            .layout(layout);
+            .layout(signature.pipeline_layout);
 
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
         let native_pipeline = unsafe {
@@ -1187,7 +1257,6 @@ impl Device {
             device: Arc::clone(self),
             _render_pass: None,
             signature: Arc::clone(signature),
-            layout,
             native: pipeline,
             bind_point: vk::PipelineBindPoint::COMPUTE,
         }))

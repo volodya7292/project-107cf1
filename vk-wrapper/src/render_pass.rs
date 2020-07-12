@@ -5,6 +5,7 @@ use crate::{
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]
@@ -138,6 +139,20 @@ impl RenderPass {
             images,
             size,
         }))
+    }
+}
+
+impl Eq for RenderPass {}
+
+impl PartialEq for RenderPass {
+    fn eq(&self, other: &Self) -> bool {
+        (self as *const Self) == (other as *const Self)
+    }
+}
+
+impl Hash for RenderPass {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_usize(self as *const Self as usize);
     }
 }
 

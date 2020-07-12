@@ -42,7 +42,9 @@ pub use crate::render_pass::LoadStore;
 pub use crate::render_pass::RenderPass;
 pub use crate::render_pass::Subpass;
 pub use crate::render_pass::SubpassDependency;
+pub use crate::shader::BindingType;
 pub use crate::shader::Shader;
+pub use crate::shader::ShaderBinding;
 pub use crate::shader::ShaderBindingMod;
 pub use crate::shader::ShaderStage;
 pub use crate::surface::Surface;
@@ -51,7 +53,6 @@ pub use crate::swapchain::SwapchainImage;
 
 use crate::buffer::Buffer;
 use crate::semaphore::Semaphore;
-use crate::shader::ShaderBinding;
 use crate::swapchain::SwapchainWrapper;
 
 #[macro_use]

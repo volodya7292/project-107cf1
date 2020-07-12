@@ -68,7 +68,7 @@ fn main() {
     );
     renderer.load_texture(index);
 
-    let mat_pipelines = material_pipelines::create(&device);
+    let mat_pipelines = material_pipelines::create(&resources, &device);
 
     let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(
@@ -92,7 +92,7 @@ fn main() {
         .with(component::VertexMeshRef::new(
             triangle_mesh.raw().as_ref().unwrap(),
         ))
-        .with(component::Renderer::new(&device, &mat_pipelines.basic(), false))
+        .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
         .build();
 
     /*{

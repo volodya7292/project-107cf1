@@ -163,7 +163,7 @@ impl specs::Component for VertexMeshRef {
 
 pub struct Renderer {
     pub(in crate::renderer) mat_pipeline: Arc<MaterialPipeline>,
-    pub(in crate::renderer) pipelines_inputs: Vec<Arc<PipelineInput>>,
+    pub(in crate::renderer) pipeline_inputs: Vec<Arc<PipelineInput>>,
 
     pub(in crate::renderer) uniform_buffer: Arc<DeviceBuffer>,
     //buffers: HashMap<u32, vkw::RawHostBuffer>,
@@ -180,7 +180,7 @@ impl Renderer {
     ) -> Renderer {
         Self {
             mat_pipeline: Arc::clone(&mat_pipeline),
-            pipelines_inputs: vec![],
+            pipeline_inputs: vec![],
             uniform_buffer: device
                 .create_device_buffer(
                     vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
