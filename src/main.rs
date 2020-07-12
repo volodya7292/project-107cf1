@@ -1,9 +1,11 @@
 #[macro_use]
 mod renderer;
+mod program;
 mod resource_file;
 
+use crate::program::Program;
 use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
-use crate::renderer::{component, TextureQuality};
+use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
 use nalgebra::Vector3;
@@ -13,6 +15,8 @@ use sdl2::rect::Rect;
 use specs::prelude::*;
 use specs::{Builder, WorldExt};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Instant;
 use vk_wrapper as vkw;
 use vk_wrapper::{HostBuffer, PrimitiveTopology};
 use vk_wrapper::{ImageUsageFlags, Subpass};
@@ -40,6 +44,8 @@ fn main() {
         .vulkan()
         .build()
         .unwrap();
+    sdl_context.mouse().set_relative_mouse_mode(true); // enable relative-pos events
+    sdl_context.mouse().show_cursor(false);
 
     let windows_extensions = window.vulkan_instance_extensions().unwrap();
     let vke = vk_wrapper::Entry::new().unwrap();
@@ -56,19 +62,22 @@ fn main() {
     let renderer_settings = renderer::Settings {
         vsync: true,
         texture_quality: TextureQuality::LOW,
+        translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };
     let mut renderer =
         renderer::new(&surface, window_size, renderer_settings, &device, &mut resources).unwrap();
 
-    let index = renderer.add_texture(
+    /*let index = renderer.lock().unwrap().add_texture(
         resources.get("textures/test_texture.jpg").unwrap(),
         renderer::TextureAtlasType::ALBEDO,
     );
-    renderer.load_texture(index);
+    renderer.load_texture(index);*/
 
     let mat_pipelines = material_pipelines::create(&resources, &device);
+
+    let mut program = program::new(&renderer);
 
     let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(
@@ -87,6 +96,8 @@ fn main() {
     );
 
     let entity = renderer
+        .lock()
+        .unwrap()
         .add_entity()
         .with(component::Transform::default())
         .with(component::VertexMeshRef::new(
@@ -121,8 +132,12 @@ fn main() {
     // }
     //println!("ITE {:?}", &buf[0..5]);
 
+    let mut delta_time = 0.0;
+
     let mut running = true;
     while running {
+        let start_t = Instant::now();
+
         for event in sdl_context.event_pump().unwrap().poll_iter() {
             use sdl2::event::Event;
             use sdl2::event::WindowEvent;
@@ -159,14 +174,21 @@ fn main() {
                 } => match win_event {
                     WindowEvent::SizeChanged(width, height) => {
                         window_size = (width as u32, height as u32);
-                        renderer.on_resize(window_size);
+                        renderer.lock().unwrap().on_resize(window_size);
                     }
                     _ => {}
                 },
                 _ => {}
             }
+
+            program.on_event(event);
         }
 
-        renderer.on_draw();
+        program.on_update(delta_time);
+        renderer.lock().unwrap().on_draw();
+
+        let end_t = Instant::now();
+        let t = end_t.duration_since(start_t);
+        delta_time = t.as_secs_f64();
     }
 }

@@ -1,5 +1,6 @@
 use crate::buffer::Buffer;
 use crate::device::DeviceWrapper;
+use crate::render_pass::vk_clear_value;
 use crate::{
     BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
     Pipeline, PipelineInput, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
@@ -64,6 +65,8 @@ impl CmdList {
         subpass: u32,
         framebuffer: Option<&Arc<Framebuffer>>,
     ) -> Result<(), vk::Result> {
+        self.clear_resources();
+
         let inheritance_info = vk::CommandBufferInheritanceInfo::builder()
             .render_pass(render_pass.native)
             .subpass(subpass)
@@ -108,22 +111,7 @@ impl CmdList {
         clear_values: &[ClearValue],
         secondary_cmd_lists: bool,
     ) {
-        let clear_values: Vec<vk::ClearValue> = clear_values
-            .iter()
-            .map(|val| match val {
-                ClearValue::ColorF32(c) => vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: c.to_owned(),
-                    },
-                },
-                ClearValue::Depth(d) => vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: *d,
-                        stencil: 0,
-                    },
-                },
-            })
-            .collect();
+        let clear_values: Vec<vk::ClearValue> = clear_values.iter().map(|val| vk_clear_value(val)).collect();
 
         let begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(render_pass.native)
@@ -549,6 +537,38 @@ impl CmdList {
         };
         self.query_pools.push(Arc::clone(query_pool));
         self.buffers.push(Arc::clone(&dst_buffer.buffer));
+    }
+
+    pub fn clear_image(&mut self, image: &Arc<Image>, layout: ImageLayout, color: ClearValue) {
+        let range = vk::ImageSubresourceRange {
+            aspect_mask: image.aspect,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+        let clear_value = vk_clear_value(&color);
+
+        unsafe {
+            if image.aspect == vk::ImageAspectFlags::COLOR {
+                self.device_wrapper.0.cmd_clear_color_image(
+                    self.native,
+                    image.native,
+                    layout.0,
+                    &clear_value.color,
+                    &[range],
+                );
+            } else if image.aspect == vk::ImageAspectFlags::DEPTH {
+                self.device_wrapper.0.cmd_clear_depth_stencil_image(
+                    self.native,
+                    image.native,
+                    layout.0,
+                    &clear_value.depth_stencil,
+                    &[range],
+                );
+            }
+        }
+        self.images.push(Arc::clone(image));
     }
 
     pub fn barrier_buffer_image(

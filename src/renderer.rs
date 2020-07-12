@@ -93,9 +93,17 @@ pub enum TextureQuality {
 }
 
 #[derive(Copy, Clone)]
+pub enum TranslucencyMaxDepth {
+    LOW = 4,
+    MEDIUM = 8,
+    HIGH = 16,
+}
+
+#[derive(Copy, Clone)]
 pub struct Settings {
     pub(crate) vsync: bool,
     pub(crate) texture_quality: TextureQuality,
+    pub(crate) translucency_max_depth: TranslucencyMaxDepth,
     pub(crate) textures_gen_mipmaps: bool,
     pub(crate) textures_max_anisotropy: f32,
 }
@@ -133,8 +141,16 @@ impl<'a> specs::System<'a> for RenderSystem {
 */
 
 impl Renderer {
+    pub fn world(&self) -> &specs::World {
+        &self.world
+    }
+
     pub fn add_entity(&mut self) -> specs::EntityBuilder {
         self.world.create_entity()
+    }
+
+    pub fn get_active_camera(&mut self) -> specs::Entity {
+        self.active_camera
     }
 
     pub fn set_active_camera(&mut self, entity: specs::Entity) {
@@ -296,6 +312,14 @@ impl Renderer {
         self.surface_size = new_size;
         self.surface_changed = true;
 
+        // Set camera aspect
+        {
+            let entity = self.get_active_camera();
+            let mut camera_comp = self.world.write_component::<component::Camera>();
+            let camera = camera_comp.get_mut(entity).unwrap();
+            camera.set_aspect(new_size.0, new_size.1);
+        }
+
         self.depth_framebuffer = Some(self.depth_render_pass.create_framebuffer(new_size, &[]).unwrap());
 
         self.g_framebuffer = Some(
@@ -316,7 +340,44 @@ impl Renderer {
                             4,
                             ImageMod::OverrideImage(self.depth_framebuffer.as_ref().unwrap().get_image(0)),
                         ),
+                        (
+                            5,
+                            ImageMod::OverrideImage(
+                                self.device
+                                    .create_image_2d(
+                                        Format::R32_UINT,
+                                        1,
+                                        1.0,
+                                        ImageUsageFlags::STORAGE,
+                                        new_size,
+                                    )
+                                    .unwrap(),
+                            ),
+                        ),
                     ],
+                )
+                .unwrap(),
+        );
+
+        self.translucency_head_image = Some(
+            self.device
+                .create_image_2d(
+                    Format::R32_UINT,
+                    1,
+                    1.0,
+                    ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
+                    new_size,
+                )
+                .unwrap(),
+        );
+
+        self.translucency_buffer = Some(
+            self.device
+                .create_device_buffer(
+                    vkw::BufferUsageFlags::STORAGE,
+                    12,
+                    // +1 for atomic pixel counter
+                    (1 + new_size.0 * new_size.1 * (self.settings.translucency_max_depth as u32)) as u64,
                 )
                 .unwrap(),
         )
@@ -769,37 +830,54 @@ impl Renderer {
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            let object_count = self.sorted_render_entities.len() as u32;
+            let translucency_head_image = self.translucency_head_image.as_ref().unwrap();
 
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
+
+            // TODO: translucency
+            /*cl.barrier_image(
+                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::TRANSFER,
+                &[translucency_head_image.barrier_queue(
+                    AccessFlags::default(),
+                    AccessFlags::TRANSFER_WRITE,
+                    ImageLayout::UNDEFINED,
+                    ImageLayout::GENERAL,
+                    graphics_queue,
+                    graphics_queue,
+                )],
+            );
+            cl.clear_image(
+                translucency_head_image,
+                ImageLayout::GENERAL,
+                ClearValue::ColorU32([0xffffffff; 4]),
+            );*/
+
             cl.begin_render_pass(
                 &self.g_render_pass,
                 self.g_framebuffer.as_ref().unwrap(),
-                &[ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0])],
+                &[
+                    ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0]),
+                    ClearValue::Undefined,
+                    ClearValue::Undefined,
+                    ClearValue::Undefined,
+                    ClearValue::Undefined,
+                    ClearValue::ColorU32([0xffffffff; 4]),
+                ],
                 true,
             );
             cl.execute_secondary(&self.secondary_cmd_lists);
             cl.end_render_pass();
 
-            let diffuse = self.g_framebuffer.as_ref().unwrap().get_image(0);
+            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0);
             let sw_image = self.sw_framebuffers[sw_image.get_index() as usize].get_image(0);
 
-            /*
-
-            deferred_cl->PipelineBarrier(
-            RE_PIPELINE_STAGE_COLOR_OUTPUT, RE_PIPELINE_STAGE_TRANSFER,
-            {
-                frame_image->Barrier(0, RE_ACCESS_TRANSFER_WRITE, RE_IMAGE_LAYOUT_UNDEFINED, RE_IMAGE_LAYOUT_TRANSFER_DST),
-                diffuse_image->Barrier(RE_ACCESS_COLOR_WRITE, RE_ACCESS_TRANSFER_READ, RE_IMAGE_LAYOUT_SHADER_READ,
-                                       RE_IMAGE_LAYOUT_TRANSFER_SRC),
-            });
-             */
             cl.barrier_image(
                 PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 PipelineStageFlags::TRANSFER,
                 &[
-                    diffuse.barrier_queue(
+                    albedo.barrier_queue(
                         AccessFlags::COLOR_ATTACHMENT_WRITE,
                         AccessFlags::TRANSFER_READ,
                         ImageLayout::SHADER_READ,
@@ -818,10 +896,10 @@ impl Renderer {
                 ],
             );
             cl.blit_image_2d(
-                &diffuse,
+                &albedo,
                 ImageLayout::TRANSFER_SRC,
                 (0, 0),
-                diffuse.size_2d(),
+                albedo.size_2d(),
                 0,
                 &sw_image,
                 ImageLayout::TRANSFER_DST,
@@ -833,7 +911,7 @@ impl Renderer {
                 PipelineStageFlags::TRANSFER,
                 PipelineStageFlags::BOTTOM_OF_PIPE,
                 &[
-                    diffuse.barrier_queue(
+                    albedo.barrier_queue(
                         AccessFlags::TRANSFER_READ,
                         AccessFlags::default(),
                         ImageLayout::TRANSFER_SRC,
@@ -962,7 +1040,7 @@ pub fn new(
     settings: Settings,
     device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
-) -> Result<Renderer, vkw::DeviceError> {
+) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
     let mut world = specs::World::new();
     world.register::<component::Transform>();
     world.register::<component::VertexMeshRef>();
@@ -973,7 +1051,7 @@ pub fn new(
     // TODO
     let active_camera = world
         .create_entity()
-        .with(component::Camera::new(1.0, 90.0, 0.1, 1000.0))
+        .with(component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01))
         .build();
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
@@ -999,7 +1077,7 @@ pub fn new(
             color: vec![],
             depth: Some(AttachmentRef {
                 index: 0,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                layout: ImageLayout::DEPTH_ATTACHMENT,
             }),
         }],
         &[],
@@ -1064,6 +1142,12 @@ pub fn new(
                 final_layout: ImageLayout::DEPTH_READ,
                 load_store: LoadStore::InitSaveFinalSave,
             },
+            Attachment {
+                format: Format::R32_UINT,
+                init_layout: ImageLayout::UNDEFINED,
+                final_layout: ImageLayout::GENERAL,
+                load_store: LoadStore::InitClearFinalSave,
+            },
         ],
         &[Subpass {
             color: vec![
@@ -1086,7 +1170,7 @@ pub fn new(
             ],
             depth: Some(AttachmentRef {
                 index: 4,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                layout: ImageLayout::DEPTH_ATTACHMENT,
             }),
         }],
         &[],
@@ -1208,5 +1292,5 @@ pub fn new(
     };
     renderer.on_resize(size);
 
-    Ok(renderer)
+    Ok(Arc::new(Mutex::new(renderer)))
 }
