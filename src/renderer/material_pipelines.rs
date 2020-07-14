@@ -37,7 +37,6 @@ pub fn create(resources: &Arc<ResourceFile>, device: &Arc<vkw::Device>) -> Mater
 
 #[derive(Default)]
 pub struct BasicUniformInfo {
-    some_shit: na::Vector4<f32>,
     model: na::Matrix4<f32>,
 }
 

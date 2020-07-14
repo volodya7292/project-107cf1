@@ -9,21 +9,30 @@ impl Format {
     pub const UNDEFINED: Self = Self(vk::Format::UNDEFINED);
     pub const D32_FLOAT: Self = Self(vk::Format::D32_SFLOAT);
     pub const R32_UINT: Self = Self(vk::Format::R32_UINT);
+    pub const RG16_UNORM: Self = Self(vk::Format::R16G16_UNORM);
     pub const RG32_FLOAT: Self = Self(vk::Format::R32G32_SFLOAT);
     pub const RGB16_FLOAT: Self = Self(vk::Format::R16G16B16_SFLOAT);
     pub const RGB32_FLOAT: Self = Self(vk::Format::R32G32B32_SFLOAT);
     pub const RGB32_UINT: Self = Self(vk::Format::R32G32B32_UINT);
     pub const RGBA8_UNORM: Self = Self(vk::Format::R8G8B8A8_UNORM);
-    pub const RGB10A2_UNORM: Self = Self(vk::Format::A2R10G10B10_UNORM_PACK32);
     pub const RGBA16_UNORM: Self = Self(vk::Format::R16G16B16A16_UNORM);
     pub const RGBA16_FLOAT: Self = Self(vk::Format::R16G16B16A16_SFLOAT);
     pub const RGBA32_FLOAT: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
+
+    pub const BC1_RGB_UNORM: Self = Self(vk::Format::BC1_RGB_UNORM_BLOCK);
+    pub const BC3_RGBA_UNORM: Self = Self(vk::Format::BC3_UNORM_BLOCK);
+    pub const BC5_RG_UNORM: Self = Self(vk::Format::BC5_UNORM_BLOCK);
 }
 
 // TODO
 pub const BUFFER_FORMATS: [Format; 0] = [];
 // TODO
-pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RGB10A2_UNORM];
+pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RG16_UNORM];
+pub const BC_IMAGE_FORMATS: [Format; 3] = [
+    Format::BC1_RGB_UNORM,
+    Format::BC3_RGBA_UNORM,
+    Format::BC5_RG_UNORM,
+];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
 lazy_static! {
@@ -31,15 +40,18 @@ lazy_static! {
         (Format::UNDEFINED, 0),
         (Format::D32_FLOAT, 4),
         (Format::R32_UINT, 4),
+        (Format::RG16_UNORM, 4),
         (Format::RG32_FLOAT, 8),
         (Format::RGB16_FLOAT, 6),
         (Format::RGB32_FLOAT, 12),
         (Format::RGB32_UINT, 12),
         (Format::RGBA8_UNORM, 4),
-        (Format::RGB10A2_UNORM, 4),
         (Format::RGBA16_UNORM, 8),
         (Format::RGBA16_FLOAT, 8),
         (Format::RGBA32_FLOAT, 16),
+        (Format::BC1_RGB_UNORM, 1),
+        (Format::BC3_RGBA_UNORM, 1),
+        (Format::BC5_RG_UNORM, 1),
     ]
     .iter()
     .cloned()

@@ -90,13 +90,11 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                     let mut cmd = &mut Command::new("spirv-opt");
                     cmd = cmd
                         .arg(dst_path_s.clone())
-                        .arg("--target-env")
-                        .arg("vulkan1.2")
-                        .arg("--upgrade-memory-model")
                         .arg("-o")
-                        .arg(entry_str)
-                        .arg("-O")
-                        .arg(entry_str);
+                        .arg(dst_path_s.clone())
+                        .arg("--target-env=vulkan1.2")
+                        .arg("--upgrade-memory-model")
+                        .arg("-O");
 
                     let output = cmd.output().unwrap();
                     println!("{}", String::from_utf8_lossy(&output.stdout));

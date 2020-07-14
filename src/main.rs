@@ -61,19 +61,32 @@ fn main() {
 
     let renderer_settings = renderer::Settings {
         vsync: true,
-        texture_quality: TextureQuality::LOW,
+        texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };
-    let mut renderer =
-        renderer::new(&surface, window_size, renderer_settings, &device, &mut resources).unwrap();
+    let mut renderer = renderer::new(
+        &surface,
+        window_size,
+        renderer_settings,
+        &device,
+        &mut resources,
+        4,
+    )
+    .unwrap();
 
-    /*let index = renderer.lock().unwrap().add_texture(
-        resources.get("textures/test_texture.jpg").unwrap(),
-        renderer::TextureAtlasType::ALBEDO,
-    );
-    renderer.load_texture(index);*/
+    {
+        let mut renderer = renderer.lock().unwrap();
+        let index = renderer
+            .add_texture(
+                renderer::TextureAtlasType::ALBEDO,
+                resources.get("textures/test_texture.bmp").unwrap(),
+            )
+            .unwrap();
+
+        //renderer.load_texture(index);
+    }
 
     let mat_pipelines = material_pipelines::create(&resources, &device);
 

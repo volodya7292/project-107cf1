@@ -22,6 +22,7 @@ use specs::WorldExt;
 use specs::{Builder, Join, ParJoin};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{cmp, mem, slice};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
@@ -53,7 +54,9 @@ pub struct Renderer {
     settings: Settings,
     device: Arc<Device>,
 
+    texture_resources: HashMap<TextureIndex, ResourceRef>,
     texture_atlases: [TextureAtlas; 4],
+    free_texture_indices: [Vec<u32>; 4],
 
     staging_buffer: HostBuffer<u8>,
     staging_cl: Arc<Mutex<CmdList>>,
@@ -87,9 +90,8 @@ pub struct Renderer {
 
 #[derive(Copy, Clone)]
 pub enum TextureQuality {
-    LOW,
-    MEDIUM,
-    HIGH,
+    STANDARD = 128,
+    HIGH = 256,
 }
 
 #[derive(Copy, Clone)]
@@ -108,13 +110,18 @@ pub struct Settings {
     pub(crate) textures_max_anisotropy: f32,
 }
 
-pub struct TextureAtlasType(u32);
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub enum TextureAtlasType {
+    ALBEDO = 0,
+    SPECULAR = 1,
+    EMISSION = 2,
+    NORMAL = 3,
+}
 
-impl TextureAtlasType {
-    pub const ALBEDO: Self = Self(0);
-    pub const SPECULAR: Self = Self(1);
-    pub const EMISSION: Self = Self(2);
-    pub const NORMAL: Self = Self(3);
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct TextureIndex {
+    atlas_type: TextureAtlasType,
+    index: u32,
 }
 
 pub struct CameraInfo {
@@ -158,93 +165,43 @@ impl Renderer {
     }
 
     /// Add texture to renderer
-    pub fn add_texture(&mut self, res_ref: ResourceRef, atlas_type: TextureAtlasType) -> u16 {
-        /*self.textures.push(Texture {
-            res_ref,
-            bounds: (0, 0, 0, 0),
-            loaded: false,
-            atlas_type,
-        });
-        (self.textures.len() - 1) as u16*/
-        0
+    pub fn add_texture(
+        &mut self,
+        atlas_type: TextureAtlasType,
+        res_ref: ResourceRef,
+    ) -> Option<TextureIndex> {
+        let indices = &mut self.free_texture_indices[atlas_type as usize];
+        if indices.is_empty() {
+            None
+        } else {
+            let index = TextureIndex {
+                atlas_type,
+                index: indices.remove(indices.len() - 1),
+            };
+
+            self.texture_resources.insert(index, res_ref);
+            Some(index)
+        }
     }
 
     /// Texture must be loaded before use in a shader
-    pub fn load_texture(&mut self, index: u16) {
-        // TODO: generate mipmaps if needed
+    pub fn load_texture(&mut self, index: TextureIndex) {
+        let atlas = &mut self.texture_atlases[index.atlas_type as usize];
+        let res_ref = &self.texture_resources[&index];
 
-        // 1. load texture
-        // 2. find space for it
-        // 3. defragment atlas if needed (make some textures smaller)
-        // 4. copy texture to atlas
+        let t0 = Instant::now();
 
-        /*if let Some(texture) = self.textures.get_mut(index as usize) {
-            // Load resource
-            let bytes = texture.res_ref.read().unwrap();
-            let img = image::load_from_memory(&bytes).unwrap();
+        let res_data = res_ref.read().unwrap();
+        let image = image::DynamicImage::ImageRgba8(image::load_from_memory(&res_data).unwrap().into_rgba());
 
-            // Create staging buffer
-            let mut buffer = self
-                .device
-                .create_host_buffer::<u8>(
-                    BufferUsageFlags::TRANSFER_SRC,
-                    (img.width() * img.height() * FORMAT_SIZES[&texture.format] as u32) as u64,
-                )
-                .unwrap();
-            buffer.write(0, &img.to_bytes());
+        let t1 = Instant::now();
+        println!("TIME: {}", t1.duration_since(t0).as_secs_f64());
 
-            // Create image
-            texture.image = Some(
-                self.device
-                    .create_image_2d(
-                        texture.format,
-                        self.settings.textures_gen_mipmaps,
-                        self.settings.textures_max_anisotropy,
-                        ImageUsageFlags::SAMPLED,
-                        (img.width(), img.height()),
-                    )
-                    .unwrap(),
-            );
-            let image = texture.image.as_ref().unwrap();
+        let bytes = image.to_bytes();
 
-            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
-            // Record cmd list: copy resource to image
-            {
-                let mut cl = self.texture_load_cmd_list.lock().unwrap();
-                cl.begin(true).unwrap();
-                cl.barrier_image(
-                    PipelineStageFlags::TOP_OF_PIPE,
-                    PipelineStageFlags::TRANSFER,
-                    &[image.barrier_queue(
-                        AccessFlags::default(),
-                        AccessFlags::TRANSFER_WRITE,
-                        ImageLayout::UNDEFINED,
-                        ImageLayout::TRANSFER_DST,
-                        graphics_queue,
-                        graphics_queue,
-                    )],
-                );
-                cl.copy_host_buffer_to_image(&buffer, 0, &image, ImageLayout::TRANSFER_DST);
-                cl.barrier_image(
-                    PipelineStageFlags::TRANSFER,
-                    PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[image.barrier_queue(
-                        AccessFlags::TRANSFER_WRITE,
-                        AccessFlags::default(),
-                        ImageLayout::TRANSFER_DST,
-                        ImageLayout::SHADER_READ,
-                        graphics_queue,
-                        graphics_queue,
-                    )],
-                );
-                cl.end().unwrap();
-            }
-
-            // Submit work
-            graphics_queue.submit(&mut self.texture_load_packet).unwrap();
-            self.texture_load_packet.wait().unwrap();
-        }*/
+        atlas
+            .set_texture(index.index, &bytes, Format::RGBA8_UNORM)
+            .unwrap();
     }
 
     /// Unload unused texture to free GPU memory
@@ -376,8 +333,7 @@ impl Renderer {
                 .create_device_buffer(
                     vkw::BufferUsageFlags::STORAGE,
                     12,
-                    // +1 for atomic pixel counter
-                    (1 + new_size.0 * new_size.1 * (self.settings.translucency_max_depth as u32)) as u64,
+                    (new_size.0 * new_size.1 * (self.settings.translucency_max_depth as u32)) as u64,
                 )
                 .unwrap(),
         )
@@ -540,11 +496,7 @@ impl Renderer {
                         uniform_input.update(&[Binding {
                             id: 0,
                             array_index: 0,
-                            res: BindingRes::BufferRange(
-                                Arc::clone(&renderer.uniform_buffer),
-                                mat_pipeline.uniform_buffer_offset_model() as u64,
-                                mem::size_of::<na::Matrix4<f32>>() as u64,
-                            ),
+                            res: BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
                         }]);
 
                         inputs.push(uniform_input);
@@ -660,6 +612,14 @@ impl Renderer {
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
+        /*{
+            let index = TextureIndex {
+                atlas_type: TextureAtlasType::ALBEDO,
+                index: 3,
+            };
+            self.load_texture(index);
+        }*/
+
         let camera_component = self.world.read_component::<component::Camera>();
         let active_camera = camera_component.get(self.active_camera).unwrap();
 
@@ -1040,6 +1000,7 @@ pub fn new(
     settings: Settings,
     device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
+    max_texture_count: u32,
 ) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
     let mut world = specs::World::new();
     world.register::<component::Transform>();
@@ -1130,7 +1091,7 @@ pub fn new(
             },
             // Normal
             Attachment {
-                format: Format::RGB10A2_UNORM,
+                format: Format::RG16_UNORM,
                 init_layout: ImageLayout::UNDEFINED,
                 final_layout: ImageLayout::SHADER_READ,
                 load_store: LoadStore::FinalSave,
@@ -1199,48 +1160,46 @@ pub fn new(
         )])
         .unwrap();
 
-    // TODO: dynamic size depending on settings
-    let atlas_size = (1024, 1024);
-
+    let tile_count = max_texture_count;
     let texture_atlases = [
         // albedo
         texture_atlas::new(
             &device,
-            Format::RGBA8_UNORM,
+            Format::BC3_RGBA_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
-            1,
-            128,
+            tile_count,
+            settings.texture_quality as u32,
         )
         .unwrap(),
         // specular
         texture_atlas::new(
             &device,
-            Format::RGBA8_UNORM,
+            Format::BC3_RGBA_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
-            1,
-            128,
+            tile_count,
+            settings.texture_quality as u32,
         )
         .unwrap(),
         // emission
         texture_atlas::new(
             &device,
-            Format::RGBA8_UNORM,
+            Format::BC1_RGB_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
-            1,
-            128,
+            tile_count,
+            settings.texture_quality as u32,
         )
         .unwrap(),
         // normal
         texture_atlas::new(
             &device,
-            Format::RGBA16_UNORM,
+            Format::BC5_RG_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
-            1,
-            128,
+            tile_count,
+            settings.texture_quality as u32,
         )
         .unwrap(),
     ];
@@ -1248,6 +1207,8 @@ pub fn new(
     let staging_copy_cl = graphics_queue.create_primary_cmd_list()?;
     let staging_copy_submit =
         device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_copy_cl)])])?;
+
+    let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
     let mut renderer = Renderer {
         world,
@@ -1260,7 +1221,14 @@ pub fn new(
         surface_size: size,
         settings,
         device: Arc::clone(device),
+        texture_resources: Default::default(),
         texture_atlases,
+        free_texture_indices: [
+            free_indices.clone(),
+            free_indices.clone(),
+            free_indices.clone(),
+            free_indices.clone(),
+        ],
         staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
         staging_cl: staging_copy_cl,
         staging_submit: staging_copy_submit,

@@ -298,32 +298,45 @@ impl Device {
                 base_array_layer: 0,
                 layer_count: array_layers,
             });
-        let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
+        let (view, sampler) = if usage.intersects(
+            ImageUsageFlags::COLOR_ATTACHMENT
+                | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                | ImageUsageFlags::INPUT_ATTACHMENT
+                | ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::STORAGE,
+        ) {
+            let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
 
-        let linear_filter_supported = self
-            .adapter
-            .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
+            let linear_filter_supported = self
+                .adapter
+                .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
 
-        let sampler_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::NEAREST)
-            .min_filter(if linear_filter_supported {
-                vk::Filter::LINEAR
-            } else {
-                vk::Filter::NEAREST
-            })
-            .mipmap_mode(if linear_filter_supported {
-                vk::SamplerMipmapMode::LINEAR
-            } else {
-                vk::SamplerMipmapMode::NEAREST
-            })
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
-            .anisotropy_enable(max_anisotropy != 1f32)
-            .max_anisotropy(max_anisotropy)
-            .compare_enable(false)
-            .max_lod(mip_levels as f32 - 1f32)
-            .unnormalized_coordinates(false);
+            let sampler_info = vk::SamplerCreateInfo::builder()
+                .mag_filter(vk::Filter::NEAREST)
+                .min_filter(if linear_filter_supported {
+                    vk::Filter::LINEAR
+                } else {
+                    vk::Filter::NEAREST
+                })
+                .mipmap_mode(if linear_filter_supported {
+                    vk::SamplerMipmapMode::LINEAR
+                } else {
+                    vk::SamplerMipmapMode::NEAREST
+                })
+                .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                .address_mode_v(vk::SamplerAddressMode::REPEAT)
+                .address_mode_w(vk::SamplerAddressMode::REPEAT)
+                .anisotropy_enable(max_anisotropy != 1f32)
+                .max_anisotropy(max_anisotropy)
+                .compare_enable(false)
+                .max_lod(mip_levels as f32 - 1f32)
+                .unnormalized_coordinates(false);
+            let sampler = unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? };
+
+            (view, sampler)
+        } else {
+            (vk::ImageView::default(), vk::Sampler::default())
+        };
 
         Ok(Arc::new(Image {
             device: Arc::clone(self),
@@ -331,7 +344,7 @@ impl Device {
             native: image,
             allocation: alloc,
             view,
-            sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+            sampler,
             aspect,
             owned_handle: true,
             format,

@@ -136,8 +136,12 @@ impl Image {
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
-            self.device.wrapper.0.destroy_sampler(self.sampler, None);
-            self.device.wrapper.0.destroy_image_view(self.view, None);
+            if self.sampler != vk::Sampler::default() {
+                self.device.wrapper.0.destroy_sampler(self.sampler, None);
+            }
+            if self.view != vk::ImageView::default() {
+                self.device.wrapper.0.destroy_image_view(self.view, None);
+            }
         }
         if self.owned_handle {
             self.device
