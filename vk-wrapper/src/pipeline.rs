@@ -22,6 +22,7 @@ vk_bitflags_impl!(AccessFlags, vk::AccessFlags);
 impl AccessFlags {
     pub const COLOR_ATTACHMENT_READ: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_READ);
     pub const COLOR_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+    pub const UNIFORM_READ: Self = Self(vk::AccessFlags::UNIFORM_READ);
     pub const TRANSFER_READ: Self = Self(vk::AccessFlags::TRANSFER_READ);
     pub const TRANSFER_WRITE: Self = Self(vk::AccessFlags::TRANSFER_WRITE);
     pub const SHADER_READ: Self = Self(vk::AccessFlags::SHADER_READ);

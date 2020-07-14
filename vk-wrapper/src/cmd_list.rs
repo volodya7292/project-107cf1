@@ -612,13 +612,22 @@ impl CmdList {
         }
     }
 
+    pub fn barrier_buffer(
+        &mut self,
+        src_stage_mask: PipelineStageFlags,
+        dst_stage_mask: PipelineStageFlags,
+        buffer_barriers: &[BufferBarrier],
+    ) {
+        self.barrier_buffer_image(src_stage_mask, dst_stage_mask, buffer_barriers, &[]);
+    }
+
     pub fn barrier_image(
         &mut self,
         src_stage_mask: PipelineStageFlags,
         dst_stage_mask: PipelineStageFlags,
         image_barriers: &[ImageBarrier],
     ) {
-        self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers)
+        self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers);
     }
 
     pub fn execute_secondary(&mut self, cmd_lists: &[Arc<Mutex<CmdList>>]) {

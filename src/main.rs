@@ -81,7 +81,7 @@ fn main() {
         let index = renderer
             .add_texture(
                 renderer::TextureAtlasType::ALBEDO,
-                resources.get("textures/test_texture.bmp").unwrap(),
+                resources.get("textures/test_texture.jpg").unwrap(),
             )
             .unwrap();
 

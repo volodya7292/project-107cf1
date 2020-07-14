@@ -219,6 +219,7 @@ impl Renderer {
 
         let update_count = updates.len();
 
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
         self.staging_cl.lock().unwrap().begin(true).unwrap();
 
         let mut used_size = 0;
@@ -231,12 +232,25 @@ impl Renderer {
 
             if copy_size > 0 && new_used_size < self.staging_buffer.size() as usize {
                 self.staging_buffer.write(used_size as u64, &update.0);
-                self.staging_cl.lock().unwrap().copy_buffer_to_device(
+
+                let mut cl = self.staging_cl.lock().unwrap();
+
+                cl.copy_buffer_to_device(
                     &self.staging_buffer,
                     used_size as u64,
                     &update.1,
                     update.2,
                     copy_size as u64,
+                );
+                cl.barrier_buffer(
+                    PipelineStageFlags::TRANSFER,
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
+                    &[update.1.barrier_queue(
+                        AccessFlags::TRANSFER_WRITE,
+                        AccessFlags::default(),
+                        graphics_queue,
+                        graphics_queue,
+                    )],
                 );
                 used_size = new_used_size;
                 i += 1;
@@ -245,10 +259,7 @@ impl Renderer {
             if i == update_count || new_used_size > self.staging_buffer.size() as usize {
                 self.staging_cl.lock().unwrap().end().unwrap();
 
-                self.device
-                    .get_queue(Queue::TYPE_GRAPHICS)
-                    .submit(&mut self.staging_submit)
-                    .unwrap();
+                graphics_queue.submit(&mut self.staging_submit).unwrap();
                 self.staging_submit.wait().unwrap();
 
                 if i == update_count {
