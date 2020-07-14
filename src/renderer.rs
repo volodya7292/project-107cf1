@@ -124,6 +124,7 @@ pub struct TextureIndex {
     index: u32,
 }
 
+#[derive(Debug)]
 pub struct CameraInfo {
     pos: Vector4<f32>,
     dir: Vector4<f32>,
@@ -235,6 +236,7 @@ impl Renderer {
 
                 let mut cl = self.staging_cl.lock().unwrap();
 
+                cl.debug_full_memory_barrier();
                 cl.copy_buffer_to_device(
                     &self.staging_buffer,
                     used_size as u64,
@@ -242,7 +244,8 @@ impl Renderer {
                     update.2,
                     copy_size as u64,
                 );
-                cl.barrier_buffer(
+                cl.debug_full_memory_barrier();
+                /*cl.barrier_buffer(
                     PipelineStageFlags::TRANSFER,
                     PipelineStageFlags::BOTTOM_OF_PIPE,
                     &[update.1.barrier_queue(
@@ -251,7 +254,7 @@ impl Renderer {
                         graphics_queue,
                         graphics_queue,
                     )],
-                );
+                );*/
                 used_size = new_used_size;
                 i += 1;
             }
@@ -269,6 +272,9 @@ impl Renderer {
                 }
             }
         }
+
+        // TODO: remove
+        self.staging_submit.wait().unwrap();
     }
 
     pub fn set_settings(&mut self, settings: Settings) {

@@ -351,6 +351,35 @@ impl CmdList {
             .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
     }
 
+    pub fn copy_buffer_to_host<T>(
+        &mut self,
+        src_buffer: &Arc<DeviceBuffer>,
+        src_element_index: u64,
+        dst_buffer: &HostBuffer<T>,
+        dst_element_index: u64,
+        size: u64,
+    ) {
+        if size == 0 {
+            return;
+        }
+
+        let region = vk::BufferCopy {
+            src_offset: src_element_index * src_buffer.buffer.aligned_elem_size,
+            dst_offset: dst_element_index * src_buffer.buffer.aligned_elem_size,
+            size: size * src_buffer.buffer.aligned_elem_size,
+        };
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer(
+                self.native,
+                src_buffer.buffer.native,
+                dst_buffer.buffer.native,
+                &[region],
+            )
+        };
+        self.buffers
+            .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
+    }
+
     pub fn copy_host_buffer_to_image(
         &mut self,
         src_buffer: &HostBuffer<u8>,
@@ -643,6 +672,40 @@ impl CmdList {
         };
 
         self.secondary_cmd_lists.extend_from_slice(cmd_lists);
+    }
+
+    pub fn debug_full_memory_barrier(&mut self) {
+        let access_mask = vk::AccessFlags::INDIRECT_COMMAND_READ
+            | vk::AccessFlags::INDEX_READ
+            | vk::AccessFlags::VERTEX_ATTRIBUTE_READ
+            | vk::AccessFlags::UNIFORM_READ
+            | vk::AccessFlags::INPUT_ATTACHMENT_READ
+            | vk::AccessFlags::SHADER_READ
+            | vk::AccessFlags::SHADER_WRITE
+            | vk::AccessFlags::COLOR_ATTACHMENT_READ
+            | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+            | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+            | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+            | vk::AccessFlags::TRANSFER_READ
+            | vk::AccessFlags::TRANSFER_WRITE
+            | vk::AccessFlags::HOST_READ
+            | vk::AccessFlags::HOST_WRITE;
+        let memory_barrier = vk::MemoryBarrier::builder()
+            .src_access_mask(access_mask)
+            .dst_access_mask(access_mask)
+            .build();
+
+        unsafe {
+            self.device_wrapper.0.cmd_pipeline_barrier(
+                self.native,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::default(),
+                &[memory_barrier],
+                &[],
+                &[],
+            )
+        };
     }
 }
 
