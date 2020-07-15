@@ -897,7 +897,7 @@ impl Device {
                         .build(),
                 );
 
-                let mut flags = vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
+                let mut flags = vk::DescriptorBindingFlags::default();
                 if binding.count > 1 {
                     flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
                 }
@@ -1016,7 +1016,7 @@ impl Device {
                         .build(),
                 );
 
-                let mut flags = vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING;
+                let mut flags = vk::DescriptorBindingFlags::default();
                 if binding.count > 1 {
                     flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
                 }

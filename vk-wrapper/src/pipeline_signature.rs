@@ -36,7 +36,7 @@ impl PipelineSignature {
             signature: Arc::clone(&self),
             descriptor_set: set_id,
             native: unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None)? },
-            free_sets: Mutex::new(Vec::with_capacity(65535)),
+            free_sets: Mutex::new(Vec::with_capacity(max_inputs as usize)),
         }))
     }
 }

@@ -157,8 +157,8 @@ impl Instance {
                 };
                 let available_features = available_features2.features;
 
-                let mut enabled_features12 = vk::PhysicalDeviceVulkan12Features::builder().build();
-                let mut enabled_features = vk::PhysicalDeviceFeatures::builder().build();
+                let mut enabled_features12 = vk::PhysicalDeviceVulkan12Features::default();
+                let mut enabled_features = vk::PhysicalDeviceFeatures::default();
 
                 macro_rules! require_feature {
                     ($name:ident) => {
@@ -186,14 +186,10 @@ impl Instance {
                 require_feature!(shader_storage_image_array_dynamic_indexing);
 
                 require_feature12!(descriptor_indexing);
-                require_feature12!(descriptor_binding_update_unused_while_pending);
                 require_feature12!(descriptor_binding_partially_bound);
                 require_feature12!(runtime_descriptor_array);
                 require_feature12!(separate_depth_stencil_layouts);
                 require_feature12!(timeline_semaphore);
-
-                enabled_features.robust_buffer_access =
-                    available_features.robust_buffer_access & props12.robust_buffer_access_update_after_bind;
 
                 enabled_features12.vulkan_memory_model = available_features12.vulkan_memory_model;
                 enabled_features12.vulkan_memory_model_device_scope =
