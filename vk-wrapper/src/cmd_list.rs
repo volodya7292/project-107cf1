@@ -380,27 +380,34 @@ impl CmdList {
             .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
     }
 
-    pub fn copy_host_buffer_to_image(
+    pub fn copy_host_buffer_to_image_2d(
         &mut self,
         src_buffer: &HostBuffer<u8>,
         src_offset: u64,
         dst_image: &Arc<Image>,
         dst_image_layout: ImageLayout,
+        dst_offset: (u32, u32),
+        dst_mip_level: u32,
+        size: (u32, u32),
     ) {
         let region = vk::BufferImageCopy {
             buffer_offset: src_offset,
-            buffer_row_length: dst_image.size.0,
-            buffer_image_height: dst_image.size.1,
+            buffer_row_length: 0,
+            buffer_image_height: 0,
             image_subresource: vk::ImageSubresourceLayers {
                 aspect_mask: dst_image.aspect,
-                mip_level: 0,
+                mip_level: dst_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
             },
-            image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+            image_offset: vk::Offset3D {
+                x: dst_offset.0 as i32,
+                y: dst_offset.1 as i32,
+                z: 0,
+            },
             image_extent: vk::Extent3D {
-                width: dst_image.size.0,
-                height: dst_image.size.1,
+                width: size.0,
+                height: size.1,
                 depth: 1,
             },
         };

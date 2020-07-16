@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PROJECT>
+    <Image File="D:/Vova/Projects/Rust/project-107cf1/uncompressed_textures/test_texture.bmp">
+        <Compression Setting="test_texture" Enabled="False">
+            <Source>D:/Vova/Projects/Rust/project-107cf1/uncompressed_textures/test_texture.bmp</Source>
+            <Destination>D:/Vova/Projects/Rust/project-107cf1/res/textures/test_texture.KTX</Destination>
+            <fd>BC7</fd>
+            <Quality>1</Quality>
+            <WeightR>0.3086</WeightR>
+            <WeightG>0.6094</WeightG>
+            <WeightB>0.082</WeightB>
+            <AlphaThreshold>0</AlphaThreshold>
+            <BlockRate>8.00</BlockRate>
+        </Compression>
+    </Image>
+</PROJECT>

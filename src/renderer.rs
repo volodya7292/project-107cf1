@@ -2,14 +2,15 @@ pub(crate) mod component;
 #[macro_use]
 pub(crate) mod material_pipeline;
 pub mod material_pipelines;
-//mod texture;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
 
 use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
+use crate::utils;
 use image::GenericImageView;
+use ktx::KtxInfo;
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector3, Vector4};
 use order_stat;
@@ -21,6 +22,7 @@ use specs::storage::RestrictedStorage;
 use specs::WorldExt;
 use specs::{Builder, Join, ParJoin};
 use std::collections::{HashMap, HashSet};
+use std::io::BufReader;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{cmp, mem, slice};
@@ -54,7 +56,7 @@ pub struct Renderer {
     settings: Settings,
     device: Arc<Device>,
 
-    texture_resources: HashMap<TextureIndex, ResourceRef>,
+    texture_resources: Vec<(ResourceRef, TextureAtlasType, Option<u32>)>,
     texture_atlases: [TextureAtlas; 4],
     free_texture_indices: [Vec<u32>; 4],
 
@@ -118,12 +120,6 @@ pub enum TextureAtlasType {
     NORMAL = 3,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct TextureIndex {
-    atlas_type: TextureAtlasType,
-    index: u32,
-}
-
 #[derive(Debug)]
 pub struct CameraInfo {
     pos: Vector4<f32>,
@@ -166,50 +162,64 @@ impl Renderer {
     }
 
     /// Add texture to renderer
-    pub fn add_texture(
-        &mut self,
-        atlas_type: TextureAtlasType,
-        res_ref: ResourceRef,
-    ) -> Option<TextureIndex> {
-        let indices = &mut self.free_texture_indices[atlas_type as usize];
-        if indices.is_empty() {
-            None
-        } else {
-            let index = TextureIndex {
-                atlas_type,
-                index: indices.remove(indices.len() - 1),
-            };
-
-            self.texture_resources.insert(index, res_ref);
-            Some(index)
-        }
+    pub fn add_texture(&mut self, atlas_type: TextureAtlasType, res_ref: ResourceRef) -> usize {
+        self.texture_resources.push((res_ref, atlas_type, None));
+        self.texture_resources.len() - 1
     }
 
     /// Texture must be loaded before use in a shader
-    pub fn load_texture(&mut self, index: TextureIndex) {
-        let atlas = &mut self.texture_atlases[index.atlas_type as usize];
-        let res_ref = &self.texture_resources[&index];
+    pub fn load_texture(&mut self, index: usize) {
+        let (res_ref, atlas_type, tex_index) = &mut self.texture_resources[index];
 
-        let t0 = Instant::now();
+        if tex_index.is_none() {
+            let free_indices = &mut self.free_texture_indices[*atlas_type as usize];
+            *tex_index = if free_indices.is_empty() {
+                None
+            } else {
+                Some(free_indices.swap_remove(0))
+            };
+        }
 
-        let res_data = res_ref.read().unwrap();
-        let image = image::DynamicImage::ImageRgba8(image::load_from_memory(&res_data).unwrap().into_rgba());
+        if let Some(tex_index) = tex_index {
+            let t0 = Instant::now();
+            let res_data = res_ref.read().unwrap();
 
-        let t1 = Instant::now();
-        println!("TIME: {}", t1.duration_since(t0).as_secs_f64());
+            let decoder = ktx::Decoder::new(res_data.as_slice()).unwrap();
+            let width = decoder.pixel_width();
+            let height = decoder.pixel_height();
 
-        let bytes = image.to_bytes();
+            if !utils::is_pow_of_2(width as u64)
+                || width != height
+                || width < (self.settings.texture_quality as u32)
+            {
+                return;
+            }
 
-        atlas
-            .set_texture(index.index, &bytes, Format::RGBA8_UNORM)
-            .unwrap();
+            let mip_maps: Vec<Vec<u8>> = decoder.read_textures().collect();
+
+            let first_level = utils::log2(width / (self.settings.texture_quality as u32));
+            let last_level = utils::log2(width / 4); // BC block size = 4x4
+
+            self.texture_atlases[*atlas_type as usize]
+                .set_texture(
+                    *tex_index,
+                    &mip_maps[(first_level as usize)..(last_level as usize + 1)],
+                )
+                .unwrap();
+
+            let t1 = Instant::now();
+            println!("TIME: {}", t1.duration_since(t0).as_secs_f64());
+        }
     }
 
-    /// Unload unused texture to free GPU memory
-    pub fn unload_texture(&mut self, index: u16) {
-        /*if let Some(texture) = self.textures.get_mut(index as usize) {
-            texture.loaded = false;
-        }*/
+    /// Unload unused texture to free GPU memory for another texture
+    pub fn unload_texture(&mut self, index: u32) {
+        let (res_ref, atlas_type, tex_index) = &mut self.texture_resources[index as usize];
+
+        if let Some(tex_index) = tex_index {
+            self.free_texture_indices[*atlas_type as usize].push(*tex_index);
+        }
+        *tex_index = None;
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
@@ -236,7 +246,6 @@ impl Renderer {
 
                 let mut cl = self.staging_cl.lock().unwrap();
 
-                cl.debug_full_memory_barrier();
                 cl.copy_buffer_to_device(
                     &self.staging_buffer,
                     used_size as u64,
@@ -244,17 +253,6 @@ impl Renderer {
                     update.2,
                     copy_size as u64,
                 );
-                cl.debug_full_memory_barrier();
-                /*cl.barrier_buffer(
-                    PipelineStageFlags::TRANSFER,
-                    PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[update.1.barrier_queue(
-                        AccessFlags::TRANSFER_WRITE,
-                        AccessFlags::default(),
-                        graphics_queue,
-                        graphics_queue,
-                    )],
-                );*/
                 used_size = new_used_size;
                 i += 1;
             }
@@ -629,14 +627,6 @@ impl Renderer {
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
-        /*{
-            let index = TextureIndex {
-                atlas_type: TextureAtlasType::ALBEDO,
-                index: 3,
-            };
-            self.load_texture(index);
-        }*/
-
         let camera_component = self.world.read_component::<component::Camera>();
         let active_camera = camera_component.get(self.active_camera).unwrap();
 
@@ -1182,7 +1172,7 @@ pub fn new(
         // albedo
         texture_atlas::new(
             &device,
-            Format::BC3_RGBA_UNORM,
+            Format::BC7_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             tile_count,
@@ -1192,7 +1182,7 @@ pub fn new(
         // specular
         texture_atlas::new(
             &device,
-            Format::BC3_RGBA_UNORM,
+            Format::BC7_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             tile_count,
@@ -1202,7 +1192,7 @@ pub fn new(
         // emission
         texture_atlas::new(
             &device,
-            Format::BC1_RGB_UNORM,
+            Format::BC7_UNORM,
             settings.textures_gen_mipmaps,
             settings.textures_max_anisotropy,
             tile_count,

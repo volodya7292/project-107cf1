@@ -19,20 +19,16 @@ impl Format {
     pub const RGBA16_FLOAT: Self = Self(vk::Format::R16G16B16A16_SFLOAT);
     pub const RGBA32_FLOAT: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
 
-    pub const BC1_RGB_UNORM: Self = Self(vk::Format::BC1_RGB_UNORM_BLOCK);
     pub const BC3_RGBA_UNORM: Self = Self(vk::Format::BC3_UNORM_BLOCK);
     pub const BC5_RG_UNORM: Self = Self(vk::Format::BC5_UNORM_BLOCK);
+    pub const BC7_UNORM: Self = Self(vk::Format::BC7_UNORM_BLOCK);
 }
 
 // TODO
 pub const BUFFER_FORMATS: [Format; 0] = [];
 // TODO
 pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RG16_UNORM];
-pub const BC_IMAGE_FORMATS: [Format; 3] = [
-    Format::BC1_RGB_UNORM,
-    Format::BC3_RGBA_UNORM,
-    Format::BC5_RG_UNORM,
-];
+pub const BC_IMAGE_FORMATS: [Format; 3] = [Format::BC3_RGBA_UNORM, Format::BC5_RG_UNORM, Format::BC7_UNORM];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
 lazy_static! {
@@ -49,9 +45,9 @@ lazy_static! {
         (Format::RGBA16_UNORM, 8),
         (Format::RGBA16_FLOAT, 8),
         (Format::RGBA32_FLOAT, 16),
-        (Format::BC1_RGB_UNORM, 1),
         (Format::BC3_RGBA_UNORM, 1),
         (Format::BC5_RG_UNORM, 1),
+        (Format::BC7_UNORM, 1),
     ]
     .iter()
     .cloned()

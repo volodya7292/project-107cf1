@@ -1,3 +1,4 @@
+mod utils;
 #[macro_use]
 mod renderer;
 mod program;
@@ -78,14 +79,12 @@ fn main() {
 
     {
         let mut renderer = renderer.lock().unwrap();
-        let index = renderer
-            .add_texture(
-                renderer::TextureAtlasType::ALBEDO,
-                resources.get("textures/test_texture.jpg").unwrap(),
-            )
-            .unwrap();
+        let index = renderer.add_texture(
+            renderer::TextureAtlasType::ALBEDO,
+            resources.get("textures/test_texture.ktx").unwrap(),
+        );
 
-        //renderer.load_texture(index);
+        renderer.load_texture(index);
     }
 
     let mat_pipelines = material_pipelines::create(&resources, &device);

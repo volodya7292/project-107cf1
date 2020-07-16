@@ -1,4 +1,5 @@
 use crate::resource_file::ResourceRef;
+use crate::utils;
 use std::mem;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
@@ -28,7 +29,7 @@ impl TextureAtlas {
         self.size_in_tiles * self.size_in_tiles
     }
 
-    pub fn set_texture(&mut self, index: u32, bytes: &[u8], format: vkw::Format) -> Result<(), Error> {
+    pub fn set_texture(&mut self, index: u32, mip_maps: &[Vec<u8>]) -> Result<(), Error> {
         let max_index = self.size_in_tiles * self.size_in_tiles - 1;
         if index > max_index {
             return Err(Error::IndexOutOfBounds(format!(
@@ -38,25 +39,23 @@ impl TextureAtlas {
         }
 
         // Create staging buffer
-        let buffer_size = (self.texture_size * self.texture_size * vkw::FORMAT_SIZES[&format] as u32) as u64;
+        let buffer_size =
+            (self.texture_size * self.texture_size * vkw::FORMAT_SIZES[&self.image.format()] as u32 * 2)
+                as u64;
         let mut buffer = self
             .device
             .create_host_buffer::<u8>(vkw::BufferUsageFlags::TRANSFER_SRC, buffer_size)
             .unwrap();
-        buffer.write(0, &bytes[..(buffer_size as usize)]);
 
-        // Create staging image
-        let staging_image = self
-            .device
-            .create_image_2d(
-                format,
-                self.image.mip_levels(),
-                1.0,
-                vkw::ImageUsageFlags::TRANSFER_SRC | vkw::ImageUsageFlags::TRANSFER_DST,
-                (self.texture_size, self.texture_size),
-            )
-            .unwrap();
-        let mip_levels = staging_image.mip_levels();
+        // Copy mip_maps
+        let mut offset = 0;
+        for (level, mip_map) in mip_maps.iter().enumerate() {
+            let mip_size = self.calc_texture_size(level as u32);
+            let texture_byte_size = mip_size * mip_size * vkw::FORMAT_SIZES[&self.image.format()] as u32;
+
+            buffer.write(offset, &mip_map[..(texture_byte_size as usize)]);
+            offset += texture_byte_size as u64;
+        }
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
 
@@ -65,140 +64,6 @@ impl TextureAtlas {
             cl.begin(true).unwrap();
             cl.barrier_image(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
-                vkw::PipelineStageFlags::TRANSFER,
-                &[staging_image.barrier_queue(
-                    vkw::AccessFlags::default(),
-                    vkw::AccessFlags::TRANSFER_WRITE,
-                    vkw::ImageLayout::UNDEFINED,
-                    vkw::ImageLayout::TRANSFER_DST,
-                    graphics_queue,
-                    graphics_queue,
-                )],
-            );
-            cl.copy_host_buffer_to_image(&buffer, 0, &staging_image, vkw::ImageLayout::TRANSFER_DST);
-            /*cl.barrier_image(
-                vkw::PipelineStageFlags::TRANSFER,
-                vkw::PipelineStageFlags::TRANSFER,
-                &[
-                    staging_image.barrier_queue(
-                        vkw::AccessFlags::TRANSFER_WRITE,
-                        vkw::AccessFlags::TRANSFER_READ,
-                        vkw::ImageLayout::TRANSFER_DST,
-                        vkw::ImageLayout::TRANSFER_SRC,
-                        graphics_queue,
-                        graphics_queue,
-                    ),
-                    /*self.image.barrier_queue(
-                        vkw::AccessFlags::default(),
-                        vkw::AccessFlags::TRANSFER_WRITE,
-                        vkw::ImageLayout::SHADER_READ,
-                        vkw::ImageLayout::TRANSFER_DST,
-                        graphics_queue,
-                        graphics_queue,
-                    ),*/
-                ],
-            );*/
-
-            /*let dst_offset = self.get_image_texture_offset(index, 0);
-            cl.blit_image_2d(
-                &staging_image,
-                vkw::ImageLayout::TRANSFER_SRC,
-                (0, 0),
-                (width, height),
-                0,
-                &self.image,
-                vkw::ImageLayout::TRANSFER_DST,
-                dst_offset,
-                (self.texture_size, self.texture_size),
-                0,
-            );*/
-
-            // Generate mipmaps
-            // ---------------------------------------------------------------------------------------------------------
-            for level in 0..(mip_levels - 1) {
-                cl.barrier_image(
-                    vkw::PipelineStageFlags::TRANSFER,
-                    vkw::PipelineStageFlags::TRANSFER,
-                    &[staging_image.barrier_queue_level(
-                        vkw::AccessFlags::TRANSFER_WRITE,
-                        vkw::AccessFlags::TRANSFER_READ,
-                        vkw::ImageLayout::TRANSFER_DST,
-                        vkw::ImageLayout::TRANSFER_SRC,
-                        graphics_queue,
-                        graphics_queue,
-                        level,
-                        1,
-                    )],
-                );
-
-                //let src_offset = self.get_image_texture_offset(index, level);
-                let src_size = self.calc_texture_size(level);
-                //let dst_offset = self.get_image_texture_offset(index, level + 1);
-                let dst_size = self.calc_texture_size(level + 1);
-
-                cl.blit_image_2d(
-                    &staging_image,
-                    vkw::ImageLayout::TRANSFER_SRC,
-                    (0, 0),
-                    (src_size, src_size),
-                    level,
-                    &staging_image,
-                    vkw::ImageLayout::TRANSFER_DST,
-                    (0, 0),
-                    (dst_size, dst_size),
-                    level + 1,
-                );
-
-                /*cl.barrier_image(
-                    vkw::PipelineStageFlags::TRANSFER,
-                    vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[staging_image.barrier_queue_level(
-                        vkw::AccessFlags::TRANSFER_READ,
-                        vkw::AccessFlags::default(),
-                        vkw::ImageLayout::TRANSFER_SRC,
-                        vkw::ImageLayout::SHADER_READ,
-                        graphics_queue,
-                        graphics_queue,
-                        level,
-                        1,
-                    )],
-                );*/
-            }
-
-            cl.barrier_image(
-                vkw::PipelineStageFlags::TRANSFER,
-                vkw::PipelineStageFlags::TRANSFER,
-                &[staging_image.barrier_queue_level(
-                    vkw::AccessFlags::TRANSFER_WRITE,
-                    vkw::AccessFlags::TRANSFER_READ,
-                    vkw::ImageLayout::TRANSFER_DST,
-                    vkw::ImageLayout::TRANSFER_SRC,
-                    graphics_queue,
-                    graphics_queue,
-                    mip_levels - 1,
-                    1,
-                )],
-            );
-
-            /*cl.barrier_image(
-                vkw::PipelineStageFlags::TRANSFER,
-                vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
-                &[staging_image.barrier_queue_level(
-                    vkw::AccessFlags::TRANSFER_WRITE,
-                    vkw::AccessFlags::default(),
-                    vkw::ImageLayout::TRANSFER_DST,
-                    vkw::ImageLayout::SHADER_READ,
-                    graphics_queue,
-                    graphics_queue,
-                    mip_levels - 1,
-                    1,
-                )],
-            );*/
-
-            // Copy mipmaps to main image
-            // ---------------------------------------------------------------------------------------------------------
-            cl.barrier_image(
-                vkw::PipelineStageFlags::TRANSFER,
                 vkw::PipelineStageFlags::TRANSFER,
                 &[self.image.barrier_queue(
                     vkw::AccessFlags::default(),
@@ -210,21 +75,22 @@ impl TextureAtlas {
                 )],
             );
 
-            for level in 0..mip_levels {
-                let dst_offset = self.get_image_texture_offset(index, level);
-                let size = self.calc_texture_size(level);
+            let mut offset = 0;
+            for level in 0..mip_maps.len().min(self.image.mip_levels() as usize) {
+                let mip_size = self.calc_texture_size(level as u32);
+                let texture_offset = self.get_image_texture_offset(index, level as u32);
+                let texture_byte_size = mip_size * mip_size * vkw::FORMAT_SIZES[&self.image.format()] as u32;
 
-                cl.copy_image_2d(
-                    &staging_image,
-                    vkw::ImageLayout::TRANSFER_SRC,
-                    (0, 0),
-                    level,
+                cl.copy_host_buffer_to_image_2d(
+                    &buffer,
+                    offset,
                     &self.image,
                     vkw::ImageLayout::TRANSFER_DST,
-                    dst_offset,
-                    level,
-                    (size / 4, size / 4), // divide by compressed block size
+                    (texture_offset.0, texture_offset.1),
+                    level as u32,
+                    (mip_size, mip_size),
                 );
+                offset += texture_byte_size as u64;
             }
 
             cl.barrier_image(
@@ -264,43 +130,24 @@ impl TextureAtlas {
     }*/
 }
 
-fn next_power_of_two(mut n: u32) -> u32 {
-    n -= 1;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n += 1;
-    n
-}
-
-fn make_mul_of(n: u32, m: u32) -> u32 {
-    ((n + m - 1) / m) * m
-}
-
-const fn num_bits<T>() -> usize {
-    std::mem::size_of::<T>() * 8
-}
-
-fn log2(n: u32) -> u32 {
-    (mem::size_of::<u32>() * 8) as u32 - n.leading_zeros() - 1
-}
-
 /// Creates a new texture atlas with resolution (size x size) and
 /// max texture resolution (max_texture_size x max_texture_size)
 pub fn new(
     device: &Arc<vkw::Device>,
     format: vkw::Format,
-    gen_mipmaps: bool,
+    mipmaps: bool,
     max_anisotropy: f32,
     tile_count: u32,
     texture_size: u32,
 ) -> Result<TextureAtlas, vkw::DeviceError> {
-    let max_texture_size = next_power_of_two(texture_size);
+    let max_texture_size = utils::next_power_of_two(texture_size);
     let size_in_tiles = (tile_count as f64).sqrt().ceil() as u32;
     let size = size_in_tiles * max_texture_size;
-    let max_mip_levels = if gen_mipmaps { log2(max_texture_size) } else { 1 };
+    let max_mip_levels = if mipmaps {
+        (utils::log2(max_texture_size).max(3) - 2) // Account for BC block size (4x4)
+    } else {
+        1
+    };
 
     let image = device.create_image_2d(
         format,
