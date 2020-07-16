@@ -29,7 +29,7 @@ pub struct BindingType(pub(crate) vk::DescriptorType);
 impl BindingType {
     pub const UNIFORM_BUFFER: Self = Self(vk::DescriptorType::UNIFORM_BUFFER);
     pub const STORAGE_BUFFER: Self = Self(vk::DescriptorType::STORAGE_BUFFER);
-    pub const SAMPLED_IMAGE: Self = Self(vk::DescriptorType::SAMPLED_IMAGE);
+    pub const SAMPLED_IMAGE: Self = Self(vk::DescriptorType::COMBINED_IMAGE_SAMPLER);
     pub const STORAGE_IMAGE: Self = Self(vk::DescriptorType::STORAGE_IMAGE);
 }
 

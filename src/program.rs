@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
 
-    pressed_keys: HashSet<sdl2::keyboard::Keycode>,
+    pressed_keys: HashSet<sdl2::keyboard::Scancode>,
 
     cursor_rel: (i32, i32),
 }
@@ -30,8 +30,8 @@ impl Program {
                 keymod,
                 repeat,
             } => {
-                if let Some(keycode) = keycode {
-                    self.pressed_keys.insert(keycode);
+                if let Some(scancode) = scancode {
+                    self.pressed_keys.insert(scancode);
                 }
             }
             Event::KeyUp {
@@ -42,8 +42,8 @@ impl Program {
                 keymod,
                 repeat,
             } => {
-                if let Some(keycode) = keycode {
-                    self.pressed_keys.remove(&keycode);
+                if let Some(scancode) = scancode {
+                    self.pressed_keys.remove(&scancode);
                 }
             }
             Event::MouseMotion {
@@ -62,34 +62,34 @@ impl Program {
         }
     }
 
-    pub fn is_key_pressed(&self, keycode: sdl2::keyboard::Keycode) -> bool {
-        self.pressed_keys.contains(&keycode)
+    pub fn is_key_pressed(&self, scancode: sdl2::keyboard::Scancode) -> bool {
+        self.pressed_keys.contains(&scancode)
     }
 
     pub fn on_update(&mut self, delta_time: f64) {
         {
-            use sdl2::keyboard::Keycode;
+            use sdl2::keyboard::Scancode;
 
             let mut vel_front_back = 0;
             let mut vel_left_right = 0;
             let mut vel_up_down = 0;
 
-            if self.is_key_pressed(Keycode::W) {
+            if self.is_key_pressed(Scancode::W) {
                 vel_front_back += 1;
             }
-            if self.is_key_pressed(Keycode::S) {
+            if self.is_key_pressed(Scancode::S) {
                 vel_front_back -= 1;
             }
-            if self.is_key_pressed(Keycode::A) {
+            if self.is_key_pressed(Scancode::A) {
                 vel_left_right -= 1;
             }
-            if self.is_key_pressed(Keycode::D) {
+            if self.is_key_pressed(Scancode::D) {
                 vel_left_right += 1;
             }
-            if self.is_key_pressed(Keycode::Space) {
+            if self.is_key_pressed(Scancode::Space) {
                 vel_up_down += 1;
             }
-            if self.is_key_pressed(Keycode::LShift) {
+            if self.is_key_pressed(Scancode::LShift) {
                 vel_up_down -= 1;
             }
 

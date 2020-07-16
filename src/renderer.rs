@@ -75,15 +75,18 @@ pub struct Renderer {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
+    depth_per_frame_in: Arc<PipelineInput>,
+    depth_per_object_pool: Arc<DescriptorPool>,
 
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
+    g_per_frame_in: Arc<PipelineInput>,
+    g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_buffer: Option<Arc<DeviceBuffer>>,
 
-    camera_input: Arc<PipelineInput>,
     model_inputs: Arc<DescriptorPool>,
 
     active_camera: specs::Entity,
@@ -128,6 +131,10 @@ pub struct CameraInfo {
     view: Matrix4<f32>,
     proj_view: Matrix4<f32>,
     info: Vector4<f32>, // .x - FovY
+}
+
+pub struct PerFrameInfo {
+    camera: CameraInfo,
 }
 
 /*struct RenderSystem;
@@ -181,7 +188,6 @@ impl Renderer {
         }
 
         if let Some(tex_index) = tex_index {
-            let t0 = Instant::now();
             let res_data = res_ref.read().unwrap();
 
             let decoder = ktx::Decoder::new(res_data.as_slice()).unwrap();
@@ -206,9 +212,6 @@ impl Renderer {
                     &mip_maps[(first_level as usize)..(last_level as usize + 1)],
                 )
                 .unwrap();
-
-            let t1 = Instant::now();
-            println!("TIME: {}", t1.duration_since(t0).as_secs_f64());
         }
     }
 
@@ -270,9 +273,6 @@ impl Renderer {
                 }
             }
         }
-
-        // TODO: remove
-        self.staging_submit.wait().unwrap();
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
@@ -487,12 +487,6 @@ impl Renderer {
         // Update pipeline inputs
         // -------------------------------------------------------------------------------------------------------------
         {
-            self.camera_input.update(&[Binding {
-                id: 0,
-                array_index: 0,
-                res: BindingRes::Buffer(Arc::clone(&self.camera_uniform_buffer)),
-            }]);
-
             let mut renderer_comp = self.world.write_component::<component::Renderer>();
 
             (&mut renderer_comp.par_restrict_mut())
@@ -507,6 +501,15 @@ impl Renderer {
 
                         inputs.clear();
 
+                        let depth_per_object = self.depth_per_object_pool.allocate_input().unwrap();
+                        depth_per_object.update(&[Binding {
+                            id: 0,
+                            array_index: 0,
+                            res: BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+                        }]);
+
+                        //let g_per_object = self.g_
+
                         let uniform_input = self.model_inputs.allocate_input().unwrap();
                         uniform_input.update(&[Binding {
                             id: 0,
@@ -514,7 +517,7 @@ impl Renderer {
                             res: BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
                         }]);
 
-                        inputs.push(uniform_input);
+                        inputs.extend_from_slice(&[depth_per_object, uniform_input]);
 
                         renderer.changed = false;
                     }
@@ -656,7 +659,7 @@ impl Renderer {
                 )
                 .unwrap();
 
-                cl.bind_graphics_input(&self.depth_signature, 0, &self.camera_input);
+                cl.bind_graphics_input(&self.depth_signature, 0, &self.depth_per_frame_in);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -785,9 +788,9 @@ impl Renderer {
 
                     let already_bound = cl.bind_pipeline(&pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, &self.camera_input);
+                        cl.bind_graphics_input(&signature, 0, &self.g_per_frame_in);
                     }
-                    cl.bind_graphics_input(&signature, 1, &renderer.pipeline_inputs[0]);
+                    cl.bind_graphics_input(&signature, 1, &renderer.pipeline_inputs[1]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -1014,6 +1017,9 @@ pub fn new(
     world.register::<component::VertexMeshRef>();
     world.register::<component::Renderer>();
     world.register::<component::Camera>();
+
+    // Register reader for listening for creation/removing of component::Renderer.
+    // Used to optimize front-to-back distance sorting.
     let renderer_cmp_reader = world.write_component::<component::Renderer>().register_reader();
 
     // TODO
@@ -1024,16 +1030,21 @@ pub fn new(
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
-    let texture_load_cmd_list = graphics_queue.create_primary_cmd_list().unwrap();
-    let texture_load_packet = device
-        .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&texture_load_cmd_list)])])
-        .unwrap();
-
+    // Create secondary cmd lists for multithread recording
     let mut secondary_cmd_lists = vec![];
     for _ in 0..num_cpus::get() {
         secondary_cmd_lists.push(graphics_queue.create_secondary_cmd_list()?);
     }
 
+    // Create per-frame uniform buffer
+    let per_frame_uniform_buffer = device.create_device_buffer(
+        BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
+        mem::size_of::<PerFrameInfo>() as u64,
+        1,
+    )?;
+
+    // Create depth pass resources
+    // -----------------------------------------------------------------------------------------------------------------
     let depth_render_pass = device.create_render_pass(
         &[Attachment {
             format: Format::D32_FLOAT,
@@ -1072,7 +1083,10 @@ pub fn new(
         PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
+    let depth_per_frame_in = depth_signature.create_pool(0, 1)?.allocate_input()?;
 
+    // Create G-Buffer pass resources
+    // -----------------------------------------------------------------------------------------------------------------
     let g_render_pass = device.create_render_pass(
         &[
             // Albedo
@@ -1144,28 +1158,44 @@ pub fn new(
         &[],
     )?;
     let g_signature = device
-        .create_custom_pipeline_signature(&[(
-            ShaderStage::VERTEX,
-            &[
-                // Camera info binding
-                ShaderBinding {
-                    binding_type: BindingType::UNIFORM_BUFFER,
-                    binding_mod: ShaderBindingMod::DEFAULT,
-                    descriptor_set: 0,
-                    id: 0,
-                    count: 1,
-                },
-                // Per object info binding
-                ShaderBinding {
-                    binding_type: BindingType::UNIFORM_BUFFER,
-                    binding_mod: ShaderBindingMod::DEFAULT,
-                    descriptor_set: 1,
-                    id: 0,
-                    count: 1,
-                },
-            ],
-        )])
+        .create_custom_pipeline_signature(&[
+            (
+                ShaderStage::VERTEX,
+                &[
+                    // Camera info
+                    ShaderBinding {
+                        binding_type: BindingType::UNIFORM_BUFFER,
+                        binding_mod: ShaderBindingMod::DEFAULT,
+                        descriptor_set: 0,
+                        id: 0,
+                        count: 1,
+                    },
+                    // Per object info
+                    ShaderBinding {
+                        binding_type: BindingType::UNIFORM_BUFFER,
+                        binding_mod: ShaderBindingMod::DEFAULT,
+                        descriptor_set: 1,
+                        id: 0,
+                        count: 1,
+                    },
+                ],
+            ),
+            (
+                ShaderStage::PIXEL,
+                &[
+                    // Albedo atlas
+                    ShaderBinding {
+                        binding_type: BindingType::SAMPLED_IMAGE,
+                        binding_mod: ShaderBindingMod::DEFAULT,
+                        descriptor_set: 0,
+                        id: 1,
+                        count: 1,
+                    },
+                ],
+            ),
+        ])
         .unwrap();
+    let g_per_frame_in = g_signature.create_pool(0, 1)?.allocate_input().unwrap();
 
     let tile_count = max_texture_count;
     let texture_atlases = [
@@ -1211,6 +1241,25 @@ pub fn new(
         .unwrap(),
     ];
 
+    // Update pipeline inputs
+    depth_per_frame_in.update(&[Binding {
+        id: 0,
+        array_index: 0,
+        res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+    }]);
+    g_per_frame_in.update(&[
+        Binding {
+            id: 0,
+            array_index: 0,
+            res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+        },
+        Binding {
+            id: 1,
+            array_index: 0,
+            res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+        },
+    ]);
+
     let staging_copy_cl = graphics_queue.create_primary_cmd_list()?;
     let staging_copy_submit =
         device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_copy_cl)])])?;
@@ -1251,19 +1300,18 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
+        depth_per_frame_in,
+        depth_per_object_pool: depth_signature.create_pool(1, 65535)?,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
+        g_per_frame_in,
+        g_per_object_pools: Default::default(),
         translucency_head_image: None,
         translucency_buffer: None,
-        camera_input: g_signature.create_pool(0, 1)?.allocate_input()?,
-        model_inputs: g_signature.create_pool(1, 65535)?,
+        model_inputs: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
         active_camera,
-        camera_uniform_buffer: device.create_device_buffer(
-            BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
-            mem::size_of::<CameraInfo>() as u64,
-            1,
-        )?,
+        camera_uniform_buffer: per_frame_uniform_buffer,
     };
     renderer.on_resize(size);
 
