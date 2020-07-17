@@ -99,7 +99,7 @@ impl Camera {
 
     pub fn view(&self) -> Matrix4<f32> {
         let mut mat = Matrix4::<f32>::identity();
-        mat *= Rotation3::from_axis_angle(&Vector3::x_axis(), -self.rotation.x).to_homogeneous();
+        mat *= Rotation3::from_axis_angle(&Vector3::x_axis(), self.rotation.x).to_homogeneous();
         mat *= Rotation3::from_axis_angle(&Vector3::y_axis(), self.rotation.y).to_homogeneous();
         mat *= Rotation3::from_axis_angle(&Vector3::z_axis(), self.rotation.z).to_homogeneous();
         mat *= Translation3::from(-self.position).to_homogeneous();

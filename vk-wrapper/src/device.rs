@@ -329,7 +329,8 @@ impl Device {
                 .anisotropy_enable(max_anisotropy != 1f32)
                 .max_anisotropy(max_anisotropy)
                 .compare_enable(false)
-                .max_lod(mip_levels as f32 - 1f32)
+                .min_lod(0.0)
+                .max_lod(max_mip_levels as f32 - 1.0)
                 .unnormalized_coordinates(false);
             let sampler = unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? };
 
@@ -383,7 +384,7 @@ impl Device {
             vk::ImageViewType::TYPE_3D,
             format,
             1,
-            1f32,
+            1.0,
             usage,
             preferred_size,
         )
@@ -888,21 +889,27 @@ impl Device {
                     .descriptor_count += binding.count;
                 binding_types.insert(binding.id, binding.binding_type.0);
 
-                native_bindings[set].push(
-                    vk::DescriptorSetLayoutBinding::builder()
-                        .binding(binding.id)
-                        .descriptor_type(binding.binding_type.0)
-                        .descriptor_count(binding.count)
-                        .stage_flags(shader.stage.0)
-                        .build(),
-                );
+                let native_binding = native_bindings[set].iter_mut().find(|b| b.binding == binding.id);
 
-                let mut flags = vk::DescriptorBindingFlags::default();
-                if binding.count > 1 {
-                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                if let Some(native_binding) = native_binding {
+                    native_binding.stage_flags |= shader.stage.0;
+                } else {
+                    native_bindings[set].push(
+                        vk::DescriptorSetLayoutBinding::builder()
+                            .binding(binding.id)
+                            .descriptor_type(binding.binding_type.0)
+                            .descriptor_count(binding.count)
+                            .stage_flags(shader.stage.0)
+                            .build(),
+                    );
+
+                    let mut flags = vk::DescriptorBindingFlags::default();
+                    if binding.count > 1 {
+                        flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                    }
+
+                    binding_flags[set].push(flags);
                 }
-
-                binding_flags[set].push(flags);
             }
 
             if shader.push_constants_size > 0 {
@@ -1100,23 +1107,26 @@ impl Device {
             .ok_or(DeviceError::InvalidSignature("Vertex shader not provided!"))?;
 
         // Vertex input
-        let mut vertex_binding_descs = Vec::<vk::VertexInputBindingDescription>::new();
-        let mut vertex_attrib_descs = Vec::<vk::VertexInputAttributeDescription>::new();
+        let vertex_binding_count = vertex_shader.input_locations.len();
+        let mut vertex_binding_descs =
+            vec![vk::VertexInputBindingDescription::default(); vertex_binding_count];
+        let mut vertex_attrib_descs =
+            vec![vk::VertexInputAttributeDescription::default(); vertex_binding_count];
 
-        for (i, (location, format)) in vertex_shader.input_locations.iter().enumerate() {
-            let buffer_index = i as u32;
+        for (location, format) in &vertex_shader.input_locations {
+            let buffer_index = *location;
 
-            vertex_binding_descs.push(vk::VertexInputBindingDescription {
+            vertex_binding_descs[buffer_index as usize] = vk::VertexInputBindingDescription {
                 binding: buffer_index,
                 stride: FORMAT_SIZES[&format] as u32,
                 input_rate: vk::VertexInputRate::VERTEX,
-            });
-            vertex_attrib_descs.push(vk::VertexInputAttributeDescription {
+            };
+            vertex_attrib_descs[buffer_index as usize] = vk::VertexInputAttributeDescription {
                 location: *location,
                 binding: buffer_index,
                 format: format.0,
                 offset: 0,
-            });
+            };
         }
 
         let vertex_info = vk::PipelineVertexInputStateCreateInfo::builder()

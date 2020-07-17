@@ -15,9 +15,9 @@ pub struct TextureAtlas {
     cmd_list: Arc<Mutex<vkw::CmdList>>,
     submit_packet: vkw::SubmitPacket,
     image: Arc<vkw::Image>,
-    size: u32,
-    size_in_tiles: u32,
-    texture_size: u32,
+    width: u32,
+    width_in_tiles: u32,
+    tile_width: u32,
 }
 
 impl TextureAtlas {
@@ -25,12 +25,20 @@ impl TextureAtlas {
         Arc::clone(&self.image)
     }
 
+    pub fn width_in_tiles(&self) -> u32 {
+        self.width_in_tiles
+    }
+
+    pub fn tile_width(&self) -> u32 {
+        self.tile_width
+    }
+
     pub fn max_texture_count(&self) -> u32 {
-        self.size_in_tiles * self.size_in_tiles
+        self.width_in_tiles * self.width_in_tiles
     }
 
     pub fn set_texture(&mut self, index: u32, mip_maps: &[Vec<u8>]) -> Result<(), Error> {
-        let max_index = self.size_in_tiles * self.size_in_tiles - 1;
+        let max_index = self.width_in_tiles * self.width_in_tiles - 1;
         if index > max_index {
             return Err(Error::IndexOutOfBounds(format!(
                 "index {} > {}",
@@ -40,8 +48,7 @@ impl TextureAtlas {
 
         // Create staging buffer
         let buffer_size =
-            (self.texture_size * self.texture_size * vkw::FORMAT_SIZES[&self.image.format()] as u32 * 2)
-                as u64;
+            (self.tile_width * self.tile_width * vkw::FORMAT_SIZES[&self.image.format()] as u32 * 2) as u64;
         let mut buffer = self
             .device
             .create_host_buffer::<u8>(vkw::BufferUsageFlags::TRANSFER_SRC, buffer_size)
@@ -116,13 +123,13 @@ impl TextureAtlas {
 
     fn get_image_texture_offset(&self, index: u32, level: u32) -> (u32, u32) {
         (
-            (index % self.size_in_tiles) * self.texture_size / (1 << level),
-            (index / self.size_in_tiles) * self.texture_size / (1 << level),
+            (index % self.width_in_tiles) * self.tile_width / (1 << level),
+            (index / self.width_in_tiles) * self.tile_width / (1 << level),
         )
     }
 
     fn calc_texture_size(&self, level: u32) -> u32 {
-        self.texture_size / (1 << level)
+        self.tile_width / (1 << level)
     }
 
     /*pub fn get_cell(&self, pos: (u32, u32)) -> &Cell {
@@ -138,13 +145,13 @@ pub fn new(
     mipmaps: bool,
     max_anisotropy: f32,
     tile_count: u32,
-    texture_size: u32,
+    tile_width: u32,
 ) -> Result<TextureAtlas, vkw::DeviceError> {
-    let max_texture_size = utils::next_power_of_two(texture_size);
-    let size_in_tiles = (tile_count as f64).sqrt().ceil() as u32;
-    let size = size_in_tiles * max_texture_size;
+    let max_tile_width = utils::next_power_of_two(tile_width);
+    let width_in_tiles = (tile_count as f64).sqrt().ceil() as u32;
+    let width = width_in_tiles * max_tile_width;
     let max_mip_levels = if mipmaps {
-        (utils::log2(max_texture_size).max(3) - 2) // Account for BC block size (4x4)
+        (utils::log2(max_tile_width).max(3) - 2) // Account for BC block size (4x4)
     } else {
         1
     };
@@ -154,7 +161,7 @@ pub fn new(
         max_mip_levels,
         max_anisotropy,
         vkw::ImageUsageFlags::TRANSFER_DST | vkw::ImageUsageFlags::SAMPLED,
-        (size, size),
+        (width, width),
     )?;
 
     let graphics_queue = device.get_queue(vkw::Queue::TYPE_GRAPHICS);
@@ -190,8 +197,8 @@ pub fn new(
         cmd_list,
         submit_packet,
         image,
-        size,
-        size_in_tiles,
-        texture_size: max_texture_size,
+        width,
+        width_in_tiles,
+        tile_width: max_tile_width,
     })
 }

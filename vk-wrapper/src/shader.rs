@@ -15,6 +15,10 @@ impl ShaderStage {
     pub const COMPUTE: Self = Self(vk::ShaderStageFlags::COMPUTE);
 }
 
+//#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//pub struct AccessFlags(pub(crate) vk::AccessFlags);
+vk_bitflags_impl!(ShaderStage, vk::ShaderStageFlags);
+
 #[derive(Copy, Clone, PartialEq)]
 pub struct ShaderBindingMod(u32);
 

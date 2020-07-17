@@ -9,7 +9,9 @@ use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
-use nalgebra::Vector3;
+use na::Vector2;
+use na::Vector3;
+use nalgebra as na;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
@@ -24,10 +26,11 @@ use vk_wrapper::{ImageUsageFlags, Subpass};
 
 #[derive(Default)]
 pub struct BasicVertex {
-    position: nalgebra::Vector3<f32>,
+    position: na::Vector3<f32>,
+    tex_coord: na::Vector2<f32>,
 }
 
-vertex_impl!(BasicVertex, position);
+vertex_impl!(BasicVertex, position, tex_coord);
 
 fn main() {
     simple_logger::init().unwrap();
@@ -96,12 +99,15 @@ fn main() {
         &[
             BasicVertex {
                 position: Vector3::new(0.0, -0.5, -3.0),
+                tex_coord: Vector2::new(1.0, 2.0),
             },
             BasicVertex {
                 position: Vector3::new(-0.5, 0.5, -3.0),
+                tex_coord: Vector2::new(0.0, 0.0),
             },
             BasicVertex {
                 position: Vector3::new(0.5, 0.5, -3.0),
+                tex_coord: Vector2::new(2.0, 0.0),
             },
         ],
         &[],

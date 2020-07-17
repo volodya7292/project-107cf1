@@ -85,7 +85,7 @@ pub struct Renderer {
     g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
-    translucency_buffer: Option<Arc<DeviceBuffer>>,
+    translucency_texel_image: Option<Arc<Image>>,
 
     model_inputs: Arc<DescriptorPool>,
 
@@ -135,6 +135,7 @@ pub struct CameraInfo {
 
 pub struct PerFrameInfo {
     camera: CameraInfo,
+    atlas_info: na::Vector4<u32>,
 }
 
 /*struct RenderSystem;
@@ -343,12 +344,16 @@ impl Renderer {
                 .unwrap(),
         );
 
-        self.translucency_buffer = Some(
+        self.translucency_texel_image = Some(
             self.device
-                .create_device_buffer(
-                    vkw::BufferUsageFlags::STORAGE,
-                    12,
-                    (new_size.0 * new_size.1 * (self.settings.translucency_max_depth as u32)) as u64,
+                .create_image_3d(
+                    vkw::Format::RG32_UINT, // color & depth
+                    vkw::ImageUsageFlags::STORAGE,
+                    (
+                        new_size.0,
+                        new_size.1,
+                        self.settings.translucency_max_depth as u32,
+                    ),
                 )
                 .unwrap(),
         )
@@ -596,7 +601,7 @@ impl Renderer {
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
-            let camera_info = {
+            let per_frame_info = {
                 let camera_comp = self.world.read_component::<component::Camera>();
                 let camera = camera_comp.get(self.active_camera).unwrap();
 
@@ -605,21 +610,29 @@ impl Renderer {
                 let proj = camera.projection();
                 let view = camera.view();
 
-                CameraInfo {
-                    pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
-                    dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
-                    proj,
-                    view,
-                    proj_view: proj * view,
-                    info: Vector4::new(camera.fovy(), 0.0, 0.0, 0.0),
+                PerFrameInfo {
+                    camera: CameraInfo {
+                        pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                        dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                        proj,
+                        view,
+                        proj_view: proj * view,
+                        info: Vector4::new(camera.fovy(), 0.0, 0.0, 0.0),
+                    },
+                    atlas_info: na::Vector4::new(
+                        self.texture_atlases[0].width_in_tiles(),
+                        self.texture_atlases[0].tile_width(),
+                        0,
+                        0,
+                    ),
                 }
             };
 
             self.update_device_buffers(&[(
                 unsafe {
                     slice::from_raw_parts(
-                        &camera_info as *const CameraInfo as *const u8,
-                        mem::size_of::<CameraInfo>(),
+                        &per_frame_info as *const PerFrameInfo as *const u8,
+                        mem::size_of_val(&per_frame_info),
                     )
                     .to_vec()
                 },
@@ -1162,19 +1175,24 @@ pub fn new(
             (
                 ShaderStage::VERTEX,
                 &[
-                    // Camera info
-                    ShaderBinding {
-                        binding_type: BindingType::UNIFORM_BUFFER,
-                        binding_mod: ShaderBindingMod::DEFAULT,
-                        descriptor_set: 0,
-                        id: 0,
-                        count: 1,
-                    },
                     // Per object info
                     ShaderBinding {
                         binding_type: BindingType::UNIFORM_BUFFER,
                         binding_mod: ShaderBindingMod::DEFAULT,
                         descriptor_set: 1,
+                        id: 0,
+                        count: 1,
+                    },
+                ],
+            ),
+            (
+                ShaderStage::VERTEX | ShaderStage::PIXEL,
+                &[
+                    // Per frame info
+                    ShaderBinding {
+                        binding_type: BindingType::UNIFORM_BUFFER,
+                        binding_mod: ShaderBindingMod::DEFAULT,
+                        descriptor_set: 0,
                         id: 0,
                         count: 1,
                     },
@@ -1308,7 +1326,7 @@ pub fn new(
         g_per_frame_in,
         g_per_object_pools: Default::default(),
         translucency_head_image: None,
-        translucency_buffer: None,
+        translucency_texel_image: None,
         model_inputs: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
         active_camera,
         camera_uniform_buffer: per_frame_uniform_buffer,

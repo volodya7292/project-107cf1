@@ -11,6 +11,7 @@ impl Format {
     pub const R32_UINT: Self = Self(vk::Format::R32_UINT);
     pub const RG16_UNORM: Self = Self(vk::Format::R16G16_UNORM);
     pub const RG32_FLOAT: Self = Self(vk::Format::R32G32_SFLOAT);
+    pub const RG32_UINT: Self = Self(vk::Format::R32G32_UINT);
     pub const RGB16_FLOAT: Self = Self(vk::Format::R16G16B16_SFLOAT);
     pub const RGB32_FLOAT: Self = Self(vk::Format::R32G32B32_SFLOAT);
     pub const RGB32_UINT: Self = Self(vk::Format::R32G32B32_UINT);
@@ -25,9 +26,9 @@ impl Format {
 }
 
 // TODO
-pub const BUFFER_FORMATS: [Format; 0] = [];
+pub const TEXEL_BUFFER_FORMATS: [Format; 0] = [];
 // TODO
-pub const IMAGE_FORMATS: [Format; 2] = [Format::RGBA8_UNORM, Format::RG16_UNORM];
+pub const IMAGE_FORMATS: [Format; 3] = [Format::RGBA8_UNORM, Format::RG16_UNORM, Format::RG32_UINT];
 pub const BC_IMAGE_FORMATS: [Format; 3] = [Format::BC3_RGBA_UNORM, Format::BC5_RG_UNORM, Format::BC7_UNORM];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
@@ -38,6 +39,7 @@ lazy_static! {
         (Format::R32_UINT, 4),
         (Format::RG16_UNORM, 4),
         (Format::RG32_FLOAT, 8),
+        (Format::RG32_UINT, 8),
         (Format::RGB16_FLOAT, 6),
         (Format::RGB32_FLOAT, 12),
         (Format::RGB32_UINT, 12),

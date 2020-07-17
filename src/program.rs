@@ -113,7 +113,7 @@ impl Program {
             );
 
             rotation.x = na::clamp(
-                rotation.x - cursor_offset.1,
+                rotation.x + cursor_offset.1,
                 -std::f32::consts::FRAC_PI_2,
                 std::f32::consts::FRAC_PI_2,
             );

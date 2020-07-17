@@ -38,6 +38,11 @@ struct Camera {
     vec4 info;// .x - FovY
 };
 
+struct PerFrameInfo {
+    Camera camera;
+    uvec4 tex_atlas_info; // .x: size in tiles, .y: tile size in pixels
+};
+
 vec4 infi_clip(vec4 clip_coord, float dist) {
     // clip_coord.xy /= clip_coord.w;
     clip_coord.y = -clip_coord.y;

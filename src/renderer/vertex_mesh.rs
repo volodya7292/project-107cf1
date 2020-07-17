@@ -27,12 +27,12 @@ macro_rules! vertex_impl {
             fn attributes() -> Vec<(u32, vkw::Format)> {
                 use crate::renderer::vertex_mesh::VertexMember;
 
+                fn get_format<T: VertexMember>(_: &T) -> vkw::Format { T::vk_format() }
+
                 let mut attribs = vec![];
                 let dummy = <$vertex>::default();
 
                 $(
-                    fn get_format<T: VertexMember>(_: &T) -> vkw::Format { T::vk_format() }
-
                     let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
                     let format = get_format(&dummy.$member_name);
 
@@ -56,14 +56,14 @@ macro_rules! vertex_impl {
                         let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
                         let format = get_format(&dummy.$member_name);
 
-                        Some((
+                        return Some((
                             offset as u32,
                             format,
-                        ))
-                    } else {
-                        None
+                        ));
                     }
                 )*
+
+                return None;
             }
 
             fn position(&self) -> &nalgebra::Vector3<f32> {
@@ -71,6 +71,12 @@ macro_rules! vertex_impl {
             }
         }
     )
+}
+
+impl VertexMember for na::Vector2<f32> {
+    fn vk_format() -> Format {
+        vkw::Format::RG32_FLOAT
+    }
 }
 
 impl VertexMember for na::Vector3<f32> {
@@ -148,16 +154,13 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
             let format_size = vkw::FORMAT_SIZES[&format] as isize;
 
             for (i, vertex) in vertices.iter().enumerate() {
-                let vertex_bytes = unsafe {
-                    slice::from_raw_parts(vertex as *const VertexT as *const u8, mem::size_of::<VertexT>())
-                };
                 unsafe {
                     ptr::copy_nonoverlapping(
-                        vertex_bytes.as_ptr(),
+                        (vertex as *const VertexT as *const u8).offset(vertex_offset as isize),
                         staging_buffer
                             .as_mut_ptr()
                             .offset(buffer_offset + format_size * i as isize),
-                        vertex_bytes.len(),
+                        format_size as usize,
                     );
                 }
             }
