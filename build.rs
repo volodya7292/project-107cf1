@@ -94,6 +94,9 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                         .arg(dst_path_s.clone())
                         .arg("--target-env=vulkan1.2")
                         .arg("--upgrade-memory-model")
+                        .arg("--skip-validation")
+                        .arg("--strip-debug")
+                        .arg("--strip-reflect")
                         .arg("-O");
 
                     let output = cmd.output().unwrap();

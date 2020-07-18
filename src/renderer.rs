@@ -619,12 +619,7 @@ impl Renderer {
                         proj_view: proj * view,
                         info: Vector4::new(camera.fovy(), 0.0, 0.0, 0.0),
                     },
-                    atlas_info: na::Vector4::new(
-                        self.texture_atlases[0].width_in_tiles(),
-                        self.texture_atlases[0].tile_width(),
-                        0,
-                        0,
-                    ),
+                    atlas_info: na::Vector4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
                 }
             };
 
