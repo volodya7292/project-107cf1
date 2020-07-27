@@ -24,10 +24,10 @@ pub trait Vertex {
 macro_rules! vertex_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
         impl $crate::renderer::vertex_mesh::Vertex for $vertex {
-            fn attributes() -> Vec<(u32, vkw::Format)> {
+            fn attributes() -> Vec<(u32, vk_wrapper::Format)> {
                 use crate::renderer::vertex_mesh::VertexMember;
 
-                fn get_format<T: VertexMember>(_: &T) -> vkw::Format { T::vk_format() }
+                fn get_format<T: VertexMember>(_: &T) -> vk_wrapper::Format { T::vk_format() }
 
                 let mut attribs = vec![];
                 let dummy = <$vertex>::default();
@@ -45,12 +45,12 @@ macro_rules! vertex_impl {
                 attribs
             }
 
-            fn member_info(name: &str) -> Option<(u32, vkw::Format)> {
+            fn member_info(name: &str) -> Option<(u32, vk_wrapper::Format)> {
                 use crate::renderer::vertex_mesh::VertexMember;
 
                 $(
                     if name == stringify!($member_name) {
-                        fn get_format<T: VertexMember>(_: &T) -> vkw::Format { T::vk_format() }
+                        fn get_format<T: VertexMember>(_: &T) -> vk_wrapper::Format { T::vk_format() }
 
                         let dummy = <$vertex>::default();
                         let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
@@ -73,6 +73,12 @@ macro_rules! vertex_impl {
     )
 }
 
+impl VertexMember for u32 {
+    fn vk_format() -> Format {
+        vkw::Format::R32_UINT
+    }
+}
+
 impl VertexMember for na::Vector2<f32> {
     fn vk_format() -> Format {
         vkw::Format::RG32_FLOAT
@@ -82,6 +88,12 @@ impl VertexMember for na::Vector2<f32> {
 impl VertexMember for na::Vector3<f32> {
     fn vk_format() -> Format {
         vkw::Format::RGB32_FLOAT
+    }
+}
+
+impl VertexMember for na::Vector4<u32> {
+    fn vk_format() -> Format {
+        vkw::Format::RGBA32_UINT
     }
 }
 
@@ -110,12 +122,54 @@ pub struct VertexMesh<VertexT: Vertex> {
     raw: Option<Arc<Mutex<RawVertexMesh>>>,
 }
 
-impl<VertexT: Vertex> VertexMesh<VertexT> {
+impl<VertexT> VertexMesh<VertexT>
+where
+    VertexT: Vertex + Clone + Default,
+{
     pub fn raw(&self) -> &Option<Arc<Mutex<RawVertexMesh>>> {
         &self.raw
     }
 
-    pub fn set_vertices(&mut self, vertices: &[VertexT], indices: &[u16]) {
+    pub fn get_vertices(&self, first_vertex: u32, count: u32) -> Vec<VertexT> {
+        let raw = self.raw.as_ref().unwrap().lock().unwrap();
+        let attribs = VertexT::attributes();
+
+        let mut vertices =
+            vec![Default::default(); count.min(raw.vertex_count.max(first_vertex) - first_vertex) as usize];
+
+        for (vertex_offset, format) in attribs {
+            let buffer_offset = vertex_offset as isize * vertices.len() as isize;
+            let format_size = vkw::FORMAT_SIZES[&format] as isize;
+
+            for (i, vertex) in vertices.iter_mut().enumerate() {
+                unsafe {
+                    ptr::copy_nonoverlapping(
+                        raw.staging_buffer
+                            .as_ptr()
+                            .offset(buffer_offset + format_size * (first_vertex + i as u32) as isize),
+                        (vertex as *mut VertexT as *mut u8).offset(vertex_offset as isize),
+                        format_size as usize,
+                    );
+                }
+            }
+        }
+
+        vertices
+    }
+
+    pub fn get_indices(&self, first_index: u32, count: u32) -> Vec<u32> {
+        let raw = self.raw.as_ref().unwrap().lock().unwrap();
+
+        let mut indices = vec![0u32; count.min(raw.index_count.max(first_index) - first_index) as usize];
+
+        raw.staging_buffer.read(raw.indices_offset, unsafe {
+            slice::from_raw_parts_mut(indices.as_mut_ptr() as *mut u8, indices.len())
+        });
+
+        indices
+    }
+
+    pub fn set_vertices(&mut self, vertices: &[VertexT], indices: &[u32]) {
         if vertices.is_empty() {
             return;
         }
@@ -123,7 +177,7 @@ impl<VertexT: Vertex> VertexMesh<VertexT> {
         let indexed = indices.len() > 0;
 
         let vertex_size = mem::size_of::<VertexT>();
-        let index_size = mem::size_of::<u16>();
+        let index_size = mem::size_of::<u32>();
         let buffer_size = vertices.len() * vertex_size + indices.len() * index_size;
 
         let indices_offset = vertex_size * vertices.len();

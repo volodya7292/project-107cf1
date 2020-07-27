@@ -1,11 +1,11 @@
 mod utils;
 #[macro_use]
-mod renderer;
+pub(crate) mod renderer;
+mod object;
 mod program;
 mod resource_file;
 
-use crate::program::Program;
-use crate::renderer::vertex_mesh::{Vertex, VertexMeshCreate};
+use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
@@ -13,24 +13,20 @@ use na::Vector2;
 use na::Vector3;
 use nalgebra as na;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
-use specs::prelude::*;
 use specs::{Builder, WorldExt};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use vk_wrapper as vkw;
-use vk_wrapper::{HostBuffer, PrimitiveTopology};
-use vk_wrapper::{ImageUsageFlags, Subpass};
 
-#[derive(Default)]
+#[derive(Copy, Clone, Default)]
 pub struct BasicVertex {
     position: na::Vector3<f32>,
     tex_coord: na::Vector2<f32>,
 }
 
 vertex_impl!(BasicVertex, position, tex_coord);
+
+const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 fn main() {
     simple_logger::init().unwrap();
@@ -70,7 +66,7 @@ fn main() {
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };
-    let mut renderer = renderer::new(
+    let renderer = renderer::new(
         &surface,
         window_size,
         renderer_settings,
@@ -173,15 +169,16 @@ fn main() {
                 } => {
                     if window.fullscreen_state() == sdl2::video::FullscreenType::True {
                         window.set_fullscreen(sdl2::video::FullscreenType::Off).unwrap();
+                        window.set_size(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1).unwrap();
+                        window
+                            .set_position(sdl2::video::WindowPos::Centered, sdl2::video::WindowPos::Centered);
                     } else {
-                        let mut curr_mode = sdl_context
+                        let curr_mode = sdl_context
                             .video()
                             .unwrap()
                             .current_display_mode(window.display_index().unwrap())
                             .unwrap();
-                        curr_mode.format = sdl2::pixels::PixelFormatEnum::RGBA32;
-
-                        window.set_display_mode(curr_mode).unwrap();
+                        window.set_size(curr_mode.w as u32, curr_mode.h as u32).unwrap();
                         window.set_fullscreen(sdl2::video::FullscreenType::True).unwrap();
                     }
                 }

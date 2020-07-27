@@ -9,7 +9,6 @@ pub(crate) mod vertex_mesh;
 use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
-use image::GenericImageView;
 use ktx::KtxInfo;
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector3, Vector4};
@@ -37,8 +36,7 @@ use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
     Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineInput,
     PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue,
-    QueueType, RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
-    FORMAT_SIZES,
+    RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
 };
 
 const DISTANCE_SORT_PER_UPDATE: u32 = 128;
@@ -334,13 +332,7 @@ impl Renderer {
 
         self.translucency_head_image = Some(
             self.device
-                .create_image_2d(
-                    Format::R32_UINT,
-                    1,
-                    1.0,
-                    ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
-                    new_size,
-                )
+                .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
                 .unwrap(),
         );
 
@@ -564,10 +556,10 @@ impl Renderer {
 
         // Check for transform updates
         // -------------------------------------------------------------------------------------------------------------
-        let mut buffer_updates = Mutex::new(vec![]);
+        let buffer_updates = Mutex::new(vec![]);
         {
             let mut transform_comp = self.world.write_component::<component::Transform>();
-            let mut renderer_comp = self.world.read_component::<component::Renderer>();
+            let renderer_comp = self.world.read_component::<component::Renderer>();
 
             (&mut transform_comp.par_restrict_mut(), &renderer_comp)
                 .par_join()
@@ -1030,7 +1022,8 @@ pub fn new(
     // Used to optimize front-to-back distance sorting.
     let renderer_cmp_reader = world.write_component::<component::Renderer>().register_reader();
 
-    // TODO
+    // TODO: pipeline cache management
+
     let active_camera = world
         .create_entity()
         .with(component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01))

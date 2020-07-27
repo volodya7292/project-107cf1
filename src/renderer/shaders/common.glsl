@@ -43,14 +43,6 @@ struct PerFrameInfo {
     uvec4 tex_atlas_info; // .x: tile size in pixels
 };
 
-vec4 infi_clip(vec4 clip_coord, float dist) {
-    // clip_coord.xy /= clip_coord.w;
-    clip_coord.y = -clip_coord.y;
-    // clip_coord.z = -dist / 65536.0f;
-    // clip_coord.w = 1;
-    return clip_coord;
-}
-
 #ifdef FN_TEXTURE_ATLAS
 /// tile_width: single tile width in pixels
 /// tex_coord: regular texture coordinates
@@ -81,3 +73,20 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     return textureLod(atlas, tex_coord, lod);
 }
 #endif
+
+
+// Blue noise sequences
+// ----------------------------------------------------------------------------------------
+float blue_noise_1d(uint n) {
+    return fract(0.5 + 0.618033988749 * float(n));
+}
+
+vec2 blue_noise_2d(uint n) {
+    return fract(0.5 + vec2(0.754877666246, 0.569840290998) * float(n));
+}
+
+vec3 blue_noise_3d(uint n) {
+    return fract(0.5 + vec3(0.819172513396, 0.671043606703, 0.549700477901) * float(n));
+}
+// ----------------------------------------------------------------------------------------
+

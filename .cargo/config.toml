@@ -1,2 +1,6 @@
 build.rustflags = "-C target-cpu=core-avx2"
 build.incremental = true # TODO: check program performance without it
+
+[profile.release]
+opt-level = 3
+lto = true

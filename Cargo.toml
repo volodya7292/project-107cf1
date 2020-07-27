@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 simple_logger = "1.6.0"
-sdl2 = { version = "0.34.1", features = ["bundled", "static-link", "raw-window-handle"] }
+sdl2 = { version = "0.34.2", features = ["bundled", "static-link", "raw-window-handle"] }
 byteorder = "1.3.4"
 nalgebra = "0.21.1"
 nalgebra-glm = "0.7.0"

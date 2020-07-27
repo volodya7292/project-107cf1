@@ -20,39 +20,38 @@ impl Program {
 
     pub fn on_event(&mut self, event: sdl2::event::Event) {
         use sdl2::event::Event;
-        use sdl2::event::WindowEvent;
         match event {
             Event::KeyDown {
-                timestamp,
-                window_id,
-                keycode,
+                timestamp: _,
+                window_id: _,
+                keycode: _,
                 scancode,
-                keymod,
-                repeat,
+                keymod: _,
+                repeat: _,
             } => {
                 if let Some(scancode) = scancode {
                     self.pressed_keys.insert(scancode);
                 }
             }
             Event::KeyUp {
-                timestamp,
-                window_id,
-                keycode,
+                timestamp: _,
+                window_id: _,
+                keycode: _,
                 scancode,
-                keymod,
-                repeat,
+                keymod: _,
+                repeat: _,
             } => {
                 if let Some(scancode) = scancode {
                     self.pressed_keys.remove(&scancode);
                 }
             }
             Event::MouseMotion {
-                timestamp,
-                window_id,
-                which,
-                mousestate,
-                x,
-                y,
+                timestamp: _,
+                window_id: _,
+                which: _,
+                mousestate: _,
+                x: _,
+                y: _,
                 xrel,
                 yrel,
             } => {

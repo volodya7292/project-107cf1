@@ -19,6 +19,7 @@ impl Format {
     pub const RGBA16_UNORM: Self = Self(vk::Format::R16G16B16A16_UNORM);
     pub const RGBA16_FLOAT: Self = Self(vk::Format::R16G16B16A16_SFLOAT);
     pub const RGBA32_FLOAT: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
+    pub const RGBA32_UINT: Self = Self(vk::Format::R32G32B32A32_UINT);
 
     pub const BC3_RGBA_UNORM: Self = Self(vk::Format::BC3_UNORM_BLOCK);
     pub const BC5_RG_UNORM: Self = Self(vk::Format::BC5_UNORM_BLOCK);
@@ -47,6 +48,7 @@ lazy_static! {
         (Format::RGBA16_UNORM, 8),
         (Format::RGBA16_FLOAT, 8),
         (Format::RGBA32_FLOAT, 16),
+        (Format::RGBA32_UINT, 16),
         (Format::BC3_RGBA_UNORM, 1),
         (Format::BC5_RG_UNORM, 1),
         (Format::BC7_UNORM, 1),
