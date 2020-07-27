@@ -88,7 +88,7 @@ fn main() {
 
     let mat_pipelines = material_pipelines::create(&resources, &device);
 
-    let mut program = program::new(&renderer);
+    let mut program = program::new(&renderer, &device, &mat_pipelines);
 
     let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(
@@ -114,9 +114,19 @@ fn main() {
         .unwrap()
         .add_entity()
         .with(component::Transform::default())
-        .with(component::VertexMeshRef::new(
-            triangle_mesh.raw().as_ref().unwrap(),
+        .with(component::VertexMeshRef::new(&triangle_mesh.raw()))
+        .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
+        .build();
+    let entity = renderer
+        .lock()
+        .unwrap()
+        .add_entity()
+        .with(component::Transform::new(
+            na::Vector3::new(0.0, 0.0, 1.0),
+            na::Vector3::default(),
+            na::Vector3::new(1.0, 1.0, 1.0),
         ))
+        .with(component::VertexMeshRef::new(&triangle_mesh.raw()))
         .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
         .build();
 
@@ -190,6 +200,7 @@ fn main() {
                     WindowEvent::SizeChanged(width, height) => {
                         window_size = (width as u32, height as u32);
                         renderer.lock().unwrap().on_resize(window_size);
+                        println!("{:?}", window_size)
                     }
                     _ => {}
                 },

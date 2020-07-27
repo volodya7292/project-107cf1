@@ -196,7 +196,7 @@ pub struct Cluster {
 }
 
 #[derive(Copy, Clone, Default)]
-struct Vertex {
+pub struct Vertex {
     position: na::Vector3<f32>,
     density: u32,
 }
@@ -272,6 +272,10 @@ impl Cluster {
             cell_pos[1] as usize / SECTOR_SIZE,
             cell_pos[2] as usize / SECTOR_SIZE,
         ]
+    }
+
+    pub fn vertex_mesh(&self) -> &VertexMesh<Vertex> {
+        &self.vertex_mesh
     }
 
     /// pos: [x, y, z, layer index]
@@ -578,8 +582,19 @@ impl Cluster {
 
                     // Calculate max layer count
                     let mut max_count = 0;
+                    let mut is_valid_cell = true;
                     for i in 0..8 {
-                        max_count = max_count.max(densities[i].1);
+                        let count = densities[i].1;
+                        max_count = max_count.max(count);
+
+                        if count == 0 {
+                            is_valid_cell = false;
+                            break;
+                        }
+                    }
+
+                    if !is_valid_cell {
+                        continue;
                     }
 
                     for i in 0..max_count {

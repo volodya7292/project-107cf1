@@ -6,6 +6,7 @@ use crate::{
     Pipeline, PipelineInput, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ash::{version::DeviceV1_0, vk};
+use std::mem;
 use std::sync::{Arc, Mutex};
 
 pub struct CmdList {
@@ -567,7 +568,7 @@ impl CmdList {
                 query_count,
                 dst_buffer.buffer.native,
                 dst_offset,
-                0,
+                mem::size_of::<u32>() as u64,
                 vk::QueryResultFlags::WAIT,
             )
         };

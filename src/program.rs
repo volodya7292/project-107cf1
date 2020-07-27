@@ -1,8 +1,11 @@
+use crate::object::cluster;
+use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
-use specs::WorldExt;
+use specs::{Builder, WorldExt};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use vk_wrapper as vkw;
 
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
@@ -125,10 +128,32 @@ impl Program {
     }
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>) -> Program {
-    Program {
+pub fn new(
+    renderer: &Arc<Mutex<Renderer>>,
+    device: &Arc<vkw::Device>,
+    mat_pipelines: &MaterialPipelines,
+) -> Program {
+    let program = Program {
         renderer: Arc::clone(renderer),
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
+    };
+
+    let mut cluster = cluster::new(device);
+
+    {
+        let mut renderer = program.renderer.lock().unwrap();
+        renderer.world_mut().register::<cluster::Cluster>();
+
+        /*renderer
+        .world_mut()
+        .create_entity()
+        .with(component::Transform::default())
+        .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
+        .with(component::Renderer::new(device, &mat_pipelines.cluster(), false))
+        .with(cluster)
+        .build();*/
     }
+
+    program
 }

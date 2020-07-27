@@ -99,8 +99,8 @@ impl VertexMember for na::Vector4<u32> {
 
 pub struct RawVertexMesh {
     indexed: bool,
-    pub(in crate::renderer) staging_buffer: vkw::HostBuffer<u8>,
-    pub(in crate::renderer) buffer: Arc<vkw::DeviceBuffer>,
+    pub(in crate::renderer) staging_buffer: Option<vkw::HostBuffer<u8>>,
+    pub(in crate::renderer) buffer: Option<Arc<vkw::DeviceBuffer>>,
     vertex_size: u32,
     vertex_count: u32,
     index_count: u32,
@@ -119,19 +119,19 @@ impl RawVertexMesh {
 pub struct VertexMesh<VertexT: Vertex> {
     _type_marker: PhantomData<VertexT>,
     device: Arc<Device>,
-    raw: Option<Arc<Mutex<RawVertexMesh>>>,
+    raw: Arc<Mutex<RawVertexMesh>>,
 }
 
 impl<VertexT> VertexMesh<VertexT>
 where
     VertexT: Vertex + Clone + Default,
 {
-    pub fn raw(&self) -> &Option<Arc<Mutex<RawVertexMesh>>> {
-        &self.raw
+    pub fn raw(&self) -> Arc<Mutex<RawVertexMesh>> {
+        Arc::clone(&self.raw)
     }
 
     pub fn get_vertices(&self, first_vertex: u32, count: u32) -> Vec<VertexT> {
-        let raw = self.raw.as_ref().unwrap().lock().unwrap();
+        let raw = self.raw.as_ref().lock().unwrap();
         let attribs = VertexT::attributes();
 
         let mut vertices =
@@ -145,6 +145,8 @@ where
                 unsafe {
                     ptr::copy_nonoverlapping(
                         raw.staging_buffer
+                            .as_ref()
+                            .unwrap()
                             .as_ptr()
                             .offset(buffer_offset + format_size * (first_vertex + i as u32) as isize),
                         (vertex as *mut VertexT as *mut u8).offset(vertex_offset as isize),
@@ -158,13 +160,16 @@ where
     }
 
     pub fn get_indices(&self, first_index: u32, count: u32) -> Vec<u32> {
-        let raw = self.raw.as_ref().unwrap().lock().unwrap();
+        let raw = self.raw.as_ref().lock().unwrap();
 
         let mut indices = vec![0u32; count.min(raw.index_count.max(first_index) - first_index) as usize];
 
-        raw.staging_buffer.read(raw.indices_offset, unsafe {
-            slice::from_raw_parts_mut(indices.as_mut_ptr() as *mut u8, indices.len())
-        });
+        raw.staging_buffer
+            .as_ref()
+            .unwrap()
+            .read(raw.indices_offset, unsafe {
+                slice::from_raw_parts_mut(indices.as_mut_ptr() as *mut u8, indices.len())
+            });
 
         indices
     }
@@ -240,10 +245,11 @@ where
             aabb.1 = aabb.1.sup(vertex.position());
         }
 
-        self.raw = Some(Arc::new(Mutex::new(RawVertexMesh {
+        let mut raw = self.raw.as_ref().lock().unwrap();
+        *raw = RawVertexMesh {
             indexed,
-            staging_buffer,
-            buffer,
+            staging_buffer: Some(staging_buffer),
+            buffer: Some(buffer),
             vertex_size: mem::size_of::<VertexT>() as u32,
             vertex_count: vertices.len() as u32,
             index_count: indices.len() as u32,
@@ -251,7 +257,7 @@ where
             bindings,
             indices_offset: indices_offset as u64,
             changed: true,
-        })));
+        };
     }
 
     /*pub fn set_component<T: VertexMember>(&mut self, member_name: &str, values: &[T]) -> Result<(), Error> {
@@ -290,7 +296,18 @@ impl VertexMeshCreate for vkw::Device {
         Ok(VertexMesh {
             _type_marker: PhantomData,
             device: Arc::clone(self),
-            raw: None,
+            raw: Arc::new(Mutex::new(RawVertexMesh {
+                indexed: false,
+                staging_buffer: None,
+                buffer: None,
+                vertex_size: 0,
+                vertex_count: 0,
+                index_count: 0,
+                aabb: Default::default(),
+                bindings: vec![],
+                indices_offset: 0,
+                changed: false,
+            })),
         })
     }
 }
@@ -306,7 +323,7 @@ impl VertexMeshCmdList for vkw::CmdList {
         self.bind_vertex_buffers(0, &vertex_mesh.bindings);
 
         if vertex_mesh.indexed {
-            self.bind_index_buffer(&vertex_mesh.buffer, vertex_mesh.indices_offset);
+            self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
             self.draw_indexed(vertex_mesh.index_count, 0, 0);
         } else {
             self.draw(vertex_mesh.vertex_count, 0);

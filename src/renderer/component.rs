@@ -19,6 +19,15 @@ pub struct Transform {
 }
 
 impl Transform {
+    pub fn new(position: na::Vector3<f32>, rotation: na::Vector3<f32>, scale: na::Vector3<f32>) -> Transform {
+        Transform {
+            position,
+            rotation,
+            scale,
+            changed: true,
+        }
+    }
+
     pub fn matrix(&self) -> Matrix4<f32> {
         let mut mat = Matrix4::<f32>::identity();
         mat.prepend_translation_mut(&self.position);

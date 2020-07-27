@@ -155,6 +155,10 @@ impl Renderer {
         &self.world
     }
 
+    pub fn world_mut(&mut self) -> &mut specs::World {
+        &mut self.world
+    }
+
     pub fn add_entity(&mut self) -> specs::EntityBuilder {
         self.world.create_entity()
     }
@@ -467,10 +471,15 @@ impl Renderer {
                         (aabb.0 + aabb.1) * 0.5 + b_transform.position()
                     };
 
-                    if (a_pos - camera_pos).magnitude() < (b_pos - camera_pos).magnitude() {
+                    let a_dist = (a_pos - camera_pos).magnitude();
+                    let b_dist = (b_pos - camera_pos).magnitude();
+
+                    if a_dist < b_dist {
                         cmp::Ordering::Less
-                    } else {
+                    } else if a_dist > b_dist {
                         cmp::Ordering::Greater
+                    } else {
+                        cmp::Ordering::Equal
                     }
                 });
             }
@@ -536,11 +545,11 @@ impl Renderer {
                 if vertex_mesh.changed {
                     let mut cl = self.staging_cl.lock().unwrap();
                     cl.copy_buffer_to_device(
-                        &vertex_mesh.staging_buffer,
+                        vertex_mesh.staging_buffer.as_ref().unwrap(),
                         0,
-                        &vertex_mesh.buffer,
+                        vertex_mesh.buffer.as_ref().unwrap(),
                         0,
-                        vertex_mesh.staging_buffer.size(),
+                        vertex_mesh.staging_buffer.as_ref().unwrap().size(),
                     );
 
                     vertex_mesh.changed = false;
@@ -637,9 +646,6 @@ impl Renderer {
         let renderer_comp = self.world.read_component::<component::Renderer>();
         let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
 
-        /*let objects: Vec<_> = (&transform_component, &renderer_component, &mesh_ref_component)
-        .join()
-        .collect();*/
         let object_count = self.sorted_render_entities.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
@@ -767,12 +773,14 @@ impl Renderer {
 
                     // Check query_pool occlusion results
                     let mut occlusion_result = 0u32;
-                    self.occlusion_buffer.read(entity_index as u64, unsafe {
-                        slice::from_raw_parts_mut(
-                            &mut occlusion_result as *mut u32 as *mut u8,
-                            mem::size_of::<u32>(),
-                        )
-                    });
+                    self.occlusion_buffer
+                        .read((mem::size_of::<u32>() * entity_index) as u64, unsafe {
+                            slice::from_raw_parts_mut(
+                                &mut occlusion_result as *mut u32 as *mut u8,
+                                mem::size_of::<u32>(),
+                            )
+                        });
+
                     if occlusion_result == 0 {
                         continue;
                     }
