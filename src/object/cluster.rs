@@ -6,19 +6,23 @@ use vk_wrapper as vkw;
 
 const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 1;
-const SIZE_IN_SECTORS: usize = 4;
-const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
+const SIZE_IN_SECTORS: usize = 1;
+pub const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
 const MAX_CELL_LAYERS: usize = 4;
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
 const ISO_VALUE_NORM: f32 = 0.5;
 const ISO_VALUE_INT: i16 = (ISO_VALUE_NORM * 255.0) as i16;
 
-macro_rules! index_3d_to_1d {
+pub fn index_3d_to_1d(p: [u8; 3], ds: u32) -> u32 {
+    (p[2] as u32) + (p[1] as u32) * ds + (p[0] as u32) * ds * ds
+}
+
+/*macro_rules! index_3d_to_1d {
     ($p: expr, $ds: expr) => {
         ($p[2] as u32) + ($p[1] as u32) * $ds + ($p[0] as u32) * $ds * $ds
     };
-}
+}*/
 
 macro_rules! index_3d_to_1d_inv {
     ($p: expr, $ds: expr) => {
@@ -26,10 +30,10 @@ macro_rules! index_3d_to_1d_inv {
     };
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct DensityPoint {
-    density: u8,
-    material: u16,
+    pub(crate) density: u8,
+    pub(crate) material: u16,
 }
 
 #[derive(Clone)]
@@ -47,8 +51,8 @@ pub struct Sector {
 #[derive(Copy, Clone)]
 pub struct DensityPointInfo {
     /// [x, y, z, layer index]
-    pos: [u8; 4],
-    point: DensityPoint,
+    pub(crate) pos: [u8; 4],
+    pub(crate) point: DensityPoint,
 }
 
 #[derive(Copy, Clone)]
@@ -311,8 +315,8 @@ impl Cluster {
         // Sort points by position starting from [0,,] to [sector_SIZE,,]
         let mut points = points.to_vec();
         points.sort_by(|a, b| {
-            let a_dist = index_3d_to_1d!(a.pos, SECTOR_SIZE as u32);
-            let b_dist = index_3d_to_1d!(b.pos, SECTOR_SIZE as u32);
+            let a_dist = index_3d_to_1d((&a.pos[..3]).try_into().unwrap(), SECTOR_SIZE as u32);
+            let b_dist = index_3d_to_1d((&b.pos[..3]).try_into().unwrap(), SECTOR_SIZE as u32);
 
             a_dist.cmp(&b_dist)
         });
@@ -438,7 +442,7 @@ impl Cluster {
             // Back side
             if sector_pos[2] + 1 < SIZE_IN_SECTORS as u8 {
                 let back_sector =
-                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize - 1];
+                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize + 1];
 
                 for x in 0..SECTOR_SIZE {
                     for y in 0..SECTOR_SIZE {
@@ -535,53 +539,52 @@ impl Cluster {
         }
 
         // Vertex components
-        let mut v_positions = [na::Vector3::<f32>::default(); SECTOR_VOLUME * MAX_CELL_LAYERS];
+        let mut v_positions =
+            [na::Vector3::<f32>::new(f32::NAN, f32::NAN, f32::NAN); SECTOR_VOLUME * MAX_CELL_LAYERS];
         let mut v_density_indices = [0u32; SECTOR_VOLUME * MAX_CELL_LAYERS];
 
         // Faces index buffer
-        let mut v_faces = [[0u32; 4]; SECTOR_VOLUME * 12];
-        let mut v_faces_size = 0;
-
+        let mut v_faces = Vec::<[u32; 4]>::with_capacity(SECTOR_VOLUME * 12);
         // Density buffer
-        let mut density_infos = [[0u32; 4]; ALIGNED_SECTOR_VOLUME];
-        let mut density_infos_size = 0;
+        let mut density_infos = Vec::<[u32; 4]>::with_capacity(ALIGNED_SECTOR_VOLUME);
 
-        for x in 1..ALIGNED_SECTOR_SIZE {
-            for y in 1..ALIGNED_SECTOR_SIZE {
-                for z in 1..ALIGNED_SECTOR_SIZE {
+        for x in 0..SECTOR_SIZE {
+            for y in 0..SECTOR_SIZE {
+                for z in 0..SECTOR_SIZE {
                     macro_rules! calc_index {
                         ($x: expr, $y: expr, $z: expr) => {
-                            (($z + $y * ALIGNED_SECTOR_SIZE + $x * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE)
-                                * MAX_CELL_LAYERS) as u32
+                            (($z + $y * SECTOR_SIZE + $x * SECTOR_SIZE * SECTOR_SIZE) * MAX_CELL_LAYERS)
+                                as u32
                         };
                     }
 
                     // Obtain 2x2x2 indices for v_positions & v_density_indices arrays
                     let indices = [
-                        calc_index!(x - 1, y - 1, z - 1),
-                        calc_index!(x, y - 1, z - 1),
-                        calc_index!(x - 1, y, z - 1),
-                        calc_index!(x, y, z - 1),
-                        calc_index!(x - 1, y - 1, z),
-                        calc_index!(x, y - 1, z),
-                        calc_index!(x - 1, y, z),
                         calc_index!(x, y, z),
+                        calc_index!(x + 1, y, z),
+                        calc_index!(x, y + 1, z),
+                        calc_index!(x + 1, y + 1, z),
+                        calc_index!(x, y, z + 1),
+                        calc_index!(x + 1, y, z + 1),
+                        calc_index!(x, y + 1, z + 1),
+                        calc_index!(x + 1, y + 1, z + 1),
                     ];
 
                     // Get all densities for current cell
                     let densities = [
-                        densities[x - 1][y - 1][z - 1],
-                        densities[x][y - 1][z - 1],
-                        densities[x - 1][y][z - 1],
-                        densities[x][y][z - 1],
-                        densities[x - 1][y - 1][z],
-                        densities[x][y - 1][z],
-                        densities[x - 1][y][z],
                         densities[x][y][z],
+                        densities[x + 1][y][z],
+                        densities[x][y + 1][z],
+                        densities[x + 1][y + 1][z],
+                        densities[x][y][z + 1],
+                        densities[x + 1][y][z + 1],
+                        densities[x][y + 1][z + 1],
+                        densities[x + 1][y + 1][z + 1],
                     ];
 
-                    // Calculate max layer count
+                    // Calculate max layer count & validate cell
                     let mut max_count = 0;
+
                     let mut is_valid_cell = true;
                     for i in 0..8 {
                         let count = densities[i].1;
@@ -611,14 +614,13 @@ impl Cluster {
                         ];
 
                         // Store cell material info
-                        let density_index = density_infos_size;
-                        density_infos[density_index] = [
+                        let density_index = density_infos.len();
+                        density_infos.push([
                             ((points[0].material as u32) << 16) | (points[1].material as u32),
                             ((points[2].material as u32) << 16) | (points[3].material as u32),
                             ((points[4].material as u32) << 16) | (points[5].material as u32),
                             ((points[6].material as u32) << 16) | (points[7].material as u32),
-                        ];
-                        density_infos_size += 1;
+                        ]);
 
                         // Calculate point in the cell
                         if let Some(point) = Self::calc_cell_point(&points) {
@@ -638,63 +640,60 @@ impl Cluster {
                         let s2 = points[7].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[3] + i.min(densities[3].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ];
+                                ]);
                             } else {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[3] + i.min(densities[3].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
-                                ];
+                                ]);
                             }
-                            v_faces_size += 1;
                         }
 
                         // XZ plane
                         let s1 = points[5].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s2 {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[5] + i.min(densities[5].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ];
+                                ]);
                             } else {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[5] + i.min(densities[5].1 - 1) as u32,
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
-                                ];
+                                ]);
                             }
-                            v_faces_size += 1;
                         }
 
                         // YZ plane
                         let s1 = points[6].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[6] + i.min(densities[6].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ];
+                                ]);
                             } else {
-                                v_faces[v_faces_size] = [
+                                v_faces.push([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[6] + i.min(densities[6].1 - 1) as u32,
-                                ];
+                                ]);
                             }
-                            v_faces_size += 1;
                         }
                     }
                 }
@@ -706,18 +705,31 @@ impl Cluster {
         let mut index_map = [u32::MAX; SECTOR_VOLUME * MAX_CELL_LAYERS];
 
         let mut vertices = Vec::with_capacity(SECTOR_VOLUME * MAX_CELL_LAYERS);
-        let mut indices = Vec::with_capacity(v_faces_size * 6);
+        let mut indices = Vec::with_capacity(v_faces.len() * 6);
 
-        for i in 0..v_faces_size {
+        for face in &v_faces {
             let face_indices = [
-                v_faces[i][0] as usize,
-                v_faces[i][1] as usize,
-                v_faces[i][2] as usize,
-                v_faces[i][0] as usize,
-                v_faces[i][2] as usize,
-                v_faces[i][3] as usize,
+                face[0] as usize,
+                face[1] as usize,
+                face[2] as usize,
+                face[0] as usize,
+                face[2] as usize,
+                face[3] as usize,
             ];
 
+            // Validate face
+            let mut invalid_face = false;
+            for &face_index in &face_indices {
+                if v_positions[face_index] == na::Vector3::new(f32::NAN, f32::NAN, f32::NAN) {
+                    invalid_face = true;
+                    break;
+                }
+            }
+            if invalid_face {
+                continue;
+            }
+
+            // Add vertices & indices
             for &face_index in &face_indices {
                 if index_map[face_index] == u32::MAX {
                     index_map[face_index] = vertices.len() as u32;

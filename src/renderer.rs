@@ -65,7 +65,7 @@ pub struct Renderer {
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
     query_pool: Arc<QueryPool>,
-    occlusion_buffer: HostBuffer<u8>,
+    occlusion_buffer: HostBuffer<u32>,
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
 
     depth_render_pass: Arc<RenderPass>,
@@ -772,14 +772,7 @@ impl Renderer {
                     }
 
                     // Check query_pool occlusion results
-                    let mut occlusion_result = 0u32;
-                    self.occlusion_buffer
-                        .read((mem::size_of::<u32>() * entity_index) as u64, unsafe {
-                            slice::from_raw_parts_mut(
-                                &mut occlusion_result as *mut u32 as *mut u8,
-                                mem::size_of::<u32>(),
-                            )
-                        });
+                    let mut occlusion_result = self.occlusion_buffer[entity_index];
 
                     if occlusion_result == 0 {
                         continue;

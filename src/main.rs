@@ -200,7 +200,6 @@ fn main() {
                     WindowEvent::SizeChanged(width, height) => {
                         window_size = (width as u32, height as u32);
                         renderer.lock().unwrap().on_resize(window_size);
-                        println!("{:?}", window_size)
                     }
                     _ => {}
                 },

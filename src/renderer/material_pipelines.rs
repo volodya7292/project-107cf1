@@ -45,10 +45,10 @@ pub fn create(resources: &Arc<ResourceFile>, device: &Arc<vkw::Device>) -> Mater
     let cluster = {
         let triag_vertex = device
             .create_shader(
-                &resources.get("shaders/triag.vert.spv").unwrap().read().unwrap(),
+                &resources.get("shaders/triag2.vert.spv").unwrap().read().unwrap(),
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
-                    ("inTexCoord", vkw::Format::RG32_FLOAT),
+                    ("inDensityMatIndex", vkw::Format::R32_UINT),
                 ],
                 &[],
             )

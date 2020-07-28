@@ -125,6 +125,16 @@ impl Program {
 
             self.cursor_rel = (0, 0);
         }
+
+        {
+            /*let renderer = self.renderer.lock().unwrap();
+            let world = renderer.world();
+            let cluster_comp = world.read_component::<cluster::Cluster>();
+
+            for cluster {}
+
+            for */
+        }
     }
 }
 
@@ -142,17 +152,38 @@ pub fn new(
     let mut cluster = cluster::new(device);
 
     {
+        let mut points = Vec::<cluster::DensityPointInfo>::new();
+
+        for x in 0..cluster::SIZE {
+            for y in 0..cluster::SIZE {
+                for z in 0..cluster::SIZE {
+                    points.push(cluster::DensityPointInfo {
+                        pos: [x as u8, y as u8, z as u8, 0],
+                        point: cluster::DensityPoint {
+                            density: ((y as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            material: 0,
+                        },
+                    });
+                }
+            }
+        }
+
+        cluster.set_densities(&points);
+        cluster.update_mesh();
+    }
+
+    {
         let mut renderer = program.renderer.lock().unwrap();
         renderer.world_mut().register::<cluster::Cluster>();
 
-        /*renderer
-        .world_mut()
-        .create_entity()
-        .with(component::Transform::default())
-        .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
-        .with(component::Renderer::new(device, &mat_pipelines.cluster(), false))
-        .with(cluster)
-        .build();*/
+        renderer
+            .world_mut()
+            .create_entity()
+            .with(component::Transform::default())
+            .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
+            .with(component::Renderer::new(device, &mat_pipelines.cluster(), false))
+            .with(cluster)
+            .build();
     }
 
     program

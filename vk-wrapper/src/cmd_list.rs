@@ -301,7 +301,7 @@ impl CmdList {
                 self.native,
                 buffer.buffer.native,
                 offset,
-                vk::IndexType::UINT16,
+                vk::IndexType::UINT32,
             )
         };
         self.buffers.push(Arc::clone(&buffer.buffer));
@@ -552,12 +552,12 @@ impl CmdList {
             .extend_from_slice(&[Arc::clone(src_image), Arc::clone(dst_image)]);
     }
 
-    pub fn copy_query_pool_results_to_host(
+    pub fn copy_query_pool_results_to_host<T>(
         &mut self,
         query_pool: &Arc<QueryPool>,
         first_query: u32,
         query_count: u32,
-        dst_buffer: &HostBuffer<u8>,
+        dst_buffer: &HostBuffer<T>,
         dst_offset: u64,
     ) {
         unsafe {
