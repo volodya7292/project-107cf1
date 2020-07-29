@@ -68,16 +68,10 @@ pub struct Camera {
     fovy: f32,
     near: f32,
     frustum: [Vector4<f32>; 6],
-    changed: bool,
 }
 
 impl Camera {
-    pub fn new(aspect: f32, fovy: f32, near: f32) -> Camera {
-        let projection = glm::infinite_perspective_rh_zo(aspect, fovy, near);
-        let view = Isometry3::identity();
-        let proj_view_mat = projection * view.to_homogeneous();
-
-        // Calculate frustum
+    fn calc_frustum(proj_view_mat: &Matrix4<f32>) -> [Vector4<f32>; 6] {
         let mut frustum = [Vector4::<f32>::default(); 6];
 
         for i in 0..6 {
@@ -91,6 +85,15 @@ impl Camera {
             *plane /= (*plane).fixed_rows::<na::U3>(0).magnitude();
         }
 
+        frustum
+    }
+
+    pub fn new(aspect: f32, fovy: f32, near: f32) -> Camera {
+        let projection = glm::infinite_perspective_rh_zo(aspect, fovy, near);
+        let view = Isometry3::identity();
+        let proj_view_mat = projection * view.to_homogeneous();
+        let frustum = Self::calc_frustum(&proj_view_mat);
+
         Camera {
             position: Vector3::default(),
             rotation: Vector3::new(0.0, 0.0, 0.0),
@@ -98,8 +101,12 @@ impl Camera {
             fovy,
             near,
             frustum,
-            changed: true,
         }
+    }
+
+    pub fn update_frustum(&mut self) {
+        let proj_view_mat = self.projection() * self.view();
+        self.frustum = Self::calc_frustum(&proj_view_mat);
     }
 
     pub fn projection(&self) -> Matrix4<f32> {
@@ -121,6 +128,7 @@ impl Camera {
 
     pub fn set_aspect(&mut self, width: u32, height: u32) {
         self.aspect = width as f32 / height as f32;
+        self.update_frustum();
     }
 
     pub fn position(&self) -> Vector3<f32> {
@@ -129,7 +137,7 @@ impl Camera {
 
     pub fn set_position(&mut self, position: Vector3<f32>) {
         self.position = position;
-        self.changed = true;
+        self.update_frustum();
     }
 
     pub fn rotation(&self) -> Vector3<f32> {
@@ -138,6 +146,7 @@ impl Camera {
 
     pub fn set_rotation(&mut self, rotation: Vector3<f32>) {
         self.rotation = rotation.map(|x| x % (std::f32::consts::PI * 2.0));
+        self.update_frustum();
     }
 
     pub fn direction(&self) -> Vector3<f32> {
@@ -155,6 +164,7 @@ impl Camera {
         let d = Vector3::new((-self.rotation.y).sin(), 0.0, (-self.rotation.y).cos());
         self.position -= d * front_back;
         self.position -= d.cross(&Vector3::new(0.0, 1.0, 0.0)).normalize() * left_right;
+        self.update_frustum();
     }
 
     pub fn is_sphere_visible(&self, pos: Vector3<f32>, radius: f32) -> bool {

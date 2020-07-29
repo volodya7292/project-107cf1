@@ -5,6 +5,7 @@ use nalgebra as na;
 use specs::{Builder, WorldExt};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use vk_wrapper as vkw;
 
 pub struct Program {
@@ -169,7 +170,12 @@ pub fn new(
         }
 
         cluster.set_densities(&points);
+
+        let t0 = Instant::now();
         cluster.update_mesh();
+        let t1 = Instant::now();
+
+        println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());
     }
 
     {
