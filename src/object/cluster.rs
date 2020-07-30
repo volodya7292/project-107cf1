@@ -252,8 +252,8 @@ impl Cluster {
         let mut c_count = 0u32;
         let mut vertex = na::Vector3::<f32>::new(0.0, 0.0, 0.0);
 
-        fn cell_adapt(a: u8, b: u8) -> f32 {
-            ((ISO_VALUE_INT - a as i16) as f32) / ((b - a) as f32) / 255.0
+        fn cell_interpolate(a: i16, b: i16) -> f32 {
+            ((ISO_VALUE_INT - a) as f32) / ((b - a) as f32)
         }
 
         for x in 0..2 {
@@ -265,7 +265,7 @@ impl Cluster {
                     vertex += na::Vector3::new(
                         x as f32,
                         y as f32,
-                        cell_adapt(points[i0].density, points[i1].density) as f32,
+                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
                     );
                     c_count += 1;
                 }
@@ -280,7 +280,7 @@ impl Cluster {
                 if (points[i0].density > ISO_VALUE_INT as u8) != (points[i1].density > ISO_VALUE_INT as u8) {
                     vertex += na::Vector3::new(
                         x as f32,
-                        cell_adapt(points[i0].density, points[i1].density) as f32,
+                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
                         z as f32,
                     );
                     c_count += 1;
@@ -295,7 +295,7 @@ impl Cluster {
 
                 if (points[i0].density > ISO_VALUE_INT as u8) != (points[i1].density > ISO_VALUE_INT as u8) {
                     vertex += na::Vector3::new(
-                        cell_adapt(points[i0].density, points[i1].density) as f32,
+                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
                         y as f32,
                         z as f32,
                     );
@@ -1007,8 +1007,8 @@ impl Cluster {
                 for z in 0..(SECTOR_SIZE + 1) {
                     macro_rules! calc_index {
                         ($x: expr, $y: expr, $z: expr) => {
-                            (($z + $y * SECTOR_SIZE + $x * SECTOR_SIZE * SECTOR_SIZE) * MAX_CELL_LAYERS)
-                                as u32
+                            (($z + $y * ALIGNED_SECTOR_SIZE + $x * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE)
+                                * MAX_CELL_LAYERS) as u32
                         };
                     }
 
@@ -1144,8 +1144,8 @@ impl Cluster {
                                 v_faces.push([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
-                                    indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[6] + i.min(densities[6].1 - 1) as u32,
+                                    indices[4] + i.min(densities[4].1 - 1) as u32,
                                 ]);
                             }
                         }

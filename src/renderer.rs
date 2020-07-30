@@ -16,7 +16,6 @@ use order_stat;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
 use specs::storage::ComponentEvent;
-use specs::storage::MutableParallelRestriction;
 use specs::storage::RestrictedStorage;
 use specs::WorldExt;
 use specs::{Builder, Join, ParJoin};
@@ -698,7 +697,9 @@ impl Renderer {
 
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
-                    if active_camera.is_sphere_visible(center_position, radius) {
+                    if active_camera.is_sphere_visible(center_position, radius)
+                        && vertex_mesh.lock().unwrap().vertex_count > 0
+                    {
                         if renderer.translucent {
                             cl.bind_pipeline(&self.depth_pipeline_r);
                         } else {

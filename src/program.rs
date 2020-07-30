@@ -2,6 +2,7 @@ use crate::object::cluster;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
+use simdnoise::NoiseBuilder;
 use specs::{Builder, WorldExt};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ pub struct Program {
 }
 
 impl Program {
-    const MOVEMENT_SPEED: f32 = 2.0;
+    const MOVEMENT_SPEED: f32 = 4.0;
     const MOUSE_SENSITIVITY: f32 = 0.005;
 
     pub fn init(&self) {}
@@ -155,13 +156,32 @@ pub fn new(
     {
         let mut points = Vec::<cluster::DensityPointInfo>::new();
 
+        let noise = NoiseBuilder::gradient_3d(cluster::SIZE, cluster::SIZE, cluster::SIZE)
+            //.with_freq(20.0)
+            .generate();
+        //println!("{} {} {}", noise.1, noise.2, noise.0.len());
+
         for x in 0..cluster::SIZE {
             for y in 0..cluster::SIZE {
                 for z in 0..cluster::SIZE {
+                    let n_v = noise.0[z * cluster::SIZE * cluster::SIZE + y * cluster::SIZE + x] * 35.0;
+
+                    /*let v = (na::Vector3::new(
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                    ) - na::Vector3::new(x as f32, y as f32, z as f32))
+                    .magnitude()
+                        / (cluster::SIZE as f32)
+                        * 1.05;*/
+
                     points.push(cluster::DensityPointInfo {
                         pos: [x as u8, y as u8, z as u8, 0],
                         point: cluster::DensityPoint {
-                            density: ((y as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: (((cluster::SIZE - y - 1) as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: ((x as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            density: (n_v * 255.0) as u8,
+                            //density: 255 - (v * 255.0) as u8,
                             material: 0,
                         },
                     });
@@ -185,7 +205,11 @@ pub fn new(
         renderer
             .world_mut()
             .create_entity()
-            .with(component::Transform::default())
+            .with(component::Transform::new(
+                na::Vector3::new(0.0, -(cluster::SIZE as f32) / 2.0 - 4.0, 0.0),
+                na::Vector3::new(0.0, 0.0, 0.0),
+                na::Vector3::new(1.0, 1.0, 1.0),
+            ))
             .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
             .with(component::Renderer::new(device, &mat_pipelines.cluster(), false))
             .with(cluster)

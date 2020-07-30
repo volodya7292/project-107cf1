@@ -102,7 +102,7 @@ pub struct RawVertexMesh {
     pub(in crate::renderer) staging_buffer: Option<vkw::HostBuffer<u8>>,
     pub(in crate::renderer) buffer: Option<Arc<vkw::DeviceBuffer>>,
     vertex_size: u32,
-    vertex_count: u32,
+    pub(in crate::renderer) vertex_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
     bindings: Vec<(Arc<vkw::DeviceBuffer>, u64)>,

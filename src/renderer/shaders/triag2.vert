@@ -12,9 +12,16 @@ layout(set = 1, binding = 0) uniform per_object_data {
     mat4 model;
 };
 
-layout(location = 0) out vec2 tex_coord;
+layout(location = 0) out Output {
+    vec3 world_pos;
+    vec2 tex_coord;
+} vs_out;
 
 void main() {
-    tex_coord = vec2(0, 0);
-    gl_Position = info.camera.proj_view * (model * vec4(inPosition, 1));
+    vec4 world_pos = (model * vec4(inPosition, 1));
+
+    vs_out.world_pos = world_pos.xyz;
+    vs_out.tex_coord = vec2(0, 0);
+
+    gl_Position = info.camera.proj_view * world_pos;
 }

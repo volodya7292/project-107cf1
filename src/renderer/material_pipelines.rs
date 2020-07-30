@@ -55,7 +55,7 @@ pub fn create(resources: &Arc<ResourceFile>, device: &Arc<vkw::Device>) -> Mater
             .unwrap();
         let triag_g_pixel = device
             .create_shader(
-                &resources.get("shaders/triag.frag.spv").unwrap().read().unwrap(),
+                &resources.get("shaders/triag2.frag.spv").unwrap().read().unwrap(),
                 &[],
                 &[],
             )
