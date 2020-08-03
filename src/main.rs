@@ -1,4 +1,5 @@
 mod utils;
+mod world;
 #[macro_use]
 pub(crate) mod renderer;
 mod object;
@@ -13,9 +14,8 @@ use na::Vector2;
 use na::Vector3;
 use nalgebra as na;
 use sdl2::keyboard::Keycode;
-use specs::{Builder, WorldExt};
+use specs::Builder;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Copy, Clone, Default)]
@@ -109,7 +109,7 @@ fn main() {
         &[],
     );
 
-    let entity = renderer
+    let _entity = renderer
         .lock()
         .unwrap()
         .add_entity()
@@ -117,7 +117,7 @@ fn main() {
         .with(component::VertexMeshRef::new(&triangle_mesh.raw()))
         .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
         .build();
-    let entity = renderer
+    let _entity = renderer
         .lock()
         .unwrap()
         .add_entity()

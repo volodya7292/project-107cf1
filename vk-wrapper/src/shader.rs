@@ -52,7 +52,7 @@ pub struct Shader {
     pub(crate) input_locations: HashMap<u32, Format>,
     // [location, format]
     pub(crate) bindings: HashMap<String, ShaderBinding>,
-    pub(crate) push_constants: HashMap<String, spirv::BufferRange>,
+    pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,
 }
 

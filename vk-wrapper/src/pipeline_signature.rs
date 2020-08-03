@@ -11,8 +11,8 @@ pub struct PipelineSignature {
     pub(crate) pipeline_layout: vk::PipelineLayout,
     pub(crate) descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4],
     pub(crate) binding_types: HashMap<u32, vk::DescriptorType>,
-    pub(crate) push_constant_ranges: HashMap<ShaderStage, (u32, u32)>,
-    pub(crate) push_constants_size: u32,
+    pub(crate) _push_constant_ranges: HashMap<ShaderStage, (u32, u32)>,
+    pub(crate) _push_constants_size: u32,
     pub(crate) shaders: HashMap<ShaderStage, Arc<Shader>>,
 }
 

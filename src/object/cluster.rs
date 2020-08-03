@@ -8,7 +8,7 @@ const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 2;
 const SIZE_IN_SECTORS: usize = 4;
 pub const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
-const MAX_CELL_LAYERS: usize = 4;
+pub const MAX_CELL_LAYERS: usize = 4; // MAX: 255
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
 const ISO_VALUE_NORM: f32 = 0.5;
@@ -30,7 +30,11 @@ macro_rules! index_3d_to_1d_inv {
     };
 }
 
-#[derive(Debug, Copy, Clone)]
+pub fn calc_density_index(head_index: u32, layer_count: u8) -> u32 {
+    head_index | ((layer_count as u32) << 24)
+}
+
+#[derive(Debug, Default, Copy, Clone)]
 pub struct DensityPoint {
     pub(crate) density: u8,
     pub(crate) material: u16,
@@ -53,12 +57,6 @@ pub struct DensityPointInfo {
     /// [x, y, z, layer index]
     pub(crate) pos: [u8; 4],
     pub(crate) point: DensityPoint,
-}
-
-#[derive(Copy, Clone)]
-struct PointIndex {
-    head_index: u32,
-    layer_count: u32,
 }
 
 impl Sector {
@@ -150,44 +148,44 @@ impl Default for Sector {
     }
 }
 
-struct ClusterAdjacency {
-    densities: Vec<DensityPoint>,
+pub struct ClusterAdjacency {
+    pub densities: Vec<DensityPoint>,
 
     // Sides
-    side_x0: [[u32; SIZE]; SIZE],
-    side_x1: [[u32; SIZE]; SIZE],
-    side_y0: [[u32; SIZE]; SIZE],
-    side_y1: [[u32; SIZE]; SIZE],
-    side_z0: [[u32; SIZE]; SIZE],
-    side_z1: [[u32; SIZE]; SIZE],
+    pub side_x0: [[u32; SIZE]; SIZE],
+    pub side_x1: [[u32; SIZE]; SIZE],
+    pub side_y0: [[u32; SIZE]; SIZE],
+    pub side_y1: [[u32; SIZE]; SIZE],
+    pub side_z0: [[u32; SIZE]; SIZE],
+    pub side_z1: [[u32; SIZE]; SIZE],
 
     // Edges
-    edge_x0_y0: [u32; SIZE],
-    edge_x1_y0: [u32; SIZE],
-    edge_x0_y1: [u32; SIZE],
-    edge_x1_y1: [u32; SIZE],
-    edge_x0_z0: [u32; SIZE],
-    edge_x1_z0: [u32; SIZE],
-    edge_x0_z1: [u32; SIZE],
-    edge_x1_z1: [u32; SIZE],
-    edge_y0_z0: [u32; SIZE],
-    edge_y1_z0: [u32; SIZE],
-    edge_y0_z1: [u32; SIZE],
-    edge_y1_z1: [u32; SIZE],
+    pub edge_x0_y0: [u32; SIZE],
+    pub edge_x1_y0: [u32; SIZE],
+    pub edge_x0_y1: [u32; SIZE],
+    pub edge_x1_y1: [u32; SIZE],
+    pub edge_x0_z0: [u32; SIZE],
+    pub edge_x1_z0: [u32; SIZE],
+    pub edge_x0_z1: [u32; SIZE],
+    pub edge_x1_z1: [u32; SIZE],
+    pub edge_y0_z0: [u32; SIZE],
+    pub edge_y1_z0: [u32; SIZE],
+    pub edge_y0_z1: [u32; SIZE],
+    pub edge_y1_z1: [u32; SIZE],
 
     // Corners
-    corner_x0_y0_z0: u32,
-    corner_x1_y0_z0: u32,
-    corner_x0_y1_z0: u32,
-    corner_x1_y1_z0: u32,
-    corner_x0_y0_z1: u32,
-    corner_x1_y0_z1: u32,
-    corner_x0_y1_z1: u32,
-    corner_x1_y1_z1: u32,
+    pub corner_x0_y0_z0: u32,
+    pub corner_x1_y0_z0: u32,
+    pub corner_x0_y1_z0: u32,
+    pub corner_x1_y1_z0: u32,
+    pub corner_x0_y0_z1: u32,
+    pub corner_x1_y0_z1: u32,
+    pub corner_x0_y1_z1: u32,
+    pub corner_x1_y1_z1: u32,
 }
 
 impl ClusterAdjacency {
-    pub fn get_density_layers(&self, index: u32, out: &mut [DensityPoint]) -> u8 {
+    fn get_density_layers(&self, index: u32, out: &mut [DensityPoint]) -> u8 {
         let head_index = index & 0x00ffffff;
         let layer_count = (index & 0xff000000) >> 24;
         let read_count = out.len().min(layer_count as usize);
@@ -337,6 +335,13 @@ impl Cluster {
     }
 
     /// pos: [x, y, z, layer index]
+    pub fn get_density_layers(&self, pos: [u8; 3], out: &mut [DensityPoint]) -> u8 {
+        let sector_pos = Self::calc_sector_position((&pos[..3]).try_into().unwrap());
+        let sector = &self.sectors[sector_pos[0]][sector_pos[1]][sector_pos[2]];
+        sector.get_density_layers(pos, out)
+    }
+
+    /// pos: [x, y, z, layer index]
     pub fn set_density(&mut self, pos: [u8; 4], density: DensityPoint) {
         let sector_pos = Self::calc_sector_position((&pos[..3]).try_into().unwrap());
         let sector = &mut self.sectors[sector_pos[0]][sector_pos[1]][sector_pos[2]];
@@ -405,6 +410,10 @@ impl Cluster {
         }
     }
 
+    pub fn set_adjacent_densities(&mut self, adjacency: Box<ClusterAdjacency>) {
+        self.adjacency = adjacency;
+    }
+
     fn triangulate(&self, sector_pos: [u8; 3]) -> (Vec<Vertex>, Vec<u32>) {
         let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
 
@@ -437,559 +446,330 @@ impl Cluster {
                 sector_pos[2] as usize * SECTOR_SIZE,
             ];
 
+            macro_rules! side {
+                ($name: ident, $check: expr, $sector_pos: expr, $v0: ident, $v1: ident, $get_pos: expr, $adj_get_pos: expr, $set_pos: expr) => {
+                    if $check {
+                        let sector = &self.sectors[$sector_pos[0] as usize][$sector_pos[1] as usize]
+                            [$sector_pos[2] as usize];
+
+                        for $v0 in 0..SECTOR_SIZE {
+                            for $v1 in 0..SECTOR_SIZE {
+                                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                                let count = sector.get_density_layers(
+                                    [$get_pos[0] as u8, $get_pos[1] as u8, $get_pos[2] as u8],
+                                    &mut temp_layers,
+                                );
+                                densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                            }
+                        }
+                    } else {
+                        for $v0 in 0..SECTOR_SIZE {
+                            for $v1 in 0..SECTOR_SIZE {
+                                let index = self.adjacency.$name[$adj_get_pos[0]][$adj_get_pos[1]];
+                                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
+                                densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                            }
+                        }
+                    }
+                };
+            }
+
+            macro_rules! edge {
+                ($name: ident, $check: expr, $sector_pos: expr, $v: ident, $get_pos: expr, $adj_get_pos: expr, $set_pos: expr) => {
+                    if $check {
+                        let sector = &self.sectors[$sector_pos[0] as usize][$sector_pos[1] as usize]
+                            [$sector_pos[2] as usize];
+
+                        for $v in 0..SECTOR_SIZE {
+                            let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                            let count = sector.get_density_layers(
+                                [$get_pos[0] as u8, $get_pos[1] as u8, $get_pos[2] as u8],
+                                &mut temp_layers,
+                            );
+                            densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                        }
+                    } else {
+                        for $v in 0..SECTOR_SIZE {
+                            let index = self.adjacency.$name[$adj_get_pos];
+                            let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                            let count = self.adjacency.get_density_layers(index, &mut temp_layers);
+                            densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                        }
+                    }
+                };
+            }
+
+            macro_rules! corner {
+                ($name: ident, $check: expr, $sector_pos: expr, $get_pos: expr, $set_pos: expr) => {
+                    if $check {
+                        let sector = &self.sectors[$sector_pos[0] as usize][$sector_pos[1] as usize]
+                            [$sector_pos[2] as usize];
+
+                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                        let count = sector.get_density_layers(
+                            [$get_pos[0] as u8, $get_pos[1] as u8, $get_pos[2] as u8],
+                            &mut temp_layers,
+                        );
+                        densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                    } else {
+                        let index = self.adjacency.$name;
+                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
+                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
+                        densities[$set_pos[0]][$set_pos[1]][$set_pos[2]] = (temp_layers, count);
+                    }
+                };
+            }
+
             // Sides
             // ---------------------------------------------------------------------------------------------------------
 
-            // X-0 side
-            if sector_pos[0] > 0 {
-                let left_sector =
-                    &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize][sector_pos[2] as usize];
-
-                for y in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = left_sector.get_density_layers(
-                            [(SECTOR_SIZE - 1) as u8, y as u8, z as u8],
-                            &mut temp_layers,
-                        );
-                        densities[0][y + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_x0[cell_offset[1] + y][cell_offset[2] + z];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[0][y + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            }
-
-            // X-1 side
-            if sector_pos[0] + 1 < SIZE_IN_SECTORS as u8 {
-                let right_sector =
-                    &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize][sector_pos[2] as usize];
-
-                for y in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = right_sector.get_density_layers([0, y as u8, z as u8], &mut temp_layers);
-                        densities[SECTOR_SIZE + 1][y + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_x1[cell_offset[1] + y][cell_offset[2] + z];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[SECTOR_SIZE + 1][y + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            }
-
-            // Y-0 side
-            if sector_pos[1] > 0 {
-                let bottom_sector =
-                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize - 1][sector_pos[2] as usize];
-
-                for x in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = bottom_sector.get_density_layers(
-                            [x as u8, (SECTOR_SIZE - 1) as u8, z as u8],
-                            &mut temp_layers,
-                        );
-                        densities[x + 1][0][z + 1] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_y0[cell_offset[0] + x][cell_offset[2] + z];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[x + 1][0][z + 1] = (temp_layers, count);
-                    }
-                }
-            }
-
-            // Y-1 side
-            if sector_pos[1] + 1 < SIZE_IN_SECTORS as u8 {
-                let top_sector =
-                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1][sector_pos[2] as usize];
-
-                for x in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = top_sector.get_density_layers([x as u8, 0, z as u8], &mut temp_layers);
-                        densities[x + 1][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_y1[cell_offset[0] + x][cell_offset[2] + z];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[x + 1][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                    }
-                }
-            }
-
-            // Z-0 side
-            if sector_pos[2] > 0 {
-                let front_sector =
-                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize - 1];
-
-                for x in 0..SECTOR_SIZE {
-                    for y in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = front_sector.get_density_layers(
-                            [x as u8, y as u8, (SECTOR_SIZE - 1) as u8],
-                            &mut temp_layers,
-                        );
-                        densities[x + 1][y + 1][0] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    for y in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_z0[cell_offset[0] + x][cell_offset[1] + y];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[x + 1][y + 1][0] = (temp_layers, count);
-                    }
-                }
-            }
-
-            // Z-1 side
-            if sector_pos[2] + 1 < SIZE_IN_SECTORS as u8 {
-                let back_sector =
-                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize + 1];
-
-                for x in 0..SECTOR_SIZE {
-                    for y in 0..SECTOR_SIZE {
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = back_sector.get_density_layers([x as u8, y as u8, 0], &mut temp_layers);
-                        densities[x + 1][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                    }
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    for y in 0..SECTOR_SIZE {
-                        let index = self.adjacency.side_z1[cell_offset[0] + x][cell_offset[1] + y];
-                        let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                        let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                        densities[x + 1][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                    }
-                }
-            }
+            side!(
+                side_x0,
+                sector_pos[0] > 0,
+                [sector_pos[0] - 1, sector_pos[1], sector_pos[2]],
+                y,
+                z,
+                [SECTOR_SIZE - 1, y, z],
+                [cell_offset[1] + y, cell_offset[2] + z],
+                [0, y + 1, z + 1]
+            );
+            side!(
+                side_x1,
+                sector_pos[0] + 1 < SIZE_IN_SECTORS as u8,
+                [sector_pos[0] + 1, sector_pos[1], sector_pos[2]],
+                y,
+                z,
+                [0, y, z],
+                [cell_offset[1] + y, cell_offset[2] + z],
+                [SECTOR_SIZE + 1, y + 1, z + 1]
+            );
+            side!(
+                side_y0,
+                sector_pos[1] > 0,
+                [sector_pos[0], sector_pos[1] - 1, sector_pos[2]],
+                x,
+                z,
+                [x, SECTOR_SIZE - 1, z],
+                [cell_offset[0] + x, cell_offset[2] + z],
+                [x + 1, 0, z + 1]
+            );
+            side!(
+                side_y1,
+                sector_pos[1] + 1 < SIZE_IN_SECTORS as u8,
+                [sector_pos[0], sector_pos[1] + 1, sector_pos[2]],
+                x,
+                z,
+                [x, 0, z],
+                [cell_offset[0] + x, cell_offset[2] + z],
+                [x + 1, SECTOR_SIZE + 1, z + 1]
+            );
+            side!(
+                side_z0,
+                sector_pos[2] > 0,
+                [sector_pos[0], sector_pos[1], sector_pos[2] - 1],
+                x,
+                y,
+                [x, y, SECTOR_SIZE - 1],
+                [cell_offset[0] + x, cell_offset[1] + y],
+                [x + 1, y + 1, 0]
+            );
+            side!(
+                side_z1,
+                sector_pos[2] + 1 < SIZE_IN_SECTORS as u8,
+                [sector_pos[0], sector_pos[1], sector_pos[2] + 1],
+                x,
+                y,
+                [x, y, 0],
+                [cell_offset[0] + x, cell_offset[1] + y],
+                [x + 1, y + 1, SECTOR_SIZE + 1]
+            );
 
             // Edges
             // ---------------------------------------------------------------------------------------------------------
 
-            // X-0 Y-0 edge
-            if (sector_pos[0] > 0) && (sector_pos[1] > 0) {
-                let left_bottom_sector = &self.sectors[sector_pos[0] as usize - 1]
-                    [sector_pos[1] as usize - 1][sector_pos[2] as usize];
-
-                for z in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = left_bottom_sector.get_density_layers(
-                        [(SECTOR_SIZE - 1) as u8, (SECTOR_SIZE - 1) as u8, z as u8],
-                        &mut temp_layers,
-                    );
-                    densities[0][0][z + 1] = (temp_layers, count);
-                }
-            } else {
-                for z in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x0_y0[cell_offset[2] + z];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[0][0][z + 1] = (temp_layers, count);
-                }
-            }
-
-            // X-1 Y-0 edge
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] > 0) {
-                let left_bottom_sector = &self.sectors[sector_pos[0] as usize + 1]
-                    [sector_pos[1] as usize - 1][sector_pos[2] as usize];
-
-                for z in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = left_bottom_sector
-                        .get_density_layers([0, (SECTOR_SIZE - 1) as u8, z as u8], &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][0][z + 1] = (temp_layers, count);
-                }
-            } else {
-                for z in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x0_y0[cell_offset[2] + z];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][0][z + 1] = (temp_layers, count);
-                }
-            }
-
-            // X-0 Y-1 edge
-            if (sector_pos[0] > 0) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) {
-                let left_top_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize];
-
-                for z in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = left_top_sector
-                        .get_density_layers([(SECTOR_SIZE - 1) as u8, 0, z as u8], &mut temp_layers);
-                    densities[0][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                }
-            } else {
-                for z in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_y1[cell_offset[2] + z];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[0][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                }
-            }
-
-            // X-1 Y-1 edge
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) {
-                let right_top_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize];
-
-                for z in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = right_top_sector.get_density_layers([0, 0, z as u8], &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                }
-            } else {
-                for z in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_y1[cell_offset[2] + z];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][z + 1] = (temp_layers, count);
-                }
-            }
+            edge!(
+                edge_x0_y0,
+                (sector_pos[0] > 0) && (sector_pos[1] > 0),
+                [sector_pos[0] - 1, sector_pos[1] - 1, sector_pos[2]],
+                z,
+                [SECTOR_SIZE - 1, SECTOR_SIZE - 1, z],
+                cell_offset[2] + z,
+                [0, 0, z + 1]
+            );
+            edge!(
+                edge_x1_y0,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] > 0),
+                [sector_pos[0] + 1, sector_pos[1] - 1, sector_pos[2]],
+                z,
+                [0, SECTOR_SIZE - 1, z],
+                cell_offset[2] + z,
+                [SECTOR_SIZE + 1, 0, z + 1]
+            );
+            edge!(
+                edge_x0_y1,
+                (sector_pos[0] > 0) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] - 1, sector_pos[1] + 1, sector_pos[2]],
+                z,
+                [SECTOR_SIZE - 1, 0, z],
+                cell_offset[2] + z,
+                [0, SECTOR_SIZE + 1, z + 1]
+            );
+            edge!(
+                edge_x1_y1,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] + 1, sector_pos[1] + 1, sector_pos[2]],
+                z,
+                [0, 0, z],
+                cell_offset[2] + z,
+                [SECTOR_SIZE + 1, SECTOR_SIZE + 1, z + 1]
+            );
 
             // -----------------------------------------------------
 
-            // X-0 Z-0 edge
-            if (sector_pos[0] > 0) && (sector_pos[2] > 0) {
-                let left_front_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize]
-                    [sector_pos[2] as usize - 1];
-
-                for y in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = left_front_sector.get_density_layers(
-                        [(SECTOR_SIZE - 1) as u8, y as u8, (SECTOR_SIZE - 1) as u8],
-                        &mut temp_layers,
-                    );
-                    densities[0][y + 1][0] = (temp_layers, count);
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_z1[cell_offset[1] + y];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[0][y + 1][0] = (temp_layers, count);
-                }
-            }
-
-            // X-1 Z-0 edge
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0) {
-                let right_front_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize]
-                    [sector_pos[2] as usize - 1];
-
-                for y in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = right_front_sector
-                        .get_density_layers([0, y as u8, (SECTOR_SIZE - 1) as u8], &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][y + 1][0] = (temp_layers, count);
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_z1[cell_offset[1] + y];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][y + 1][0] = (temp_layers, count);
-                }
-            }
-
-            // X-0 Z-1 edge
-            if (sector_pos[0] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8) {
-                let left_back_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize]
-                    [sector_pos[2] as usize + 1];
-
-                for y in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = left_back_sector
-                        .get_density_layers([(SECTOR_SIZE - 1) as u8, y as u8, 0], &mut temp_layers);
-                    densities[0][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_z1[cell_offset[1] + y];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[0][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            }
-
-            // X-1 Z-1 edge
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8) {
-                let right_back_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize]
-                    [sector_pos[2] as usize + 1];
-
-                for y in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = right_back_sector.get_density_layers([0, y as u8, 0], &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            } else {
-                for y in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_x1_z1[cell_offset[1] + y];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[SECTOR_SIZE + 1][y + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            }
+            edge!(
+                edge_x0_z0,
+                (sector_pos[0] > 0) && (sector_pos[2] > 0),
+                [sector_pos[0] - 1, sector_pos[1], sector_pos[2] - 1],
+                y,
+                [SECTOR_SIZE - 1, y, SECTOR_SIZE - 1],
+                cell_offset[1] + y,
+                [0, y + 1, 0]
+            );
+            edge!(
+                edge_x1_z0,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0),
+                [sector_pos[0] + 1, sector_pos[1], sector_pos[2] - 1],
+                y,
+                [0, y, SECTOR_SIZE - 1],
+                cell_offset[1] + y,
+                [SECTOR_SIZE + 1, y + 1, 0]
+            );
+            edge!(
+                edge_x0_z1,
+                (sector_pos[0] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] - 1, sector_pos[1], sector_pos[2] + 1],
+                y,
+                [SECTOR_SIZE - 1, y, 0],
+                cell_offset[1] + y,
+                [0, y + 1, SECTOR_SIZE + 1]
+            );
+            edge!(
+                edge_x1_z1,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] + 1, sector_pos[1], sector_pos[2] + 1],
+                y,
+                [0, y, 0],
+                cell_offset[1] + y,
+                [SECTOR_SIZE + 1, y + 1, SECTOR_SIZE + 1]
+            );
 
             // -----------------------------------------------------
 
-            // Y-0 Z-0 edge
-            if (sector_pos[1] > 0) && (sector_pos[2] > 0) {
-                let top_back_sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize - 1];
-
-                for x in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = top_back_sector.get_density_layers(
-                        [x as u8, (SECTOR_SIZE - 1) as u8, (SECTOR_SIZE - 1) as u8],
-                        &mut temp_layers,
-                    );
-                    densities[x + 1][0][0] = (temp_layers, count);
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_y1_z1[cell_offset[0] + x];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[x + 1][0][0] = (temp_layers, count);
-                }
-            }
-
-            // Y-1 Z-0 edge
-            if (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0) {
-                let top_back_sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize - 1];
-
-                for x in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = top_back_sector
-                        .get_density_layers([x as u8, 0, (SECTOR_SIZE - 1) as u8], &mut temp_layers);
-                    densities[x + 1][SECTOR_SIZE + 1][0] = (temp_layers, count);
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_y1_z1[cell_offset[0] + x];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[x + 1][SECTOR_SIZE + 1][0] = (temp_layers, count);
-                }
-            }
-
-            // Y-0 Z-1 edge
-            if (sector_pos[1] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8) {
-                let top_back_sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize + 1];
-
-                for x in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = top_back_sector
-                        .get_density_layers([x as u8, (SECTOR_SIZE - 1) as u8, 0], &mut temp_layers);
-                    densities[x + 1][0][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_y1_z1[cell_offset[0] + x];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[x + 1][0][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            }
-
-            // Y-1 Z-1 edge
-            if (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8) {
-                let top_back_sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize + 1];
-
-                for x in 0..SECTOR_SIZE {
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = top_back_sector.get_density_layers([x as u8, 0, 0], &mut temp_layers);
-                    densities[x + 1][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            } else {
-                for x in 0..SECTOR_SIZE {
-                    let index = self.adjacency.edge_y1_z1[cell_offset[0] + x];
-                    let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                    let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                    densities[x + 1][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-                }
-            }
+            edge!(
+                edge_y0_z0,
+                (sector_pos[1] > 0) && (sector_pos[2] > 0),
+                [sector_pos[0], sector_pos[1] - 1, sector_pos[2] - 1],
+                x,
+                [x, SECTOR_SIZE - 1, SECTOR_SIZE - 1],
+                cell_offset[0] + x,
+                [x + 1, 0, 0]
+            );
+            edge!(
+                edge_y1_z0,
+                (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0),
+                [sector_pos[0], sector_pos[1] + 1, sector_pos[2] - 1],
+                x,
+                [x, 0, SECTOR_SIZE - 1],
+                cell_offset[0] + x,
+                [x + 1, SECTOR_SIZE + 1, 0]
+            );
+            edge!(
+                edge_y0_z1,
+                (sector_pos[1] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0], sector_pos[1] - 1, sector_pos[2] + 1],
+                x,
+                [x, SECTOR_SIZE - 1, 0],
+                cell_offset[0] + x,
+                [x + 1, 0, SECTOR_SIZE + 1]
+            );
+            edge!(
+                edge_y1_z1,
+                (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0], sector_pos[1] + 1, sector_pos[2] + 1],
+                x,
+                [x, 0, 0],
+                cell_offset[0] + x,
+                [x + 1, SECTOR_SIZE + 1, SECTOR_SIZE + 1]
+            );
 
             // Corners
             // ---------------------------------------------------------------------------------------------------------
 
-            // X-0 Y-0 Z-0 corner
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8)
-            {
-                let corner_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize + 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = corner_sector.get_density_layers([0, 0, 0], &mut temp_layers);
-                densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x0_y0_z0;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-            }
-
-            // X-1 Y-0 Z-0 corner
-            if (sector_pos[0] > 0)
-                && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8)
-            {
-                let corner_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize + 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count =
-                    corner_sector.get_density_layers([(SECTOR_SIZE - 1) as u8, 0, 0], &mut temp_layers);
-                densities[0][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x1_y0_z0;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[0][SECTOR_SIZE + 1][SECTOR_SIZE + 1] = (temp_layers, count);
-            }
-
-            // X-0 Y-1 Z-0 corner
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[1] > 0)
-                && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8)
-            {
-                let corner_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize + 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count =
-                    corner_sector.get_density_layers([0, (SECTOR_SIZE - 1) as u8, 0], &mut temp_layers);
-                densities[SECTOR_SIZE + 1][0][SECTOR_SIZE + 1] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x0_y1_z0;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[SECTOR_SIZE + 1][0][SECTOR_SIZE + 1] = (temp_layers, count);
-            }
-
-            // X-1 Y-1 Z-0 corner
-            if (sector_pos[0] > 0) && (sector_pos[1] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8) {
-                let corner_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize + 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = corner_sector.get_density_layers(
-                    [(SECTOR_SIZE - 1) as u8, (SECTOR_SIZE - 1) as u8, 0],
-                    &mut temp_layers,
-                );
-                densities[0][0][SECTOR_SIZE + 1] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x1_y1_z0;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[0][0][SECTOR_SIZE + 1] = (temp_layers, count);
-            }
-
-            // X-0 Y-0 Z-1 corner
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
-                && (sector_pos[2] > 0)
-            {
-                let corner_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize - 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count =
-                    corner_sector.get_density_layers([0, 0, (SECTOR_SIZE - 1) as u8], &mut temp_layers);
-                densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][0] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x0_y0_z1;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[SECTOR_SIZE + 1][SECTOR_SIZE + 1][0] = (temp_layers, count);
-            }
-
-            // X-1 Y-0 Z-1 corner
-            if (sector_pos[0] > 0) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0) {
-                let corner_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize - 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = corner_sector.get_density_layers(
-                    [(SECTOR_SIZE - 1) as u8, 0, (SECTOR_SIZE - 1) as u8],
-                    &mut temp_layers,
-                );
-                densities[0][SECTOR_SIZE + 1][0] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x1_y0_z1;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[0][SECTOR_SIZE + 1][0] = (temp_layers, count);
-            }
-
-            // X-0 Y-1 Z-1 corner
-            if (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] > 0) && (sector_pos[2] > 0) {
-                let corner_sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize - 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = corner_sector.get_density_layers(
-                    [0, (SECTOR_SIZE - 1) as u8, (SECTOR_SIZE - 1) as u8],
-                    &mut temp_layers,
-                );
-                densities[SECTOR_SIZE + 1][0][0] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x0_y1_z1;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[SECTOR_SIZE + 1][0][0] = (temp_layers, count);
-            }
-
-            // X-1 Y-1 Z-1 corner
-            if (sector_pos[0] > 0) && (sector_pos[1] > 0) && (sector_pos[2] > 0) {
-                let corner_sector = &self.sectors[sector_pos[0] as usize - 1][sector_pos[1] as usize - 1]
-                    [sector_pos[2] as usize - 1];
-
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = corner_sector.get_density_layers(
-                    [
-                        (SECTOR_SIZE - 1) as u8,
-                        (SECTOR_SIZE - 1) as u8,
-                        (SECTOR_SIZE - 1) as u8,
-                    ],
-                    &mut temp_layers,
-                );
-                densities[0][0][0] = (temp_layers, count);
-            } else {
-                let index = self.adjacency.corner_x1_y1_z1;
-                let mut temp_layers = [init_den_point; MAX_CELL_LAYERS];
-                let count = self.adjacency.get_density_layers(index, &mut temp_layers);
-                densities[0][0][0] = (temp_layers, count);
-            }
+            corner!(
+                corner_x0_y0_z0,
+                (sector_pos[0] > 0) && (sector_pos[1] > 0) && (sector_pos[2] > 0),
+                [sector_pos[0] - 1, sector_pos[1] - 1, sector_pos[2] - 1],
+                [SECTOR_SIZE - 1, SECTOR_SIZE - 1, SECTOR_SIZE - 1],
+                [0, 0, 0]
+            );
+            corner!(
+                corner_x1_y0_z0,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[1] > 0) && (sector_pos[2] > 0),
+                [sector_pos[0] + 1, sector_pos[1] - 1, sector_pos[2] - 1],
+                [0, SECTOR_SIZE - 1, SECTOR_SIZE - 1],
+                [SECTOR_SIZE + 1, 0, 0]
+            );
+            corner!(
+                corner_x0_y1_z0,
+                (sector_pos[0] > 0) && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8) && (sector_pos[2] > 0),
+                [sector_pos[0] - 1, sector_pos[1] + 1, sector_pos[2] - 1],
+                [SECTOR_SIZE - 1, 0, SECTOR_SIZE - 1],
+                [0, SECTOR_SIZE + 1, 0]
+            );
+            corner!(
+                corner_x1_y1_z0,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[2] > 0),
+                [sector_pos[0] + 1, sector_pos[1] + 1, sector_pos[2] - 1],
+                [0, 0, SECTOR_SIZE - 1],
+                [SECTOR_SIZE + 1, SECTOR_SIZE + 1, 0]
+            );
+            corner!(
+                corner_x0_y0_z1,
+                (sector_pos[0] > 0) && (sector_pos[1] > 0) && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] - 1, sector_pos[1] - 1, sector_pos[2] + 1],
+                [SECTOR_SIZE - 1, SECTOR_SIZE - 1, 0],
+                [0, 0, SECTOR_SIZE + 1]
+            );
+            corner!(
+                corner_x1_y0_z1,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[1] > 0)
+                    && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] + 1, sector_pos[1] - 1, sector_pos[2] + 1],
+                [0, SECTOR_SIZE - 1, 0],
+                [SECTOR_SIZE + 1, 0, SECTOR_SIZE + 1]
+            );
+            corner!(
+                corner_x0_y1_z1,
+                (sector_pos[0] > 0)
+                    && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] - 1, sector_pos[1] + 1, sector_pos[2] + 1],
+                [SECTOR_SIZE - 1, 0, 0],
+                [0, SECTOR_SIZE + 1, SECTOR_SIZE + 1]
+            );
+            corner!(
+                corner_x1_y1_z1,
+                (sector_pos[0] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[1] + 1 < SIZE_IN_SECTORS as u8)
+                    && (sector_pos[2] + 1 < SIZE_IN_SECTORS as u8),
+                [sector_pos[0] + 1, sector_pos[1] + 1, sector_pos[2] + 1],
+                [0, 0, 0],
+                [SECTOR_SIZE + 1, SECTOR_SIZE + 1, SECTOR_SIZE + 1]
+            );
         }
 
         // Vertex components

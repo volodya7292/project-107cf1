@@ -2,7 +2,6 @@ use std::collections::{hash_map, HashMap};
 use std::mem;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
-use vk_wrapper::{Pipeline, RenderPass};
 
 pub trait UniformStruct {
     fn model_offset() -> u32;

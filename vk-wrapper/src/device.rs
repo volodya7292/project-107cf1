@@ -169,7 +169,7 @@ impl Device {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
-                elem_size,
+                _elem_size: elem_size,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
                 _bytesize: bytesize as u64,
@@ -710,7 +710,7 @@ impl Device {
             stage,
             input_locations,
             bindings,
-            push_constants,
+            _push_constants: push_constants,
             push_constants_size,
         }))
     }
@@ -848,8 +848,8 @@ impl Device {
             native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
             subpasses: subpasses.into(),
             attachments: attachments.to_vec(),
-            color_attachments,
-            depth_attachments,
+            _color_attachments: color_attachments,
+            _depth_attachments: depth_attachments,
         }))
     }
 
@@ -972,8 +972,8 @@ impl Device {
             pipeline_layout,
             descriptor_sizes,
             binding_types,
-            push_constant_ranges,
-            push_constants_size,
+            _push_constant_ranges: push_constant_ranges,
+            _push_constants_size: push_constants_size,
             shaders,
         }))
     }
@@ -1065,8 +1065,8 @@ impl Device {
             pipeline_layout,
             descriptor_sizes,
             binding_types,
-            push_constant_ranges: Default::default(),
-            push_constants_size: 0,
+            _push_constant_ranges: Default::default(),
+            _push_constants_size: 0,
             shaders: Default::default(),
         }))
     }

@@ -1,9 +1,6 @@
-use crate::resource_file::ResourceRef;
 use crate::utils;
-use std::mem;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
-use vk_wrapper::ImageLayout;
 
 #[derive(Debug)]
 pub enum Error {
@@ -15,7 +12,7 @@ pub struct TextureAtlas {
     cmd_list: Arc<Mutex<vkw::CmdList>>,
     submit_packet: vkw::SubmitPacket,
     image: Arc<vkw::Image>,
-    width: u32,
+    _width: u32,
     width_in_tiles: u32,
     tile_width: u32,
 }
@@ -197,7 +194,7 @@ pub fn new(
         cmd_list,
         submit_packet,
         image,
-        width,
+        _width: width,
         width_in_tiles,
         tile_width: max_tile_width,
     })

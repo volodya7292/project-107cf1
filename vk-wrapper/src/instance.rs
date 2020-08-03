@@ -269,7 +269,7 @@ impl Instance {
                     native: p_device,
                     props,
                     enabled_extensions,
-                    props12: props12.build(),
+                    _props12: props12.build(),
                     features: enabled_features,
                     features12: enabled_features12,
                     queue_family_indices: queue_fam_indices,

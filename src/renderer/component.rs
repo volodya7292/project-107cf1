@@ -1,12 +1,8 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use nalgebra as na;
-use nalgebra::{
-    Affine3, Isometry, Isometry3, Matrix4, Perspective3, Rotation3, SimdComplexField, Similarity3,
-    Transform3, Translation3, UnitQuaternion, Vector3, Vector4,
-};
+use nalgebra::{Isometry3, Matrix4, Rotation3, Translation3, Vector3, Vector4};
 use nalgebra_glm as glm;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
 use vk_wrapper::{DeviceBuffer, PipelineInput};

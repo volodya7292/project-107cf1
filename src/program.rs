@@ -18,7 +18,7 @@ pub struct Program {
 }
 
 impl Program {
-    const MOVEMENT_SPEED: f32 = 4.0;
+    const MOVEMENT_SPEED: f32 = 8.0;
     const MOUSE_SENSITIVITY: f32 = 0.005;
 
     pub fn init(&self) {}
@@ -97,7 +97,7 @@ impl Program {
                 vel_up_down -= 1;
             }
 
-            let mut renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock().unwrap();
             let entity = renderer.get_active_camera();
             let mut camera_comp = renderer.world().write_component::<component::Camera>();
             let camera = camera_comp.get_mut(entity).unwrap();
@@ -157,6 +157,7 @@ pub fn new(
         let mut points = Vec::<cluster::DensityPointInfo>::new();
 
         let noise = NoiseBuilder::gradient_3d(cluster::SIZE, cluster::SIZE, cluster::SIZE)
+            .with_seed(0)
             //.with_freq(20.0)
             .generate();
         //println!("{} {} {}", noise.1, noise.2, noise.0.len());

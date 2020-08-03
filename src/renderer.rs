@@ -11,18 +11,15 @@ use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use ktx::KtxInfo;
 use nalgebra as na;
-use nalgebra::{Matrix4, Vector3, Vector4};
+use nalgebra::{Matrix4, Vector4};
 use order_stat;
 use rayon::prelude::*;
 use specs::prelude::ParallelIterator;
 use specs::storage::ComponentEvent;
-use specs::storage::RestrictedStorage;
 use specs::WorldExt;
 use specs::{Builder, Join, ParJoin};
-use std::collections::{HashMap, HashSet};
-use std::io::BufReader;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use std::{cmp, mem, slice};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
@@ -162,7 +159,7 @@ impl Renderer {
         self.world.create_entity()
     }
 
-    pub fn get_active_camera(&mut self) -> specs::Entity {
+    pub fn get_active_camera(&self) -> specs::Entity {
         self.active_camera
     }
 
@@ -219,7 +216,7 @@ impl Renderer {
 
     /// Unload unused texture to free GPU memory for another texture
     pub fn unload_texture(&mut self, index: u32) {
-        let (res_ref, atlas_type, tex_index) = &mut self.texture_resources[index as usize];
+        let (_res_ref, atlas_type, tex_index) = &mut self.texture_resources[index as usize];
 
         if let Some(tex_index) = tex_index {
             self.free_texture_indices[*atlas_type as usize].push(*tex_index);
@@ -501,7 +498,7 @@ impl Renderer {
 
                     if renderer.changed {
                         let renderer = comps.get_mut_unchecked();
-                        let mat_pipeline = &renderer.mat_pipeline;
+                        let _mat_pipeline = &renderer.mat_pipeline;
                         let inputs = &mut renderer.pipeline_inputs;
 
                         inputs.clear();
@@ -773,9 +770,7 @@ impl Renderer {
                     }
 
                     // Check query_pool occlusion results
-                    let mut occlusion_result = self.occlusion_buffer[entity_index];
-
-                    if occlusion_result == 0 {
+                    if self.occlusion_buffer[entity_index] == 0 {
                         continue;
                     }
 
@@ -802,7 +797,7 @@ impl Renderer {
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            let translucency_head_image = self.translucency_head_image.as_ref().unwrap();
+            let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
 
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();

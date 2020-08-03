@@ -53,8 +53,8 @@ pub struct RenderPass {
     pub(crate) native: vk::RenderPass,
     pub(crate) subpasses: Vec<Subpass>,
     pub(crate) attachments: Vec<Attachment>,
-    pub(crate) color_attachments: Vec<u32>,
-    pub(crate) depth_attachments: Vec<u32>,
+    pub(crate) _color_attachments: Vec<u32>,
+    pub(crate) _depth_attachments: Vec<u32>,
 }
 
 #[derive(Clone)]
@@ -187,7 +187,7 @@ impl RenderPass {
 
         Ok(Arc::new(Framebuffer {
             device: Arc::clone(&self.device),
-            render_pass: Arc::clone(self),
+            _render_pass: Arc::clone(self),
             native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },
             images,
             size,
