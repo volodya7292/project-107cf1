@@ -416,6 +416,7 @@ impl Cluster {
         self.adjacency = adjacency;
     }
 
+    // TODO: sparse update (cache various buffers into Cluster struct)
     /// details: max detail deviation [0;1].
     fn triangulate(&self, sector_pos: [u8; 3], details: f32) -> (Vec<Vertex>, Vec<u32>) {
         let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
@@ -784,7 +785,7 @@ impl Cluster {
         let mut v_face_normals = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
 
         // Faces index buffer
-        let mut v_faces = Vec::<[u32; 4]>::with_capacity(SECTOR_VOLUME * 12);
+        let mut v_faces = Vec::<[u32; 4]>::with_capacity(ALIGNED_SECTOR_MAX_CELLS * 3);
         // Density buffer
         let mut density_infos = Vec::<[u32; 4]>::with_capacity(ALIGNED_SECTOR_VOLUME);
 
@@ -942,122 +943,264 @@ impl Cluster {
 
         // Optimize mesh
         // -------------------------------------------------------------------------------------------------------------
-        let mut mark_buffer = vec![false; ALIGNED_SECTOR_MAX_CELLS];
+        let mut mark_buffer = vec![false; ALIGNED_SECTOR_MAX_CELLS * 3];
         //if details > 0.0 {
-        {
-            fn calc_normal(vertices: [na::Vector3<f32>; 4]) -> na::Vector3<f32> {
-                let normal0 = utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
-                let normal1 = utils::calc_triangle_normal(&vertices[0], &vertices[2], &vertices[3]);
-                (normal0 + normal1) / 2.0
+
+        fn calc_normal(vertices: [na::Vector3<f32>; 4]) -> na::Vector3<f32> {
+            let normal0 = utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
+            let normal1 = utils::calc_triangle_normal(&vertices[0], &vertices[2], &vertices[3]);
+            (normal0 + normal1) / 2.0
+        }
+        let mut get_normal = |face: &[u32; 4], index: usize| -> na::Vector3<f32> {
+            let normal = &mut v_face_normals[index as usize];
+
+            if normal.is_none() {
+                let v0 = v_positions[face[0] as usize];
+                let v1 = v_positions[face[1] as usize];
+                let v2 = v_positions[face[2] as usize];
+                let v3 = v_positions[face[3] as usize];
+
+                *normal = Some(calc_normal([v0, v1, v2, v3]));
             }
-            let mut get_normal = |face: &[u32; 4], index: usize| -> na::Vector3<f32> {
-                let normal = &mut v_face_normals[index as usize];
 
-                if normal.is_none() {
-                    let v0 = v_positions[face[0] as usize];
-                    let v1 = v_positions[face[1] as usize];
-                    let v2 = v_positions[face[2] as usize];
-                    let v3 = v_positions[face[3] as usize];
+            normal.unwrap()
+        };
+        macro_rules! check_merge {
+            ($x: expr, $y: expr, $z: expr, $layer: expr, $s: expr, $normal: expr) => {{
+                let cell_index = calc_index!($x, $y, $z);
+                let index = (cell_index as usize + $layer as usize) * 3 + $s;
+                let face = v_faces2[index];
 
-                    *normal = Some(calc_normal([v0, v1, v2, v3]));
+                if let Some(face) = face {
+                    let normal2 = get_normal(&face, index);
+                    let diff = 1.0 - $normal.dot(&normal2);
+                    diff < details
+                } else {
+                    false
                 }
+            }};
+        }
 
-                normal.unwrap()
-            };
-            macro_rules! check_cell {
-                ($x: expr, $y: expr, $z: expr, $layer: expr, $s: expr, $normal: expr) => {{
-                    let cell_index = calc_index!($x, $y, $z);
-                    let index = (cell_index as usize + $layer as usize) * 3 + $s;
-                    let face = v_faces2[index];
+        for x in 0..SECTOR_SIZE {
+            for y in 0..SECTOR_SIZE {
+                for z in 0..SECTOR_SIZE {
+                    let cell_index = calc_index!(x, y, z);
 
-                    if let Some(face) = face {
-                        let normal2 = get_normal(&face, index);
-                        let diff = 1.0 - $normal.dot(&normal2);
-                        diff < details
-                    } else {
-                        false
-                    }
-                }};
-            }
+                    if x > 0
+                        && y > 0
+                        && z > 0
+                        && x < SECTOR_SIZE - 1
+                        && y < SECTOR_SIZE - 1
+                        && z < SECTOR_SIZE - 1
+                    {
+                        for i in 0..MAX_CELL_LAYERS {
+                            // XY plane
+                            {
+                                let check_mark = |x: usize, y: usize| -> bool {
+                                    mark_buffer[(calc_index!(x - 1, y - 1, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x - 1, y + 1, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x + 1, y - 1, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 0]
+                                        || mark_buffer[(calc_index!(x + 1, y + 1, z) as usize + i) * 3 + 0]
+                                };
 
-            for x in 0..SECTOR_SIZE {
-                for y in 0..SECTOR_SIZE {
-                    for z in 0..SECTOR_SIZE {
-                        let cell_index = calc_index!(x, y, z);
-
-                        // TODO: check if this cell or neighbour cells already used before starting merge
-
-                        // XY plane
-                        if x > 0
-                            && y > 0
-                            && z > 0
-                            && x < SECTOR_SIZE - 1
-                            && y < SECTOR_SIZE - 1
-                            && z < SECTOR_SIZE - 1
-                        {
-                            for i in 0..MAX_CELL_LAYERS {
-                                let index = (cell_index as usize + i as usize) * 3 + 0;
+                                let index = (cell_index as usize + i) * 3 + 0;
                                 let face = v_faces2[index];
 
                                 if let Some(face) = face {
                                     let normal = get_normal(&face, index);
-
                                     let mut max_j = 1_usize;
 
-                                    for j in 1..(SECTOR_SIZE - x.max(y)) {
-                                        // check corner
-                                        // TODO: check if this cell or neighbour cells already used in merge
-                                        let a = check_cell!(x + j, y + j, z, i, 0, normal);
-                                        if !a {
-                                            break;
-                                        }
-
-                                        // check two edges
-                                        let mut d = false;
-                                        for j2 in 0..j {
-                                            // TODO: check if this cell or neighbour cells already used in merge
-                                            let a = check_cell!(x + j, y + j2, z, i, 0, normal);
-                                            if !a {
-                                                d = true;
+                                    if !check_mark(x, y) {
+                                        for j in 1..(SECTOR_SIZE - x.max(y)) {
+                                            // Check corner
+                                            if check_mark(x + j, y + j)
+                                                || !check_merge!(x + j, y + j, z, i, 0, normal)
+                                            {
                                                 break;
                                             }
-                                            // TODO: check if this cell or neighbour cells already used in merge
-                                            let a = check_cell!(x + j2, y + j, z, i, 0, normal);
-                                            if !a {
-                                                d = true;
+
+                                            // Check two edges
+                                            let mut status = true;
+
+                                            for j2 in 0..j {
+                                                if check_mark(x + j, y + j2)
+                                                    || !check_merge!(x + j, y + j2, z, i, 0, normal)
+                                                    || check_mark(x + j2, y + j)
+                                                    || !check_merge!(x + j2, y + j, z, i, 0, normal)
+                                                {
+                                                    status = false;
+                                                    break;
+                                                }
+                                            }
+                                            if !status {
                                                 break;
                                             }
-                                        }
-                                        if d {
-                                            break;
-                                        }
 
-                                        max_j += 1;
+                                            max_j += 1;
+                                        }
                                     }
 
                                     // Mark used quads
                                     for j in 0..max_j {
                                         for j2 in 0..max_j {
                                             let cell_index = calc_index!(x + j, y + j2, z);
-                                            let index = cell_index as usize + i as usize;
+                                            let index = (cell_index as usize + i) * 3 + 0;
                                             mark_buffer[index] = true;
                                         }
                                     }
 
                                     // Create new quad
-                                    // ..
+                                    v_faces.push(face);
+
+                                    // Set correct boundary vertices
+                                    for j in 0..(max_j - 1) {}
+                                }
+                            }
+
+                            // XZ plane
+                            {
+                                let check_mark = |x: usize, z: usize| -> bool {
+                                    mark_buffer[(calc_index!(x - 1, y, z - 1) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x - 1, y, z + 1) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x, y, z - 1) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x, y, z + 1) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x + 1, y, z - 1) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 1]
+                                        || mark_buffer[(calc_index!(x + 1, y, z + 1) as usize + i) * 3 + 1]
+                                };
+
+                                let index = (cell_index as usize + i) * 3 + 1;
+                                let face = v_faces2[index];
+
+                                if let Some(face) = face {
+                                    let normal = get_normal(&face, index);
+                                    let mut max_j = 1_usize;
+
+                                    if !check_mark(x, z) {
+                                        for j in 1..(SECTOR_SIZE - x.max(z)) {
+                                            // Check corner
+                                            if check_mark(x + j, z + j)
+                                                || !check_merge!(x + j, y, z + j, i, 1, normal)
+                                            {
+                                                break;
+                                            }
+
+                                            // Check two edges
+                                            let mut status = true;
+
+                                            for j2 in 0..j {
+                                                if check_mark(x + j, z + j2)
+                                                    || !check_merge!(x + j, y, z + j2, i, 1, normal)
+                                                    || check_mark(x + j2, z + j)
+                                                    || !check_merge!(x + j2, y, z + j, i, 1, normal)
+                                                {
+                                                    status = false;
+                                                    break;
+                                                }
+                                            }
+                                            if !status {
+                                                break;
+                                            }
+
+                                            max_j += 1;
+                                        }
+                                    }
+
+                                    // Mark used quads
+                                    for j in 0..max_j {
+                                        for j2 in 0..max_j {
+                                            let cell_index = calc_index!(x + j, y, z + j2);
+                                            let index = (cell_index as usize + i) * 3 + 1;
+                                            mark_buffer[index] = true;
+                                        }
+                                    }
+
+                                    // Create new quad
+                                    v_faces.push(face);
+
+                                    // Set correct boundary vertices
+                                    for j in 0..(max_j - 1) {}
+                                }
+                            }
+
+                            // YZ plane
+                            {
+                                let check_mark = |y: usize, z: usize| -> bool {
+                                    mark_buffer[(calc_index!(x, y - 1, z - 1) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y - 1, z + 1) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y, z - 1) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y, z + 1) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y + 1, z - 1) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 2]
+                                        || mark_buffer[(calc_index!(x, y + 1, z + 1) as usize + i) * 3 + 2]
+                                };
+
+                                let index = (cell_index as usize + i) * 3 + 2;
+                                let face = v_faces2[index];
+
+                                if let Some(face) = face {
+                                    let normal = get_normal(&face, index);
+                                    let mut max_j = 1_usize;
+
+                                    if !check_mark(x, y) {
+                                        for j in 1..(SECTOR_SIZE - y.max(z)) {
+                                            // Check corner
+                                            if check_mark(y + j, z + j)
+                                                || !check_merge!(x, y + j, z + j, i, 0, normal)
+                                            {
+                                                break;
+                                            }
+
+                                            // Check two edges
+                                            let mut status = true;
+
+                                            for j2 in 0..j {
+                                                if check_mark(y + j, z + j2)
+                                                    || !check_merge!(x, y + j, z + j2, i, 0, normal)
+                                                    || check_mark(y + j2, z + j)
+                                                    || !check_merge!(x, y + j2, z + j, i, 0, normal)
+                                                {
+                                                    status = false;
+                                                    break;
+                                                }
+                                            }
+                                            if !status {
+                                                break;
+                                            }
+
+                                            max_j += 1;
+                                        }
+                                    }
+
+                                    // Mark used quads
+                                    for j in 0..max_j {
+                                        for j2 in 0..max_j {
+                                            let cell_index = calc_index!(x, y + j, z + j2);
+                                            let index = (cell_index as usize + i) * 3 + 2;
+                                            mark_buffer[index] = true;
+                                        }
+                                    }
+
+                                    // Create new quad
+                                    v_faces.push(face);
 
                                     // Set correct boundary vertices
                                     for j in 0..(max_j - 1) {}
                                 }
                             }
                         }
-
-                        // ----------------------------------------------------------------------
-                        // ----------------------------------------------------------------------
-                        // TODO: remove
-                        for j in 0..3 {
-                            for i in 0..MAX_CELL_LAYERS {
+                    } else {
+                        for i in 0..MAX_CELL_LAYERS {
+                            for j in 0..3 {
                                 let index = (cell_index as usize + i as usize) * 3 + j;
                                 if let Some(face) = v_faces2[index] {
                                     v_faces.push(face);

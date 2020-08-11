@@ -193,7 +193,7 @@ pub fn new(
         cluster.set_densities(&points);
 
         let t0 = Instant::now();
-        cluster.update_mesh(0.001);
+        cluster.update_mesh(0.1);
         let t1 = Instant::now();
 
         println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());
