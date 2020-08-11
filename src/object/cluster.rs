@@ -943,7 +943,7 @@ impl Cluster {
 
         // Optimize mesh
         // -------------------------------------------------------------------------------------------------------------
-        let mut mark_buffer = vec![false; ALIGNED_SECTOR_MAX_CELLS * 3];
+        let mut mark_buffer = vec![(false, false); ALIGNED_SECTOR_MAX_CELLS * 3];
         //if details > 0.0 {
 
         fn calc_normal(vertices: [na::Vector3<f32>; 4]) -> na::Vector3<f32> {
@@ -996,74 +996,111 @@ impl Cluster {
                         for i in 0..MAX_CELL_LAYERS {
                             // XY plane
                             {
+                                let check_mark_single = |x: usize, y: usize| -> bool {
+                                    mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0].0
+                                };
                                 let check_mark = |x: usize, y: usize| -> bool {
-                                    mark_buffer[(calc_index!(x - 1, y - 1, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x - 1, y + 1, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x + 1, y - 1, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 0]
-                                        || mark_buffer[(calc_index!(x + 1, y + 1, z) as usize + i) * 3 + 0]
+                                    mark_buffer[(calc_index!(x - 1, y - 1, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x - 1, y + 1, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x + 1, y - 1, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 0].1
+                                        || mark_buffer[(calc_index!(x + 1, y + 1, z) as usize + i) * 3 + 0].1
                                 };
 
                                 let index = (cell_index as usize + i) * 3 + 0;
                                 let face = v_faces2[index];
 
-                                if let Some(face) = face {
-                                    let normal = get_normal(&face, index);
-                                    let mut max_j = 1_usize;
+                                // FIXME: if !check_mark(x, y)
 
-                                    if !check_mark(x, y) {
-                                        for j in 1..(SECTOR_SIZE - x.max(y)) {
-                                            // Check corner
-                                            if check_mark(x + j, y + j)
-                                                || !check_merge!(x + j, y + j, z, i, 0, normal)
-                                            {
-                                                break;
-                                            }
+                                if !check_mark_single(x, y) {
+                                    if let Some(face) = face {
+                                        let normal = get_normal(&face, index);
+                                        let mut max_j = 1_usize;
 
-                                            // Check two edges
-                                            let mut status = true;
-
-                                            for j2 in 0..j {
-                                                if check_mark(x + j, y + j2)
-                                                    || !check_merge!(x + j, y + j2, z, i, 0, normal)
-                                                    || check_mark(x + j2, y + j)
-                                                    || !check_merge!(x + j2, y + j, z, i, 0, normal)
+                                        if !check_mark(x, y) {
+                                            for j in 1..(SECTOR_SIZE - x.max(y)) {
+                                                // Check corner
+                                                if check_mark(x + j, y + j)
+                                                    || !check_merge!(x + j, y + j, z, i, 0, normal)
                                                 {
-                                                    status = false;
                                                     break;
                                                 }
+
+                                                // Check two edges
+                                                let mut status = true;
+
+                                                for j2 in 0..j {
+                                                    if check_mark(x + j, y + j2)
+                                                        || !check_merge!(x + j, y + j2, z, i, 0, normal)
+                                                        || check_mark(x + j2, y + j)
+                                                        || !check_merge!(x + j2, y + j, z, i, 0, normal)
+                                                    {
+                                                        status = false;
+                                                        break;
+                                                    }
+                                                }
+                                                if !status {
+                                                    break;
+                                                }
+
+                                                max_j += 1;
                                             }
-                                            if !status {
-                                                break;
+                                        }
+
+                                        // Mark used quads
+                                        if max_j == 1 {
+                                            let index = (calc_index!(x, y, z) as usize + i) * 3 + 0;
+                                            mark_buffer[index].0 = true;
+                                        } else {
+                                            for j in 0..max_j {
+                                                for j2 in 0..max_j {
+                                                    let cell_index = calc_index!(x + j, y + j2, z);
+                                                    let index = (cell_index as usize + i) * 3 + 0;
+                                                    mark_buffer[index] = (true, true);
+                                                }
                                             }
-
-                                            max_j += 1;
                                         }
+
+                                        // Create new quad
+                                        let face_x0_y0 = &face;
+                                        let face_x1_y0 = v_faces2
+                                            [(calc_index!(x + max_j - 1, y, z) as usize + i) * 3 + 0]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_x0_y1 = v_faces2
+                                            [(calc_index!(x, y + max_j - 1, z) as usize + i) * 3 + 0]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_x1_y1 =
+                                            v_faces2[(calc_index!(x + max_j - 1, y + max_j - 1, z) as usize
+                                                + i)
+                                                * 3
+                                                + 0]
+                                            .as_ref()
+                                            .unwrap();
+
+                                        v_faces.push([
+                                            face_x0_y1[0],
+                                            face_x1_y1[1],
+                                            face_x1_y0[2],
+                                            face_x0_y0[3],
+                                        ]);
+
+                                        // Set correct boundary vertices
+                                        for j in 0..(max_j - 1) {}
                                     }
-
-                                    // Mark used quads
-                                    for j in 0..max_j {
-                                        for j2 in 0..max_j {
-                                            let cell_index = calc_index!(x + j, y + j2, z);
-                                            let index = (cell_index as usize + i) * 3 + 0;
-                                            mark_buffer[index] = true;
-                                        }
-                                    }
-
-                                    // Create new quad
-                                    v_faces.push(face);
-
-                                    // Set correct boundary vertices
-                                    for j in 0..(max_j - 1) {}
                                 }
                             }
 
-                            // XZ plane
+                            /*// XZ plane
                             {
+                                let check_mark_single = |x: usize, z: usize| -> bool {
+                                    mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 1]
+                                };
                                 let check_mark = |x: usize, z: usize| -> bool {
                                     mark_buffer[(calc_index!(x - 1, y, z - 1) as usize + i) * 3 + 1]
                                         || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 1]
@@ -1123,7 +1160,7 @@ impl Cluster {
                                     }
 
                                     // Create new quad
-                                    v_faces.push(face);
+                                    //v_faces.push(face);
 
                                     // Set correct boundary vertices
                                     for j in 0..(max_j - 1) {}
@@ -1191,19 +1228,19 @@ impl Cluster {
                                     }
 
                                     // Create new quad
-                                    v_faces.push(face);
+                                    //v_faces.push(face);
 
                                     // Set correct boundary vertices
                                     for j in 0..(max_j - 1) {}
                                 }
-                            }
+                            }*/
                         }
                     } else {
                         for i in 0..MAX_CELL_LAYERS {
                             for j in 0..3 {
                                 let index = (cell_index as usize + i as usize) * 3 + j;
                                 if let Some(face) = v_faces2[index] {
-                                    v_faces.push(face);
+                                    //v_faces.push(face);
                                 }
                             }
                         }
@@ -1211,6 +1248,8 @@ impl Cluster {
                 }
             }
         }
+
+        // TODO: separate triangulation and optimization into different functions
 
         // Generate mesh
         // -------------------------------------------------------------------------------------------------------------
