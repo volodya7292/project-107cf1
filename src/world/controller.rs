@@ -2,6 +2,7 @@ use crate::object::cluster;
 use crate::object::cluster::{Cluster, ClusterAdjacency};
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use specs::WorldExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -9,20 +10,22 @@ use std::time::Instant;
 
 pub const MAX_LOD: usize = 4;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct WorldCluster {
+    cluster: Arc<Mutex<Cluster>>,
     entity: specs::Entity,
     creation_time_secs: u64,
+    generated: bool,
 }
 
-pub struct WorldRenderer {
+pub struct WorldController {
     renderer: Arc<Mutex<Renderer>>,
     render_distance: u32, // in meters
     camera_pos_in_clusters: [i32; 3],
     clusters: [HashMap<[i32; 3], WorldCluster>; MAX_LOD + 1], // [LOD] -> clusters
 }
 
-impl WorldRenderer {
+impl WorldController {
     const MIN_RENDER_DISTANCE: u32 = 128;
     const MAX_RENDER_DISTANCE: u32 = 8192;
 
@@ -333,7 +336,7 @@ impl WorldRenderer {
             for level in &mut self.clusters {
                 *level = level
                     .iter()
-                    .filter_map(|(&pos, &world_cluster)| {
+                    .filter_map(|(&pos, world_cluster)| {
                         let dist = na::Vector3::<f32>::new(
                             (pos[0] - cam_pos_v[0]) as f32,
                             (pos[1] - cam_pos_v[1]) as f32,
@@ -349,7 +352,7 @@ impl WorldRenderer {
                             entities_to_remove.push(world_cluster.entity);
                             None
                         } else {
-                            Some((pos, world_cluster))
+                            Some((pos, world_cluster.clone()))
                         }
                     })
                     .collect();
@@ -359,11 +362,20 @@ impl WorldRenderer {
         }
 
         // Update clusters
+        {
+            for level in &self.clusters {
+                level.par_iter().for_each(|(pos, world_cluster)| {
+                    if let Ok(mut cluster) = world_cluster.cluster.try_lock() {
+                        cluster.update_mesh(0.0);
+                    }
+                });
+            }
+        }
     }
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>) -> WorldRenderer {
-    WorldRenderer {
+pub fn new(renderer: &Arc<Mutex<Renderer>>) -> WorldController {
+    WorldController {
         renderer: Arc::clone(renderer),
         render_distance: 0,
         camera_pos_in_clusters: Default::default(),

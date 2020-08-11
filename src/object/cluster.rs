@@ -1,4 +1,5 @@
 use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
+use crate::utils;
 use nalgebra as na;
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ pub const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
 pub const MAX_CELL_LAYERS: usize = 4; // MAX: 255
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
+const ALIGNED_SECTOR_MAX_CELLS: usize = ALIGNED_SECTOR_VOLUME * MAX_CELL_LAYERS;
 const ISO_VALUE_NORM: f32 = 0.5;
 const ISO_VALUE_INT: i16 = (ISO_VALUE_NORM * 255.0) as i16;
 
@@ -414,7 +416,8 @@ impl Cluster {
         self.adjacency = adjacency;
     }
 
-    fn triangulate(&self, sector_pos: [u8; 3]) -> (Vec<Vertex>, Vec<u32>) {
+    /// details: max detail deviation [0;1].
+    fn triangulate(&self, sector_pos: [u8; 3], details: f32) -> (Vec<Vertex>, Vec<u32>) {
         let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
 
         let init_den_point = DensityPoint {
@@ -773,25 +776,28 @@ impl Cluster {
         }
 
         // Vertex components
-        let mut v_positions =
-            vec![na::Vector3::new(f32::NAN, f32::NAN, f32::NAN); ALIGNED_SECTOR_VOLUME * MAX_CELL_LAYERS];
-        let mut v_density_indices = vec![0u32; ALIGNED_SECTOR_VOLUME * MAX_CELL_LAYERS];
+        let mut v_positions: Vec<na::Vector3<f32>> =
+            vec![na::Vector3::new(f32::NAN, f32::NAN, f32::NAN); ALIGNED_SECTOR_MAX_CELLS];
+        let mut v_density_indices = vec![0u32; ALIGNED_SECTOR_MAX_CELLS];
+
+        let mut v_faces2: Vec<Option<[u32; 4]>> = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
+        let mut v_face_normals = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
 
         // Faces index buffer
         let mut v_faces = Vec::<[u32; 4]>::with_capacity(SECTOR_VOLUME * 12);
         // Density buffer
         let mut density_infos = Vec::<[u32; 4]>::with_capacity(ALIGNED_SECTOR_VOLUME);
 
+        macro_rules! calc_index {
+            ($x: expr, $y: expr, $z: expr) => {
+                (($z + $y * ALIGNED_SECTOR_SIZE + $x * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE)
+                    * MAX_CELL_LAYERS) as u32
+            };
+        }
+
         for x in 0..(SECTOR_SIZE + 1) {
             for y in 0..(SECTOR_SIZE + 1) {
                 for z in 0..(SECTOR_SIZE + 1) {
-                    macro_rules! calc_index {
-                        ($x: expr, $y: expr, $z: expr) => {
-                            (($z + $y * ALIGNED_SECTOR_SIZE + $x * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE)
-                                * MAX_CELL_LAYERS) as u32
-                        };
-                    }
-
                     // Obtain 2x2x2 indices for v_positions & v_density_indices arrays
                     let indices = [
                         calc_index!(x, y, z),
@@ -874,14 +880,14 @@ impl Cluster {
                         let s2 = points[7].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some([
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[3] + i.min(densities[3].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                 ]);
                             } else {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[3] + i.min(densities[3].1 - 1) as u32,
@@ -894,14 +900,14 @@ impl Cluster {
                         let s1 = points[5].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s2 {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some([
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[5] + i.min(densities[5].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                 ]);
                             } else {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[1] + i.min(densities[1].1 - 1) as u32,
                                     indices[5] + i.min(densities[5].1 - 1) as u32,
@@ -914,19 +920,148 @@ impl Cluster {
                         let s1 = points[6].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some([
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                     indices[6] + i.min(densities[6].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                 ]);
                             } else {
-                                v_faces.push([
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some([
                                     indices[0] + i.min(densities[0].1 - 1) as u32,
                                     indices[2] + i.min(densities[2].1 - 1) as u32,
                                     indices[6] + i.min(densities[6].1 - 1) as u32,
                                     indices[4] + i.min(densities[4].1 - 1) as u32,
                                 ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Optimize mesh
+        // -------------------------------------------------------------------------------------------------------------
+        let mut mark_buffer = vec![false; ALIGNED_SECTOR_MAX_CELLS];
+        //if details > 0.0 {
+        {
+            fn calc_normal(vertices: [na::Vector3<f32>; 4]) -> na::Vector3<f32> {
+                let normal0 = utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
+                let normal1 = utils::calc_triangle_normal(&vertices[0], &vertices[2], &vertices[3]);
+                (normal0 + normal1) / 2.0
+            }
+            let mut get_normal = |face: &[u32; 4], index: usize| -> na::Vector3<f32> {
+                let normal = &mut v_face_normals[index as usize];
+
+                if normal.is_none() {
+                    let v0 = v_positions[face[0] as usize];
+                    let v1 = v_positions[face[1] as usize];
+                    let v2 = v_positions[face[2] as usize];
+                    let v3 = v_positions[face[3] as usize];
+
+                    *normal = Some(calc_normal([v0, v1, v2, v3]));
+                }
+
+                normal.unwrap()
+            };
+            macro_rules! check_cell {
+                ($x: expr, $y: expr, $z: expr, $layer: expr, $s: expr, $normal: expr) => {{
+                    let cell_index = calc_index!($x, $y, $z);
+                    let index = (cell_index as usize + $layer as usize) * 3 + $s;
+                    let face = v_faces2[index];
+
+                    if let Some(face) = face {
+                        let normal2 = get_normal(&face, index);
+                        let diff = 1.0 - $normal.dot(&normal2);
+                        diff < details
+                    } else {
+                        false
+                    }
+                }};
+            }
+
+            for x in 0..SECTOR_SIZE {
+                for y in 0..SECTOR_SIZE {
+                    for z in 0..SECTOR_SIZE {
+                        let cell_index = calc_index!(x, y, z);
+
+                        // TODO: check if this cell or neighbour cells already used before starting merge
+
+                        // XY plane
+                        if x > 0
+                            && y > 0
+                            && z > 0
+                            && x < SECTOR_SIZE - 1
+                            && y < SECTOR_SIZE - 1
+                            && z < SECTOR_SIZE - 1
+                        {
+                            for i in 0..MAX_CELL_LAYERS {
+                                let index = (cell_index as usize + i as usize) * 3 + 0;
+                                let face = v_faces2[index];
+
+                                if let Some(face) = face {
+                                    let normal = get_normal(&face, index);
+
+                                    let mut max_j = 1_usize;
+
+                                    for j in 1..(SECTOR_SIZE - x.max(y)) {
+                                        // check corner
+                                        // TODO: check if this cell or neighbour cells already used in merge
+                                        let a = check_cell!(x + j, y + j, z, i, 0, normal);
+                                        if !a {
+                                            break;
+                                        }
+
+                                        // check two edges
+                                        let mut d = false;
+                                        for j2 in 0..j {
+                                            // TODO: check if this cell or neighbour cells already used in merge
+                                            let a = check_cell!(x + j, y + j2, z, i, 0, normal);
+                                            if !a {
+                                                d = true;
+                                                break;
+                                            }
+                                            // TODO: check if this cell or neighbour cells already used in merge
+                                            let a = check_cell!(x + j2, y + j, z, i, 0, normal);
+                                            if !a {
+                                                d = true;
+                                                break;
+                                            }
+                                        }
+                                        if d {
+                                            break;
+                                        }
+
+                                        max_j += 1;
+                                    }
+
+                                    // Mark used quads
+                                    for j in 0..max_j {
+                                        for j2 in 0..max_j {
+                                            let cell_index = calc_index!(x + j, y + j2, z);
+                                            let index = cell_index as usize + i as usize;
+                                            mark_buffer[index] = true;
+                                        }
+                                    }
+
+                                    // Create new quad
+                                    // ..
+
+                                    // Set correct boundary vertices
+                                    for j in 0..(max_j - 1) {}
+                                }
+                            }
+                        }
+
+                        // ----------------------------------------------------------------------
+                        // ----------------------------------------------------------------------
+                        // TODO: remove
+                        for j in 0..3 {
+                            for i in 0..MAX_CELL_LAYERS {
+                                let index = (cell_index as usize + i as usize) * 3 + j;
+                                if let Some(face) = v_faces2[index] {
+                                    v_faces.push(face);
+                                }
                             }
                         }
                     }
@@ -981,7 +1116,7 @@ impl Cluster {
         (vertices, indices)
     }
 
-    pub fn update_mesh(&mut self) {
+    pub fn update_mesh(&mut self, lod: f32) {
         let mut changed = false;
 
         let mut prev_vertex_count = 0;
@@ -1017,7 +1152,7 @@ impl Cluster {
 
                     let (mut sector_vertices, sector_indices) = if sector_changed {
                         let (sector_vertices, mut sector_indices) =
-                            self.triangulate([x as u8, y as u8, z as u8]);
+                            self.triangulate([x as u8, y as u8, z as u8], lod);
 
                         // Adjust indices
                         for index in &mut sector_indices {

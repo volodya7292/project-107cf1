@@ -566,13 +566,10 @@ impl Renderer {
             let mut transform_comp = self.world.write_component::<component::Transform>();
             let renderer_comp = self.world.read_component::<component::Renderer>();
 
-            (&mut transform_comp.par_restrict_mut(), &renderer_comp)
+            (&mut transform_comp, &renderer_comp)
                 .par_join()
-                .for_each(|(mut transform_comps, renderer)| {
-                    let transform = transform_comps.get_unchecked();
+                .for_each(|(transform, renderer)| {
                     if transform.changed {
-                        let transform = transform_comps.get_mut_unchecked();
-
                         let matrix = transform.matrix();
                         let matrix_bytes = unsafe {
                             slice::from_raw_parts(

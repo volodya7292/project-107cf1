@@ -193,7 +193,7 @@ pub fn new(
         cluster.set_densities(&points);
 
         let t0 = Instant::now();
-        cluster.update_mesh();
+        cluster.update_mesh(0.001);
         let t1 = Instant::now();
 
         println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());
@@ -201,7 +201,6 @@ pub fn new(
 
     {
         let mut renderer = program.renderer.lock().unwrap();
-        renderer.world_mut().register::<cluster::Cluster>();
 
         renderer
             .world_mut()
@@ -213,7 +212,6 @@ pub fn new(
             ))
             .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
             .with(component::Renderer::new(device, &mat_pipelines.cluster(), false))
-            .with(cluster)
             .build();
     }
 
