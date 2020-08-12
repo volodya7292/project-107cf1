@@ -951,20 +951,22 @@ impl Cluster {
             let normal1 = utils::calc_triangle_normal(&vertices[0], &vertices[2], &vertices[3]);
             (normal0 + normal1) / 2.0
         }
-        let mut get_normal = |face: &[u32; 4], index: usize| -> na::Vector3<f32> {
-            let normal = &mut v_face_normals[index as usize];
+        macro_rules! get_normal {
+            ($face: expr, $index: expr) => {{
+                let normal = &mut v_face_normals[$index as usize];
 
-            if normal.is_none() {
-                let v0 = v_positions[face[0] as usize];
-                let v1 = v_positions[face[1] as usize];
-                let v2 = v_positions[face[2] as usize];
-                let v3 = v_positions[face[3] as usize];
+                if normal.is_none() {
+                    let v0 = v_positions[$face[0] as usize];
+                    let v1 = v_positions[$face[1] as usize];
+                    let v2 = v_positions[$face[2] as usize];
+                    let v3 = v_positions[$face[3] as usize];
 
-                *normal = Some(calc_normal([v0, v1, v2, v3]));
-            }
+                    *normal = Some(calc_normal([v0, v1, v2, v3]));
+                }
 
-            normal.unwrap()
-        };
+                normal.unwrap()
+            }};
+        }
         macro_rules! check_merge {
             ($x: expr, $y: expr, $z: expr, $layer: expr, $s: expr, $normal: expr) => {{
                 let cell_index = calc_index!($x, $y, $z);
@@ -972,7 +974,7 @@ impl Cluster {
                 let face = v_faces2[index];
 
                 if let Some(face) = face {
-                    let normal2 = get_normal(&face, index);
+                    let normal2 = get_normal!(&face, index);
                     let diff = 1.0 - $normal.dot(&normal2);
                     diff < details
                 } else {
@@ -1018,11 +1020,11 @@ impl Cluster {
 
                                 if !check_mark_single(x, y) {
                                     if let Some(face) = face {
-                                        let normal = get_normal(&face, index);
+                                        let normal = get_normal!(&face, index);
                                         let mut max_j = 1_usize;
 
                                         if !check_mark(x, y) {
-                                            for j in 1..(SECTOR_SIZE - x.max(y)) {
+                                            for j in 1..(SECTOR_SIZE - x.max(y) - 1) {
                                                 // Check corner
                                                 if check_mark(x + j, y + j)
                                                     || !check_merge!(x + j, y + j, z, i, 0, normal)
@@ -1091,7 +1093,39 @@ impl Cluster {
                                         ]);
 
                                         // Set correct boundary vertices
-                                        for j in 0..(max_j - 1) {}
+                                        let x0_start = v_positions[face_x0_y0[3] as usize];
+                                        let x0_end = v_positions[face_x0_y1[0] as usize];
+                                        let x0_step = (x0_end - x0_start) / (max_j as f32);
+
+                                        let x1_start = v_positions[face_x1_y0[2] as usize];
+                                        let x1_end = v_positions[face_x1_y1[1] as usize];
+                                        let x1_step = (x1_end - x1_start) / (max_j as f32);
+
+                                        let y0_start = v_positions[face_x0_y0[3] as usize];
+                                        let y0_end = v_positions[face_x1_y0[2] as usize];
+                                        let y0_step = (y0_end - y0_start) / (max_j as f32);
+
+                                        let y1_start = v_positions[face_x0_y1[0] as usize];
+                                        let y1_end = v_positions[face_x1_y1[1] as usize];
+                                        let y1_step = (y1_end - y1_start) / (max_j as f32);
+
+                                        for j in 1..max_j {
+                                            // x0 edge
+                                            let index = calc_index!(x, y + j, z) as usize + i;
+                                            v_positions[index] = x0_start + x0_step * (j as f32);
+
+                                            // x1 edge
+                                            let index = calc_index!(x + max_j, y + j, z) as usize + i;
+                                            v_positions[index] = x1_start + x1_step * (j as f32);
+
+                                            // y0 edge
+                                            let index = calc_index!(x + j, y, z) as usize + i;
+                                            v_positions[index] = y0_start + y0_step * (j as f32);
+
+                                            // y1 edge
+                                            let index = calc_index!(x + j, y + max_j, z) as usize + i;
+                                            v_positions[index] = y1_start + y1_step * (j as f32);
+                                        }
                                     }
                                 }
                             }
