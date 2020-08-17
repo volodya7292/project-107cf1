@@ -106,7 +106,7 @@ fn main() {
                 tex_coord: Vector2::new(2.0, 0.0),
             },
         ],
-        &[],
+        None,
     );
 
     let _entity = renderer

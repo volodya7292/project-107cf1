@@ -1,4 +1,7 @@
+use crate::renderer::vertex_mesh;
+use crate::renderer::vertex_mesh::VertexImpl;
 use nalgebra as na;
+use std::collections::{hash_map, HashMap, HashSet};
 use std::mem;
 
 pub fn is_pow_of_2(n: u64) -> bool {

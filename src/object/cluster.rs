@@ -781,7 +781,7 @@ impl Cluster {
             vec![na::Vector3::new(f32::NAN, f32::NAN, f32::NAN); ALIGNED_SECTOR_MAX_CELLS];
         let mut v_density_indices = vec![0u32; ALIGNED_SECTOR_MAX_CELLS];
 
-        let mut v_faces2: Vec<Option<[u32; 4]>> = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
+        let mut v_faces2: Vec<Option<([u32; 4], bool)>> = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
         let mut v_face_normals = vec![None; ALIGNED_SECTOR_MAX_CELLS * 3];
 
         // Faces index buffer
@@ -881,19 +881,29 @@ impl Cluster {
                         let s2 = points[7].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some([
-                                    indices[2] + i.min(densities[2].1 - 1) as u32,
-                                    indices[3] + i.min(densities[3].1 - 1) as u32,
-                                    indices[1] + i.min(densities[1].1 - 1) as u32,
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some((
+                                    [
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,
+                                        indices[3] + i.min(densities[3].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                    ],
+                                    false,
+                                ));
                             } else {
-                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some([
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                    indices[1] + i.min(densities[1].1 - 1) as u32,
-                                    indices[3] + i.min(densities[3].1 - 1) as u32,
-                                    indices[2] + i.min(densities[2].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3] = Some((
+                                    [
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,
+                                        indices[3] + i.min(densities[3].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        /*indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[3] + i.min(densities[3].1 - 1) as u32,
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,*/
+                                    ],
+                                    true,
+                                ));
                             }
                         }
 
@@ -901,19 +911,29 @@ impl Cluster {
                         let s1 = points[5].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s2 {
-                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some([
-                                    indices[4] + i.min(densities[4].1 - 1) as u32,
-                                    indices[5] + i.min(densities[5].1 - 1) as u32,
-                                    indices[1] + i.min(densities[1].1 - 1) as u32,
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some((
+                                    [
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,
+                                        indices[5] + i.min(densities[5].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                    ],
+                                    false,
+                                ));
                             } else {
-                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some([
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                    indices[1] + i.min(densities[1].1 - 1) as u32,
-                                    indices[5] + i.min(densities[5].1 - 1) as u32,
-                                    indices[4] + i.min(densities[4].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 1] = Some((
+                                    [
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,
+                                        indices[5] + i.min(densities[5].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        /*indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        indices[1] + i.min(densities[1].1 - 1) as u32,
+                                        indices[5] + i.min(densities[5].1 - 1) as u32,
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,*/
+                                    ],
+                                    true,
+                                ));
                             }
                         }
 
@@ -921,19 +941,29 @@ impl Cluster {
                         let s1 = points[6].density > ISO_VALUE_INT as u8;
                         if s1 != s2 {
                             if s1 {
-                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some([
-                                    indices[4] + i.min(densities[4].1 - 1) as u32,
-                                    indices[6] + i.min(densities[6].1 - 1) as u32,
-                                    indices[2] + i.min(densities[2].1 - 1) as u32,
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some((
+                                    [
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,
+                                        indices[6] + i.min(densities[6].1 - 1) as u32,
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                    ],
+                                    false,
+                                ));
                             } else {
-                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some([
-                                    indices[0] + i.min(densities[0].1 - 1) as u32,
-                                    indices[2] + i.min(densities[2].1 - 1) as u32,
-                                    indices[6] + i.min(densities[6].1 - 1) as u32,
-                                    indices[4] + i.min(densities[4].1 - 1) as u32,
-                                ]);
+                                v_faces2[(indices[0] as usize + i as usize) * 3 + 2] = Some((
+                                    [
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,
+                                        indices[6] + i.min(densities[6].1 - 1) as u32,
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,
+                                        indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        /*indices[0] + i.min(densities[0].1 - 1) as u32,
+                                        indices[2] + i.min(densities[2].1 - 1) as u32,
+                                        indices[6] + i.min(densities[6].1 - 1) as u32,
+                                        indices[4] + i.min(densities[4].1 - 1) as u32,*/
+                                    ],
+                                    true,
+                                ));
                             }
                         }
                     }
@@ -943,7 +973,8 @@ impl Cluster {
 
         // Optimize mesh
         // -------------------------------------------------------------------------------------------------------------
-        let mut mark_buffer = vec![(false, false); ALIGNED_SECTOR_MAX_CELLS * 3];
+        let mut use_marks = vec![false; ALIGNED_SECTOR_MAX_CELLS * 3];
+        let mut merge_marks = vec![false; ALIGNED_SECTOR_MAX_CELLS];
         //if details > 0.0 {
 
         fn calc_normal(vertices: [na::Vector3<f32>; 4]) -> na::Vector3<f32> {
@@ -956,10 +987,10 @@ impl Cluster {
                 let normal = &mut v_face_normals[$index as usize];
 
                 if normal.is_none() {
-                    let v0 = v_positions[$face[0] as usize];
-                    let v1 = v_positions[$face[1] as usize];
-                    let v2 = v_positions[$face[2] as usize];
-                    let v3 = v_positions[$face[3] as usize];
+                    let v0 = v_positions[$face.0[0] as usize];
+                    let v1 = v_positions[$face.0[1] as usize];
+                    let v2 = v_positions[$face.0[2] as usize];
+                    let v3 = v_positions[$face.0[3] as usize];
 
                     *normal = Some(calc_normal([v0, v1, v2, v3]));
                 }
@@ -998,71 +1029,66 @@ impl Cluster {
                         for i in 0..MAX_CELL_LAYERS {
                             // XY plane
                             {
-                                let check_mark_single = |x: usize, y: usize| -> bool {
-                                    mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0].0
+                                let check_quad_usage = |x: usize, y: usize| -> bool {
+                                    use_marks[(calc_index!(x, y, z) as usize + i) * 3 + 0]
                                 };
-                                let check_mark = |x: usize, y: usize| -> bool {
-                                    mark_buffer[(calc_index!(x - 1, y - 1, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x - 1, y + 1, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x + 1, y - 1, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 0].1
-                                        || mark_buffer[(calc_index!(x + 1, y + 1, z) as usize + i) * 3 + 0].1
+                                let check_merge_marks = |x: usize, y: usize| -> bool {
+                                    merge_marks[calc_index!(x, y, z) as usize + i]
+                                        || merge_marks[calc_index!(x + 1, y, z) as usize + i]
+                                        || merge_marks[calc_index!(x, y + 1, z) as usize + i]
+                                        || merge_marks[calc_index!(x + 1, y + 1, z) as usize + i]
                                 };
 
                                 let index = (cell_index as usize + i) * 3 + 0;
                                 let face = v_faces2[index];
 
-                                // FIXME: if !check_mark(x, y)
-
-                                if !check_mark_single(x, y) {
+                                if !check_quad_usage(x, y) {
                                     if let Some(face) = face {
                                         let normal = get_normal!(&face, index);
-                                        let mut max_j = 1_usize;
 
-                                        if !check_mark(x, y) {
-                                            for j in 1..(SECTOR_SIZE - x.max(y) - 1) {
-                                                // Check corner
-                                                if check_mark(x + j, y + j)
-                                                    || !check_merge!(x + j, y + j, z, i, 0, normal)
-                                                {
-                                                    break;
-                                                }
+                                        let mut w = 1;
+                                        let mut h = 1;
 
-                                                // Check two edges
-                                                let mut status = true;
+                                        if !check_merge_marks(x, y) {
+                                            let mut prev_max_y2 = SECTOR_SIZE - y - 2;
 
-                                                for j2 in 0..j {
-                                                    if check_mark(x + j, y + j2)
-                                                        || !check_merge!(x + j, y + j2, z, i, 0, normal)
-                                                        || check_mark(x + j2, y + j)
-                                                        || !check_merge!(x + j2, y + j, z, i, 0, normal)
+                                            for x2 in 0..(SECTOR_SIZE - x - 2) {
+                                                let mut max_y2 = 0;
+
+                                                for y2 in 0..prev_max_y2 {
+                                                    if check_quad_usage(x + x2, y + y2)
+                                                        || check_merge_marks(x + x2, y + y2)
+                                                        || !check_merge!(x + x2, y + y2, z, i, 0, normal)
                                                     {
-                                                        status = false;
                                                         break;
                                                     }
-                                                }
-                                                if !status {
-                                                    break;
+
+                                                    max_y2 += 1;
                                                 }
 
-                                                max_j += 1;
+                                                if (x2 * prev_max_y2) < ((x2 + 1) * max_y2) {
+                                                    w = x2 + 1;
+                                                    h = max_y2;
+                                                    prev_max_y2 = max_y2;
+                                                } else {
+                                                    break;
+                                                }
                                             }
                                         }
 
                                         // Mark used quads
-                                        if max_j == 1 {
+                                        if w == 1 && h == 1 {
                                             let index = (calc_index!(x, y, z) as usize + i) * 3 + 0;
-                                            mark_buffer[index].0 = true;
+                                            use_marks[index] = true;
                                         } else {
-                                            for j in 0..max_j {
-                                                for j2 in 0..max_j {
-                                                    let cell_index = calc_index!(x + j, y + j2, z);
-                                                    let index = (cell_index as usize + i) * 3 + 0;
-                                                    mark_buffer[index] = (true, true);
+                                            for x2 in 0..(w + 1) {
+                                                for y2 in 0..(h + 1) {
+                                                    let index = calc_index!(x + x2, y + y2, z) as usize + i;
+                                                    merge_marks[index] = true;
+
+                                                    if x2 < w && y2 < h {
+                                                        use_marks[(index) * 3 + 0] = true;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1070,210 +1096,372 @@ impl Cluster {
                                         // Create new quad
                                         let face_x0_y0 = &face;
                                         let face_x1_y0 = v_faces2
-                                            [(calc_index!(x + max_j - 1, y, z) as usize + i) * 3 + 0]
+                                            [(calc_index!(x + w - 1, y, z) as usize + i) * 3 + 0]
                                             .as_ref()
                                             .unwrap();
                                         let face_x0_y1 = v_faces2
-                                            [(calc_index!(x, y + max_j - 1, z) as usize + i) * 3 + 0]
+                                            [(calc_index!(x, y + h - 1, z) as usize + i) * 3 + 0]
                                             .as_ref()
                                             .unwrap();
-                                        let face_x1_y1 =
-                                            v_faces2[(calc_index!(x + max_j - 1, y + max_j - 1, z) as usize
-                                                + i)
-                                                * 3
-                                                + 0]
+                                        let face_x1_y1 = v_faces2
+                                            [(calc_index!(x + w - 1, y + h - 1, z) as usize + i) * 3 + 0]
                                             .as_ref()
                                             .unwrap();
 
-                                        v_faces.push([
-                                            face_x0_y1[0],
-                                            face_x1_y1[1],
-                                            face_x1_y0[2],
-                                            face_x0_y0[3],
-                                        ]);
+                                        if face.1 {
+                                            v_faces.push([
+                                                face_x0_y0.0[3],
+                                                face_x1_y0.0[2],
+                                                face_x1_y1.0[1],
+                                                face_x0_y1.0[0],
+                                            ]);
+                                        } else {
+                                            v_faces.push([
+                                                face_x0_y1.0[0],
+                                                face_x1_y1.0[1],
+                                                face_x1_y0.0[2],
+                                                face_x0_y0.0[3],
+                                            ]);
+                                        }
 
                                         // Set correct boundary vertices
-                                        let x0_start = v_positions[face_x0_y0[3] as usize];
-                                        let x0_end = v_positions[face_x0_y1[0] as usize];
-                                        let x0_step = (x0_end - x0_start) / (max_j as f32);
+                                        let x0_start = v_positions[face_x0_y0.0[3] as usize];
+                                        let x0_end = v_positions[face_x0_y1.0[0] as usize];
+                                        let x0_step = (x0_end - x0_start) / (h as f32);
 
-                                        let x1_start = v_positions[face_x1_y0[2] as usize];
-                                        let x1_end = v_positions[face_x1_y1[1] as usize];
-                                        let x1_step = (x1_end - x1_start) / (max_j as f32);
+                                        let x1_start = v_positions[face_x1_y0.0[2] as usize];
+                                        let x1_end = v_positions[face_x1_y1.0[1] as usize];
+                                        let x1_step = (x1_end - x1_start) / (h as f32);
 
-                                        let y0_start = v_positions[face_x0_y0[3] as usize];
-                                        let y0_end = v_positions[face_x1_y0[2] as usize];
-                                        let y0_step = (y0_end - y0_start) / (max_j as f32);
+                                        let y0_start = v_positions[face_x0_y0.0[3] as usize];
+                                        let y0_end = v_positions[face_x1_y0.0[2] as usize];
+                                        let y0_step = (y0_end - y0_start) / (w as f32);
 
-                                        let y1_start = v_positions[face_x0_y1[0] as usize];
-                                        let y1_end = v_positions[face_x1_y1[1] as usize];
-                                        let y1_step = (y1_end - y1_start) / (max_j as f32);
+                                        let y1_start = v_positions[face_x0_y1.0[0] as usize];
+                                        let y1_end = v_positions[face_x1_y1.0[1] as usize];
+                                        let y1_step = (y1_end - y1_start) / (w as f32);
 
-                                        for j in 1..max_j {
-                                            // x0 edge
-                                            let index = calc_index!(x, y + j, z) as usize + i;
-                                            v_positions[index] = x0_start + x0_step * (j as f32);
-
-                                            // x1 edge
-                                            let index = calc_index!(x + max_j, y + j, z) as usize + i;
-                                            v_positions[index] = x1_start + x1_step * (j as f32);
-
+                                        for x2 in 1..w {
                                             // y0 edge
-                                            let index = calc_index!(x + j, y, z) as usize + i;
-                                            v_positions[index] = y0_start + y0_step * (j as f32);
+                                            let index = calc_index!(x + x2, y, z) as usize + i;
+                                            v_positions[index] = y0_start + y0_step * (x2 as f32);
 
                                             // y1 edge
-                                            let index = calc_index!(x + j, y + max_j, z) as usize + i;
-                                            v_positions[index] = y1_start + y1_step * (j as f32);
+                                            let index = calc_index!(x + x2, y + h, z) as usize + i;
+                                            v_positions[index] = y1_start + y1_step * (x2 as f32);
+                                        }
+
+                                        for y2 in 1..h {
+                                            // x0 edge
+                                            let index = calc_index!(x, y + y2, z) as usize + i;
+                                            v_positions[index] = x0_start + x0_step * (y2 as f32);
+
+                                            // x1 edge
+                                            let index = calc_index!(x + w, y + y2, z) as usize + i;
+                                            v_positions[index] = x1_start + x1_step * (y2 as f32);
                                         }
                                     }
                                 }
                             }
 
-                            /*// XZ plane
+                            // XZ plane
                             {
-                                let check_mark_single = |x: usize, z: usize| -> bool {
-                                    mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 1]
+                                let check_quad_usage = |x: usize, z: usize| -> bool {
+                                    use_marks[(calc_index!(x, y, z) as usize + i) * 3 + 1]
                                 };
-                                let check_mark = |x: usize, z: usize| -> bool {
-                                    mark_buffer[(calc_index!(x - 1, y, z - 1) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x - 1, y, z) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x - 1, y, z + 1) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x, y, z - 1) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x, y, z + 1) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x + 1, y, z - 1) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x + 1, y, z) as usize + i) * 3 + 1]
-                                        || mark_buffer[(calc_index!(x + 1, y, z + 1) as usize + i) * 3 + 1]
+                                let check_merge_marks = |x: usize, z: usize| -> bool {
+                                    merge_marks[calc_index!(x, y, z) as usize + i]
+                                        || merge_marks[calc_index!(x + 1, y, z) as usize + i]
+                                        || merge_marks[calc_index!(x, y, z + 1) as usize + i]
+                                        || merge_marks[calc_index!(x + 1, y, z + 1) as usize + i]
                                 };
 
                                 let index = (cell_index as usize + i) * 3 + 1;
                                 let face = v_faces2[index];
 
-                                if let Some(face) = face {
-                                    let normal = get_normal(&face, index);
-                                    let mut max_j = 1_usize;
+                                if !check_quad_usage(x, z) {
+                                    if let Some(face) = face {
+                                        let normal = get_normal!(&face, index);
 
-                                    if !check_mark(x, z) {
-                                        for j in 1..(SECTOR_SIZE - x.max(z)) {
-                                            // Check corner
-                                            if check_mark(x + j, z + j)
-                                                || !check_merge!(x + j, y, z + j, i, 1, normal)
-                                            {
-                                                break;
-                                            }
+                                        let mut w = 1;
+                                        let mut h = 1;
 
-                                            // Check two edges
-                                            let mut status = true;
+                                        if !check_merge_marks(x, z) {
+                                            let mut prev_max_z2 = SECTOR_SIZE - z - 2;
 
-                                            for j2 in 0..j {
-                                                if check_mark(x + j, z + j2)
-                                                    || !check_merge!(x + j, y, z + j2, i, 1, normal)
-                                                    || check_mark(x + j2, z + j)
-                                                    || !check_merge!(x + j2, y, z + j, i, 1, normal)
-                                                {
-                                                    status = false;
+                                            for x2 in 0..(SECTOR_SIZE - x - 2) {
+                                                let mut max_z2 = 0;
+
+                                                for z2 in 0..prev_max_z2 {
+                                                    if check_quad_usage(x + x2, z + z2)
+                                                        || check_merge_marks(x + x2, z + z2)
+                                                        || !check_merge!(x + x2, y, z + z2, i, 1, normal)
+                                                    {
+                                                        break;
+                                                    }
+
+                                                    max_z2 += 1;
+                                                }
+
+                                                if (x2 * prev_max_z2) < ((x2 + 1) * max_z2) {
+                                                    w = x2 + 1;
+                                                    h = max_z2;
+                                                    prev_max_z2 = max_z2;
+                                                } else {
                                                     break;
                                                 }
                                             }
-                                            if !status {
-                                                break;
+                                        }
+
+                                        // Mark used quads
+                                        if w == 1 && h == 1 {
+                                            let index = (calc_index!(x, y, z) as usize + i) * 3 + 1;
+                                            use_marks[index] = true;
+                                        } else {
+                                            for x2 in 0..(w + 1) {
+                                                for z2 in 0..(h + 1) {
+                                                    let index = calc_index!(x + x2, y, z + z2) as usize + i;
+                                                    merge_marks[index] = true;
+
+                                                    if x2 < w && z2 < h {
+                                                        use_marks[(index) * 3 + 1] = true;
+                                                    }
+                                                }
                                             }
+                                        }
 
-                                            max_j += 1;
+                                        // Create new quad
+                                        let face_x0_z0 = &face;
+                                        let face_x1_z0 = v_faces2
+                                            [(calc_index!(x + w - 1, y, z) as usize + i) * 3 + 1]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_x0_z1 = v_faces2
+                                            [(calc_index!(x, y, z + h - 1) as usize + i) * 3 + 1]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_x1_z1 = v_faces2
+                                            [(calc_index!(x + w - 1, y, z + h - 1) as usize + i) * 3 + 1]
+                                            .as_ref()
+                                            .unwrap();
+
+                                        /*v_faces.push([
+                                            face_x0_z1[0],
+                                            face_x1_z1[1],
+                                            face_x1_z0[2],
+                                            face_x0_z0[3],
+                                        ]);*/
+
+                                        if face.1 {
+                                            v_faces.push([
+                                                face_x0_z0.0[3],
+                                                face_x1_z0.0[2],
+                                                face_x1_z1.0[1],
+                                                face_x0_z1.0[0],
+                                            ]);
+                                        } else {
+                                            v_faces.push([
+                                                face_x0_z1.0[0],
+                                                face_x1_z1.0[1],
+                                                face_x1_z0.0[2],
+                                                face_x0_z0.0[3],
+                                            ]);
+                                        }
+
+                                        // Set correct boundary vertices
+                                        let x0_start = v_positions[face_x0_z0.0[3] as usize];
+                                        let x0_end = v_positions[face_x0_z1.0[0] as usize];
+                                        let x0_step = (x0_end - x0_start) / (h as f32);
+
+                                        let x1_start = v_positions[face_x1_z0.0[2] as usize];
+                                        let x1_end = v_positions[face_x1_z1.0[1] as usize];
+                                        let x1_step = (x1_end - x1_start) / (h as f32);
+
+                                        let z0_start = v_positions[face_x0_z0.0[3] as usize];
+                                        let z0_end = v_positions[face_x1_z0.0[2] as usize];
+                                        let z0_step = (z0_end - z0_start) / (w as f32);
+
+                                        let z1_start = v_positions[face_x0_z1.0[0] as usize];
+                                        let z1_end = v_positions[face_x1_z1.0[1] as usize];
+                                        let z1_step = (z1_end - z1_start) / (w as f32);
+
+                                        for x2 in 1..w {
+                                            // z0 edge
+                                            let index = calc_index!(x + x2, y, z) as usize + i;
+                                            v_positions[index] = z0_start + z0_step * (x2 as f32);
+
+                                            // z1 edge
+                                            let index = calc_index!(x + x2, y, z + h) as usize + i;
+                                            v_positions[index] = z1_start + z1_step * (x2 as f32);
+                                        }
+
+                                        for z2 in 1..h {
+                                            // x0 edge
+                                            let index = calc_index!(x, y, z + z2) as usize + i;
+                                            v_positions[index] = x0_start + x0_step * (z2 as f32);
+
+                                            // x1 edge
+                                            let index = calc_index!(x + w, y, z + z2) as usize + i;
+                                            v_positions[index] = x1_start + x1_step * (z2 as f32);
                                         }
                                     }
-
-                                    // Mark used quads
-                                    for j in 0..max_j {
-                                        for j2 in 0..max_j {
-                                            let cell_index = calc_index!(x + j, y, z + j2);
-                                            let index = (cell_index as usize + i) * 3 + 1;
-                                            mark_buffer[index] = true;
-                                        }
-                                    }
-
-                                    // Create new quad
-                                    //v_faces.push(face);
-
-                                    // Set correct boundary vertices
-                                    for j in 0..(max_j - 1) {}
                                 }
                             }
 
                             // YZ plane
                             {
-                                let check_mark = |y: usize, z: usize| -> bool {
-                                    mark_buffer[(calc_index!(x, y - 1, z - 1) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y - 1, z) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y - 1, z + 1) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y, z - 1) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y, z) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y, z + 1) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y + 1, z - 1) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y + 1, z) as usize + i) * 3 + 2]
-                                        || mark_buffer[(calc_index!(x, y + 1, z + 1) as usize + i) * 3 + 2]
+                                let check_quad_usage = |y: usize, z: usize| -> bool {
+                                    use_marks[(calc_index!(x, y, z) as usize + i) * 3 + 2]
+                                };
+                                let check_merge_marks = |y: usize, z: usize| -> bool {
+                                    merge_marks[calc_index!(x, y, z) as usize + i]
+                                        || merge_marks[calc_index!(x, y + 1, z) as usize + i]
+                                        || merge_marks[calc_index!(x, y, z + 1) as usize + i]
+                                        || merge_marks[calc_index!(x, y + 1, z + 1) as usize + i]
                                 };
 
                                 let index = (cell_index as usize + i) * 3 + 2;
                                 let face = v_faces2[index];
 
-                                if let Some(face) = face {
-                                    let normal = get_normal(&face, index);
-                                    let mut max_j = 1_usize;
+                                if !check_quad_usage(y, z) {
+                                    if let Some(face) = face {
+                                        let normal = get_normal!(&face, index);
 
-                                    if !check_mark(x, y) {
-                                        for j in 1..(SECTOR_SIZE - y.max(z)) {
-                                            // Check corner
-                                            if check_mark(y + j, z + j)
-                                                || !check_merge!(x, y + j, z + j, i, 0, normal)
-                                            {
-                                                break;
-                                            }
+                                        let mut w = 1;
+                                        let mut h = 1;
 
-                                            // Check two edges
-                                            let mut status = true;
+                                        if !check_merge_marks(y, z) {
+                                            let mut prev_max_z2 = SECTOR_SIZE - z - 2;
 
-                                            for j2 in 0..j {
-                                                if check_mark(y + j, z + j2)
-                                                    || !check_merge!(x, y + j, z + j2, i, 0, normal)
-                                                    || check_mark(y + j2, z + j)
-                                                    || !check_merge!(x, y + j2, z + j, i, 0, normal)
-                                                {
-                                                    status = false;
+                                            for y2 in 0..(SECTOR_SIZE - y - 2) {
+                                                let mut max_z2 = 0;
+
+                                                for z2 in 0..prev_max_z2 {
+                                                    if check_quad_usage(y + y2, z + z2)
+                                                        || check_merge_marks(y + y2, z + z2)
+                                                        || !check_merge!(x, y + y2, z + z2, i, 2, normal)
+                                                    {
+                                                        break;
+                                                    }
+
+                                                    max_z2 += 1;
+                                                }
+
+                                                if (y2 * prev_max_z2) < ((y2 + 1) * max_z2) {
+                                                    w = y2 + 1;
+                                                    h = max_z2;
+                                                    prev_max_z2 = max_z2;
+                                                } else {
                                                     break;
                                                 }
                                             }
-                                            if !status {
-                                                break;
+                                        }
+
+                                        // Mark used quads
+                                        if w == 1 && h == 1 {
+                                            let index = (calc_index!(x, y, z) as usize + i) * 3 + 2;
+                                            use_marks[index] = true;
+                                        } else {
+                                            for y2 in 0..(w + 1) {
+                                                for z2 in 0..(h + 1) {
+                                                    let index = calc_index!(x, y + y2, z + z2) as usize + i;
+                                                    merge_marks[index] = true;
+
+                                                    if y2 < w && z2 < h {
+                                                        use_marks[(index) * 3 + 2] = true;
+                                                    }
+                                                }
                                             }
+                                        }
 
-                                            max_j += 1;
+                                        // Create new quad
+                                        let face_y0_z0 = &face;
+                                        let face_y1_z0 = v_faces2
+                                            [(calc_index!(x, y + w - 1, z) as usize + i) * 3 + 2]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_y0_z1 = v_faces2
+                                            [(calc_index!(x, y, z + h - 1) as usize + i) * 3 + 2]
+                                            .as_ref()
+                                            .unwrap();
+                                        let face_y1_z1 = v_faces2
+                                            [(calc_index!(x, y + w - 1, z + h - 1) as usize + i) * 3 + 2]
+                                            .as_ref()
+                                            .unwrap();
+
+                                        if face.1 {
+                                            v_faces.push([
+                                                face_y0_z0.0[3],
+                                                face_y1_z0.0[2],
+                                                face_y1_z1.0[1],
+                                                face_y0_z1.0[0],
+                                            ]);
+                                        } else {
+                                            v_faces.push([
+                                                face_y0_z1.0[0],
+                                                face_y1_z1.0[1],
+                                                face_y1_z0.0[2],
+                                                face_y0_z0.0[3],
+                                            ]);
+                                        }
+
+                                        /*v_faces.push([
+                                            face_y0_z1[0],
+                                            face_y1_z1[1],
+                                            face_y1_z0[2],
+                                            face_y0_z0[3],
+                                        ]);*/
+
+                                        // Set correct boundary vertices
+                                        let y0_start = v_positions[face_y0_z0.0[3] as usize];
+                                        let y0_end = v_positions[face_y0_z1.0[0] as usize];
+                                        let y0_step = (y0_end - y0_start) / (h as f32);
+
+                                        let y1_start = v_positions[face_y1_z0.0[2] as usize];
+                                        let y1_end = v_positions[face_y1_z1.0[1] as usize];
+                                        let y1_step = (y1_end - y1_start) / (h as f32);
+
+                                        let z0_start = v_positions[face_y0_z0.0[3] as usize];
+                                        let z0_end = v_positions[face_y1_z0.0[2] as usize];
+                                        let z0_step = (z0_end - z0_start) / (w as f32);
+
+                                        let z1_start = v_positions[face_y0_z1.0[0] as usize];
+                                        let z1_end = v_positions[face_y1_z1.0[1] as usize];
+                                        let z1_step = (z1_end - z1_start) / (w as f32);
+
+                                        for y2 in 1..w {
+                                            // z0 edge
+                                            let index = calc_index!(x, y + y2, z) as usize + i;
+                                            v_positions[index] = z0_start + z0_step * (y2 as f32);
+
+                                            // z1 edge
+                                            let index = calc_index!(x, y + y2, z + h) as usize + i;
+                                            v_positions[index] = z1_start + z1_step * (y2 as f32);
+                                        }
+
+                                        for z2 in 1..h {
+                                            // y0 edge
+                                            let index = calc_index!(x, y, z + z2) as usize + i;
+                                            v_positions[index] = y0_start + y0_step * (z2 as f32);
+
+                                            // y1 edge
+                                            let index = calc_index!(x, y + w, z + z2) as usize + i;
+                                            v_positions[index] = y1_start + y1_step * (z2 as f32);
                                         }
                                     }
-
-                                    // Mark used quads
-                                    for j in 0..max_j {
-                                        for j2 in 0..max_j {
-                                            let cell_index = calc_index!(x, y + j, z + j2);
-                                            let index = (cell_index as usize + i) * 3 + 2;
-                                            mark_buffer[index] = true;
-                                        }
-                                    }
-
-                                    // Create new quad
-                                    //v_faces.push(face);
-
-                                    // Set correct boundary vertices
-                                    for j in 0..(max_j - 1) {}
                                 }
-                            }*/
+                            }
                         }
                     } else {
                         for i in 0..MAX_CELL_LAYERS {
                             for j in 0..3 {
                                 let index = (cell_index as usize + i as usize) * 3 + j;
                                 if let Some(face) = v_faces2[index] {
+                                    if face.1 {
+                                        v_faces.push([face.0[3], face.0[2], face.0[1], face.0[0]]);
+                                    } else {
+                                        v_faces.push([face.0[0], face.0[1], face.0[2], face.0[3]]);
+                                    }
                                     //v_faces.push(face);
                                 }
                             }
@@ -1409,7 +1597,7 @@ impl Cluster {
             }
         }
 
-        self.vertex_mesh.set_vertices(&vertices, &indices);
+        self.vertex_mesh.set_vertices(&vertices, Some(&indices));
     }
 }
 

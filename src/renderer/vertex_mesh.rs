@@ -15,7 +15,7 @@ pub trait VertexMember {
     fn vk_format() -> vkw::Format;
 }
 
-pub trait Vertex {
+pub trait VertexImpl {
     fn attributes() -> Vec<(u32, vkw::Format)>;
     fn member_info(name: &str) -> Option<(u32, vkw::Format)>;
     fn position(&self) -> &na::Vector3<f32>;
@@ -23,7 +23,7 @@ pub trait Vertex {
 
 macro_rules! vertex_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
-        impl $crate::renderer::vertex_mesh::Vertex for $vertex {
+        impl $crate::renderer::vertex_mesh::VertexImpl for $vertex {
             fn attributes() -> Vec<(u32, vk_wrapper::Format)> {
                 use crate::renderer::vertex_mesh::VertexMember;
 
@@ -116,7 +116,7 @@ impl RawVertexMesh {
     }
 }
 
-pub struct VertexMesh<VertexT: Vertex> {
+pub struct VertexMesh<VertexT: VertexImpl> {
     _type_marker: PhantomData<VertexT>,
     device: Arc<Device>,
     raw: Arc<Mutex<RawVertexMesh>>,
@@ -124,7 +124,7 @@ pub struct VertexMesh<VertexT: Vertex> {
 
 impl<VertexT> VertexMesh<VertexT>
 where
-    VertexT: Vertex + Clone + Default,
+    VertexT: VertexImpl + Clone + Default,
 {
     pub fn raw(&self) -> Arc<Mutex<RawVertexMesh>> {
         Arc::clone(&self.raw)
@@ -174,12 +174,13 @@ where
         indices
     }
 
-    pub fn set_vertices(&mut self, vertices: &[VertexT], indices: &[u32]) {
+    pub fn set_vertices(&mut self, vertices: &[VertexT], indices: Option<&[u32]>) {
         if vertices.is_empty() {
             return;
         }
 
-        let indexed = indices.len() > 0;
+        let indexed = indices.is_some();
+        let indices = indices.unwrap_or(&[]);
 
         let vertex_size = mem::size_of::<VertexT>();
         let index_size = mem::size_of::<u32>();
@@ -277,11 +278,11 @@ where
 }
 
 pub trait VertexMeshCreate {
-    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error>;
+    fn create_vertex_mesh<VertexT: VertexImpl>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error>;
 }
 
 impl VertexMeshCreate for vkw::Device {
-    fn create_vertex_mesh<VertexT: Vertex>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error> {
+    fn create_vertex_mesh<VertexT: VertexImpl>(self: &Arc<Self>) -> Result<VertexMesh<VertexT>, Error> {
         const POS_FORMAT: vkw::Format = vkw::Format::RGB32_FLOAT;
 
         let pos_info =
@@ -323,8 +324,10 @@ impl VertexMeshCmdList for vkw::CmdList {
         self.bind_vertex_buffers(0, &vertex_mesh.bindings);
 
         if vertex_mesh.indexed {
-            self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
-            self.draw_indexed(vertex_mesh.index_count, 0, 0);
+            if vertex_mesh.index_count > 0 {
+                self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
+                self.draw_indexed(vertex_mesh.index_count, 0, 0);
+            }
         } else {
             self.draw(vertex_mesh.vertex_count, 0);
         }
