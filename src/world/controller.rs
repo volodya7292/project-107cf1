@@ -1,5 +1,5 @@
 use crate::object::cluster;
-use crate::object::cluster::{Cluster, ClusterAdjacency};
+use crate::object::cluster::Cluster;
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -39,7 +39,7 @@ impl WorldController {
         2_u32.pow(6 + level)
     }
 
-    fn set_cluster_boundaries(&self, lod_index: u32, cluster_pos: [i32; 3]) {
+    /*fn set_cluster_boundaries(&self, lod_index: u32, cluster_pos: [i32; 3]) {
         if let Some(world_cluster) = self.clusters[lod_index as usize].get(&cluster_pos) {
             let mut renderer = self.renderer.lock().unwrap();
             let world = renderer.world_mut();
@@ -291,7 +291,7 @@ impl WorldController {
             let cluster = cluster_comp.get_mut(world_cluster.entity).unwrap();
             cluster.set_adjacent_densities(adjacency);
         }
-    }
+    }*/
 
     pub fn on_update(&mut self) {
         // Adjust camera position & camera_pos_in_clusters
@@ -371,6 +371,26 @@ impl WorldController {
                 });
             }
         }
+
+        // LOD -> radius in clusters (area)
+        // ---------------
+        // lod -> 2 ^ (1 + lod)
+        // 0 -> 2 (13)
+        // 1 -> 4 (51)
+        // 2 -> 8 (202)
+        // 3 -> 16 (805)
+        // 4 -> 32 (3217)
+        // 5 -> 64 (12868)
+        // 6 -> 128 (51472)
+
+        // AVG face count per cluster T = 4096
+
+        // Average total triangle count
+        // ---------------
+        // circle_area(2) * T + (circle_area(4) - circle_area(2)) * (T * 4^-1) + (circle_area(8) - circle_area(4)) * (T * 4^-2)
+
+        // 13 * 4096 + (51 - 13) * 1024 + (202 - 51) * 256 + (805 - 202) * 64 + (3217 - 805) * 16 + (12868 - 3217) * 4 + (51472 - 12868) * 1
+        // = 285208
     }
 }
 
