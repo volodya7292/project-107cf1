@@ -39,6 +39,46 @@ impl WorldController {
         2_u32.pow(6 + level)
     }
 
+    fn set_cluster_boundaries(&self, lod_index: u32, cluster_pos: [i32; 3]) {
+        let world_cluster = self.clusters[lod_index as usize].get(&cluster_pos);
+
+        if world_cluster.is_none() {
+            return;
+        }
+        let world_cluster = world_cluster.unwrap();
+
+        let mut density_infos =
+            Vec::<cluster::DensityPointInfo>::with_capacity(cluster::SIZE * cluster::SIZE * 8);
+        let mut temp_density = [cluster::DensityPoint::default(); cluster::MAX_CELL_LAYERS];
+
+        // Corner
+        {
+            if let Some(world_cluster) = self.clusters[lod_index as usize].get(&[
+                cluster_pos[0] + 1,
+                cluster_pos[1] + 1,
+                cluster_pos[2] + 1,
+            ]) {
+                let cluster = world_cluster.cluster.lock().unwrap();
+
+                for x in 0..2 {
+                    for y in 0..cluster::SIZE {
+                        for z in 0..cluster::SIZE {
+                            let count =
+                                cluster.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                density_infos.push(cluster::DensityPointInfo {
+                                    pos: [cluster::SIZE as u8 + x, y as u8, z as u8, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /*fn set_cluster_boundaries(&self, lod_index: u32, cluster_pos: [i32; 3]) {
         if let Some(world_cluster) = self.clusters[lod_index as usize].get(&cluster_pos) {
             let mut renderer = self.renderer.lock().unwrap();

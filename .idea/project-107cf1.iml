@@ -8,6 +8,8 @@
       <sourceFolder url="file://$MODULE_DIR$/shader-builder/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/res-encoder/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/vk-wrapper/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/dual-contouring/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/dual-contouring/target" />
       <excludeFolder url="file://$MODULE_DIR$/engine-3d/target" />
       <excludeFolder url="file://$MODULE_DIR$/res-encoder/target" />
       <excludeFolder url="file://$MODULE_DIR$/shader-builder/target" />

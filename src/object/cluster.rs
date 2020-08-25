@@ -333,21 +333,9 @@ impl Cluster {
             let sector = &mut self.sectors[sector_pos[0]][sector_pos[1]][sector_pos[2]];
 
             let pos_in_sector = [
-                if sector_pos[0] == SIZE_IN_SECTORS - 1 {
-                    (point_info.pos[0] as usize - SECTOR_SIZE * (SIZE_IN_SECTORS - 1))
-                } else {
-                    point_info.pos[0] as usize % SECTOR_SIZE
-                },
-                if sector_pos[1] == SIZE_IN_SECTORS - 1 {
-                    (point_info.pos[1] as usize - SECTOR_SIZE * (SIZE_IN_SECTORS - 1))
-                } else {
-                    point_info.pos[1] as usize % SECTOR_SIZE
-                },
-                if sector_pos[2] == SIZE_IN_SECTORS - 1 {
-                    (point_info.pos[2] as usize - SECTOR_SIZE * (SIZE_IN_SECTORS - 1))
-                } else {
-                    point_info.pos[2] as usize % SECTOR_SIZE
-                },
+                (point_info.pos[0] as usize - SECTOR_SIZE * sector_pos[0]),
+                (point_info.pos[1] as usize - SECTOR_SIZE * sector_pos[1]),
+                (point_info.pos[2] as usize - SECTOR_SIZE * sector_pos[2]),
             ];
 
             let index = &mut sector.indices[pos_in_sector[0]][pos_in_sector[1]][pos_in_sector[2]];
@@ -383,24 +371,11 @@ impl Cluster {
     // TODO: sparse update (cache various buffers into Cluster struct)
     /// details: max detail deviation [0;1]
     fn triangulate(&mut self, sector_pos: [u8; 3], details: f32) -> (Vec<Vertex>, Vec<u32>) {
-        let init_den_point = DensityPoint {
-            density: 0,
-            material: u16::MAX,
-        };
-
         // Fill sectors edges (use sectors or self.adjacency)
         {
             let mut temp_density_infos =
                 Vec::<DensityPointInfo>::with_capacity(SECTOR_SIZE * SECTOR_SIZE * 8);
-            let mut temp_density = [init_den_point; MAX_CELL_LAYERS];
-
-            let cell_offset = [
-                sector_pos[0] as usize * SECTOR_SIZE,
-                sector_pos[1] as usize * SECTOR_SIZE,
-                sector_pos[2] as usize * SECTOR_SIZE,
-            ];
-
-            let mut temp_density = [init_den_point; MAX_CELL_LAYERS];
+            let mut temp_density = [DensityPoint::default(); MAX_CELL_LAYERS];
 
             // Right side
             if sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8 {

@@ -285,6 +285,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4358a9e11b9a09cf52383b451b49a169e8d797b68aa02301ff586d70d9661ea3"
 
 [[package]]
+name = "dual-contouring"
+version = "0.1.0"
+dependencies = [
+ "nalgebra",
+]
+
+[[package]]
 name = "either"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -739,6 +746,7 @@ name = "project-107cf1"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "dual-contouring",
  "glob",
  "image",
  "ktx",
