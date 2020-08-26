@@ -1,4 +1,4 @@
-mod contour;
+pub mod contour;
 mod octree;
 mod utils;
 

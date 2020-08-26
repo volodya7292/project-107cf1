@@ -157,7 +157,7 @@ impl<T> Octree<T> {
                 if let &NodeType::Internal(children) = &curr_node.ty {
                     Some(children)
                 } else {
-                    unreachable!()
+                    None
                 }
             } else {
                 None

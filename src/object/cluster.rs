@@ -1,5 +1,6 @@
 use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
 use crate::utils;
+use dual_contouring as dc;
 use nalgebra as na;
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -1295,6 +1296,52 @@ impl Cluster {
         (vertices, indices)
     }
 
+    fn triangulate2(&mut self, sector_pos: [u8; 3], details: f32) -> (Vec<Vertex>, Vec<u32>) {
+        let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
+        let densities = &sector.densities;
+        let density_indices = &sector.indices;
+
+        let mut field = vec![0.0; (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1)];
+
+        macro_rules! field_index {
+            ($x: expr, $y: expr, $z: expr) => {
+                ($x * (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1) + $y * (SECTOR_SIZE + 1) + $z) as usize
+            };
+        }
+
+        for x in 0..(SECTOR_SIZE + 1) {
+            for y in 0..(SECTOR_SIZE + 1) {
+                for z in 0..(SECTOR_SIZE + 1) {
+                    let density_index = density_indices[x][y][z];
+
+                    let index = density_index & 0x00ffffff;
+                    let count = density_index >> 24;
+
+                    let density = if count > 0 {
+                        densities[index as usize].density
+                    } else {
+                        0
+                    };
+
+                    field[field_index!(x, y, z)] = (density as f32) / 255.0;
+                }
+            }
+        }
+
+        let (vertices, oct) = dc::contour::construct_octree(&field, SECTOR_SIZE as u32, 0.5);
+        let indices = dc::contour::generate_mesh(&oct);
+
+        let vertices: Vec<Vertex> = vertices
+            .iter()
+            .map(|pos| Vertex {
+                position: *pos,
+                density: 0,
+            })
+            .collect();
+
+        (vertices, indices)
+    }
+
     pub fn update_mesh(&mut self, lod: f32) {
         let mut changed = false;
 
@@ -1331,7 +1378,7 @@ impl Cluster {
 
                     let (mut sector_vertices, sector_indices) = if sector_changed {
                         let (sector_vertices, mut sector_indices) =
-                            self.triangulate([x as u8, y as u8, z as u8], lod);
+                            self.triangulate2([x as u8, y as u8, z as u8], lod);
 
                         // Adjust indices
                         for index in &mut sector_indices {

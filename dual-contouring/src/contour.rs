@@ -4,7 +4,7 @@ use crate::utils;
 use nalgebra as na;
 
 #[derive(Copy, Clone)]
-struct NodeData {
+pub struct NodeData {
     corners: u8,
     vertex_pos: na::Vector3<f32>,
     index: u32,
@@ -96,7 +96,7 @@ const CELL_PROC_EDGE_MASK: [[usize; 5]; 6] = [
 /// Construct octree from field of size (dim_size + 1) x (dim_size + 1) x (dim_size + 1)
 ///
 /// dim_size: power of 2
-fn construct_octree(
+pub fn construct_octree(
     field: &[f32],
     dim_size: u32,
     iso_value: f32,
@@ -111,13 +111,13 @@ fn construct_octree(
     let mut vertices = vec![];
     macro_rules! field_index {
         ($x: expr, $y: expr, $z: expr) => {
-            ($x * a_dim_size * a_dim_size + $y + a_dim_size + $z) as usize
+            ($x * a_dim_size * a_dim_size + $y * a_dim_size + $z) as usize
         };
     }
 
-    for x in 0..a_dim_size {
-        for y in 0..a_dim_size {
-            for z in 0..a_dim_size {
+    for x in 0..dim_size {
+        for y in 0..dim_size {
+            for z in 0..dim_size {
                 let densities = [
                     field[field_index!(x, y, z)],
                     field[field_index!(x, y, z + 1)],
@@ -151,7 +151,7 @@ fn construct_octree(
                     }
 
                     let offset0 = CELL_OFFSETS[di0];
-                    let offset1 = CELL_OFFSETS[di0];
+                    let offset1 = CELL_OFFSETS[di1];
 
                     let pos0 = na::Vector3::new(
                         (x + offset0[0]) as f32,
@@ -255,15 +255,24 @@ fn edge_proc(
     } else {
         for i in 0..2 {
             let mut edge_nodes = *nodes;
+            let mut success = true;
 
             for j in 0..4 {
                 if let octree::NodeType::Internal(children) = edge_nodes[j].ty() {
-                    let index = EDGE_PROC_EDGE_MASK[dir][i][j];
-                    edge_nodes[j] = oct.get_node(children[index]).unwrap();
+                    let child_id = children[EDGE_PROC_EDGE_MASK[dir][i][j]];
+
+                    if child_id == octree::NODE_ID_NONE {
+                        success = false;
+                        break;
+                    }
+
+                    edge_nodes[j] = oct.get_node(child_id).unwrap();
                 }
             }
 
-            edge_proc(oct, &edge_nodes, EDGE_PROC_EDGE_MASK[dir][i][4], indices_out);
+            if success {
+                edge_proc(oct, &edge_nodes, EDGE_PROC_EDGE_MASK[dir][i][4], indices_out);
+            }
         }
     }
 }
@@ -288,15 +297,24 @@ fn face_proc(
 
     for i in 0..4 {
         let mut face_nodes = *nodes;
+        let mut success = true;
 
         for j in 0..2 {
             if let octree::NodeType::Internal(children) = face_nodes[j].ty() {
-                let index = FACE_PROC_FACE_MASK[dir][i][j];
-                face_nodes[j] = oct.get_node(children[index]).unwrap();
+                let child_id = children[FACE_PROC_FACE_MASK[dir][i][j]];
+
+                if child_id == octree::NODE_ID_NONE {
+                    success = false;
+                    break;
+                }
+
+                face_nodes[j] = oct.get_node(child_id).unwrap();
             }
         }
 
-        face_proc(oct, &face_nodes, FACE_PROC_FACE_MASK[dir][i][2], indices_out);
+        if success {
+            face_proc(oct, &face_nodes, FACE_PROC_FACE_MASK[dir][i][2], indices_out);
+        }
     }
 
     const ORDERS: [[usize; 4]; 2] = [[0, 0, 1, 1], [0, 1, 0, 1]];
@@ -304,15 +322,24 @@ fn face_proc(
     for i in 0..4 {
         let order = &ORDERS[FACE_PROC_EDGE_MASK[dir][i][0]];
         let mut edge_nodes = [nodes[order[0]], nodes[order[1]], nodes[order[2]], nodes[order[3]]];
+        let mut success = true;
 
         for j in 0..4 {
             if let octree::NodeType::Internal(children) = edge_nodes[j].ty() {
-                let index = FACE_PROC_EDGE_MASK[dir][i][j];
-                edge_nodes[j] = oct.get_node(children[index]).unwrap();
+                let child_id = children[FACE_PROC_EDGE_MASK[dir][i][1 + j]];
+
+                if child_id == octree::NODE_ID_NONE {
+                    success = false;
+                    break;
+                }
+
+                edge_nodes[j] = oct.get_node(child_id).unwrap();
             }
         }
 
-        edge_proc(oct, &edge_nodes, FACE_PROC_EDGE_MASK[dir][i][5], indices_out);
+        if success {
+            edge_proc(oct, &edge_nodes, FACE_PROC_EDGE_MASK[dir][i][5], indices_out);
+        }
     }
 }
 
@@ -356,10 +383,10 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
             }
 
             let edge_nodes = [
-                oct.get_node(children[CELL_PROC_EDGE_MASK[i][0]]).unwrap(),
-                oct.get_node(children[CELL_PROC_EDGE_MASK[i][1]]).unwrap(),
-                oct.get_node(children[CELL_PROC_EDGE_MASK[i][2]]).unwrap(),
-                oct.get_node(children[CELL_PROC_EDGE_MASK[i][3]]).unwrap(),
+                oct.get_node(ids[0]).unwrap(),
+                oct.get_node(ids[1]).unwrap(),
+                oct.get_node(ids[2]).unwrap(),
+                oct.get_node(ids[3]).unwrap(),
             ];
 
             edge_proc(oct, &edge_nodes, CELL_PROC_EDGE_MASK[i][4], indices_out);
@@ -367,13 +394,12 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
     }
 }
 
-fn generate_mesh(
-    vertices: Vec<na::Vector3<f32>>,
-    oct: &Octree<NodeData>,
-    dim_size: u32,
-    iso_value: f32,
-) -> Vec<u32> {
+pub fn generate_mesh(oct: &Octree<NodeData>) -> Vec<u32> {
     let mut indices = Vec::<u32>::new();
-    cell_proc(oct, &oct.root_node().unwrap(), &mut indices);
+
+    if let Some(node) = oct.root_node() {
+        cell_proc(oct, node, &mut indices);
+    }
+
     indices
 }
