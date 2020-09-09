@@ -1,41 +1,37 @@
 use nalgebra as na;
+use std::hint::unreachable_unchecked;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum NodeType<T> {
     Internal([u32; 8]),
     Leaf(T),
+    External(Octree<T>),
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Node<T> {
     ty: NodeType<T>,
-    min: na::Vector3<u32>,
     size: u32,
 }
 
 impl<T> Node<T> {
-    pub fn min(&self) -> na::Vector3<u32> {
-        self.min
-    }
-
-    pub fn size(&self) -> u32 {
-        self.size
+    pub fn new_leaf(size: u32, data: T) -> Node<T> {
+        Node {
+            ty: NodeType::Leaf(data),
+            size,
+        }
     }
 
     pub fn ty(&self) -> &NodeType<T> {
         &self.ty
     }
 
-    pub fn data(&self) -> Option<&T> {
-        if let NodeType::Leaf(data) = &self.ty {
-            Some(data)
-        } else {
-            None
-        }
+    pub fn size(&self) -> u32 {
+        self.size
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Octree<T> {
     size: u32,
     nodes: Vec<Option<Node<T>>>,
@@ -96,44 +92,44 @@ impl<T> Octree<T> {
         self.get_node(0)
     }
 
-    pub(crate) fn set_node(&mut self, min: na::Vector3<u32>, size: u32, data: T) {
+    pub(crate) fn set_node(&mut self, position: na::Vector3<u32>, node: Node<T>) {
         let mut curr_node_id = self.root_id;
-        let mut curr_min = min;
+        let mut curr_pos = position;
         let mut curr_size = self.size;
 
-        while curr_size != size {
-            // Check for availability
+        while curr_size != node.size {
+            // Check for internal node availability
             {
                 let curr_node = &mut self.nodes[curr_node_id as usize];
 
                 if curr_node.is_none() {
                     *curr_node = Some(Node {
                         ty: NodeType::Internal([NODE_ID_NONE; 8]),
-                        min: min - min.map(|v| v % curr_size),
                         size: curr_size,
-                    })
+                    });
                 }
             }
 
             // Calculate child index
-            let child_index_1d = {
-                let child_index = curr_min / (curr_size / 2);
+            let child_index = curr_pos / (curr_size / 2);
+            let child_index_1d = (child_index.x * 4 + child_index.y * 2 + child_index.z) as usize;
 
-                curr_size /= 2;
-                curr_min -= curr_size * child_index;
-
-                (child_index.x * 4 + child_index.y * 2 + child_index.z) as usize
-            };
+            curr_size /= 2;
+            curr_pos -= curr_size * child_index;
 
             // Get child node id
             let mut child_id = {
                 let curr_node = self.nodes[curr_node_id as usize].as_mut().unwrap();
 
-                match &curr_node.ty {
+                match &mut curr_node.ty {
                     NodeType::Internal(children) => children[child_index_1d],
                     NodeType::Leaf(_) => {
                         curr_node.ty = NodeType::Internal([NODE_ID_NONE; 8]);
                         NODE_ID_NONE
+                    }
+                    NodeType::External(octree) => {
+                        octree.set_node(curr_pos, node);
+                        return;
                     }
                 }
             };
@@ -152,21 +148,19 @@ impl<T> Octree<T> {
         }
 
         // Get children nodes
-        let children = {
-            if let Some(curr_node) = &mut self.nodes[curr_node_id as usize] {
-                if let &NodeType::Internal(children) = &curr_node.ty {
-                    Some(children)
-                } else {
-                    None
-                }
+        let children = if let Some(curr_node) = &mut self.nodes[curr_node_id as usize] {
+            if let NodeType::Internal(mut children) = &curr_node.ty {
+                Some(children)
             } else {
                 None
             }
+        } else {
+            None
         };
 
         // Remove children nodes
-        if let Some(children) = &children {
-            for &child_id in children {
+        if let Some(children) = children {
+            for &child_id in &children {
                 if child_id != NODE_ID_NONE {
                     self.remove_node(child_id);
                 }
@@ -174,18 +168,7 @@ impl<T> Octree<T> {
         }
 
         // Set new node
-        let curr_node = &mut self.nodes[curr_node_id as usize];
-        if let Some(curr_node) = curr_node {
-            curr_node.ty = NodeType::Leaf(data);
-            curr_node.min = min;
-            curr_node.size = size;
-        } else {
-            *curr_node = Some(Node {
-                ty: NodeType::Leaf(data),
-                min,
-                size,
-            });
-        }
+        self.nodes[curr_node_id as usize] = Some(node);
     }
 }
 

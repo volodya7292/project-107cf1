@@ -2,6 +2,7 @@ use crate::octree;
 use crate::octree::Octree;
 use crate::utils;
 use nalgebra as na;
+use std::hint::unreachable_unchecked;
 
 #[derive(Copy, Clone)]
 pub struct NodeData {
@@ -179,12 +180,14 @@ pub fn construct_octree(
 
                 oct.set_node(
                     na::Vector3::new(x, y, z),
-                    1,
-                    NodeData {
-                        corners,
-                        vertex_pos: avg_pos,
-                        index: vertices.len() as u32,
-                    },
+                    octree::Node::new_leaf(
+                        1,
+                        NodeData {
+                            corners,
+                            vertex_pos: avg_pos,
+                            index: vertices.len() as u32,
+                        },
+                    ),
                 );
                 vertices.push(avg_pos);
             }
@@ -203,7 +206,12 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
 
     for i in 0..4 {
         let node = &nodes[i];
-        let node_data = node.data().unwrap();
+
+        let node_data = if let octree::NodeType::Leaf(data) = node.ty() {
+            data
+        } else {
+            unreachable!()
+        };
 
         let edge = PROCESS_EDGE_MASK[dir][i];
         let di0 = EDGE_VERT_MAP[edge][0];
@@ -254,7 +262,7 @@ fn edge_proc(
         process_edge(&nodes, dir, indices_out);
     } else {
         for i in 0..2 {
-            let mut edge_nodes = *nodes;
+            let mut edge_nodes = nodes.clone();
             let mut success = true;
 
             for j in 0..4 {
@@ -266,7 +274,7 @@ fn edge_proc(
                         break;
                     }
 
-                    edge_nodes[j] = oct.get_node(child_id).unwrap();
+                    edge_nodes[j] = oct.get_node(child_id).clone().unwrap();
                 }
             }
 
@@ -296,7 +304,7 @@ fn face_proc(
     }
 
     for i in 0..4 {
-        let mut face_nodes = *nodes;
+        let mut face_nodes = nodes.clone();
         let mut success = true;
 
         for j in 0..2 {
@@ -308,7 +316,7 @@ fn face_proc(
                     break;
                 }
 
-                face_nodes[j] = oct.get_node(child_id).unwrap();
+                face_nodes[j] = oct.get_node(child_id).clone().unwrap();
             }
         }
 
@@ -321,7 +329,12 @@ fn face_proc(
 
     for i in 0..4 {
         let order = &ORDERS[FACE_PROC_EDGE_MASK[dir][i][0]];
-        let mut edge_nodes = [nodes[order[0]], nodes[order[1]], nodes[order[2]], nodes[order[3]]];
+        let mut edge_nodes = [
+            nodes[order[0]].clone(),
+            nodes[order[1]].clone(),
+            nodes[order[2]].clone(),
+            nodes[order[3]].clone(),
+        ];
         let mut success = true;
 
         for j in 0..4 {
@@ -333,7 +346,7 @@ fn face_proc(
                     break;
                 }
 
-                edge_nodes[j] = oct.get_node(child_id).unwrap();
+                edge_nodes[j] = oct.get_node(child_id).clone().unwrap();
             }
         }
 
@@ -349,7 +362,7 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
             let child_id = children[i];
 
             if child_id != octree::NODE_ID_NONE {
-                cell_proc(oct, &oct.get_node(child_id).unwrap(), indices_out);
+                cell_proc(oct, &oct.get_node(child_id).clone().unwrap(), indices_out);
             }
         }
 
@@ -362,7 +375,10 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
                 continue;
             }
 
-            let face_nodes = [oct.get_node(ids[0]).unwrap(), oct.get_node(ids[1]).unwrap()];
+            let face_nodes = [
+                oct.get_node(ids[0]).clone().unwrap(),
+                oct.get_node(ids[1]).clone().unwrap(),
+            ];
 
             face_proc(oct, &face_nodes, CELL_PROC_FACE_MASK[i][2], indices_out);
         }
@@ -383,10 +399,10 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
             }
 
             let edge_nodes = [
-                oct.get_node(ids[0]).unwrap(),
-                oct.get_node(ids[1]).unwrap(),
-                oct.get_node(ids[2]).unwrap(),
-                oct.get_node(ids[3]).unwrap(),
+                oct.get_node(ids[0]).clone().unwrap(),
+                oct.get_node(ids[1]).clone().unwrap(),
+                oct.get_node(ids[2]).clone().unwrap(),
+                oct.get_node(ids[3]).clone().unwrap(),
             ];
 
             edge_proc(oct, &edge_nodes, CELL_PROC_EDGE_MASK[i][4], indices_out);
