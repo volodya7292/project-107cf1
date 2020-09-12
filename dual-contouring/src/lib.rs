@@ -1,5 +1,5 @@
 pub mod contour;
-mod octree;
+pub mod octree;
 mod utils;
 
 #[cfg(test)]

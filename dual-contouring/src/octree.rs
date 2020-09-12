@@ -1,15 +1,14 @@
 use nalgebra as na;
-use std::hint::unreachable_unchecked;
 
 #[derive(Clone, Debug)]
-pub(crate) enum NodeType<T> {
+pub enum NodeType<T> {
     Internal([u32; 8]),
     Leaf(T),
     External(Octree<T>),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Node<T> {
+pub struct Node<T> {
     ty: NodeType<T>,
     size: u32,
 }
@@ -149,7 +148,7 @@ impl<T> Octree<T> {
 
         // Get children nodes
         let children = if let Some(curr_node) = &mut self.nodes[curr_node_id as usize] {
-            if let NodeType::Internal(mut children) = &curr_node.ty {
+            if let NodeType::Internal(children) = curr_node.ty {
                 Some(children)
             } else {
                 None
@@ -187,4 +186,40 @@ pub fn new<T>(size: u32) -> Octree<T> {
         root_id: 0,
         free_node_ids: vec![],
     }
+}
+
+#[derive(Copy, Clone)]
+pub struct LeafNode<T> {
+    data: T,
+    pos: na::Vector3<u32>,
+    size: u32,
+}
+
+impl<T> LeafNode<T> {
+    pub fn new(pos: na::Vector3<u32>, size: u32, data: T) -> LeafNode<T> {
+        LeafNode { data, pos, size }
+    }
+
+    pub fn data_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+}
+
+pub fn from_nodes<T>(size: u32, nodes: &[LeafNode<T>]) -> Octree<T>
+where
+    T: Clone,
+{
+    let mut octree = new::<T>(size);
+
+    for node in nodes {
+        octree.set_node(
+            node.pos,
+            Node {
+                ty: NodeType::Leaf(node.data.clone()),
+                size: node.size,
+            },
+        )
+    }
+
+    octree
 }

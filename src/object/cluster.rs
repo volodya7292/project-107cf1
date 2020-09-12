@@ -1296,22 +1296,204 @@ impl Cluster {
         (vertices, indices)
     }
 
-    fn triangulate2(&mut self, sector_pos: [u8; 3], details: f32) -> (Vec<Vertex>, Vec<u32>) {
+    fn triangulate2(
+        &mut self,
+        sector_pos: [u8; 3],
+        layer_index: u8,
+        neighbour_nodes: &[(na::Vector3<u32>, dc::contour::Node)],
+    ) -> (Vec<Vertex>, Vec<u32>) {
+        // Fill sectors edges
+        {
+            let mut temp_density_infos =
+                Vec::<DensityPointInfo>::with_capacity(SECTOR_SIZE * SECTOR_SIZE * 8);
+            let mut temp_density = [DensityPoint::default(); MAX_CELL_LAYERS];
+
+            // Right side
+            if sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8 {
+                let sector =
+                    &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize][sector_pos[2] as usize];
+
+                for x in 0..2 {
+                    for y in 0..SECTOR_SIZE {
+                        for z in 0..SECTOR_SIZE {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [SECTOR_SIZE as u8 + x, y as u8, z as u8, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Top side
+            if sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8 {
+                let sector =
+                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1][sector_pos[2] as usize];
+
+                for x in 0..SECTOR_SIZE {
+                    for y in 0..2 {
+                        for z in 0..SECTOR_SIZE {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [x as u8, SECTOR_SIZE as u8 + y, z as u8, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Back side
+            if sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8 {
+                let sector =
+                    &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize + 1];
+
+                for x in 0..SECTOR_SIZE {
+                    for y in 0..SECTOR_SIZE {
+                        for z in 0..2 {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [x as u8, y as u8, SECTOR_SIZE as u8 + z, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Right-Top edge
+            if (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8)
+            {
+                let sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
+                    [sector_pos[2] as usize];
+
+                for x in 0..2 {
+                    for y in 0..2 {
+                        for z in 0..SECTOR_SIZE {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [SECTOR_SIZE as u8 + x, SECTOR_SIZE as u8 + y, z as u8, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Right-Back edge
+            if (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8)
+            {
+                let sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize]
+                    [sector_pos[2] as usize + 1];
+
+                for x in 0..2 {
+                    for y in 0..SECTOR_SIZE {
+                        for z in 0..2 {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [SECTOR_SIZE as u8 + x, y as u8, SECTOR_SIZE as u8 + z, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Top-Back edge
+            if (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8)
+            {
+                let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1]
+                    [sector_pos[2] as usize + 1];
+
+                for x in 0..SECTOR_SIZE {
+                    for y in 0..2 {
+                        for z in 0..2 {
+                            let count =
+                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [x as u8, SECTOR_SIZE as u8 + y, SECTOR_SIZE as u8 + z, i],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Corner
+            if (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8)
+                && (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8)
+                && (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8)
+            {
+                let sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
+                    [sector_pos[2] as usize + 1];
+
+                for x in 0..2 {
+                    for y in 0..2 {
+                        for z in 0..2 {
+                            let count = sector.get_density_layers([x, y, z], &mut temp_density);
+
+                            for i in 0..count {
+                                temp_density_infos.push(DensityPointInfo {
+                                    pos: [
+                                        SECTOR_SIZE as u8 + x,
+                                        SECTOR_SIZE as u8 + y,
+                                        SECTOR_SIZE as u8 + z,
+                                        i,
+                                    ],
+                                    point: temp_density[i as usize],
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            let sector =
+                &mut self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
+            sector.set_densities(&mut temp_density_infos);
+        }
+
+        // ---------
+
         let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
         let densities = &sector.densities;
         let density_indices = &sector.indices;
 
-        let mut field = vec![0.0; (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1)];
+        let mut field = vec![0.0; ALIGNED_SECTOR_VOLUME];
 
         macro_rules! field_index {
             ($x: expr, $y: expr, $z: expr) => {
-                ($x * (SECTOR_SIZE + 1) * (SECTOR_SIZE + 1) + $y * (SECTOR_SIZE + 1) + $z) as usize
+                ($x * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE + $y * ALIGNED_SECTOR_SIZE + $z) as usize
             };
         }
 
-        for x in 0..(SECTOR_SIZE + 1) {
-            for y in 0..(SECTOR_SIZE + 1) {
-                for z in 0..(SECTOR_SIZE + 1) {
+        for x in 0..ALIGNED_SECTOR_SIZE {
+            for y in 0..ALIGNED_SECTOR_SIZE {
+                for z in 0..ALIGNED_SECTOR_SIZE {
                     let density_index = density_indices[x][y][z];
 
                     let index = density_index & 0x00ffffff;
@@ -1328,8 +1510,17 @@ impl Cluster {
             }
         }
 
-        let (vertices, oct) = dc::contour::construct_octree(&field, SECTOR_SIZE as u32, 0.5);
-        let indices = dc::contour::generate_mesh(&oct);
+        let mut nodes = dc::contour::construct_nodes(&field, (SECTOR_SIZE + 1) as u32, 0.5);
+
+        let mut vertices = Vec::with_capacity(nodes.len());
+
+        for node in &mut nodes {
+            let node_data = node.data_mut();
+            node_data.vertex_index = vertices.len() as u32;
+            vertices.push(node_data.vertex_pos);
+        }
+
+        let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32, &nodes);
 
         let vertices: Vec<Vertex> = vertices
             .iter()
@@ -1338,6 +1529,7 @@ impl Cluster {
                 density: 0,
             })
             .collect();
+        let indices = dc::contour::generate_mesh(&octree);
 
         (vertices, indices)
     }
@@ -1378,7 +1570,7 @@ impl Cluster {
 
                     let (mut sector_vertices, sector_indices) = if sector_changed {
                         let (sector_vertices, mut sector_indices) =
-                            self.triangulate2([x as u8, y as u8, z as u8], lod);
+                            self.triangulate2([x as u8, y as u8, z as u8], 0, &[]);
 
                         // Adjust indices
                         for index in &mut sector_indices {

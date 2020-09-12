@@ -2,14 +2,15 @@ use crate::octree;
 use crate::octree::Octree;
 use crate::utils;
 use nalgebra as na;
-use std::hint::unreachable_unchecked;
 
 #[derive(Copy, Clone)]
 pub struct NodeData {
-    corners: u8,
-    vertex_pos: na::Vector3<f32>,
-    index: u32,
+    pub corners: u8,
+    pub vertex_pos: na::Vector3<f32>,
+    pub vertex_index: u32,
 }
+
+pub type Node = octree::Node<NodeData>;
 
 const CELL_OFFSETS: [[u32; 3]; 8] = [
     [0, 0, 0],
@@ -185,7 +186,7 @@ pub fn construct_octree(
                         NodeData {
                             corners,
                             vertex_pos: avg_pos,
-                            index: vertices.len() as u32,
+                            vertex_index: vertices.len() as u32,
                         },
                     ),
                 );
@@ -197,7 +198,97 @@ pub fn construct_octree(
     (vertices, oct)
 }
 
-fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &mut Vec<u32>) {
+pub fn construct_nodes(field: &[f32], dim_size: u32, iso_value: f32) -> Vec<octree::LeafNode<NodeData>> {
+    let a_dim_size = dim_size + 1;
+    assert_eq!(field.len() as u32, a_dim_size * a_dim_size * a_dim_size);
+
+    macro_rules! field_index {
+        ($x: expr, $y: expr, $z: expr) => {
+            ($x * a_dim_size * a_dim_size + $y * a_dim_size + $z) as usize
+        };
+    }
+
+    let mut nodes = Vec::with_capacity((dim_size * dim_size * dim_size) as usize);
+
+    for x in 0..dim_size {
+        for y in 0..dim_size {
+            for z in 0..dim_size {
+                let densities = [
+                    field[field_index!(x, y, z)],
+                    field[field_index!(x, y, z + 1)],
+                    field[field_index!(x, y + 1, z)],
+                    field[field_index!(x, y + 1, z + 1)],
+                    field[field_index!(x + 1, y, z)],
+                    field[field_index!(x + 1, y, z + 1)],
+                    field[field_index!(x + 1, y + 1, z)],
+                    field[field_index!(x + 1, y + 1, z + 1)],
+                ];
+
+                let mut corners = 0_u8;
+                for i in 0..8 {
+                    corners |= ((densities[i] > iso_value) as u8) << i;
+                }
+                if corners == 0 || corners == 0xff {
+                    continue;
+                }
+
+                let mut avg_pos = na::Vector3::<f32>::new(0.0, 0.0, 0.0);
+                let mut edge_count = 0;
+
+                for i in 0..12 {
+                    let di0 = EDGE_VERT_MAP[i][0];
+                    let di1 = EDGE_VERT_MAP[i][1];
+                    let d0 = densities[di0];
+                    let d1 = densities[di1];
+
+                    if (d0 > iso_value) == (d1 > iso_value) {
+                        continue;
+                    }
+
+                    let offset0 = CELL_OFFSETS[di0];
+                    let offset1 = CELL_OFFSETS[di1];
+
+                    let pos0 = na::Vector3::new(
+                        (x + offset0[0]) as f32,
+                        (y + offset0[1]) as f32,
+                        (z + offset0[2]) as f32,
+                    );
+                    let pos1 = na::Vector3::new(
+                        (x + offset1[0]) as f32,
+                        (y + offset1[1]) as f32,
+                        (z + offset1[2]) as f32,
+                    );
+
+                    let interpolation = (iso_value - d0) / (d1 - d0);
+                    let pos = pos0 + (pos1 - pos0) * interpolation;
+
+                    avg_pos += pos;
+                    edge_count += 1;
+
+                    if edge_count >= 6 {
+                        break;
+                    }
+                }
+
+                avg_pos /= edge_count as f32;
+
+                nodes.push(octree::LeafNode::new(
+                    na::Vector3::new(x, y, z),
+                    1,
+                    NodeData {
+                        corners,
+                        vertex_pos: avg_pos,
+                        vertex_index: u32::MAX,
+                    },
+                ));
+            }
+        }
+    }
+
+    nodes
+}
+
+fn process_edge(nodes: &[Node; 4], dir: usize, indices_out: &mut Vec<u32>) {
     let mut min_size = u32::MAX;
     let mut min_index = 0;
     let mut flip = false;
@@ -226,7 +317,7 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
             flip = m1;
         }
 
-        indices[i] = node_data.index;
+        indices[i] = node_data.vertex_index;
         sign_change[i] = m0 ^ m1;
     }
 
@@ -243,12 +334,7 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
     }
 }
 
-fn edge_proc(
-    oct: &Octree<NodeData>,
-    nodes: &[octree::Node<NodeData>; 4],
-    dir: usize,
-    indices_out: &mut Vec<u32>,
-) {
+fn edge_proc(oct: &Octree<NodeData>, nodes: &[Node; 4], dir: usize, indices_out: &mut Vec<u32>) {
     let mut all_leaf = true;
 
     for i in 0..4 {
@@ -285,12 +371,7 @@ fn edge_proc(
     }
 }
 
-fn face_proc(
-    oct: &Octree<NodeData>,
-    nodes: &[octree::Node<NodeData>; 2],
-    dir: usize,
-    indices_out: &mut Vec<u32>,
-) {
+fn face_proc(oct: &Octree<NodeData>, nodes: &[Node; 2], dir: usize, indices_out: &mut Vec<u32>) {
     let mut internal_present = false;
 
     for i in 0..2 {
@@ -356,7 +437,7 @@ fn face_proc(
     }
 }
 
-fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out: &mut Vec<u32>) {
+fn cell_proc(oct: &Octree<NodeData>, node: &Node, indices_out: &mut Vec<u32>) {
     if let octree::NodeType::Internal(children) = &node.ty() {
         for i in 0..8 {
             let child_id = children[i];
