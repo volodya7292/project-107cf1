@@ -1300,7 +1300,7 @@ impl Cluster {
         &mut self,
         sector_pos: [u8; 3],
         layer_index: u8,
-        neighbour_nodes: &[(na::Vector3<u32>, dc::contour::Node)],
+        neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeData>],
     ) -> (Vec<Vertex>, Vec<u32>) {
         // Fill sectors edges
         {
@@ -1477,13 +1477,14 @@ impl Cluster {
             sector.set_densities(&mut temp_density_infos);
         }
 
-        // ---------
+        // Create density field
+        // ------------------------------------------------------
 
         let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize][sector_pos[2] as usize];
         let densities = &sector.densities;
         let density_indices = &sector.indices;
 
-        let mut field = vec![0.0; ALIGNED_SECTOR_VOLUME];
+        let mut field = vec![None; ALIGNED_SECTOR_VOLUME];
 
         macro_rules! field_index {
             ($x: expr, $y: expr, $z: expr) => {
@@ -1499,19 +1500,21 @@ impl Cluster {
                     let index = density_index & 0x00ffffff;
                     let count = density_index >> 24;
 
-                    let density = if count > 0 {
-                        densities[index as usize].density
+                    if count > 0 {
+                        field[field_index!(x, y, z)] =
+                            Some((densities[index as usize].density as f32) / 255.0);
                     } else {
-                        0
-                    };
-
-                    field[field_index!(x, y, z)] = (density as f32) / 255.0;
+                        field[field_index!(x, y, z)] = None;
+                    }
                 }
             }
         }
 
-        let mut nodes = dc::contour::construct_nodes(&field, (SECTOR_SIZE + 1) as u32, 0.5);
+        // Construct octree & generate mesh
+        // ------------------------------------------------------
 
+        // Collect vertices & set node vertex indices
+        let mut nodes = dc::contour::construct_nodes(&field, (SECTOR_SIZE + 1) as u32, 0.5);
         let mut vertices = Vec::with_capacity(nodes.len());
 
         for node in &mut nodes {
@@ -1520,8 +1523,38 @@ impl Cluster {
             vertices.push(node_data.vertex_pos);
         }
 
-        let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32, &nodes);
+        // Extend with outer seam nodes
+        nodes.reserve(neighbour_nodes.len());
 
+        let seam_bound0 = na::Vector3::new(sector_pos[0] as u32, sector_pos[1] as u32, sector_pos[2] as u32)
+            * (SECTOR_SIZE as u32);
+        let seam_bound1 = seam_bound0.add_scalar(SECTOR_SIZE as u32);
+
+        for node in neighbour_nodes {
+            let pos = node.position();
+
+            if (pos.x >= seam_bound0.x
+                && pos.x <= seam_bound1.x
+                && pos.y == seam_bound1.y
+                && pos.z == seam_bound1.z)
+                || (pos.y >= seam_bound0.y
+                    && pos.y <= seam_bound1.y
+                    && pos.x == seam_bound1.x
+                    && pos.z == seam_bound1.z)
+                || (pos.z >= seam_bound0.z
+                    && pos.z <= seam_bound1.z
+                    && pos.x == seam_bound1.x
+                    && pos.y == seam_bound1.y)
+            {
+                nodes.push(*node);
+            }
+        }
+
+        // Create octree & generate mesh
+        let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32, &nodes);
+        let indices = dc::contour::generate_mesh(&octree);
+
+        // Wrap vertices
         let vertices: Vec<Vertex> = vertices
             .iter()
             .map(|pos| Vertex {
@@ -1529,7 +1562,6 @@ impl Cluster {
                 density: 0,
             })
             .collect();
-        let indices = dc::contour::generate_mesh(&octree);
 
         (vertices, indices)
     }

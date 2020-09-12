@@ -200,6 +200,10 @@ impl<T> LeafNode<T> {
         LeafNode { data, pos, size }
     }
 
+    pub fn position(&self) -> &na::Vector3<u32> {
+        &self.pos
+    }
+
     pub fn data_mut(&mut self) -> &mut T {
         &mut self.data
     }
