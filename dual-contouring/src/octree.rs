@@ -213,7 +213,7 @@ pub fn from_nodes<T>(size: u32, nodes: &[LeafNode<T>]) -> Octree<T>
 where
     T: Clone,
 {
-    let mut octree = new::<T>(size);
+    let mut octree = with_capacity::<T>(size, (nodes.len() * 2) as u32);
 
     for node in nodes {
         octree.set_node(

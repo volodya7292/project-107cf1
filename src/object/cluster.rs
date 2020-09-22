@@ -114,16 +114,18 @@ impl Sector {
         }
     }
 
+    /// All points must be unique.
     fn set_densities(&mut self, points: &mut [DensityPointInfo]) {
         // Sort points by position starting from [0,,] to [sector_SIZE,,]
         points.sort_by(|a, b| {
             let a_dist = index_3d_to_1d((&a.pos[..3]).try_into().unwrap(), ALIGNED_SECTOR_SIZE as u32);
             let b_dist = index_3d_to_1d((&b.pos[..3]).try_into().unwrap(), ALIGNED_SECTOR_SIZE as u32);
-
             a_dist.cmp(&b_dist)
         });
 
         let mut offset = 0u32;
+        let mut temp_offset = 0u32;
+        let mut last_pos_1d = 0u32;
 
         for point_info in points {
             let pos = [
@@ -136,6 +138,16 @@ impl Sector {
             let head_index = *index & 0x00ffffff;
             let layer_count = (*index & 0xff000000) >> 24;
 
+            let pos_1d = index_3d_to_1d(
+                (&point_info.pos[..3]).try_into().unwrap(),
+                ALIGNED_SECTOR_SIZE as u32,
+            );
+            if pos_1d != last_pos_1d {
+                offset += temp_offset;
+                temp_offset = 0;
+                last_pos_1d = pos_1d;
+            }
+
             let insert_index = (head_index + point_info.pos[3] as u32 + offset) as usize;
 
             if point_info.pos[3] < MAX_CELL_LAYERS as u8 {
@@ -145,7 +157,7 @@ impl Sector {
                     // Add a new layer
                     self.densities.insert(insert_index, point_info.point);
                     *index = head_index | ((layer_count + 1) << 24);
-                    offset += 1;
+                    temp_offset += 1;
                     self.indices_changed = true;
                 }
             }
@@ -297,7 +309,14 @@ impl Cluster {
     pub fn get_density_layers(&self, pos: [u8; 3], out: &mut [DensityPoint]) -> u8 {
         let sector_pos = Self::calc_sector_position((&pos[..3]).try_into().unwrap());
         let sector = &self.sectors[sector_pos[0]][sector_pos[1]][sector_pos[2]];
-        sector.get_density_layers(pos, out)
+        sector.get_density_layers(
+            [
+                pos[0] - ((SECTOR_SIZE * sector_pos[0]) as u8),
+                pos[1] - ((SECTOR_SIZE * sector_pos[1]) as u8),
+                pos[2] - ((SECTOR_SIZE * sector_pos[2]) as u8),
+            ],
+            out,
+        )
     }
 
     /// pos: [x, y, z, layer index]
@@ -316,6 +335,7 @@ impl Cluster {
         );
     }
 
+    /// All points must be unique.
     pub fn set_densities(&mut self, points: &[DensityPointInfo]) {
         // Sort points by position starting from [0,,] to [SIZE,,]
         let mut points = points.to_vec();
@@ -327,7 +347,8 @@ impl Cluster {
         });
 
         // Offset for each sector for density insert (density_indices isn't updated every insertion to densities)
-        let mut offset = [[[0u32; SIZE_IN_SECTORS]; SIZE_IN_SECTORS]; SIZE_IN_SECTORS];
+        // (offset, temp_offset, last_pos_1d)
+        let mut offsets = [[[(0u32, 0u32, 0u32); SIZE_IN_SECTORS]; SIZE_IN_SECTORS]; SIZE_IN_SECTORS];
 
         for point_info in &points {
             let sector_pos = Self::calc_sector_position((&point_info.pos[..3]).try_into().unwrap());
@@ -343,8 +364,16 @@ impl Cluster {
             let head_index = *index & 0x00ffffff;
             let layer_count = (*index & 0xff000000) >> 24;
 
-            let sector_offset = &mut offset[sector_pos[0]][sector_pos[1]][sector_pos[2]];
-            let insert_index = (head_index + point_info.pos[3] as u32 + *sector_offset) as usize;
+            let offset = &mut offsets[sector_pos[0]][sector_pos[1]][sector_pos[2]];
+
+            let pos_1d = index_3d_to_1d((&point_info.pos[..3]).try_into().unwrap(), ALIGNED_SIZE as u32);
+            if pos_1d != offset.2 {
+                offset.0 += offset.1;
+                offset.1 = 0;
+                offset.2 = pos_1d;
+            }
+
+            let insert_index = (head_index + point_info.pos[3] as u32 + offset.0) as usize;
 
             if point_info.pos[3] < MAX_CELL_LAYERS as u8 {
                 if point_info.pos[3] < layer_count as u8 {
@@ -353,7 +382,7 @@ impl Cluster {
                     // Add a new layer
                     sector.densities.insert(insert_index, point_info.point);
                     *index = head_index | ((layer_count + 1) << 24);
-                    *sector_offset += 1;
+                    offset.1 += 1;
                     sector.indices_changed = true;
                 }
             }
@@ -1375,16 +1404,24 @@ impl Cluster {
             }
 
             // Right-Top edge
-            if (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8)
-            {
-                let sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize];
+            let c0 = (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8);
+            let c1 = (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8);
+
+            if c0 || c1 {
+                let sector = &self.sectors[sector_pos[0] as usize + c0 as usize]
+                    [sector_pos[1] as usize + c1 as usize][sector_pos[2] as usize];
 
                 for x in 0..2 {
                     for y in 0..2 {
-                        for z in 0..SECTOR_SIZE {
-                            let count =
-                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+                        for z in 0..ALIGNED_SECTOR_SIZE {
+                            let count = sector.get_density_layers(
+                                [
+                                    (SECTOR_SIZE as u8 * (!c0 as u8)) + x,
+                                    (SECTOR_SIZE as u8 * (!c1 as u8)) + y,
+                                    z as u8,
+                                ],
+                                &mut temp_density,
+                            );
 
                             for i in 0..count {
                                 temp_density_infos.push(DensityPointInfo {
@@ -1398,16 +1435,24 @@ impl Cluster {
             }
 
             // Right-Back edge
-            if (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8)
-            {
-                let sector = &self.sectors[sector_pos[0] as usize + 1][sector_pos[1] as usize]
-                    [sector_pos[2] as usize + 1];
+            let c0 = (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8);
+            let c1 = (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8);
+
+            if c0 || c1 {
+                let sector = &self.sectors[sector_pos[0] as usize + c0 as usize][sector_pos[1] as usize]
+                    [sector_pos[2] as usize + c1 as usize];
 
                 for x in 0..2 {
-                    for y in 0..SECTOR_SIZE {
+                    for y in 0..ALIGNED_SECTOR_SIZE {
                         for z in 0..2 {
-                            let count =
-                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+                            let count = sector.get_density_layers(
+                                [
+                                    (SECTOR_SIZE as u8 * (!c0 as u8)) + x,
+                                    y as u8,
+                                    (SECTOR_SIZE as u8 * (!c1 as u8)) + z,
+                                ],
+                                &mut temp_density,
+                            );
 
                             for i in 0..count {
                                 temp_density_infos.push(DensityPointInfo {
@@ -1421,16 +1466,24 @@ impl Cluster {
             }
 
             // Top-Back edge
-            if (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8) && (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8)
-            {
-                let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + 1]
-                    [sector_pos[2] as usize + 1];
+            let c0 = (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8);
+            let c1 = (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8);
 
-                for x in 0..SECTOR_SIZE {
+            if c0 || c1 {
+                let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + c0 as usize]
+                    [sector_pos[2] as usize + c1 as usize];
+
+                for x in 0..ALIGNED_SECTOR_SIZE {
                     for y in 0..2 {
                         for z in 0..2 {
-                            let count =
-                                sector.get_density_layers([x as u8, y as u8, z as u8], &mut temp_density);
+                            let count = sector.get_density_layers(
+                                [
+                                    x as u8,
+                                    (SECTOR_SIZE as u8 * (!c0 as u8)) + y,
+                                    (SECTOR_SIZE as u8 * (!c1 as u8)) + z,
+                                ],
+                                &mut temp_density,
+                            );
 
                             for i in 0..count {
                                 temp_density_infos.push(DensityPointInfo {
@@ -1530,10 +1583,10 @@ impl Cluster {
             * (SECTOR_SIZE as u32);
         let seam_bound1 = seam_bound0.add_scalar(SECTOR_SIZE as u32);
 
-        for node in neighbour_nodes {
+        nodes.extend(neighbour_nodes.iter().filter(|node| {
             let pos = node.position();
 
-            if (pos.x >= seam_bound0.x
+            (pos.x >= seam_bound0.x
                 && pos.x <= seam_bound1.x
                 && pos.y == seam_bound1.y
                 && pos.z == seam_bound1.z)
@@ -1545,10 +1598,7 @@ impl Cluster {
                     && pos.z <= seam_bound1.z
                     && pos.x == seam_bound1.x
                     && pos.y == seam_bound1.y)
-            {
-                nodes.push(*node);
-            }
-        }
+        }));
 
         // Create octree & generate mesh
         let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32, &nodes);
@@ -1566,7 +1616,7 @@ impl Cluster {
         (vertices, indices)
     }
 
-    pub fn update_mesh(&mut self, lod: f32) {
+    pub fn update_mesh(&mut self, neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeData>], lod: f32) {
         let mut changed = false;
 
         let mut prev_vertex_count = 0;
@@ -1602,7 +1652,7 @@ impl Cluster {
 
                     let (mut sector_vertices, sector_indices) = if sector_changed {
                         let (sector_vertices, mut sector_indices) =
-                            self.triangulate2([x as u8, y as u8, z as u8], 0, &[]);
+                            self.triangulate2([x as u8, y as u8, z as u8], 0, neighbour_nodes);
 
                         // Adjust indices
                         for index in &mut sector_indices {

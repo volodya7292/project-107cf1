@@ -406,7 +406,7 @@ impl WorldController {
             for level in &self.clusters {
                 level.par_iter().for_each(|(pos, world_cluster)| {
                     if let Ok(mut cluster) = world_cluster.cluster.try_lock() {
-                        cluster.update_mesh(0.0);
+                        //cluster.update_mesh(0.0); TODO
                     }
                 });
             }
