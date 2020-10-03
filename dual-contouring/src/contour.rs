@@ -10,6 +10,71 @@ pub struct NodeData {
     pub vertex_index: u32,
 }
 
+#[derive(Copy, Clone)]
+pub struct NodeDataDiscrete {
+    pub corners: u8,
+    pub densities: [f32; 8],
+    pub vertex_pos: na::Vector3<f32>,
+}
+
+impl NodeDataDiscrete {
+    pub fn new(node_pos: &na::Vector3<u32>, densities: [f32; 8], iso_value: f32) -> Option<NodeDataDiscrete> {
+        let mut corners = 0_u8;
+        for i in 0..8 {
+            corners |= ((densities[i] > iso_value) as u8) << i;
+        }
+        if corners == 0 || corners == 0xff {
+            return None;
+        }
+
+        let mut avg_pos = na::Vector3::<f32>::new(0.0, 0.0, 0.0);
+        let mut edge_count = 0;
+
+        for i in 0..12 {
+            let di0 = EDGE_VERT_MAP[i][0];
+            let di1 = EDGE_VERT_MAP[i][1];
+            let d0 = densities[di0];
+            let d1 = densities[di1];
+
+            if (d0 > iso_value) == (d1 > iso_value) {
+                continue;
+            }
+
+            let offset0 = CELL_OFFSETS[di0];
+            let offset1 = CELL_OFFSETS[di1];
+
+            let pos0 = na::Vector3::new(
+                (node_pos.x + offset0[0]) as f32,
+                (node_pos.y + offset0[1]) as f32,
+                (node_pos.z + offset0[2]) as f32,
+            );
+            let pos1 = na::Vector3::new(
+                (node_pos.x + offset1[0]) as f32,
+                (node_pos.y + offset1[1]) as f32,
+                (node_pos.z + offset1[2]) as f32,
+            );
+
+            let interpolation = (iso_value - d0) / (d1 - d0);
+            let pos = pos0 + (pos1 - pos0) * interpolation;
+
+            avg_pos += pos;
+            edge_count += 1;
+
+            if edge_count >= 6 {
+                break;
+            }
+        }
+
+        avg_pos /= edge_count as f32;
+
+        Some(NodeDataDiscrete {
+            corners,
+            densities,
+            vertex_pos: avg_pos,
+        })
+    }
+}
+
 const CELL_OFFSETS: [[u32; 3]; 8] = [
     [0, 0, 0],
     [0, 0, 1],
@@ -199,6 +264,7 @@ pub fn construct_octree(
 pub fn construct_nodes(
     field: &[Option<f32>],
     dim_size: u32,
+    node_size: u32,
     iso_value: f32,
 ) -> Vec<octree::LeafNode<NodeData>> {
     let a_dim_size = dim_size + 1;
@@ -282,11 +348,11 @@ pub fn construct_nodes(
                 avg_pos /= edge_count as f32;
 
                 nodes.push(octree::LeafNode::new(
-                    na::Vector3::new(x, y, z),
-                    1,
+                    na::Vector3::new(x * node_size, y * node_size, z * node_size),
+                    node_size,
                     NodeData {
                         corners,
-                        vertex_pos: avg_pos,
+                        vertex_pos: avg_pos * (node_size as f32),
                         vertex_index: u32::MAX,
                     },
                 ));

@@ -204,6 +204,14 @@ impl<T> LeafNode<T> {
         &self.pos
     }
 
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    pub fn data(&self) -> &T {
+        &self.data
+    }
+
     pub fn data_mut(&mut self) -> &mut T {
         &mut self.data
     }

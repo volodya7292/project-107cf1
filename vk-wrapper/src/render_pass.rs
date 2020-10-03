@@ -39,6 +39,10 @@ pub struct Subpass {
     pub depth: Option<AttachmentRef>,
 }
 
+impl Subpass {
+    pub const EXTERNAL: u32 = vk::SUBPASS_EXTERNAL;
+}
+
 pub struct SubpassDependency {
     pub src_subpass: u32,
     pub dst_subpass: u32,

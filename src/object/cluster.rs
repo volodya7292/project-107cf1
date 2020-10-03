@@ -206,6 +206,7 @@ impl Default for Sector {
 
 pub struct Cluster {
     sectors: [[[Sector; SIZE_IN_SECTORS]; SIZE_IN_SECTORS]; SIZE_IN_SECTORS],
+    node_size: u32,
     vertex_mesh: VertexMesh<Vertex>,
 }
 
@@ -1329,7 +1330,7 @@ impl Cluster {
         &mut self,
         sector_pos: [u8; 3],
         layer_index: u8,
-        neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeData>],
+        neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeDataDiscrete>],
     ) -> (Vec<Vertex>, Vec<u32>) {
         // Fill sectors edges
         {
@@ -1404,8 +1405,8 @@ impl Cluster {
             }
 
             // Right-Top edge
-            let c0 = (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8);
-            let c1 = (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8);
+            let c0 = sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8;
+            let c1 = sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8;
 
             if c0 || c1 {
                 let sector = &self.sectors[sector_pos[0] as usize + c0 as usize]
@@ -1435,8 +1436,8 @@ impl Cluster {
             }
 
             // Right-Back edge
-            let c0 = (sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8);
-            let c1 = (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8);
+            let c0 = sector_pos[0] < (SIZE_IN_SECTORS - 1) as u8;
+            let c1 = sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8;
 
             if c0 || c1 {
                 let sector = &self.sectors[sector_pos[0] as usize + c0 as usize][sector_pos[1] as usize]
@@ -1466,8 +1467,8 @@ impl Cluster {
             }
 
             // Top-Back edge
-            let c0 = (sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8);
-            let c1 = (sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8);
+            let c0 = sector_pos[1] < (SIZE_IN_SECTORS - 1) as u8;
+            let c1 = sector_pos[2] < (SIZE_IN_SECTORS - 1) as u8;
 
             if c0 || c1 {
                 let sector = &self.sectors[sector_pos[0] as usize][sector_pos[1] as usize + c0 as usize]
@@ -1545,6 +1546,83 @@ impl Cluster {
             };
         }
 
+        let seam_bound0 = na::Vector3::new(sector_pos[0] as u32, sector_pos[1] as u32, sector_pos[2] as u32)
+            * (SECTOR_SIZE as u32);
+        let seam_bound1 = seam_bound0.add_scalar(SECTOR_SIZE as u32);
+
+        let mut neighbour_nodes_transformed = Vec::with_capacity(neighbour_nodes.len() * 4);
+
+        // Filter neighbour nodes
+        for node in neighbour_nodes {
+            let pos = node.position();
+            let size = node.size();
+
+            if (size != self.node_size && (size != self.node_size / 2) && (size != self.node_size * 2))
+                || (pos.x != seam_bound1.x && pos.y != seam_bound1.y && pos.z != seam_bound1.z)
+                || (pos.x < seam_bound0.x
+                    || pos.x > seam_bound1.x
+                    || pos.y < seam_bound0.y
+                    || pos.y > seam_bound1.y
+                    || pos.z < seam_bound0.z
+                    || pos.z > seam_bound1.z)
+            {
+                continue;
+            }
+
+            if size == self.node_size * 2 {
+                let d = &node.data().densities;
+
+                /*let mut densities = [
+                    [[d[0], 0.0, d[1]], [0.0, 0.0, 0.0], [d[2], 0.0, d[3]]],
+                    [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                    [[d[4], 0.0, d[5]], [0.0, 0.0, 0.0], [d[6], 0.0, d[7]]],
+                ];*/
+                let mut densities = [
+                    [[d[0], d[0], d[1]], [d[0], d[0], d[1]], [d[2], d[2], d[3]]],
+                    [[d[0], d[0], d[1]], [d[0], d[0], d[1]], [d[2], d[2], d[3]]],
+                    [[d[4], d[4], d[5]], [d[4], d[4], d[5]], [d[6], d[6], d[7]]],
+                ];
+
+                for x in 0..2 {
+                    for y in 0..2 {
+                        for z in 0..2 {
+                            let d = [
+                                densities[x + 0][y + 0][z + 0],
+                                densities[x + 0][y + 0][z + 1],
+                                densities[x + 0][y + 1][z + 0],
+                                densities[x + 0][y + 1][z + 1],
+                                densities[x + 1][y + 0][z + 0],
+                                densities[x + 1][y + 0][z + 1],
+                                densities[x + 1][y + 1][z + 0],
+                                densities[x + 1][y + 1][z + 1],
+                            ];
+                            let new_pos = pos + na::Vector3::new(x as u32, y as u32, z as u32);
+
+                            if new_pos.x > (SECTOR_SIZE as u32)
+                                || new_pos.y > (SECTOR_SIZE as u32)
+                                || new_pos.z > (SECTOR_SIZE as u32)
+                            {
+                                continue;
+                            }
+
+                            let data = dc::contour::NodeDataDiscrete::new(&new_pos, d, ISO_VALUE_NORM);
+
+                            if let Some(data) = data {
+                                neighbour_nodes_transformed.push(dc::octree::LeafNode::new(
+                                    new_pos,
+                                    self.node_size,
+                                    data,
+                                ));
+                            }
+                        }
+                    }
+                }
+            } else {
+                neighbour_nodes_transformed.push(*node);
+            }
+        }
+
+        // Fill the field with local data
         for x in 0..ALIGNED_SECTOR_SIZE {
             for y in 0..ALIGNED_SECTOR_SIZE {
                 for z in 0..ALIGNED_SECTOR_SIZE {
@@ -1563,42 +1641,69 @@ impl Cluster {
             }
         }
 
+        // Fill gaps in the field using neighbour nodes
+        for node in &neighbour_nodes_transformed {
+            let pos = node.position();
+            let size = node.size();
+            let data = node.data();
+
+            let xc = (pos.x == seam_bound1.x) as u32;
+            let yc = (pos.y == seam_bound1.y) as u32;
+            let zc = (pos.z == seam_bound1.z) as u32;
+
+            for i in 0..2 {
+                for j in 0..2 {
+                    let xu = i * yc + i * zc;
+                    let yu = i * xc + j * zc;
+                    let zu = j * xc + j * yc;
+                    let x = pos.x + xu * size;
+                    let y = pos.y + yu * size;
+                    let z = pos.z + zu * size;
+
+                    if (x % self.node_size == 0) && (y % self.node_size == 0) && (z % self.node_size == 0) {
+                        let xyz = [
+                            (x / self.node_size) as usize,
+                            (y / self.node_size) as usize,
+                            (z / self.node_size) as usize,
+                        ];
+                        let i = (zu * 4 + yu * 2 + xu) as usize;
+
+                        if xyz[0] <= SECTOR_SIZE && xyz[1] <= SECTOR_SIZE && xyz[2] <= SECTOR_SIZE {
+                            field[field_index!(xyz[0], xyz[1], xyz[2])] = Some(data.densities[i]);
+                        }
+                    }
+                }
+            }
+        }
+
         // Construct octree & generate mesh
         // ------------------------------------------------------
 
         // Collect vertices & set node vertex indices
-        let mut nodes = dc::contour::construct_nodes(&field, (SECTOR_SIZE + 1) as u32, 0.5);
+        let mut nodes = dc::contour::construct_nodes(&field, (SECTOR_SIZE + 1) as u32, self.node_size, 0.5);
         let mut vertices = Vec::with_capacity(nodes.len());
 
+        // Extend with neighbour nodes
+        nodes.extend(neighbour_nodes.iter().map(|node| {
+            let data = node.data();
+
+            dc::octree::LeafNode::new(
+                *node.position(),
+                node.size(),
+                dc::contour::NodeData {
+                    corners: data.corners,
+                    vertex_pos: data.vertex_pos,
+                    vertex_index: 0,
+                },
+            )
+        }));
+
+        // Reindex nodes vertex indices
         for node in &mut nodes {
             let node_data = node.data_mut();
             node_data.vertex_index = vertices.len() as u32;
             vertices.push(node_data.vertex_pos);
         }
-
-        // Extend with outer seam nodes
-        nodes.reserve(neighbour_nodes.len());
-
-        let seam_bound0 = na::Vector3::new(sector_pos[0] as u32, sector_pos[1] as u32, sector_pos[2] as u32)
-            * (SECTOR_SIZE as u32);
-        let seam_bound1 = seam_bound0.add_scalar(SECTOR_SIZE as u32);
-
-        nodes.extend(neighbour_nodes.iter().filter(|node| {
-            let pos = node.position();
-
-            (pos.x >= seam_bound0.x
-                && pos.x <= seam_bound1.x
-                && pos.y == seam_bound1.y
-                && pos.z == seam_bound1.z)
-                || (pos.y >= seam_bound0.y
-                    && pos.y <= seam_bound1.y
-                    && pos.x == seam_bound1.x
-                    && pos.z == seam_bound1.z)
-                || (pos.z >= seam_bound0.z
-                    && pos.z <= seam_bound1.z
-                    && pos.x == seam_bound1.x
-                    && pos.y == seam_bound1.y)
-        }));
 
         // Create octree & generate mesh
         let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32, &nodes);
@@ -1616,7 +1721,25 @@ impl Cluster {
         (vertices, indices)
     }
 
-    pub fn update_mesh(&mut self, neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeData>], lod: f32) {
+    // Collect nodes to use in seams of another clusters
+    pub fn collect_seam_nodes(
+        &self,
+        layer_index: u8,
+    ) -> Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>> {
+        let nodes = Vec::with_capacity(SIZE * SIZE * 3);
+
+        for i in 0..SIZE {
+            for j in 0..SIZE {}
+        }
+
+        unimplemented!()
+    }
+
+    pub fn update_mesh(
+        &mut self,
+        neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeDataDiscrete>],
+        lod: f32,
+    ) {
         let mut changed = false;
 
         let mut prev_vertex_count = 0;
@@ -1700,6 +1823,7 @@ impl Cluster {
 pub fn new(device: &Arc<vkw::Device>) -> Cluster {
     Cluster {
         sectors: Default::default(),
+        node_size: 1,
         vertex_mesh: device.create_vertex_mesh().unwrap(),
     }
 }
