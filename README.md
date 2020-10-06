@@ -6,7 +6,7 @@
 - VulkanSDK 1.2.148+
 
 ### Windows
-- Visual Studio 2019 or above
+- Visual Studio
 
 ### Ubuntu
 - sudo apt install build-essential
