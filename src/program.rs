@@ -1,6 +1,7 @@
 use crate::object::cluster;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
+use dual_contouring as dc;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
 use specs::{Builder, WorldExt};
@@ -176,9 +177,9 @@ pub fn new(
     {
         let mut points = Vec::<cluster::DensityPointInfo>::new();
 
-        for x in 0..(cluster::SIZE + 2) {
-            for y in 0..(cluster::SIZE + 2) {
-                for z in 0..(cluster::SIZE + 2) {
+        for x in 0..(cluster::SIZE) {
+            for y in 0..(cluster::SIZE) {
+                for z in 0..(cluster::SIZE) {
                     let n_v = sample_noise(x, y, z);
 
                     //let n_v = ((x as f32) / (cluster::SIZE as f32)).min(1.0);
@@ -244,8 +245,26 @@ pub fn new(
     }
 
     {
+        let nei = cluster2.collect_nodes_for_seams(0);
+        let mut nei_filtered = Vec::with_capacity(nei.len());
+
+        for node in &nei {
+            let pos = node.position();
+
+            if pos.x == 0 {
+                let new_pos = na::Vector3::new(cluster::SIZE as u32 * cluster2.node_size(), pos.y, pos.z);
+                let mut new_data = *node.data();
+
+                if let Some(vertex_pos) = &mut new_data.vertex_pos {
+                    vertex_pos.x += cluster::SIZE as f32 * cluster2.node_size() as f32;
+                }
+
+                nei_filtered.push(dc::octree::LeafNode::new(new_pos, node.size(), new_data));
+            }
+        }
+
         let t0 = Instant::now();
-        cluster.update_mesh(&[], 1.0); // TODO: include neighbour nodes
+        cluster.update_mesh(&nei_filtered, 1.0); // TODO: include neighbour nodes
         let t1 = Instant::now();
 
         println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());

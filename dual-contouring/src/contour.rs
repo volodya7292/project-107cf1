@@ -14,17 +14,23 @@ pub struct NodeData {
 pub struct NodeDataDiscrete {
     pub corners: u8,
     pub densities: [f32; 8],
-    pub vertex_pos: na::Vector3<f32>,
+    pub vertex_pos: Option<na::Vector3<f32>>,
 }
 
 impl NodeDataDiscrete {
-    pub fn new(node_pos: &na::Vector3<u32>, densities: [f32; 8], iso_value: f32) -> Option<NodeDataDiscrete> {
+    pub fn new(node_pos: &na::Vector3<u32>, densities: [f32; 8], iso_value: f32) -> NodeDataDiscrete {
         let mut corners = 0_u8;
+
         for i in 0..8 {
             corners |= ((densities[i] > iso_value) as u8) << i;
         }
+
         if corners == 0 || corners == 0xff {
-            return None;
+            return NodeDataDiscrete {
+                corners,
+                densities,
+                vertex_pos: None,
+            };
         }
 
         let mut avg_pos = na::Vector3::<f32>::new(0.0, 0.0, 0.0);
@@ -67,11 +73,11 @@ impl NodeDataDiscrete {
 
         avg_pos /= edge_count as f32;
 
-        Some(NodeDataDiscrete {
+        NodeDataDiscrete {
             corners,
             densities,
-            vertex_pos: avg_pos,
-        })
+            vertex_pos: Some(avg_pos),
+        }
     }
 }
 
