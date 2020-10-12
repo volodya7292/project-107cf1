@@ -1,2 +1,2 @@
-mod controller;
 mod generator;
+mod streamer;

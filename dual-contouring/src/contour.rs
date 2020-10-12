@@ -18,7 +18,7 @@ pub struct NodeDataDiscrete {
 }
 
 impl NodeDataDiscrete {
-    pub fn new(node_pos: &na::Vector3<u32>, densities: [f32; 8], iso_value: f32) -> NodeDataDiscrete {
+    pub fn new(densities: [f32; 8], iso_value: f32) -> NodeDataDiscrete {
         let mut corners = 0_u8;
 
         for i in 0..8 {
@@ -49,16 +49,8 @@ impl NodeDataDiscrete {
             let offset0 = CELL_OFFSETS[di0];
             let offset1 = CELL_OFFSETS[di1];
 
-            let pos0 = na::Vector3::new(
-                (node_pos.x + offset0[0]) as f32,
-                (node_pos.y + offset0[1]) as f32,
-                (node_pos.z + offset0[2]) as f32,
-            );
-            let pos1 = na::Vector3::new(
-                (node_pos.x + offset1[0]) as f32,
-                (node_pos.y + offset1[1]) as f32,
-                (node_pos.z + offset1[2]) as f32,
-            );
+            let pos0 = na::Vector3::new(offset0[0] as f32, offset0[1] as f32, offset0[2] as f32);
+            let pos1 = na::Vector3::new(offset1[0] as f32, offset1[1] as f32, offset1[2] as f32);
 
             let interpolation = (iso_value - d0) / (d1 - d0);
             let pos = pos0 + (pos1 - pos0) * interpolation;
@@ -224,16 +216,8 @@ pub fn construct_octree(
                     let offset0 = CELL_OFFSETS[di0];
                     let offset1 = CELL_OFFSETS[di1];
 
-                    let pos0 = na::Vector3::new(
-                        (x + offset0[0]) as f32,
-                        (y + offset0[1]) as f32,
-                        (z + offset0[2]) as f32,
-                    );
-                    let pos1 = na::Vector3::new(
-                        (x + offset1[0]) as f32,
-                        (y + offset1[1]) as f32,
-                        (z + offset1[2]) as f32,
-                    );
+                    let pos0 = na::Vector3::new(offset0[0] as f32, offset0[1] as f32, offset0[2] as f32);
+                    let pos1 = na::Vector3::new(offset1[0] as f32, offset1[1] as f32, offset1[2] as f32);
 
                     let interpolation = (iso_value - d0) / (d1 - d0);
                     let pos = pos0 + (pos1 - pos0) * interpolation;
@@ -329,16 +313,8 @@ pub fn construct_nodes(
                     let offset0 = CELL_OFFSETS[di0];
                     let offset1 = CELL_OFFSETS[di1];
 
-                    let pos0 = na::Vector3::new(
-                        (x + offset0[0]) as f32,
-                        (y + offset0[1]) as f32,
-                        (z + offset0[2]) as f32,
-                    );
-                    let pos1 = na::Vector3::new(
-                        (x + offset1[0]) as f32,
-                        (y + offset1[1]) as f32,
-                        (z + offset1[2]) as f32,
-                    );
+                    let pos0 = na::Vector3::new(offset0[0] as f32, offset0[1] as f32, offset0[2] as f32);
+                    let pos1 = na::Vector3::new(offset1[0] as f32, offset1[1] as f32, offset1[2] as f32);
 
                     let interpolation = (iso_value - d0) / (d1 - d0);
                     let pos = pos0 + (pos1 - pos0) * interpolation;

@@ -1809,6 +1809,7 @@ impl Cluster {
                                 densities[x + 1][y + 1][z + 0],
                                 densities[x + 1][y + 1][z + 1],
                             ];
+
                             let new_pos = pos + na::Vector3::new(x as u32, y as u32, z as u32);
 
                             if new_pos.x > (SECTOR_SIZE as u32)
@@ -1818,7 +1819,7 @@ impl Cluster {
                                 continue;
                             }
 
-                            let data = dc::contour::NodeDataDiscrete::new(&new_pos, d, ISO_VALUE_NORM);
+                            let data = dc::contour::NodeDataDiscrete::new(d, ISO_VALUE_NORM);
 
                             neighbour_nodes_transformed.push(dc::octree::LeafNode::new(
                                 new_pos,
@@ -1898,22 +1899,19 @@ impl Cluster {
 
         // Extend with neighbour nodes
         nodes.extend(neighbour_nodes_transformed.iter().filter_map(|node| {
-            let added_pos =
-                na::Vector3::new(sector_pos[0] as u32, sector_pos[1] as u32, sector_pos[2] as u32)
+            let rel_pos = node.position()
+                - (na::Vector3::new(sector_pos[0] as u32, sector_pos[1] as u32, sector_pos[2] as u32)
                     * (SECTOR_SIZE as u32)
-                    * self.node_size;
-            let rel_pos = node.position() - added_pos;
+                    * self.node_size);
             let data = node.data();
 
             if let Some(vertex_pos) = data.vertex_pos {
-                let added_pos = na::Vector3::new(added_pos.x as f32, added_pos.y as f32, added_pos.z as f32);
-
                 Some(dc::octree::LeafNode::new(
                     rel_pos,
                     node.size(),
                     dc::contour::NodeData {
                         corners: data.corners,
-                        vertex_pos: vertex_pos - added_pos,
+                        vertex_pos,
                         vertex_index: 0,
                     },
                 ))
@@ -1924,9 +1922,15 @@ impl Cluster {
 
         // Reindex nodes vertex indices
         for node in &mut nodes {
-            let node_data = node.data_mut();
-            node_data.vertex_index = vertices.len() as u32;
-            vertices.push(node_data.vertex_pos);
+            {
+                let node_data = node.data_mut();
+                node_data.vertex_index = vertices.len() as u32;
+            }
+
+            let node_pos = node.position();
+            let node_pos = na::Vector3::new(node_pos.x as f32, node_pos.y as f32, node_pos.z as f32);
+
+            vertices.push(node_pos + node.data().vertex_pos * (node.size() as f32));
         }
 
         // Create octree & generate mesh
@@ -1995,7 +1999,6 @@ impl Cluster {
                             );
 
                             if !is_valid_cell {
-                                dbg!(pos);
                                 continue;
                             }
 
@@ -2005,7 +2008,7 @@ impl Cluster {
                             }
 
                             let node_data =
-                                dc::contour::NodeDataDiscrete::new(&pos, temp_densities, ISO_VALUE_NORM);
+                                dc::contour::NodeDataDiscrete::new(temp_densities, ISO_VALUE_NORM);
                             nodes.push(dc::octree::LeafNode::new(pos, self.node_size, node_data));
                         };
                     }

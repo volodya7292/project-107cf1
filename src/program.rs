@@ -255,10 +255,6 @@ pub fn new(
                 let new_pos = na::Vector3::new(cluster::SIZE as u32 * cluster2.node_size(), pos.y, pos.z);
                 let mut new_data = *node.data();
 
-                if let Some(vertex_pos) = &mut new_data.vertex_pos {
-                    vertex_pos.x += cluster::SIZE as f32 * cluster2.node_size() as f32;
-                }
-
                 nei_filtered.push(dc::octree::LeafNode::new(new_pos, node.size(), new_data));
             }
         }

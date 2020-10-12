@@ -9,9 +9,9 @@ edition = "2018"
 [dependencies]
 lazy_static = "1.4.0"
 bitflags = "1.2.1"
-log = "0.4.8"
+log = "0.4.11"
 ash = "0.31.0"
-ash-window = "0.4.1"
+ash-window = "0.5.0"
 raw-window-handle = "0.3.3"
 vk-mem = "0.2.2"
-spirv_cross = { version = "0.20.0", features = ["glsl"] }
+spirv_cross = { version = "0.21.0", features = ["glsl"] }

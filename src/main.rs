@@ -29,7 +29,7 @@ vertex_impl!(BasicVertex, position, tex_coord);
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 fn main() {
-    simple_logger::init().unwrap();
+    simple_logger::SimpleLogger::new().init().unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 

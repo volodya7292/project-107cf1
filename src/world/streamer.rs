@@ -18,16 +18,27 @@ struct WorldCluster {
     generated: bool,
 }
 
-pub struct WorldController {
+pub struct StreamPosition {
+    position: na::Vector3<f64>,
+    cluster_aligned: na::Vector3<i32>,
+}
+
+pub struct WorldStreamer {
     renderer: Arc<Mutex<Renderer>>,
     render_distance: u32, // in meters
-    camera_pos_in_clusters: [i32; 3],
+    stream_pos: StreamPosition,
     clusters: [HashMap<[i32; 3], WorldCluster>; MAX_LOD + 1], // [LOD] -> clusters
 }
 
-impl WorldController {
+pub trait ClusterProvider {}
+
+impl WorldStreamer {
     const MIN_RENDER_DISTANCE: u32 = 128;
     const MAX_RENDER_DISTANCE: u32 = 8192;
+
+    pub fn set_camera_pos(&mut self, camera_pos: na::Vector3<f64>) {
+        self.stream_pos.position = camera_pos;
+    }
 
     pub fn set_render_distance(&mut self, render_distance: u32) {
         self.render_distance = render_distance
@@ -333,7 +344,7 @@ impl WorldController {
         }
     }*/
 
-    pub fn on_update(&mut self) {
+    /*pub fn on_update(&mut self) {
         // Adjust camera position & camera_pos_in_clusters
         {
             let renderer = self.renderer.lock().unwrap();
@@ -431,14 +442,41 @@ impl WorldController {
 
         // 13 * 4096 + (51 - 13) * 1024 + (202 - 51) * 256 + (805 - 202) * 64 + (3217 - 805) * 16 + (12868 - 3217) * 4 + (51472 - 12868) * 1
         // = 285208
+    }*/
+
+    pub fn on_update(&mut self) {
+        // Adjust camera_pos_in_clusters
+        {
+            /*let renderer = self.renderer.lock().unwrap();
+            let mut camera_comp = renderer.world().write_component::<component::Camera>();
+            let camera = camera_comp.get_mut(renderer.get_active_camera()).unwrap();
+            let pos = camera.position();
+
+            let cluster_step_size = Self::cluster_size(0) as i32;
+            let offset_in_clusters = [
+                pos.x.floor() as i32 / cluster_step_size,
+                pos.y.floor() as i32 / cluster_step_size,
+                pos.z.floor() as i32 / cluster_step_size,
+            ];
+            let new_cam_pos = pos.map(|x| x % (cluster_step_size as f32));
+
+            self.camera_pos_in_clusters = [
+                self.camera_pos_in_clusters[0] + offset_in_clusters[0],
+                self.camera_pos_in_clusters[1] + offset_in_clusters[1],
+                self.camera_pos_in_clusters[2] + offset_in_clusters[2],
+            ];*/
+        }
     }
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>) -> WorldController {
-    WorldController {
+pub fn new(renderer: &Arc<Mutex<Renderer>>) -> WorldStreamer {
+    WorldStreamer {
         renderer: Arc::clone(renderer),
         render_distance: 0,
-        camera_pos_in_clusters: Default::default(),
+        stream_pos: StreamPosition {
+            position: na::Vector3::new(0.0, 0.0, 0.0),
+            cluster_aligned: na::Vector3::new(0, 0, 0),
+        },
         clusters: Default::default(),
     }
 }
