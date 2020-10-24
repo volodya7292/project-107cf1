@@ -1,2 +1,2 @@
 mod generator;
-mod streamer;
+pub mod streamer;

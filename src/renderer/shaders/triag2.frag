@@ -30,7 +30,7 @@ vec3 hsv2rgb(vec3 c)
 }
 
 void main() {
-    vec3 color = clamp((vs_out.world_pos.xyz + 40) / 65.0, 0, 1);
+    vec3 color = clamp((vs_out.world_pos.xyz + 128) / 256.0, 0, 1);
     color = vec3(pow(color.r * color.g * color.b, 1. / 3.), 1, 1);
     color = hsv2rgb(color);
 

@@ -147,6 +147,10 @@ impl<'a> specs::System<'a> for RenderSystem {
 */
 
 impl Renderer {
+    pub fn device(&self) -> &Arc<Device> {
+        &self.device
+    }
+
     pub fn world(&self) -> &specs::World {
         &self.world
     }
@@ -913,7 +917,7 @@ impl Renderer {
     }
 
     pub fn on_draw(&mut self) {
-        let device = self.device.clone();
+        let device = Arc::clone(&self.device);
         let adapter = device.get_adapter();
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
         let surface = &self.surface;
@@ -929,7 +933,7 @@ impl Renderer {
                 self.surface_changed = false;
             }
 
-            let swapchain = self.swapchain.clone().unwrap();
+            let swapchain = Arc::clone(self.swapchain.as_ref().unwrap());
             let acquire_result = swapchain.acquire_image();
 
             if let Ok((sw_image, optimal)) = acquire_result {

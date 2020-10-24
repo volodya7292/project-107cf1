@@ -88,7 +88,7 @@ fn main() {
 
     let mat_pipelines = material_pipelines::create(&resources, &device);
 
-    let mut program = program::new(&renderer, &device, &mat_pipelines);
+    let mut program = program::new(&renderer, &mat_pipelines);
 
     let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
     triangle_mesh.set_vertices(

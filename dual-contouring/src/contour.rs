@@ -559,7 +559,8 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
 }
 
 pub fn generate_mesh(oct: &Octree<NodeData>) -> Vec<u32> {
-    let mut indices = Vec::<u32>::new();
+    let oct_size = oct.size() as usize;
+    let mut indices = Vec::<u32>::with_capacity(oct_size * oct_size * oct_size * 18);
 
     if let Some(node) = oct.root_node() {
         cell_proc(oct, node, &mut indices);

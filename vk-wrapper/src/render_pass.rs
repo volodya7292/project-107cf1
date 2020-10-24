@@ -104,39 +104,6 @@ impl RenderPass {
         let mut images = Vec::with_capacity(self.attachments.len());
         let mut native_image_views = Vec::with_capacity(self.attachments.len());
 
-        /*macro_rules! process_attachment {
-            ($attachment: ident, $attachment_mod: ident, $usage: expr) => {
-                let mut usage = $usage;
-                let mut override_image = None;
-
-                if let Some($attachment_mod) = attachment_mods.get(&$attachment) {
-                    match $attachment_mod {
-                        ImageMod::OverrideImage(i) => {
-                            override_image = Some(i);
-                        }
-                        ImageMod::AdditionalUsage(u) => {
-                            usage |= *u;
-                        }
-                    }
-                }
-
-                let image = if let Some(override_image) = override_image {
-                    override_image.clone()
-                } else {
-                    self.device.create_image_2d(
-                        self.attachments[*$attachment as usize].format,
-                        1,
-                        1f32,
-                        usage,
-                        size,
-                    )?
-                };
-
-                native_image_views.push(image.view);
-                images.push(image);
-            };
-        }*/
-
         for (i, attachment) in self.attachments.iter().enumerate() {
             let mut usage = if attachment.format == DEPTH_FORMAT {
                 ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
@@ -157,7 +124,7 @@ impl RenderPass {
             }
 
             let image = if let Some(override_image) = override_image {
-                override_image.clone()
+                Arc::clone(override_image)
             } else {
                 self.device
                     .create_image_2d(attachment.format, 1, 1f32, usage, size)?
@@ -166,21 +133,6 @@ impl RenderPass {
             native_image_views.push(image.view);
             images.push(image);
         }
-
-        /* for color_attachment in &self.color_attachments {
-            process_attachment!(
-                color_attachment,
-                attachment_mod,
-                ImageUsageFlags::COLOR_ATTACHMENT
-            );
-        }
-        for depth_attachment in &self.depth_attachments {
-            process_attachment!(
-                depth_attachment,
-                attachment_mod,
-                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-            );
-        }*/
 
         let create_info = vk::FramebufferCreateInfo::builder()
             .render_pass(self.native)

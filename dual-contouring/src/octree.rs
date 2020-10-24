@@ -83,6 +83,10 @@ impl<T> Octree<T> {
         }
     }
 
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
     pub(crate) fn get_node(&self, id: u32) -> &Option<Node<T>> {
         &self.nodes[id as usize]
     }
