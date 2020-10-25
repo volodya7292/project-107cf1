@@ -156,7 +156,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
     world_streamer.on_update();*/
 
-    let device = renderer.lock().unwrap().device().clone();
+    /*let device = renderer.lock().unwrap().device().clone();
     let mut cluster = cluster::new(&device, 1);
     let mut cluster2 = cluster::new(&device, 1);
     let mut cluster3 = cluster::new(&device, 1);
@@ -444,6 +444,167 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
                 na::Vector3::new(1.0, 1.0, 1.0),
             ))
             .with(component::VertexMeshRef::new(&cluster4.vertex_mesh().raw()))
+            .with(component::Renderer::new(&device, &mat_pipelines.cluster(), false))
+            .build();
+    }*/
+
+    let device = renderer.lock().unwrap().device().clone();
+    let mut cluster = cluster::new(&device, 1);
+    let mut cluster2 = cluster::new(&device, 2);
+
+    {
+        let noise =
+            NoiseBuilder::gradient_3d_offset(0.0, cluster::SIZE, 0.0, cluster::SIZE, 0.0, cluster::SIZE)
+                .with_seed(0)
+                .with_freq(1.0 / 50.0)
+                .generate();
+
+        let sample_noise = |x, y, z| -> f32 {
+            noise.0[z * (cluster::SIZE) * (cluster::SIZE) + y * (cluster::SIZE) + x] * 35.0
+        };
+
+        let mut points = Vec::<cluster::DensityPointInfo>::new();
+
+        for x in 0..(cluster::SIZE) {
+            for y in 0..(cluster::SIZE) {
+                for z in 0..(cluster::SIZE) {
+                    let n_v = sample_noise(x, y, z);
+
+                    //let n_v = ((x as f32) / (cluster::SIZE as f32)).min(1.0);
+
+                    /*let v = (na::Vector3::new(
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                    ) - na::Vector3::new(x as f32, y as f32, z as f32))
+                    .magnitude()
+                        / (cluster::SIZE as f32)
+                        * 1.05;*/
+
+                    let n_v = ((n_v as f32 + (64 - (y as i32)) as f32 / 10.0) / 2.0)
+                        .max(0.0)
+                        .min(1.0);
+
+                    points.push(cluster::DensityPointInfo {
+                        pos: [x as u8, y as u8, z as u8, 0],
+                        point: cluster::DensityPoint {
+                            //density: (((cluster::SIZE - y - 1) as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: ((x as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: (((64 - y) as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            density: (n_v * 255.0) as u8,
+                            //density: 255 - (v * 255.0) as u8,
+                            material: 0,
+                        },
+                    });
+                }
+            }
+        }
+
+        cluster.set_densities(&points);
+    }
+
+    {
+        let noise = NoiseBuilder::gradient_3d_offset(
+            64.0 / 2.0,
+            cluster::SIZE,
+            0.0,
+            cluster::SIZE,
+            0.0,
+            cluster::SIZE,
+        )
+        .with_seed(0)
+        .with_freq(1.0 / 25.0)
+        .generate();
+
+        let sample_noise = |x, y, z| -> f32 {
+            noise.0[z * (cluster::SIZE) * (cluster::SIZE) + y * (cluster::SIZE) + x] * 35.0
+        };
+
+        let mut points = Vec::<cluster::DensityPointInfo>::new();
+
+        for x in 0..cluster::SIZE {
+            for y in 0..cluster::SIZE {
+                for z in 0..cluster::SIZE {
+                    let n_v = sample_noise(x, y, z);
+
+                    /*let v = (na::Vector3::new(
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                        cluster::SIZE as f32 / 2.0,
+                    ) - na::Vector3::new(x as f32, y as f32, z as f32))
+                    .magnitude()
+                        / (cluster::SIZE as f32)
+                        * 1.05;*/
+
+                    let n_v = ((n_v as f32 + (64 - (y as i32) * 2) as f32 / 10.0) / 2.0)
+                        .max(0.0)
+                        .min(1.0);
+
+                    points.push(cluster::DensityPointInfo {
+                        pos: [x as u8, y as u8, z as u8, 0],
+                        point: cluster::DensityPoint {
+                            //density: (((cluster::SIZE - y - 1) as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: ((x as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: (((64 - y) as f32 / (cluster::SIZE as f32 * 1.5)) * 255.0) as u8,
+                            density: (n_v * 255.0) as u8,
+                            //density: 255 - (v * 255.0) as u8,
+                            material: 0,
+                        },
+                    });
+                }
+            }
+        }
+
+        cluster2.set_densities(&points);
+    }
+
+    {
+        let mut seam = cluster::Seam::new(cluster.node_size());
+        let mut seamt = cluster::Seam::new(cluster.node_size());
+        let mut seam2 = cluster::Seam::new(cluster2.node_size());
+
+        seam.insert(&mut cluster2, na::Vector3::new(64, 0, 0));
+
+        cluster.fill_seam_densities(&seam);
+
+        // -----------------------------------------------------------------------------------
+
+        let t0 = Instant::now();
+        cluster.update_mesh(&seam, 1.0); // TODO: include neighbour nodes
+        let t1 = Instant::now();
+
+        println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());
+
+        let t0 = Instant::now();
+        cluster2.update_mesh(&seam2, 1.0);
+        let t1 = Instant::now();
+
+        println!("CL TIME: {}", t1.duration_since(t0).as_secs_f64());
+    }
+
+    {
+        let mut renderer = program.renderer.lock().unwrap();
+
+        renderer
+            .world_mut()
+            .create_entity()
+            .with(component::Transform::new(
+                na::Vector3::new(0.0, -(cluster::SIZE as f32) / 2.0 - 4.0, 0.0),
+                na::Vector3::new(0.0, 0.0, 0.0),
+                na::Vector3::new(1.0, 1.0, 1.0),
+            ))
+            .with(component::VertexMeshRef::new(&cluster.vertex_mesh().raw()))
+            .with(component::Renderer::new(&device, &mat_pipelines.cluster(), false))
+            .build();
+        renderer
+            .world_mut()
+            .create_entity()
+            .with(component::Transform::new(
+                na::Vector3::new(64.0, -(cluster::SIZE as f32) / 2.0 - 4.0, 0.0),
+                na::Vector3::new(0.0, 0.0, 0.0),
+                na::Vector3::new(1.0, 1.0, 1.0),
+            ))
+            .with(component::VertexMeshRef::new(&cluster2.vertex_mesh().raw()))
             .with(component::Renderer::new(&device, &mat_pipelines.cluster(), false))
             .build();
     }

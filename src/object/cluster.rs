@@ -196,8 +196,16 @@ pub struct Cluster {
     vertex_mesh: VertexMesh<Vertex>,
 }
 
+#[derive(Default)]
+struct SeamLayer {
+    // original-sized nodes: size = { seam.node_size or (seam.node_size / 2) or (seam.node_size * 2) }
+    original_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>,
+    // nodes are normalized: size = { seam.node_size or (seam.node_size / 2) }
+    normalized_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>,
+}
+
 pub struct Seam {
-    nodes: HashMap<u8, Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>>, // layer -> node cache
+    nodes: HashMap<u8, SeamLayer>, // layer -> node cache
     node_size: u32,
 }
 
@@ -210,20 +218,18 @@ impl Seam {
     }
 
     pub fn insert(&mut self, cluster: &mut Cluster, offset: na::Vector3<i32>) {
-        let cluster_node_size = cluster.node_size;
         let cluster_seam_nodes = cluster.collect_nodes_for_seams();
 
         let bound = ((SIZE as u32) * self.node_size) as i32;
 
         for (i, nodes) in cluster_seam_nodes {
-            let self_nodes = self
-                .nodes
-                .entry(*i)
-                .or_insert(Vec::with_capacity(SIZE * SIZE * 8));
+            let self_nodes = self.nodes.entry(*i).or_insert(SeamLayer {
+                original_nodes: Vec::with_capacity(SIZE * SIZE * 8),
+                normalized_nodes: Vec::with_capacity(SIZE * SIZE * 8),
+            });
 
             for node in nodes {
-                let pos = na::convert::<na::Vector3<u32>, na::Vector3<i32>>(*node.position())
-                    + offset * (SIZE as i32) * (cluster_node_size as i32);
+                let pos = na::convert::<na::Vector3<u32>, na::Vector3<i32>>(*node.position()) + offset;
                 let size = node.size();
 
                 if (size != self.node_size && (size != self.node_size / 2) && (size != self.node_size * 2))
@@ -232,6 +238,12 @@ impl Seam {
                 {
                     continue;
                 }
+
+                self_nodes.original_nodes.push(dc::octree::LeafNode::new(
+                    na::try_convert(pos).unwrap(),
+                    node.size(),
+                    *node.data(),
+                ));
 
                 if size == self.node_size * 2 {
                     let d = &node.data().densities;
@@ -256,7 +268,9 @@ impl Seam {
                                     densities[x + 1][y + 1][z + 1],
                                 ];
 
-                                let new_pos = pos + na::Vector3::new(x as i32, y as i32, z as i32);
+                                let new_pos = pos
+                                    + na::Vector3::new(x as i32, y as i32, z as i32)
+                                        * (self.node_size as i32);
 
                                 if new_pos.x > bound || new_pos.y > bound || new_pos.z > bound {
                                     continue;
@@ -264,7 +278,7 @@ impl Seam {
 
                                 let data = dc::contour::NodeDataDiscrete::new(d, ISO_VALUE_NORM);
 
-                                self_nodes.push(dc::octree::LeafNode::new(
+                                self_nodes.normalized_nodes.push(dc::octree::LeafNode::new(
                                     na::try_convert(new_pos).unwrap(),
                                     self.node_size,
                                     data,
@@ -273,7 +287,7 @@ impl Seam {
                         }
                     }
                 } else {
-                    self_nodes.push(dc::octree::LeafNode::new(
+                    self_nodes.normalized_nodes.push(dc::octree::LeafNode::new(
                         na::try_convert(pos).unwrap(),
                         node.size(),
                         *node.data(),
@@ -721,8 +735,8 @@ impl Cluster {
 
         let bound = (SIZE as u32) * self.node_size;
 
-        for (level, nodes) in &seam.nodes {
-            for node in nodes {
+        for (level, seam_layer) in &seam.nodes {
+            for node in &seam_layer.normalized_nodes {
                 let pos = node.position();
                 let size = node.size();
                 let data = node.data();
@@ -765,7 +779,7 @@ impl Cluster {
         &mut self,
         sector_pos: [u8; 3],
         layer_index: u8,
-        neighbour_nodes: &[dc::octree::LeafNode<dc::contour::NodeDataDiscrete>],
+        seam_layer: &SeamLayer,
     ) -> (Vec<Vertex>, Vec<u32>) {
         self.update_seams();
 
@@ -790,7 +804,8 @@ impl Cluster {
         let seam_bound1 = seam_bound0.add_scalar(SECTOR_SIZE as u32 * self.node_size);
 
         // Filter neighbour nodes
-        let neighbour_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>> = neighbour_nodes
+        let neighbour_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>> = seam_layer
+            .original_nodes
             .iter()
             .cloned()
             .filter(|node| {
@@ -866,7 +881,7 @@ impl Cluster {
             let node_pos = node.position();
             let node_pos = na::Vector3::new(node_pos.x as f32, node_pos.y as f32, node_pos.z as f32);
 
-            vertices.push(node_pos + node.data().vertex_pos);
+            vertices.push(node_pos + node.data().vertex_pos * (node.size() as f32));
         }
 
         // Create octree & generate mesh
@@ -931,9 +946,9 @@ impl Cluster {
                                     }
 
                                     let pos = na::Vector3::new(
-                                        (xs * SECTOR_SIZE + $x) as u32,
-                                        (ys * SECTOR_SIZE + $y) as u32,
-                                        (zs * SECTOR_SIZE + $z) as u32,
+                                        (xs * SECTOR_SIZE + $x) as u32 * self.node_size,
+                                        (ys * SECTOR_SIZE + $y) as u32 * self.node_size,
+                                        (zs * SECTOR_SIZE + $z) as u32 * self.node_size,
                                     );
 
                                     if !is_valid_cell {
@@ -1035,12 +1050,12 @@ impl Cluster {
                         let mut sector_indices = Vec::with_capacity(SECTOR_VOLUME * MAX_CELL_LAYERS);
 
                         for i in 0..sector.layer_count {
-                            let empty_vec = Vec::new();
+                            let def_seam_layer = SeamLayer::default();
 
                             let (temp_vertices, mut temp_indices) = self.triangulate(
                                 [x as u8, y as u8, z as u8],
                                 i,
-                                seam.nodes.get(&i).unwrap_or(&empty_vec),
+                                seam.nodes.get(&i).unwrap_or(&def_seam_layer),
                             );
 
                             // Adjust indices

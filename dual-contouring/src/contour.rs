@@ -334,7 +334,7 @@ pub fn construct_nodes(
                     node_size,
                     NodeData {
                         corners,
-                        vertex_pos: avg_pos * (node_size as f32),
+                        vertex_pos: avg_pos,
                         vertex_index: u32::MAX,
                     },
                 ));
