@@ -198,14 +198,15 @@ pub struct Cluster {
 
 #[derive(Default)]
 struct SeamLayer {
-    // original-sized nodes: size = { seam.node_size or (seam.node_size / 2) or (seam.node_size * 2) }
+    /// original-sized nodes: size = { seam.node_size or (seam.node_size / 2) or (seam.node_size * 2) }
     original_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>,
-    // nodes are normalized: size = { seam.node_size or (seam.node_size / 2) }
+    /// nodes are normalized: size = { seam.node_size or (seam.node_size / 2) }
     normalized_nodes: Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>,
 }
 
 pub struct Seam {
-    nodes: HashMap<u8, SeamLayer>, // layer -> node cache
+    /// layer -> node cache
+    nodes: HashMap<u8, SeamLayer>,
     node_size: u32,
 }
 
@@ -217,10 +218,24 @@ impl Seam {
         }
     }
 
+    /// Trilinear interpolation
+    fn interpolate_unit(d: &[f32; 8], p: na::Vector3<f32>) -> f32 {
+        let xm = na::Matrix1x2::new(1.0 - p.x, p.x);
+        let ym = na::Matrix2x1::new(1.0 - p.y, p.y);
+        let zm = na::Matrix1x2::new(1.0 - p.z, p.z);
+
+        let fm0 = na::Matrix2::new(d[0], d[2], d[4], d[6]);
+        let fm1 = na::Matrix2::new(d[1], d[3], d[5], d[7]);
+
+        (zm * na::Matrix2x1::new((xm * fm0 * ym)[(0, 0)], (xm * fm1 * ym)[(0, 0)]))[(0, 0)]
+    }
+
     pub fn insert(&mut self, cluster: &mut Cluster, offset: na::Vector3<i32>) {
         let cluster_seam_nodes = cluster.collect_nodes_for_seams();
 
         let bound = ((SIZE as u32) * self.node_size) as i32;
+
+        let mut densities = [[[0.0_f32; 3]; 3]; 3];
 
         for (i, nodes) in cluster_seam_nodes {
             let self_nodes = self.nodes.entry(*i).or_insert(SeamLayer {
@@ -248,11 +263,16 @@ impl Seam {
                 if size == self.node_size * 2 {
                     let d = &node.data().densities;
 
-                    let mut densities = [
-                        [[d[0], d[0], d[1]], [d[0], d[0], d[1]], [d[2], d[2], d[3]]],
-                        [[d[0], d[0], d[1]], [d[0], d[0], d[1]], [d[2], d[2], d[3]]],
-                        [[d[4], d[4], d[5]], [d[4], d[4], d[5]], [d[6], d[6], d[7]]],
-                    ];
+                    for x in 0..3 {
+                        for y in 0..3 {
+                            for z in 0..3 {
+                                densities[x][y][z] = Self::interpolate_unit(
+                                    d,
+                                    na::Vector3::new(x as f32, y as f32, z as f32) * 0.5,
+                                );
+                            }
+                        }
+                    }
 
                     for x in 0..2 {
                         for y in 0..2 {

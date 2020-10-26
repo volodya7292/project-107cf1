@@ -81,6 +81,7 @@ void sample_material(uint id, out SampledMaterial sampled_mat) {
     }
 }
 
+// TODO: change to trilinear interpolation
 void cube_interpolate(vec3 p, out float v[9]) {
     v[0] = 1.0f - distance(p, vec3(0, 0, 0));
     v[1] = 1.0f - distance(p, vec3(1, 0, 0));
