@@ -462,14 +462,20 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         let sample_noise = |x, y, z| -> f32 {
             noise.0[z * (cluster::SIZE) * (cluster::SIZE) + y * (cluster::SIZE) + x] * 35.0
         };
+        let sample_f = |x: usize, y: usize, z: usize| -> f32 {
+            let n = sample_noise(x.min(63), y.min(63), z.min(63));
+            /*let f: f32 = ((544.0_f32 - y as f32) / (1024.0_f32) + n / 32.0_f32)
+            .max(0.0)
+            .min(1.0);*/
+            let f: f32 = ((8224.0 - y as f32) / (16384.0) + n / 512.0).max(0.0).min(1.0);
+            f
+        };
 
         let mut points = Vec::<cluster::DensityPointInfo>::new();
 
         for x in 0..(cluster::SIZE) {
             for y in 0..(cluster::SIZE) {
                 for z in 0..(cluster::SIZE) {
-                    let n_v = sample_noise(x, y, z);
-
                     //let n_v = ((x as f32) / (cluster::SIZE as f32)).min(1.0);
 
                     /*let v = (na::Vector3::new(
@@ -481,16 +487,92 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
                         / (cluster::SIZE as f32)
                         * 1.05;*/
 
-                    let n_v = ((n_v as f32 + (64 - (y as i32)) as f32 / 10.0) / 2.0)
-                        .max(0.0)
-                        .min(1.0);
+                    //let n_v = ((n_v as f32 + (64 - (y as i32)) as f32 / 10.0) / 2.0)
+                    //    .max(0.0)
+                    //    .min(1.0);
+
+                    let v = sample_f(x, y, z);
+                    let v_z0 = sample_f(x, y, z.saturating_sub(1));
+                    let v_z1 = sample_f(x, y, z + 1);
+                    let v_y0 = sample_f(x, y.saturating_sub(1), z);
+                    let v_y1 = sample_f(x, y + 1, z);
+                    let v_x0 = sample_f(x.saturating_sub(1), y, z);
+                    let v_x1 = sample_f(x + 1, y, z);
+
+                    let mut n_v = v;
+
+                    if v >= 0.5
+                        && v_z0 >= 0.5
+                        && v_z1 >= 0.5
+                        && v_y0 >= 0.5
+                        && v_y1 >= 0.5
+                        && v_x0 >= 0.5
+                        && v_x1 >= 0.5
+                    {
+                        n_v = 1.0;
+                    } else if v < 0.5
+                        && v_z0 < 0.5
+                        && v_z1 < 0.5
+                        && v_y0 < 0.5
+                        && v_y1 < 0.5
+                        && v_x0 < 0.5
+                        && v_x1 < 0.5
+                    {
+                        n_v = 0.0;
+                    } else {
+                        let ad = v - 0.5;
+                        let bd = v_y1 - 0.5;
+                        let cd = v_x1 - 0.5;
+                        let ed = v_z1 - 0.5;
+                        let bd2 = v_y0 - 0.5;
+                        let cd2 = v_x0 - 0.5;
+                        let ed2 = v_z0 - 0.5;
+                        let ta = ((v >= 0.5) as i8 as f32 - v) / ad;
+                        let tb = ((v_y1 >= 0.5) as i8 as f32 - v_y1) / bd;
+                        let tc = ((v_x1 >= 0.5) as i8 as f32 - v_x1) / cd;
+                        let te = ((v_z1 >= 0.5) as i8 as f32 - v_z1) / ed;
+                        let tb2 = ((v_y0 >= 0.5) as i8 as f32 - v_y0) / bd2;
+                        let tc2 = ((v_x0 >= 0.5) as i8 as f32 - v_x0) / cd2;
+                        let te2 = ((v_z0 >= 0.5) as i8 as f32 - v_z0) / ed2;
+                        let t = ta.min(tb).min(tc).min(te).min(tb2).min(tc2).min(te2);
+                        n_v = n_v + ad * t;
+                    }
+                    /*
+
+                    h: 320
+
+                    64 * 5 = 320;
+                    f: y / 320
+                    div: 0.0031
+
+                    64
+                    f: (y - 128) / 64
+                    div: 0.015
+
+                     */
+
+                    /*
+
+
+                       float n = perlin_fbm(uv * 5.0, 1.0, 3) + (uv.y + 0.0) * 10.0;
+
+                       return vec4(vec3(n), 1);
+
+                       if (n > uv.y) {
+                           return vec4(1);
+                       } else {
+                           return vec4(0);
+                       }
+
+
+                    */
 
                     points.push(cluster::DensityPointInfo {
                         pos: [x as u8, y as u8, z as u8, 0],
                         point: cluster::DensityPoint {
                             //density: (((cluster::SIZE - y - 1) as f32 / cluster::SIZE as f32) * 255.0) as u8,
                             //density: ((x as f32 / cluster::SIZE as f32) * 255.0) as u8,
-                            //density: (((64 - y) as f32 / cluster::SIZE as f32) * 255.0) as u8,
+                            //density: (((64 - y) as f32 / cluster::SIZE as f32) * 255.0) as u8 ,
                             density: (n_v * 255.0) as u8,
                             //density: 255 - (v * 255.0) as u8,
                             material: 0,
