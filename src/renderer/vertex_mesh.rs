@@ -134,24 +134,24 @@ where
         let raw = self.raw.as_ref().lock().unwrap();
         let attribs = VertexT::attributes();
 
-        let mut vertices =
-            vec![Default::default(); count.min(raw.vertex_count.max(first_vertex) - first_vertex) as usize];
+        let first_vertex = first_vertex.min(raw.vertex_count);
+        let mut vertices = vec![Default::default(); count.min(raw.vertex_count - first_vertex) as usize];
 
-        for (vertex_offset, format) in attribs {
-            let buffer_offset = vertex_offset as isize * vertices.len() as isize;
-            let format_size = vkw::FORMAT_SIZES[&format] as isize;
+        if let Some(ref staging_buffer) = raw.staging_buffer {
+            for (vertex_offset, format) in attribs {
+                let buffer_offset = vertex_offset as isize * raw.vertex_count as isize;
+                let format_size = vkw::FORMAT_SIZES[&format] as isize;
 
-            for (i, vertex) in vertices.iter_mut().enumerate() {
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        raw.staging_buffer
-                            .as_ref()
-                            .unwrap()
-                            .as_ptr()
-                            .offset(buffer_offset + format_size * (first_vertex + i as u32) as isize),
-                        (vertex as *mut VertexT as *mut u8).offset(vertex_offset as isize),
-                        format_size as usize,
-                    );
+                for (i, vertex) in vertices.iter_mut().enumerate() {
+                    unsafe {
+                        ptr::copy_nonoverlapping(
+                            staging_buffer
+                                .as_ptr()
+                                .offset(buffer_offset + format_size * (first_vertex + i as u32) as isize),
+                            (vertex as *mut VertexT as *mut u8).offset(vertex_offset as isize),
+                            format_size as usize,
+                        );
+                    }
                 }
             }
         }
@@ -162,14 +162,20 @@ where
     pub fn get_indices(&self, first_index: u32, count: u32) -> Vec<u32> {
         let raw = self.raw.as_ref().lock().unwrap();
 
-        let mut indices = vec![0u32; count.min(raw.index_count.max(first_index) - first_index) as usize];
+        let first_index = first_index.min(raw.index_count);
+        let mut indices = vec![0u32; count.min(raw.index_count - first_index) as usize];
 
-        raw.staging_buffer
-            .as_ref()
-            .unwrap()
-            .read(raw.indices_offset, unsafe {
-                slice::from_raw_parts_mut(indices.as_mut_ptr() as *mut u8, indices.len())
-            });
+        if let Some(ref staging_buffer) = raw.staging_buffer {
+            staging_buffer.read(
+                raw.indices_offset + first_index as u64 * mem::size_of::<u32>() as u64,
+                unsafe {
+                    slice::from_raw_parts_mut(
+                        indices.as_mut_ptr() as *mut u8,
+                        indices.len() * mem::size_of::<u32>(),
+                    )
+                },
+            );
+        }
 
         indices
     }

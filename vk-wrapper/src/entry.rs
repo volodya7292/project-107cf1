@@ -81,7 +81,7 @@ impl Entry {
     pub fn create_instance(
         self: &Arc<Self>,
         app_name: &str,
-        mut required_extensions: Vec<&str>,
+        required_extensions: &[&str],
     ) -> Result<Arc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();
@@ -94,6 +94,7 @@ impl Entry {
         let available_extensions = self.enumerate_instance_extension_names()?;
 
         let mut required_layers: Vec<&str> = vec![];
+        let mut required_extensions: Vec<&str> = required_extensions.to_vec();
         let mut preferred_extensions: Vec<&str> = vec![];
 
         if cfg!(debug_assertions) {

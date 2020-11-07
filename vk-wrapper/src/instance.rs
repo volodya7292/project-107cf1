@@ -55,7 +55,7 @@ impl Instance {
 
     pub fn enumerate_adapters(
         self: &Arc<Self>,
-        surface: &Arc<Surface>,
+        surface: Option<&Arc<Surface>>,
     ) -> Result<Vec<Arc<Adapter>>, vk::Result> {
         let physical_devices = unsafe { self.native.enumerate_physical_devices()? };
 
@@ -71,10 +71,14 @@ impl Instance {
                 for (i, fam_prop) in queue_families.iter().enumerate() {
                     // Check for present usage
 
-                    let surface_supported = unsafe {
-                        self.surface_khr
-                            .get_physical_device_surface_support(p_device, i as u32, surface.native)
-                            .unwrap()
+                    let surface_supported = if let Some(surface) = surface {
+                        unsafe {
+                            self.surface_khr
+                                .get_physical_device_surface_support(p_device, i as u32, surface.native)
+                                .unwrap()
+                        }
+                    } else {
+                        false
                     };
 
                     if surface_supported && queue_fam_indices[3][0] == u32::MAX {
@@ -111,7 +115,9 @@ impl Instance {
                 }
 
                 // The same queue(graphics) is used for rest if separate queues not available
-                if queue_fam_indices[0][0] == u32::MAX || queue_fam_indices[3][0] == u32::MAX {
+                if queue_fam_indices[0][0] == u32::MAX
+                    || (queue_fam_indices[3][0] == u32::MAX && surface.is_some())
+                {
                     return None;
                 }
 

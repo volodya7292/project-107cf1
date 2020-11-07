@@ -5,6 +5,8 @@ pub(crate) mod renderer;
 mod object;
 mod program;
 mod resource_file;
+#[cfg(test)]
+mod tests;
 
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
@@ -49,11 +51,11 @@ fn main() {
 
     let windows_extensions = window.vulkan_instance_extensions().unwrap();
     let vke = vk_wrapper::Entry::new().unwrap();
-    let instance = vke.create_instance("GOVNO!", windows_extensions).unwrap();
+    let instance = vke.create_instance("GOVNO!", &windows_extensions).unwrap();
 
     let surface = instance.create_surface(&window).unwrap();
 
-    let adapters = instance.enumerate_adapters(&surface).unwrap();
+    let adapters = instance.enumerate_adapters(Some(&surface)).unwrap();
     let adapter = adapters.first().unwrap();
     let device = adapter.create_device().unwrap();
 
