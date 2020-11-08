@@ -38,8 +38,7 @@ pub struct DensityPoint {
     pub(crate) material: u16,
 }
 
-#[derive(Clone)]
-pub struct Sector {
+struct Sector {
     indices: Box<[[[u32; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     densities: Vec<DensityPoint>,
     layer_count: u8,
@@ -62,7 +61,7 @@ pub struct DensityPointInfo {
 
 impl Sector {
     /// pos: [x, y, z, layer index]
-    pub fn get_density(&self, pos: [u8; 4]) -> Option<DensityPoint> {
+    fn get_density(&self, pos: [u8; 4]) -> Option<DensityPoint> {
         let index = *self
             .indices
             .get(pos[0] as usize)?
@@ -78,7 +77,7 @@ impl Sector {
     }
 
     /// pos: [x, y, z, layer index]
-    pub fn get_density_layers(&self, pos: [u8; 3], out: &mut [DensityPoint]) -> u8 {
+    fn get_density_layers(&self, pos: [u8; 3], out: &mut [DensityPoint]) -> u8 {
         let index = self.indices[pos[0] as usize][pos[1] as usize][pos[2] as usize];
         let head_index = index & 0x00ffffff;
         let layer_count = (index & 0xff000000) >> 24;
@@ -103,6 +102,8 @@ impl Sector {
         let mut offset = 0u32;
         let mut temp_offset = 0u32;
         let mut last_pos_1d = 0u32;
+        let mut changed = false;
+        let mut indices_changed = true;
 
         for point_info in points {
             let pos = [
@@ -135,21 +136,24 @@ impl Sector {
                     self.densities.insert(insert_index, point_info.point);
                     *index = head_index | ((layer_count + 1) << 24);
                     temp_offset += 1;
-                    self.indices_changed = true;
+                    indices_changed = true;
                 }
+                changed = true;
             }
         }
+
+        self.indices_changed |= indices_changed;
+        self.changed |= changed;
 
         self.update_indices();
     }
 
-    pub fn update_indices(&mut self) {
+    fn update_indices(&mut self) {
         if !self.indices_changed {
             return;
         }
         self.indices_changed = false;
 
-        self.changed = true;
         let mut max_layer_count = 0;
         let mut offset = 0u32;
 
@@ -192,7 +196,8 @@ impl Default for Sector {
 pub struct Cluster {
     sectors: [[[Sector; SIZE_IN_SECTORS]; SIZE_IN_SECTORS]; SIZE_IN_SECTORS],
     node_size: u32,
-    seam_nodes_cache: HashMap<u8, Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>>, // layer -> node cache
+    seam_nodes_cache: HashMap<u8, Vec<dc::octree::LeafNode<dc::contour::NodeDataDiscrete>>>,
+    // layer -> node cache
     vertex_mesh: VertexMesh<Vertex>,
 }
 
@@ -250,6 +255,7 @@ impl Seam {
                 if (size != self.node_size && (size != self.node_size / 2) && (size != self.node_size * 2))
                     || (pos.x < bound && pos.y < bound && pos.z < bound)
                     || (pos.x > bound || pos.y > bound || pos.z > bound)
+                    || (pos.x < 0 || pos.y < 0 || pos.z < 0)
                 {
                     continue;
                 }
@@ -499,6 +505,7 @@ impl Cluster {
                 offset.1 += 1;
                 sector.indices_changed = true;
             }
+            sector.changed = true;
         }
 
         // Update indices to account for inserted densities
@@ -1087,6 +1094,19 @@ impl Cluster {
                             sector_indices.extend(temp_indices);
                         }
 
+                        // Adjust vertices
+                        for v in &mut sector_vertices {
+                            v.position += na::Vector3::new(x as f32, y as f32, z as f32)
+                                * (SECTOR_SIZE as f32)
+                                * (self.node_size as f32);
+                        }
+
+                        let sector = &mut self.sectors[x][y][z];
+                        sector.vertices_offset = vertices.len() as u32;
+                        sector.vertex_count = sector_vertices.len() as u32;
+                        sector.indices_offset = indices.len() as u32;
+                        sector.index_count = sector_indices.len() as u32;
+
                         (sector_vertices, sector_indices)
                     } else {
                         let sector = &self.sectors[x][y][z];
@@ -1105,13 +1125,6 @@ impl Cluster {
 
                         (sector_vertices, sector_indices)
                     };
-
-                    // Adjust vertices
-                    for v in &mut sector_vertices {
-                        v.position += na::Vector3::new(x as f32, y as f32, z as f32)
-                            * (SECTOR_SIZE as f32)
-                            * (self.node_size as f32);
-                    }
 
                     vertices.extend(sector_vertices);
                     indices.extend(sector_indices);

@@ -5,21 +5,23 @@ use crate::renderer::{component, Renderer};
 use nalgebra as na;
 use nalgebra::SimdComplexField;
 use nalgebra_glm as glm;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use nalgebra_glm::abs;
+use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use simdnoise::NoiseBuilder;
 use specs::{Builder, WorldExt};
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub const MAX_LOD: usize = 4;
 pub const LOD0_RANGE: usize = 128;
 
-#[derive(Clone)]
 struct WorldCluster {
     cluster: Arc<Mutex<Cluster>>,
+    seam: Option<cluster::Seam>,
     entity: specs::Entity,
     creation_time_secs: u64,
+    interior_changed: bool,
     generated: bool,
 }
 
@@ -57,165 +59,106 @@ impl WorldStreamer {
         na::try_convert(glm::floor(&(pos / cluster_step_size))).unwrap()
     }
 
-    // TODO
-    fn get_seam_clusters(&self) {
-        unimplemented!()
+    fn create_seam_for_cluster(&self, level: usize, pos: &na::Vector3<i32>) -> cluster::Seam {
+        let mut neighbours = Vec::with_capacity(64);
+
+        let cluster_size1 = Self::cluster_size(level as u32) as i32;
+        let cluster_size2 = Self::cluster_size(level as u32 + 1) as i32;
+
+        // Lower level
+        if level > 0 {
+            let cluster_size0 = Self::cluster_size(level.saturating_sub(1) as u32) as i32;
+
+            for x in 0..3 {
+                for y in 0..3 {
+                    for z in 0..3 {
+                        if x < 2 && y < 2 && z < 2 {
+                            continue;
+                        }
+                        let pos2 = pos + na::Vector3::new(x, y, z) * cluster_size0;
+
+                        if self.clusters[level - 1].contains_key(&pos2) {
+                            neighbours.push((level - 1, pos2));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Current level
+        {
+            for x in 0..2 {
+                for y in 0..2 {
+                    for z in 0..2 {
+                        if x == 0 && y == 0 && z == 0 {
+                            continue;
+                        }
+                        let pos2 = pos + na::Vector3::new(x, y, z) * cluster_size1;
+
+                        if self.clusters[level].contains_key(&pos2) {
+                            neighbours.push((level, pos2));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Higher level
+        if level < MAX_LOD {
+            for x in 0..2 {
+                for y in 0..2 {
+                    for z in 0..2 {
+                        if x == 0 && y == 0 && z == 0 {
+                            continue;
+                        }
+
+                        let pos2 = pos - pos.map(|a| a % cluster_size2).abs()
+                            + na::Vector3::new(x, y, z) * cluster_size2;
+
+                        if (pos2.x > pos.x + cluster_size1)
+                            || (pos2.y > pos.y + cluster_size1)
+                            || (pos2.z > pos.z + cluster_size1)
+                        {
+                            continue;
+                        }
+
+                        if self.clusters[level + 1].contains_key(&pos2) {
+                            neighbours.push((level + 1, pos2));
+                        }
+                    }
+                }
+            }
+        }
+
+        let node_size = 2_u32.pow(level as u32);
+        let mut seam = cluster::Seam::new(node_size);
+
+        for (j, neighbour_pos) in &neighbours {
+            let offset = neighbour_pos - pos;
+            let mut neighbour_cluster = self.clusters[*j][&neighbour_pos].cluster.lock().unwrap();
+            seam.insert(&mut neighbour_cluster, offset);
+        }
+
+        seam
     }
 
-    /*pub fn on_update(&mut self) {
-        // Adjust camera position & camera_pos_in_clusters
-        {
-            let renderer = self.renderer.lock().unwrap();
-            let mut camera_comp = renderer.world().write_component::<component::Camera>();
-            let camera = camera_comp.get_mut(renderer.get_active_camera()).unwrap();
-            let pos = camera.position();
-
-            let cluster_step_size = Self::cluster_size(0) as i32;
-            let offset_in_clusters = [
-                pos.x.floor() as i32 / cluster_step_size,
-                pos.y.floor() as i32 / cluster_step_size,
-                pos.z.floor() as i32 / cluster_step_size,
-            ];
-            let new_cam_pos = pos.map(|x| x % (cluster_step_size as f32));
-
-            self.camera_pos_in_clusters = [
-                self.camera_pos_in_clusters[0] + offset_in_clusters[0],
-                self.camera_pos_in_clusters[1] + offset_in_clusters[1],
-                self.camera_pos_in_clusters[2] + offset_in_clusters[2],
-            ];
-            camera.set_position(new_cam_pos);
-        }
-
-        // Remove out-of-render_distance clusters
-        {
-            let mut renderer = self.renderer.lock().unwrap();
-            let world = renderer.world_mut();
-            let cluster_step_size = Self::cluster_size(0) as i32;
-
-            let cam_pos_v = na::Vector3::<i32>::new(
-                self.camera_pos_in_clusters[0],
-                self.camera_pos_in_clusters[1],
-                self.camera_pos_in_clusters[2],
-            );
-            let render_distance = self.render_distance;
-            let curr_time_secs = Instant::now().elapsed().as_secs();
-
-            let mut entities_to_remove = Vec::with_capacity(65535);
-
-            for level in &mut self.clusters {
-                *level = level
-                    .iter()
-                    .filter_map(|(&pos, world_cluster)| {
-                        let dist = na::Vector3::<f32>::new(
-                            (pos[0] - cam_pos_v[0]) as f32,
-                            (pos[1] - cam_pos_v[1]) as f32,
-                            (pos[2] - cam_pos_v[2]) as f32,
-                        )
-                        .magnitude()
-                            * (cluster_step_size as f32);
-
-                        if (dist > render_distance as f32)
-                            && (curr_time_secs - world_cluster.creation_time_secs) >= 5
-                        {
-                            // Remove cluster
-                            entities_to_remove.push(world_cluster.entity);
-                            None
-                        } else {
-                            Some((pos, world_cluster.clone()))
-                        }
-                    })
-                    .collect();
-            }
-
-            world.delete_entities(&entities_to_remove).unwrap();
-        }
-
-        // Update clusters
-        {
-            for level in &self.clusters {
-                level.par_iter().for_each(|(pos, world_cluster)| {
-                    if let Ok(mut cluster) = world_cluster.cluster.try_lock() {
-                        //cluster.update_mesh(0.0); TODO
-                    }
-                });
-            }
-        }
-
-        // LOD -> radius in clusters (area)
-        // ---------------
-        // lod -> 2 ^ (1 + lod)
-        // 0 -> 2 (13)
-        // 1 -> 4 (51)
-        // 2 -> 8 (202)
-        // 3 -> 16 (805)
-        // 4 -> 32 (3217)
-        // 5 -> 64 (12868)
-        // 6 -> 128 (51472)
-
-        // AVG face count per cluster T = 4096
-
-        // Average total triangle count
-        // ---------------
-        // circle_area(2) * T + (circle_area(4) - circle_area(2)) * (T * 4^-1) + (circle_area(8) - circle_area(4)) * (T * 4^-2)
-
-        // 13 * 4096 + (51 - 13) * 1024 + (202 - 51) * 256 + (805 - 202) * 64 + (3217 - 805) * 16 + (12868 - 3217) * 4 + (51472 - 12868) * 1
-        // = 285208
-    }*/
-
     pub fn on_update(&mut self) {
-        // Remove out-of-render_distance clusters
-
-        // TODO: make corrections on distance calculation
-        /*{
-            let mut renderer = self.renderer.lock().unwrap();
-            let world = renderer.world_mut();
-            let cluster_step_size = Self::cluster_size(0) as f64;
-            let render_distance = self.render_distance as f64;
-
-            let stream_pos_i: na::Vector3<i32> =
-                na::try_convert(glm::floor(&(self.stream_pos / cluster_step_size))).unwrap();
-            let curr_time_secs = Instant::now().elapsed().as_secs();
-
-            let mut entities_to_remove = Vec::with_capacity(65535);
-
-            for level in &mut self.clusters {
-                level.retain(|&pos, world_cluster| {
-                    let dist = na::convert::<na::Vector3<i32>, na::Vector3<f64>>(pos - stream_pos_i)
-                        .magnitude()
-                        * cluster_step_size;
-
-                    if (dist > render_distance) && (curr_time_secs - world_cluster.creation_time_secs) > 5 {
-                        entities_to_remove.push(world_cluster.entity);
-                        false
-                    } else {
-                        true
-                    }
-                });
-            }
-
-            world.delete_entities(&entities_to_remove).unwrap();
-        }*/
-
-        // Add new clusters
+        // Add/remove clusters
         {
-            let mut to_add = Vec::with_capacity(1024);
-
-            let mut renderer = self.renderer.lock().unwrap();
-            let device = Arc::clone(renderer.device());
-            let world = renderer.world_mut();
-
             const R: i32 = (LOD0_RANGE / cluster::SIZE) as i32;
             const D: i32 = R * 2 + 1;
             const R2: usize = (R / 2) as usize;
             const D2: usize = R2 * 2 + 1;
 
+            let mut cluster_layout = vec![HashSet::with_capacity(512); MAX_LOD + 1];
             let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; MAX_LOD + 2];
 
-            for (i, level) in self.clusters.iter_mut().enumerate() {
+            for i in 0..(MAX_LOD + 1) {
                 let cluster_size = Self::cluster_size(i as u32) as i32;
                 let stream_pos_i = Self::cluster_aligned_pos(self.stream_pos, i as u32);
                 let r = (R * cluster_size) as f64;
 
+                // Fill mask of used clusters
                 for x in 0..D {
                     for y in 0..D {
                         for z in 0..D {
@@ -235,6 +178,7 @@ impl WorldStreamer {
                 let mask0 = &masks[i];
                 let mask1 = &masks[i + 1];
 
+                // Calculate new cluster positions
                 for x in 0..D {
                     for y in 0..D {
                         for z in 0..D {
@@ -269,10 +213,7 @@ impl WorldStreamer {
                                         }
 
                                         let pos = pos + na::Vector3::new(x2 as i32, y2 as i32, z2 as i32);
-
-                                        if !level.contains_key(&pos) {
-                                            to_add.push((i, pos));
-                                        }
+                                        cluster_layout[i].insert(pos);
                                     }
                                 }
                             }
@@ -281,48 +222,71 @@ impl WorldStreamer {
                 }
             }
 
-            let now = Instant::now().elapsed().as_secs();
+            let mut renderer = self.renderer.lock().unwrap();
+            let device = renderer.device().clone();
+            let world = renderer.world_mut();
+            let curr_time_secs = Instant::now().elapsed().as_secs();
 
-            for (i, pos) in to_add {
-                let node_size = 2_u32.pow(i as u32);
-                let pos = pos * (cluster::SIZE as i32) * (node_size as i32);
-                let cluster = cluster::new(&device, node_size);
+            for i in 0..(MAX_LOD + 1) {
+                // Remove unnecessary clusters
+                let mut entities_to_remove = Vec::with_capacity(512);
 
-                let transform_comp = component::Transform::new(
-                    na::Vector3::new(pos.x as f32, pos.y as f32, pos.z as f32),
-                    na::Vector3::new(0.0, 0.0, 0.0),
-                    na::Vector3::new(1.0, 1.0, 1.0),
-                );
-                let renderer_comp = component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
-                let mesh_comp = component::VertexMeshRef::new(&cluster.vertex_mesh().raw());
+                self.clusters[i].retain(|pos, world_cluster| {
+                    if (curr_time_secs - world_cluster.creation_time_secs) < 5
+                        || cluster_layout[i].contains(pos)
+                    {
+                        true
+                    } else {
+                        entities_to_remove.push(world_cluster.entity);
+                        false
+                    }
+                });
+                world.delete_entities(&entities_to_remove).unwrap();
 
-                let entity = world
-                    .create_entity()
-                    .with(transform_comp)
-                    .with(renderer_comp)
-                    .with(mesh_comp)
-                    .build();
+                // Add missing clusters
+                for pos in &cluster_layout[i] {
+                    let node_size = 2_u32.pow(i as u32);
+                    let pos = pos * (cluster::SIZE as i32) * (node_size as i32);
 
-                self.clusters[i].insert(
-                    pos,
-                    WorldCluster {
-                        cluster: Arc::new(Mutex::new(cluster)),
-                        entity,
-                        creation_time_secs: now,
-                        generated: false,
-                    },
-                );
+                    if let hash_map::Entry::Vacant(entry) = self.clusters[i].entry(pos) {
+                        let cluster = cluster::new(&device, node_size);
+
+                        let transform_comp = component::Transform::new(
+                            na::Vector3::new(pos.x as f32, pos.y as f32, pos.z as f32),
+                            na::Vector3::new(0.0, 0.0, 0.0),
+                            na::Vector3::new(1.0, 1.0, 1.0),
+                        );
+                        let renderer_comp =
+                            component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
+                        let mesh_comp = component::VertexMeshRef::new(&cluster.vertex_mesh().raw());
+
+                        let entity = world
+                            .create_entity()
+                            .with(transform_comp)
+                            .with(renderer_comp)
+                            .with(mesh_comp)
+                            .build();
+
+                        entry.insert(WorldCluster {
+                            cluster: Arc::new(Mutex::new(cluster)),
+                            seam: None,
+                            entity,
+                            creation_time_secs: curr_time_secs,
+                            interior_changed: false,
+                            generated: false,
+                        });
+                    }
+                }
             }
         }
 
         // Generate clusters
         {
-            for (i, level) in self.clusters.iter().enumerate() {
-                level.par_iter().for_each(|(pos, world_cluster)| {
+            for (i, level) in self.clusters.iter_mut().enumerate() {
+                level.par_iter_mut().for_each(|(pos, world_cluster)| {
                     if pos.y != 0 {
                         return;
                     }
-
                     let node_size = 2_u32.pow(i as u32);
 
                     let noise = NoiseBuilder::gradient_3d_offset(
@@ -370,103 +334,189 @@ impl WorldStreamer {
                     let mut cluster = world_cluster.cluster.lock().unwrap();
 
                     cluster.set_densities(&points);
+                    world_cluster.interior_changed = true;
                 });
             }
         }
 
-        // TODO
         // Generate seams
         {
+            // Phase 1: collect influenced clusters
+            let mut influenced_clusters = vec![HashSet::with_capacity(512); MAX_LOD + 1];
+            let mut diagonally_influenced_clusters = vec![HashSet::with_capacity(512); MAX_LOD + 1];
+            {
+                for (i, level) in self.clusters.iter().enumerate() {
+                    let cluster_size = Self::cluster_size(i as u32) as i32;
+
+                    for (pos, world_cluster) in level {
+                        if !world_cluster.interior_changed {
+                            continue;
+                        }
+
+                        influenced_clusters[i].insert(pos - na::Vector3::new(1, 0, 0) * cluster_size);
+                        influenced_clusters[i].insert(pos - na::Vector3::new(0, 1, 0) * cluster_size);
+                        influenced_clusters[i].insert(pos - na::Vector3::new(0, 0, 1) * cluster_size);
+
+                        if i > 0 {
+                            let cluster_size0 = Self::cluster_size(i as u32 - 1) as i32;
+
+                            influenced_clusters[i - 1].extend(
+                                [
+                                    pos + na::Vector3::new(-1, 0, 0) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 0, 1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 1, 1) * cluster_size0,
+                                    pos + na::Vector3::new(0, -1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(0, -1, 1) * cluster_size0,
+                                    pos + na::Vector3::new(1, -1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(1, -1, 1) * cluster_size0,
+                                    pos + na::Vector3::new(0, 0, -1) * cluster_size0,
+                                    pos + na::Vector3::new(0, 1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(1, 0, -1) * cluster_size0,
+                                    pos + na::Vector3::new(1, 1, -1) * cluster_size0,
+                                ]
+                                .iter(),
+                            );
+                        }
+                        if i < MAX_LOD {
+                            let cluster_size2 = Self::cluster_size(i as u32 + 1) as i32;
+                            let pos2 = pos - pos.map(|a| a % cluster_size2).abs();
+
+                            if pos.x % cluster_size2 == 0 {
+                                influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(-1, 0, 0) * cluster_size2);
+                            }
+                            if pos.y % cluster_size2 == 0 {
+                                influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(0, -1, 0) * cluster_size2);
+                            }
+                            if pos.z % cluster_size2 == 0 {
+                                influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(0, 0, -1) * cluster_size2);
+                            }
+                        }
+
+                        diagonally_influenced_clusters[i]
+                            .insert(pos - na::Vector3::new(1, 0, 1) * cluster_size);
+                        diagonally_influenced_clusters[i]
+                            .insert(pos - na::Vector3::new(0, 1, 1) * cluster_size);
+                        diagonally_influenced_clusters[i]
+                            .insert(pos - na::Vector3::new(1, 1, 0) * cluster_size);
+                        diagonally_influenced_clusters[i]
+                            .insert(pos - na::Vector3::new(1, 1, 1) * cluster_size);
+
+                        if i > 0 {
+                            let cluster_size0 = Self::cluster_size(i as u32 - 1) as i32;
+
+                            diagonally_influenced_clusters[i - 1].extend(
+                                [
+                                    pos + na::Vector3::new(-1, 0, -1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(0, -1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(1, -1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, -1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(-1, -1, 1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, -1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 0, 0) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 0, 1) * cluster_size0,
+                                    pos + na::Vector3::new(-1, 1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(0, -1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(0, -1, 1) * cluster_size0,
+                                    pos + na::Vector3::new(1, -1, 0) * cluster_size0,
+                                    pos + na::Vector3::new(0, 0, -1) * cluster_size0,
+                                    pos + na::Vector3::new(0, 1, -1) * cluster_size0,
+                                    pos + na::Vector3::new(1, 0, -1) * cluster_size0,
+                                ]
+                                .iter(),
+                            );
+                        }
+                        if i < MAX_LOD {
+                            let cluster_size2 = Self::cluster_size(i as u32 + 1) as i32;
+                            let pos2 = pos - pos.map(|a| a % cluster_size2).abs();
+
+                            if pos.x % cluster_size2 == 0 && pos.z % cluster_size2 == 0 {
+                                diagonally_influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(-1, 0, -1) * cluster_size2);
+                            }
+                            if pos.y % cluster_size2 == 0 && pos.z % cluster_size2 == 0 {
+                                diagonally_influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(0, -1, -1) * cluster_size2);
+                            }
+                            if pos.x % cluster_size2 == 0 && pos.y % cluster_size2 == 0 {
+                                diagonally_influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(-1, -1, 0) * cluster_size2);
+                            }
+                            if pos.x % cluster_size2 == 0
+                                && pos.y % cluster_size2 == 0
+                                && pos.z % cluster_size2 == 0
+                            {
+                                diagonally_influenced_clusters[i + 1]
+                                    .insert(pos2 + na::Vector3::new(-1, -1, -1) * cluster_size2);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Phase 2: create seams for influenced clusters
+            {
+                for (i, clusters) in influenced_clusters.iter().enumerate() {
+                    for cluster_pos in clusters {
+                        if !self.clusters[i].contains_key(cluster_pos) {
+                            continue;
+                        }
+
+                        let seam = self.create_seam_for_cluster(i, cluster_pos);
+
+                        let world_cluster = self.clusters[i].get_mut(cluster_pos).unwrap();
+                        let mut cluster = world_cluster.cluster.lock().unwrap();
+                        cluster.fill_seam_densities(&seam);
+
+                        world_cluster.seam = Some(seam);
+                    }
+                }
+            }
+
+            // Phase 3: create seams for diagonally-influenced clusters
+            {
+                for (i, clusters) in diagonally_influenced_clusters.iter().enumerate() {
+                    for cluster_pos in clusters {
+                        if !self.clusters[i].contains_key(cluster_pos) {
+                            continue;
+                        }
+                        let seam = self.create_seam_for_cluster(i, cluster_pos);
+
+                        let world_cluster = self.clusters[i].get_mut(cluster_pos).unwrap();
+                        let mut cluster = world_cluster.cluster.lock().unwrap();
+
+                        cluster.fill_seam_densities(&seam);
+                        world_cluster.seam = Some(seam);
+                    }
+                }
+            }
+        }
+
+        // Generate meshes
+        {
             for (i, level) in self.clusters.iter().enumerate() {
-                let node_size = 2_u32.pow(i as u32);
-
                 level.par_iter().for_each(|(pos, world_cluster)| {
-                    //for (pos, world_cluster) in level {
-                    let mut neighbours = Vec::with_capacity(64);
-
-                    let cluster_size1 = Self::cluster_size(i as u32) as i32;
-                    let cluster_size2 = Self::cluster_size(i as u32 + 1) as i32;
-
-                    // Lower level
-                    if i > 0 {
-                        let cluster_size0 = Self::cluster_size(i.saturating_sub(1) as u32) as i32;
-
-                        for x in 0..3 {
-                            for y in 0..3 {
-                                for z in 0..3 {
-                                    if x < 2 && y < 2 && z < 2 {
-                                        continue;
-                                    }
-                                    let pos2 = pos + na::Vector3::new(x, y, z) * cluster_size0;
-
-                                    if self.clusters[i - 1].contains_key(&pos2) {
-                                        neighbours.push((i - 1, pos2));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Current level
-                    {
-                        for x in 0..2 {
-                            for y in 0..2 {
-                                for z in 0..2 {
-                                    if x == 0 && y == 0 && z == 0 {
-                                        continue;
-                                    }
-                                    let pos2 = pos + na::Vector3::new(x, y, z) * cluster_size1;
-
-                                    if level.contains_key(&pos2) {
-                                        neighbours.push((i, pos2));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Higher level
-                    if i < MAX_LOD
-                        && (pos.x + cluster_size1) % cluster_size2 == 0
-                        && (pos.y + cluster_size1) % cluster_size2 == 0
-                        && (pos.z + cluster_size1) % cluster_size2 == 0
-                    {
-                        for x in 0..2 {
-                            for y in 0..2 {
-                                for z in 0..2 {
-                                    if x == 0 && y == 0 && z == 0 {
-                                        continue;
-                                    }
-                                    let pos2 = pos.add_scalar(-cluster_size1)
-                                        + na::Vector3::new(x, y, z) * cluster_size2;
-
-                                    if self.clusters[i + 1].contains_key(&pos2) {
-                                        neighbours.push((i + 1, pos2));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let world_cluster = self.clusters[i].get(&pos).unwrap();
                     let mut cluster = world_cluster.cluster.lock().unwrap();
-
-                    let mut seam = cluster::Seam::new(node_size);
-
-                    for (j, neighbour_pos) in neighbours {
-                        let offset =
-                            neighbour_pos / (Self::cluster_size(j as u32) as i32) - pos / cluster_size1; // FIXME
-
-                        let neighbour_world_cluster = &self.clusters[j][&neighbour_pos];
-                        let mut neighbour_cluster = neighbour_world_cluster.cluster.lock().unwrap();
-
-                        seam.insert(&mut neighbour_cluster, offset);
-                    }
-
-                    cluster.update_mesh(&seam, 0.0);
-                    //}
+                    let fake_seam = cluster::Seam::new(cluster.node_size());
+                    // let seam = self.create_seam_for_cluster(i, pos);
+                    let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
+                    // cluster.fill_seam_densities(seam);
+                    cluster.update_mesh(seam, 0.0);
+                    // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                 });
             }
+            /*for (i, level) in self.clusters.iter().enumerate() {
+                level.par_iter().for_each(|(pos, world_cluster)| {
+                    let mut cluster = world_cluster.cluster.lock().unwrap();
+                    let seam = self.create_seam_for_cluster(i, pos);
+                    cluster.fill_seam_densities(&seam);
+                    cluster.update_mesh(&seam, 0.0);
+                });
+            }*/
         }
     }
 }

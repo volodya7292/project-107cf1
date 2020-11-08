@@ -151,10 +151,10 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         cursor_rel: (0, 0),
     };
 
-    /*let mut world_streamer = world::streamer::new(renderer, &mat_pipelines.cluster());
+    let mut world_streamer = world::streamer::new(renderer, &mat_pipelines.cluster());
     world_streamer.set_render_distance(128);
     world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
-    world_streamer.on_update();*/
+    world_streamer.on_update();
 
     /*let device = renderer.lock().unwrap().device().clone();
     let mut cluster = cluster::new(&device, 1);
@@ -369,15 +369,15 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         let mut seam3 = cluster::Seam::new(cluster3.node_size());
         let mut seam4 = cluster::Seam::new(cluster4.node_size());
 
-        seam2.insert(&mut cluster4, na::Vector3::new(0, 0, 1));
-        seam3.insert(&mut cluster4, na::Vector3::new(1, 0, 0));
+        seam2.insert(&mut cluster4, na::Vector3::new(0, 0, 64));
+        seam3.insert(&mut cluster4, na::Vector3::new(64, 0, 0));
 
         cluster2.fill_seam_densities(&seam2);
         cluster3.fill_seam_densities(&seam3);
 
-        seam.insert(&mut cluster2, na::Vector3::new(1, 0, 0));
-        seam.insert(&mut cluster3, na::Vector3::new(0, 0, 1));
-        seam.insert(&mut cluster4, na::Vector3::new(1, 0, 1));
+        seam.insert(&mut cluster2, na::Vector3::new(64, 0, 0));
+        seam.insert(&mut cluster3, na::Vector3::new(0, 0, 64));
+        seam.insert(&mut cluster4, na::Vector3::new(64, 0, 64));
 
         cluster.fill_seam_densities(&seam);
 
@@ -448,7 +448,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
             .build();
     }*/
 
-    let device = renderer.lock().unwrap().device().clone();
+    /*let device = renderer.lock().unwrap().device().clone();
     let mut cluster = cluster::new(&device, 1);
     let mut cluster2 = cluster::new(&device, 2);
 
@@ -501,71 +501,24 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
 
                     let mut n_v = v;
 
-                    if v >= 0.5
-                        && v_z0 >= 0.5
-                        && v_z1 >= 0.5
-                        && v_y0 >= 0.5
-                        && v_y1 >= 0.5
-                        && v_x0 >= 0.5
-                        && v_x1 >= 0.5
-                    {
-                        n_v = 1.0;
-                    } else if v < 0.5
-                        && v_z0 < 0.5
-                        && v_z1 < 0.5
-                        && v_y0 < 0.5
-                        && v_y1 < 0.5
-                        && v_x0 < 0.5
-                        && v_x1 < 0.5
-                    {
-                        n_v = 0.0;
-                    } else {
-                        let ad = v - 0.5;
-                        let bd = v_y1 - 0.5;
-                        let cd = v_x1 - 0.5;
-                        let ed = v_z1 - 0.5;
-                        let bd2 = v_y0 - 0.5;
-                        let cd2 = v_x0 - 0.5;
-                        let ed2 = v_z0 - 0.5;
-                        let ta = ((v >= 0.5) as i8 as f32 - v) / ad;
-                        let tb = ((v_y1 >= 0.5) as i8 as f32 - v_y1) / bd;
-                        let tc = ((v_x1 >= 0.5) as i8 as f32 - v_x1) / cd;
-                        let te = ((v_z1 >= 0.5) as i8 as f32 - v_z1) / ed;
-                        let tb2 = ((v_y0 >= 0.5) as i8 as f32 - v_y0) / bd2;
-                        let tc2 = ((v_x0 >= 0.5) as i8 as f32 - v_x0) / cd2;
-                        let te2 = ((v_z0 >= 0.5) as i8 as f32 - v_z0) / ed2;
-                        let t = ta.min(tb).min(tc).min(te).min(tb2).min(tc2).min(te2);
-                        n_v = n_v + ad * t;
-                    }
-                    /*
+                    // 0.5 - ISO VALUE
 
-                    h: 320
-
-                    64 * 5 = 320;
-                    f: y / 320
-                    div: 0.0031
-
-                    64
-                    f: (y - 128) / 64
-                    div: 0.015
-
-                     */
-
-                    /*
-
-
-                       float n = perlin_fbm(uv * 5.0, 1.0, 3) + (uv.y + 0.0) * 10.0;
-
-                       return vec4(vec3(n), 1);
-
-                       if (n > uv.y) {
-                           return vec4(1);
-                       } else {
-                           return vec4(0);
-                       }
-
-
-                    */
+                    let ad = v - 0.5;
+                    let bd = v_y1 - 0.5;
+                    let cd = v_x1 - 0.5;
+                    let ed = v_z1 - 0.5;
+                    let bd2 = v_y0 - 0.5;
+                    let cd2 = v_x0 - 0.5;
+                    let ed2 = v_z0 - 0.5;
+                    let ta = ((v >= 0.5) as i8 as f32 - v) / ad;
+                    let tb = ((v_y1 >= 0.5) as i8 as f32 - v_y1) / bd;
+                    let tc = ((v_x1 >= 0.5) as i8 as f32 - v_x1) / cd;
+                    let te = ((v_z1 >= 0.5) as i8 as f32 - v_z1) / ed;
+                    let tb2 = ((v_y0 >= 0.5) as i8 as f32 - v_y0) / bd2;
+                    let tc2 = ((v_x0 >= 0.5) as i8 as f32 - v_x0) / cd2;
+                    let te2 = ((v_z0 >= 0.5) as i8 as f32 - v_z0) / ed2;
+                    let t = ta.min(tb).min(tc).min(te).min(tb2).min(tc2).min(te2);
+                    n_v = n_v + ad * t;
 
                     points.push(cluster::DensityPointInfo {
                         pos: [x as u8, y as u8, z as u8, 0],
@@ -689,7 +642,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
             .with(component::VertexMeshRef::new(&cluster2.vertex_mesh().raw()))
             .with(component::Renderer::new(&device, &mat_pipelines.cluster(), false))
             .build();
-    }
+    }*/
 
     program
 }
