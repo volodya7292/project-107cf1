@@ -1055,7 +1055,7 @@ pub fn new(
             color: vec![],
             depth: Some(AttachmentRef {
                 index: 0,
-                layout: ImageLayout::DEPTH_ATTACHMENT,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
             }),
         }],
         &[],
@@ -1151,7 +1151,7 @@ pub fn new(
             ],
             depth: Some(AttachmentRef {
                 index: 4,
-                layout: ImageLayout::DEPTH_ATTACHMENT,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
             }),
         }],
         &[],

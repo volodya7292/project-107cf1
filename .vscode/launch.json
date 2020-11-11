@@ -7,12 +7,33 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug executable 'project-107cf1'",
+      "name": "Launch ",
       "cargo": {
         "args": [
           "build",
           "--bin=project-107cf1",
           "--package=project-107cf1"
+        ],
+        "filter": {
+          "name": "project-107cf1",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/work_dir",
+      "env": {
+        "_NO_DEBUG_HEAP": "1"
+      }
+    },{
+      "type": "lldb",
+      "request": "launch",
+      "name": "Launch release",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=project-107cf1",
+          "--package=project-107cf1",
+          "--release"
         ],
         "filter": {
           "name": "project-107cf1",

@@ -196,18 +196,17 @@ impl Queue {
         let result = unsafe { self.swapchain_khr.queue_present(self.native, &present_info) };
         self.fence.wait()?;
 
-        let optimal = match result {
-            Ok(a) => !a,
+        *sw_image.swapchain.curr_image.lock().unwrap() = None;
+
+        match result {
+            Ok(suboptimal) => Ok(!suboptimal),
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                return Err(swapchain::Error::IncompatibleSurface);
+                Err(swapchain::Error::IncompatibleSurface)
             }
             Err(e) => {
-                return Err(swapchain::Error::VkError(e));
+                Err(swapchain::Error::VkError(e))
             }
-        };
-
-        *sw_image.swapchain.curr_image.lock().unwrap() = None;
-        Ok(optimal)
+        }
     }
 
     pub fn get_semaphore(&self) -> Arc<Semaphore> {

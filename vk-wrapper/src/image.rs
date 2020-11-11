@@ -25,6 +25,7 @@ impl ImageLayout {
     pub const UNDEFINED: Self = Self(vk::ImageLayout::UNDEFINED);
     pub const COLOR_ATTACHMENT: Self = Self(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
     pub const DEPTH_ATTACHMENT: Self = Self(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL);
+    pub const DEPTH_STENCIL_ATTACHMENT: Self = Self(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     pub const DEPTH_READ: Self = Self(vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL);
     pub const TRANSFER_SRC: Self = Self(vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
     pub const TRANSFER_DST: Self = Self(vk::ImageLayout::TRANSFER_DST_OPTIMAL);
