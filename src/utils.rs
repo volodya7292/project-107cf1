@@ -1,3 +1,5 @@
+mod mesh_simplifier;
+
 use crate::renderer::vertex_mesh;
 use crate::renderer::vertex_mesh::VertexImpl;
 use nalgebra as na;
