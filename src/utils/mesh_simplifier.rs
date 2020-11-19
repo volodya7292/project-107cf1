@@ -1,63 +1,7 @@
+use crate::renderer::vertex_mesh::VertexImpl;
 use nalgebra as na;
-use std::{mem::MaybeUninit, ptr};
 
 const COLLAPSE_MAX_DEGREE: u32 = 16;
-
-#[derive(Copy, Clone)]
-struct Vertex {
-    pos: na::Vector3<f32>,
-}
-
-impl Vertex {
-    const POS_SIZE: usize = 12;
-}
-pub struct VertexReader<'a> {
-    data: &'a [u8],
-    stride: usize,
-    position_offset: usize,
-}
-
-impl VertexReader<'_> {
-    pub fn new<R>(data: &[u8], stride: usize, position_offset: usize) -> VertexReader {
-        if position_offset + Vertex::POS_SIZE > stride {
-            panic!(
-                "position_offset ({}) + Vertex::POS_SIZE > stride ({})",
-                position_offset, stride
-            );
-        }
-
-        VertexReader {
-            data,
-            stride,
-            position_offset,
-        }
-    }
-
-    fn vertex_count(&self) -> usize {
-        self.data.len() / self.stride
-    }
-
-    fn read_vertices(&self) -> Vec<Vertex> {
-        (0..self.vertex_count())
-            .map(|i| {
-                let ptr = unsafe { self.data.as_ptr().offset((self.stride * i) as isize) };
-                let mut pos = MaybeUninit::<na::Vector3<f32>>::uninit();
-
-                unsafe {
-                    ptr::copy_nonoverlapping(
-                        ptr.offset(self.position_offset as isize),
-                        pos.as_mut_ptr() as *mut u8,
-                        12,
-                    );
-                }
-
-                Vertex {
-                    pos: unsafe { pos.assume_init() },
-                }
-            })
-            .collect::<Vec<Vertex>>()
-    }
-}
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -67,17 +11,33 @@ union Edge {
 }
 
 pub struct Options {
-    // Each iteration involves selecting a fraction of the edges at random as possible
-    // candidates for collapsing. There is likely a sweet spot here trading off against number
-    // of edges processed vs number of invalid collapses generated due to collisions
-    // (the more edges that are processed the higher the chance of collisions happening)
+    /// Each iteration involves selecting a fraction of the edges at random as possible
+    /// candidates for collapsing. There is likely a sweet spot here trading off against number
+    /// of edges processed vs number of invalid collapses generated due to collisions
+    /// (the more edges that are processed the higher the chance of collisions happening)
     edge_fraction: f32,
     /// Stop simplfying after a given number of iterations
     max_iterations: usize,
     /// And/or stop simplifying when we've reached a threshold of the input triangles
     target_triangle_count: usize,
-    // Useful for controlling how uniform the mesh is (or isn't)
+    /// Useful for controlling how uniform the mesh is (or isn't)
     max_edge_size: f32,
+}
+
+impl Options {
+    pub fn new(
+        edge_fraction: f32,
+        max_iterations: usize,
+        target_triangle_count: usize,
+        max_edge_size: f32,
+    ) -> Options {
+        Options {
+            edge_fraction,
+            max_iterations,
+            target_triangle_count,
+            max_edge_size,
+        }
+    }
 }
 
 fn build_candidate_edges(vertex_count: usize, indices: &[u32]) -> Vec<Edge> {
@@ -97,6 +57,10 @@ fn build_candidate_edges(vertex_count: usize, indices: &[u32]) -> Vec<Edge> {
         edges.push(Edge {
             v_ids: (index0.min(index2), index0.max(index2)),
         });
+    }
+
+    if edges.is_empty() {
+        return edges;
     }
 
     edges.sort_by(|a, b| unsafe { a.id.cmp(&b.id) });
@@ -138,17 +102,21 @@ fn build_candidate_edges(vertex_count: usize, indices: &[u32]) -> Vec<Edge> {
 }
 
 fn find_valid_collapses(
-    vertices: &[Vertex],
+    vertices: &[na::Vector3<f32>],
     vertex_triangle_counts: &[u32],
     edges: &[Edge],
     options: &Options,
     collapse_positions: &mut [na::Vector3<f32>],
-    collapse_edge_ids: &mut [u32],
-) -> Vec<u32> {
-    let step = (1.0 / options.edge_fraction).round() as usize;
+) -> (Vec<u32>, Vec<u32>) {
+    let step = ((1.0 / options.edge_fraction).round() as usize).max(1);
     let target_valid_edges = (edges.len() as f64 * options.edge_fraction as f64) as usize;
 
+    if target_valid_edges == 0 {
+        return (vec![], vec![u32::MAX; vertices.len()]);
+    }
+
     let mut valid_collapses = Vec::<u32>::with_capacity(edges.len());
+    let mut collapse_edge_ids = vec![u32::MAX; vertices.len()];
 
     for i in 0..step {
         let mut state = false;
@@ -158,12 +126,11 @@ fn find_valid_collapses(
                 state = true;
                 break;
             }
-
-            let edge = &edges[j];
+            let edge = &edges[j as usize];
             let v0 = vertices[unsafe { edge.v_ids.0 } as usize];
             let v1 = vertices[unsafe { edge.v_ids.1 } as usize];
 
-            if (v1.pos - v0.pos).magnitude() > options.max_edge_size {
+            if (v1 - v0).magnitude() > options.max_edge_size {
                 continue;
             }
 
@@ -174,7 +141,8 @@ fn find_valid_collapses(
             }
 
             valid_collapses.push(j as u32);
-            collapse_positions[j] = (v0.pos + v1.pos) * 0.5;
+            collapse_positions[j as usize] = (v0 + v1) * 0.5;
+
             collapse_edge_ids[unsafe { edge.v_ids.0 } as usize] = j as u32;
             collapse_edge_ids[unsafe { edge.v_ids.1 } as usize] = j as u32;
         }
@@ -184,31 +152,34 @@ fn find_valid_collapses(
         }
     }
 
-    valid_collapses
+    (valid_collapses, collapse_edge_ids)
 }
 
 fn collapse_edges(
     valid_collapses: &[u32],
     edges: &[Edge],
-    collapse_edge_ids: &mut [u32],
-    collapse_target: &mut [u32],
-    collapse_positions: &mut [na::Vector3<f32>],
-    vertices: &mut [Vertex],
-) {
-    for &i in valid_collapses {
+    collapse_edge_ids: &[u32],
+    collapse_positions: &[na::Vector3<f32>],
+    vertices: &mut [na::Vector3<f32>],
+) -> Vec<u32> {
+    let mut collapse_target = vec![u32::MAX; vertices.len()];
+
+    for &i in valid_collapses.iter() {
         let edge = &edges[i as usize];
         let min = unsafe { edge.v_ids.0 } as usize;
         let max = unsafe { edge.v_ids.1 } as usize;
 
         if (collapse_edge_ids[min] == i) && (collapse_edge_ids[max] == i) {
             collapse_target[max] = min as u32;
-            vertices[min].pos = collapse_positions[i as usize];
+            vertices[min] = collapse_positions[i as usize];
         }
     }
+
+    collapse_target
 }
 
 fn remove_triangles(
-    vertices: &[Vertex],
+    vertices: &[na::Vector3<f32>],
     collapse_target: &mut [u32],
     indices: &mut Vec<u32>,
     vertex_triangle_counts: &mut Vec<u32>,
@@ -264,14 +235,46 @@ fn remove_edges(collapse_target: &[u32], edges: &mut Vec<Edge>) {
     *edges = temp_edges;
 }
 
-// TODO: adapt to support VertexMesh::VertexImpl
+fn compact_vertices<T>(original_vertices: &[T], vertices: &[na::Vector3<f32>], indices: &mut [u32]) -> Vec<T>
+where
+    T: VertexImpl + Clone,
+{
+    let mut vertex_used = vec![false; vertices.len()];
 
-pub fn simplify(vertex_reader: VertexReader, indices: &[u32], options: &Options) -> Vec<u32> {
-    let mut vertices = vertex_reader.read_vertices();
+    for index in indices.iter_mut() {
+        vertex_used[*index as usize] = true;
+    }
+
+    let mut compacted_vertices = Vec::with_capacity(vertices.len());
+    let mut remapped_indices = vec![u32::MAX; vertices.len()];
+
+    for (i, vertex) in vertices.iter().enumerate() {
+        if vertex_used[i] {
+            remapped_indices[i] = compacted_vertices.len() as u32;
+
+            let mut new_vertex = original_vertices[i].clone();
+            *new_vertex.position_mut() = *vertex;
+
+            compacted_vertices.push(new_vertex);
+        }
+    }
+
+    for index in indices.iter_mut() {
+        *index = remapped_indices[*index as usize];
+    }
+
+    compacted_vertices
+}
+
+pub fn simplify<T>(vertices: &[T], indices: &[u32], options: &Options) -> (Vec<T>, Vec<u32>)
+where
+    T: VertexImpl + Clone,
+{
+    let mut pos_vertices: Vec<na::Vector3<f32>> = vertices.iter().map(|vertex| *vertex.position()).collect();
     let mut indices = indices.to_vec();
-    let mut edges = build_candidate_edges(vertices.len(), &indices);
+    let mut edges = build_candidate_edges(pos_vertices.len(), &indices);
 
-    let mut vertex_triangle_counts = vec![0_u32; vertices.len()];
+    let mut vertex_triangle_counts = vec![0_u32; pos_vertices.len()];
 
     for index in &indices {
         vertex_triangle_counts[*index as usize] += 1;
@@ -281,31 +284,26 @@ pub fn simplify(vertex_reader: VertexReader, indices: &[u32], options: &Options)
     let mut iteration_count = 0;
 
     while (indices.len() / 3 >= options.target_triangle_count) && (iteration_count < options.max_iterations) {
-        let mut collapse_edge_ids = vec![u32::MAX; vertices.len()];
-        let mut collapse_target = vec![u32::MAX; vertices.len()];
-
-        let valid_collapses = find_valid_collapses(
-            &vertices,
+        let (valid_collapses, collapse_edge_ids) = find_valid_collapses(
+            &pos_vertices,
             &vertex_triangle_counts,
             &edges,
             &options,
             &mut collapse_positions,
-            &mut collapse_edge_ids,
         );
         if valid_collapses.is_empty() {
             break;
         }
 
-        collapse_edges(
+        let mut collapse_target = collapse_edges(
             &valid_collapses,
             &edges,
-            &mut collapse_edge_ids,
-            &mut collapse_target,
-            &mut collapse_positions,
-            &mut vertices,
+            &collapse_edge_ids,
+            &collapse_positions,
+            &mut pos_vertices,
         );
         remove_triangles(
-            &vertices,
+            &pos_vertices,
             &mut collapse_target,
             &mut indices,
             &mut vertex_triangle_counts,
@@ -315,5 +313,7 @@ pub fn simplify(vertex_reader: VertexReader, indices: &[u32], options: &Options)
         iteration_count += 1;
     }
 
-    indices
+    let vertices = compact_vertices(vertices, &mut pos_vertices, &mut indices);
+
+    (vertices, indices)
 }

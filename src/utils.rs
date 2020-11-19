@@ -1,7 +1,7 @@
-mod mesh_simplifier;
+pub mod mesh_simplifier;
 
 use crate::renderer::vertex_mesh;
-use crate::renderer::vertex_mesh::VertexImpl;
+use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
 use nalgebra as na;
 use std::mem;
 
@@ -36,4 +36,45 @@ pub fn calc_triangle_normal(
     let side0 = v1 - v0;
     let side1 = v2 - v0;
     side0.cross(&side1).normalize()
+}
+
+/// Calculate interpolated normals using neighbour triangles.
+/// Every vertex.normal must be (0.0, 0.0, 0.0)
+pub fn calc_smooth_mesh_normals<T>(vertices: &mut [T], indices: &[u32])
+where
+    T: VertexImpl + VertexNormalImpl,
+{
+    let mut vertex_triangle_counts = vec![0_u32; vertices.len()];
+    let mut triangle_normals = Vec::<na::Vector3<f32>>::with_capacity(indices.len() / 3);
+
+    for i in (0..indices.len()).step_by(3) {
+        let ind = &indices[i..(i + 3)];
+        let normal = calc_triangle_normal(
+            vertices[ind[0] as usize].position(),
+            vertices[ind[1] as usize].position(),
+            vertices[ind[2] as usize].position(),
+        );
+
+        triangle_normals.push(normal);
+    }
+
+    for (i, normal) in triangle_normals.iter().enumerate() {
+        let indices_i = i * 3;
+        let ind = &indices[indices_i..(indices_i + 3)];
+
+        // Check for NaN
+        if normal == normal {
+            *vertices[ind[0] as usize].normal_mut() += *normal;
+            *vertices[ind[1] as usize].normal_mut() += *normal;
+            *vertices[ind[2] as usize].normal_mut() += *normal;
+
+            vertex_triangle_counts[ind[0] as usize] += 1;
+            vertex_triangle_counts[ind[1] as usize] += 1;
+            vertex_triangle_counts[ind[2] as usize] += 1;
+        }
+    }
+
+    for (i, v) in vertices.iter_mut().enumerate() {
+        *v.normal_mut() /= (vertex_triangle_counts[i] as f32);
+    }
 }

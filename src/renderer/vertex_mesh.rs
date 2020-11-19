@@ -19,6 +19,28 @@ pub trait VertexImpl {
     fn attributes() -> Vec<(u32, vkw::Format)>;
     fn member_info(name: &str) -> Option<(u32, vkw::Format)>;
     fn position(&self) -> &na::Vector3<f32>;
+    fn position_mut(&mut self) -> &mut na::Vector3<f32>;
+}
+
+pub trait VertexNormalImpl {
+    fn normal(&self) -> &na::Vector3<f32>;
+    fn normal_mut(&mut self) -> &mut na::Vector3<f32>;
+}
+
+macro_rules! __impl_normal_methods {
+    ($vertex: ty, normal) => {
+        impl $crate::renderer::vertex_mesh::VertexNormalImpl for $vertex {
+            fn normal(&self) -> &na::Vector3<f32> {
+                &self.normal
+            }
+
+            fn normal_mut(&mut self) -> &mut na::Vector3<f32> {
+                &mut self.normal
+            }
+        }
+        const D: u32 = 5;
+    };
+    ($vertex: ty, $i:ident) => {};
 }
 
 macro_rules! vertex_impl {
@@ -69,7 +91,17 @@ macro_rules! vertex_impl {
             fn position(&self) -> &nalgebra::Vector3<f32> {
                 &self.position
             }
+
+            fn position_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
+                &mut self.position
+            }
+
+
         }
+
+        $(
+            __impl_normal_methods!($vertex, $member_name);
+        )*
     )
 }
 

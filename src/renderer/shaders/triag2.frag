@@ -19,6 +19,7 @@ layout(set = 0, binding = 1) uniform sampler2D albedoAtlas;
 
 layout(location = 0) in Output {
     vec3 world_pos;
+    vec3 normal;
     vec2 tex_coord;
 } vs_out;
 
@@ -33,6 +34,10 @@ void main() {
     vec3 color = clamp((vs_out.world_pos.xyz + 128) / 256.0, 0, 1);
     color = vec3(pow(color.r * color.g * color.b, 1. / 3.), 1, 1);
     color = hsv2rgb(color);
+    color = (vs_out.normal + 1.0) / 2.0;
+
+    if (color.r != color.r)
+        color = vec3(1.0);
 
 
     //outDiffuse = textureAtlas(albedoAtlas, info.tex_atlas_info.x, vs_out.tex_coord, 0);

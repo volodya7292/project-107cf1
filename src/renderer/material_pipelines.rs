@@ -48,6 +48,7 @@ pub fn create(resources: &Arc<ResourceFile>, device: &Arc<vkw::Device>) -> Mater
                 &resources.get("shaders/triag2.vert.spv").unwrap().read().unwrap(),
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
+                    ("inNormal", vkw::Format::RGB32_FLOAT),
                     ("inDensityMatIndex", vkw::Format::R32_UINT),
                 ],
                 &[],

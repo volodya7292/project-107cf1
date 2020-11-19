@@ -1,5 +1,6 @@
 use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
 use crate::utils;
+use crate::utils::mesh_simplifier;
 use dual_contouring as dc;
 use nalgebra as na;
 use std::collections::{hash_map, HashMap};
@@ -327,9 +328,10 @@ impl Seam {
 #[derive(Copy, Clone, Default)]
 pub struct Vertex {
     position: na::Vector3<f32>,
+    normal: na::Vector3<f32>,
     density: u32,
 }
-vertex_impl!(Vertex, position, density);
+vertex_impl!(Vertex, position, normal, density);
 
 impl Cluster {
     fn calc_cell_point(points: &[DensityPoint; 8]) -> Option<na::Vector3<f32>> {
@@ -920,6 +922,7 @@ impl Cluster {
             .iter()
             .map(|pos| Vertex {
                 position: *pos,
+                normal: Default::default(),
                 density: 0, // TODO
             })
             .collect();
@@ -1079,11 +1082,28 @@ impl Cluster {
                         for i in 0..sector.layer_count {
                             let def_seam_layer = SeamLayer::default();
 
-                            let (temp_vertices, mut temp_indices) = self.triangulate(
+                            let (mut temp_vertices, mut temp_indices) = self.triangulate(
                                 [x as u8, y as u8, z as u8],
                                 i,
                                 seam.nodes.get(&i).unwrap_or(&def_seam_layer),
                             );
+
+                            let (temp_vertices, mut temp_indices) = {
+                                let options = mesh_simplifier::Options::new(
+                                    0.125,
+                                    15,
+                                    128,
+                                    4.0 * self.node_size as f32,
+                                );
+
+                                // FIXME
+                                let (mut vertices, indices) =
+                                    mesh_simplifier::simplify(&temp_vertices, &temp_indices, &options);
+
+                                utils::calc_smooth_mesh_normals(&mut vertices, &indices);
+
+                                (vertices, indices)
+                            };
 
                             // Adjust indices
                             for index in &mut temp_indices {
