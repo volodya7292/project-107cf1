@@ -8,6 +8,7 @@ pub struct NodeData {
     pub corners: u8,
     pub vertex_pos: na::Vector3<f32>,
     pub vertex_index: u32,
+    pub is_seam: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -232,6 +233,8 @@ pub fn construct_octree(
 
                 avg_pos /= edge_count as f32;
 
+                let is_seam_node = (x == dim_size - 1) || (y == dim_size - 1) || (z == dim_size - 1);
+
                 oct.set_node(
                     na::Vector3::new(x, y, z),
                     octree::Node::new_leaf(
@@ -240,6 +243,7 @@ pub fn construct_octree(
                             corners,
                             vertex_pos: avg_pos,
                             vertex_index: vertices.len() as u32,
+                            is_seam: is_seam_node,
                         },
                     ),
                 );
@@ -329,6 +333,8 @@ pub fn construct_nodes(
 
                 avg_pos /= edge_count as f32;
 
+                let is_seam_node = (x == dim_size - 1) || (y == dim_size - 1) || (z == dim_size - 1);
+
                 nodes.push(octree::LeafNode::new(
                     na::Vector3::new(x * node_size, y * node_size, z * node_size),
                     node_size,
@@ -336,6 +342,7 @@ pub fn construct_nodes(
                         corners,
                         vertex_pos: avg_pos,
                         vertex_index: u32::MAX,
+                        is_seam: is_seam_node,
                     },
                 ));
             }
@@ -352,6 +359,8 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
     let mut indices = [0u32; 4];
     let mut sign_change = [false; 4];
 
+    let mut all_seam = true;
+
     for i in 0..4 {
         let node = &nodes[i];
 
@@ -360,6 +369,10 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
         } else {
             unreachable!()
         };
+
+        if !node_data.is_seam {
+            all_seam = false;
+        }
 
         let edge = PROCESS_EDGE_MASK[dir][i];
         let di0 = EDGE_VERT_MAP[edge][0];
@@ -376,6 +389,12 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
 
         indices[i] = node_data.vertex_index;
         sign_change[i] = m0 ^ m1;
+    }
+
+    // Avoid processing an edge that completely consists of seam nodes.
+    // Seam nodes are only used to extend non-seam nodes.
+    if all_seam {
+        return;
     }
 
     if sign_change[min_index] {

@@ -19,7 +19,7 @@ layout(set = 0, binding = 1) uniform sampler2D albedoAtlas;
 
 layout(location = 0) in Output {
     vec3 world_pos;
-    vec3 normal;
+    flat vec3 normal;
     vec2 tex_coord;
 } vs_out;
 

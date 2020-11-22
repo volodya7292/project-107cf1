@@ -893,6 +893,7 @@ impl Cluster {
                         corners: data.corners,
                         vertex_pos,
                         vertex_index: 0,
+                        is_seam: true,
                     },
                 ))
             } else {
@@ -1092,7 +1093,9 @@ impl Cluster {
                                 let options = mesh_simplifier::Options::new(
                                     0.125,
                                     15,
+                                    // 25,
                                     128,
+                                    // 0,
                                     4.0 * self.node_size as f32,
                                 );
 
@@ -1103,6 +1106,9 @@ impl Cluster {
                                 utils::calc_smooth_mesh_normals(&mut vertices, &indices);
 
                                 (vertices, indices)
+
+                                // utils::calc_smooth_mesh_normals(&mut temp_vertices, &temp_indices);
+                                // (temp_vertices, temp_indices)
                             };
 
                             // Adjust indices

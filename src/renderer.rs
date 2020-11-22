@@ -1121,7 +1121,7 @@ pub fn new(
                 format: Format::D32_FLOAT,
                 init_layout: ImageLayout::DEPTH_READ,
                 final_layout: ImageLayout::DEPTH_READ,
-                load_store: LoadStore::InitSaveFinalSave,
+                load_store: LoadStore::InitSave,
             },
             Attachment {
                 format: Format::R32_UINT,

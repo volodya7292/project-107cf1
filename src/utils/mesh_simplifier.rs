@@ -270,7 +270,26 @@ pub fn simplify<T>(vertices: &[T], indices: &[u32], options: &Options) -> (Vec<T
 where
     T: VertexImpl + Clone,
 {
+    // // Remove zero-area triangles
+    // let mut new_indices: Vec<u32> = Vec::with_capacity(indices.len());
+    //
+    // for i in (0..indices.len()).step_by(3) {
+    //     let ind = &indices[i..(i + 3)];
+    //
+    //     let v0 = &vertices[ind[0] as usize];
+    //     let v1 = &vertices[ind[1] as usize];
+    //     let v2 = &vertices[ind[2] as usize];
+    //
+    //     if v0.position() == v1.position() || v0.position() == v2.position() || v1.position() == v2.position()
+    //     {
+    //         continue;
+    //     }
+    //
+    //     new_indices.extend(ind.iter());
+    // }
+
     let mut pos_vertices: Vec<na::Vector3<f32>> = vertices.iter().map(|vertex| *vertex.position()).collect();
+    // let mut indices = new_indices;
     let mut indices = indices.to_vec();
     let mut edges = build_candidate_edges(pos_vertices.len(), &indices);
 
