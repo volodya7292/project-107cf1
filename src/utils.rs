@@ -1,4 +1,5 @@
 pub mod mesh_simplifier;
+mod qef;
 
 use crate::renderer::vertex_mesh;
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
@@ -39,7 +40,6 @@ pub fn calc_triangle_normal(
 }
 
 /// Calculate interpolated normals using neighbour triangles.
-/// Every vertex.normal must be (0.0, 0.0, 0.0)
 pub fn calc_smooth_mesh_normals<T>(vertices: &mut [T], indices: &[u32])
 where
     T: VertexImpl + VertexNormalImpl,
@@ -57,6 +57,10 @@ where
 
         triangle_normals.push(normal);
     }
+
+    vertices
+        .iter_mut()
+        .for_each(|vertex| *vertex.normal_mut() = na::Vector3::from_element(0.0));
 
     for (i, normal) in triangle_normals.iter().enumerate() {
         let indices_i = i * 3;

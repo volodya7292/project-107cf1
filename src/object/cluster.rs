@@ -1,4 +1,4 @@
-use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
+use crate::renderer::vertex_mesh::{VertexImpl, VertexMesh, VertexMeshCreate};
 use crate::utils;
 use crate::utils::mesh_simplifier;
 use dual_contouring as dc;
@@ -1091,20 +1091,15 @@ impl Cluster {
 
                             let (temp_vertices, mut temp_indices) = {
                                 let options = mesh_simplifier::Options::new(
-                                    0.125,
-                                    15,
-                                    // 25,
-                                    128,
-                                    // 0,
-                                    4.0 * self.node_size as f32,
+                                    0.125, 10,  // 25,
+                                    128, // 0,
+                                    4.0, 5.0, 0.8,
                                 );
 
-                                // FIXME
+                                utils::calc_smooth_mesh_normals(&mut temp_vertices, &temp_indices);
                                 let (mut vertices, indices) =
                                     mesh_simplifier::simplify(&temp_vertices, &temp_indices, &options);
-
                                 utils::calc_smooth_mesh_normals(&mut vertices, &indices);
-
                                 (vertices, indices)
 
                                 // utils::calc_smooth_mesh_normals(&mut temp_vertices, &temp_indices);
