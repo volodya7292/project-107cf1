@@ -116,19 +116,19 @@ fn pseudo_inverse(sigma: &na::Vector3<f32>, v: &na::Matrix3<f32>) -> na::Matrix3
     let dv2 = d.component_mul(&v.column(2));
 
     let c0 = na::Vector3::new(
-        dv0[0] * v[(0, 0)] + dv0[1] * v[(1, 0)] + dv0[2] * v[(2, 0)],
-        dv0[0] * v[(0, 1)] + dv0[1] * v[(1, 1)] + dv0[2] * v[(2, 1)],
-        dv0[0] * v[(0, 2)] + dv0[1] * v[(1, 2)] + dv0[2] * v[(2, 2)],
+        dv0.dot(&v.column(0)),
+        dv0.dot(&v.column(1)),
+        dv0.dot(&v.column(2)),
     );
     let c1 = na::Vector3::new(
-        dv1[0] * v[(0, 0)] + dv1[1] * v[(1, 0)] + dv1[2] * v[(2, 0)],
-        dv1[0] * v[(0, 1)] + dv1[1] * v[(1, 1)] + dv1[2] * v[(2, 1)],
-        dv1[0] * v[(0, 2)] + dv1[1] * v[(1, 2)] + dv1[2] * v[(2, 2)],
+        dv1.dot(&v.column(0)),
+        dv1.dot(&v.column(1)),
+        dv1.dot(&v.column(2)),
     );
     let c2 = na::Vector3::new(
-        dv2[0] * v[(0, 0)] + dv2[1] * v[(1, 0)] + dv2[2] * v[(2, 0)],
-        dv2[0] * v[(0, 1)] + dv2[1] * v[(1, 1)] + dv2[2] * v[(2, 1)],
-        dv2[0] * v[(0, 2)] + dv2[1] * v[(1, 2)] + dv2[2] * v[(2, 2)],
+        dv2.dot(&v.column(0)),
+        dv2.dot(&v.column(1)),
+        dv2.dot(&v.column(2)),
     );
 
     na::Matrix3::from_columns(&[c0, c1, c2])

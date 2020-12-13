@@ -1,5 +1,5 @@
-build.rustflags = "-C target-cpu=core-avx2"
-build.incremental = true # TODO: check program performance without it
+build.rustflags = "-C target-cpu=x86-64 -C target-feature=+avx2"
+build.incremental = true
 
 [profile.dev]
 opt-level = 1
