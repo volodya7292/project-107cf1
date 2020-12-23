@@ -4,22 +4,24 @@ use crate::utils;
 use nalgebra as na;
 
 #[derive(Copy, Clone)]
-pub struct NodeData {
+pub struct NodeData<T> {
     pub corners: u8,
     pub vertex_pos: na::Vector3<f32>,
     pub vertex_index: u32,
     pub is_seam: bool,
+    pub data: [T; 8],
 }
 
 #[derive(Copy, Clone)]
-pub struct NodeDataDiscrete {
+pub struct NodeDataDiscrete<T> {
     pub corners: u8,
     pub densities: [f32; 8],
     pub vertex_pos: Option<na::Vector3<f32>>,
+    pub data: [T; 8],
 }
 
-impl NodeDataDiscrete {
-    pub fn new(densities: [f32; 8], iso_value: f32) -> NodeDataDiscrete {
+impl<T> NodeDataDiscrete<T> {
+    pub fn new(densities: [f32; 8], iso_value: f32, data: [T; 8]) -> NodeDataDiscrete<T> {
         let mut corners = 0_u8;
 
         for i in 0..8 {
@@ -31,6 +33,7 @@ impl NodeDataDiscrete {
                 corners,
                 densities,
                 vertex_pos: None,
+                data,
             };
         }
 
@@ -70,6 +73,7 @@ impl NodeDataDiscrete {
             corners,
             densities,
             vertex_pos: Some(avg_pos),
+            data,
         }
     }
 }
@@ -160,18 +164,21 @@ const CELL_PROC_EDGE_MASK: [[usize; 5]; 6] = [
 /// Construct octree from field of size (dim_size + 1) x (dim_size + 1) x (dim_size + 1)
 ///
 /// dim_size: power of 2
-pub fn construct_octree(
-    field: &[f32],
+pub fn construct_octree<T>(
+    field: &[(f32, T)],
     dim_size: u32,
     iso_value: f32,
-) -> (Vec<na::Vector3<f32>>, octree::Octree<NodeData>) {
+) -> (Vec<na::Vector3<f32>>, octree::Octree<NodeData<T>>)
+where
+    T: Clone,
+{
     let a_dim_size = dim_size + 1;
 
     assert_eq!(field.len() as u32, a_dim_size * a_dim_size * a_dim_size);
     assert!(utils::is_pow_of_2(dim_size as u64));
 
     let depth = utils::log2(dim_size) + 1;
-    let mut oct = octree::with_capacity::<NodeData>(dim_size, (8_u32.pow(depth) - 1) / 7);
+    let mut oct = octree::with_capacity::<NodeData<T>>(dim_size, (8_u32.pow(depth) - 1) / 7);
     let mut vertices = vec![];
     macro_rules! field_index {
         ($x: expr, $y: expr, $z: expr) => {
@@ -182,20 +189,30 @@ pub fn construct_octree(
     for x in 0..dim_size {
         for y in 0..dim_size {
             for z in 0..dim_size {
-                let densities = [
-                    field[field_index!(x, y, z)],
-                    field[field_index!(x, y, z + 1)],
-                    field[field_index!(x, y + 1, z)],
-                    field[field_index!(x, y + 1, z + 1)],
-                    field[field_index!(x + 1, y, z)],
-                    field[field_index!(x + 1, y, z + 1)],
-                    field[field_index!(x + 1, y + 1, z)],
-                    field[field_index!(x + 1, y + 1, z + 1)],
+                let points = [
+                    field[field_index!(x, y, z)].clone(),
+                    field[field_index!(x, y, z + 1)].clone(),
+                    field[field_index!(x, y + 1, z)].clone(),
+                    field[field_index!(x, y + 1, z + 1)].clone(),
+                    field[field_index!(x + 1, y, z)].clone(),
+                    field[field_index!(x + 1, y, z + 1)].clone(),
+                    field[field_index!(x + 1, y + 1, z)].clone(),
+                    field[field_index!(x + 1, y + 1, z + 1)].clone(),
+                ];
+                let data = [
+                    points[0].1.clone(),
+                    points[1].1.clone(),
+                    points[2].1.clone(),
+                    points[3].1.clone(),
+                    points[4].1.clone(),
+                    points[5].1.clone(),
+                    points[6].1.clone(),
+                    points[7].1.clone(),
                 ];
 
                 let mut corners = 0_u8;
                 for i in 0..8 {
-                    corners |= ((densities[i] > iso_value) as u8) << i;
+                    corners |= ((points[i].0 > iso_value) as u8) << i;
                 }
                 if corners == 0 || corners == 0xff {
                     continue;
@@ -207,8 +224,8 @@ pub fn construct_octree(
                 for i in 0..12 {
                     let di0 = EDGE_VERT_MAP[i][0];
                     let di1 = EDGE_VERT_MAP[i][1];
-                    let d0 = densities[di0];
-                    let d1 = densities[di1];
+                    let d0 = points[di0].0;
+                    let d1 = points[di1].0;
 
                     if (d0 > iso_value) == (d1 > iso_value) {
                         continue;
@@ -244,6 +261,7 @@ pub fn construct_octree(
                             vertex_pos: avg_pos,
                             vertex_index: vertices.len() as u32,
                             is_seam: is_seam_node,
+                            data,
                         },
                     ),
                 );
@@ -255,12 +273,15 @@ pub fn construct_octree(
     (vertices, oct)
 }
 
-pub fn construct_nodes(
-    field: &[Option<f32>],
+pub fn construct_nodes<T>(
+    field: &[Option<(f32, T)>],
     dim_size: u32,
     node_size: u32,
     iso_value: f32,
-) -> Vec<octree::LeafNode<NodeData>> {
+) -> Vec<octree::LeafNode<NodeData<T>>>
+where
+    T: Default + Copy,
+{
     let a_dim_size = dim_size + 1;
     assert_eq!(field.len() as u32, a_dim_size * a_dim_size * a_dim_size);
 
@@ -272,6 +293,7 @@ pub fn construct_nodes(
 
     let mut nodes = Vec::with_capacity((dim_size * dim_size * dim_size) as usize);
     let mut temp_densities = [0.0_f32; 8];
+    let mut temp_data = [T::default(); 8];
 
     for x in 0..dim_size {
         for y in 0..dim_size {
@@ -281,8 +303,9 @@ pub fn construct_nodes(
                 for i in 0..8_u32 {
                     let (x2, y2, z2) = ((i / 4) % 2, (i / 2) % 2, i % 2);
 
-                    if let Some(density) = field[field_index!(x + x2, y + y2, z + z2)] {
-                        temp_densities[i as usize] = density;
+                    if let Some(point) = field[field_index!(x + x2, y + y2, z + z2)] {
+                        temp_densities[i as usize] = point.0;
+                        temp_data[i as usize] = point.1;
                     } else {
                         valid_cell = false;
                         break;
@@ -343,6 +366,7 @@ pub fn construct_nodes(
                         vertex_pos: avg_pos,
                         vertex_index: u32::MAX,
                         is_seam: is_seam_node,
+                        data: temp_data,
                     },
                 ));
             }
@@ -352,7 +376,7 @@ pub fn construct_nodes(
     nodes
 }
 
-fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &mut Vec<u32>) {
+fn process_edge<T>(nodes: &[octree::Node<NodeData<T>>; 4], dir: usize, indices_out: &mut Vec<u32>) {
     let mut min_size = u32::MAX;
     let mut min_index = 0;
     let mut flip = false;
@@ -410,12 +434,14 @@ fn process_edge(nodes: &[octree::Node<NodeData>; 4], dir: usize, indices_out: &m
     }
 }
 
-fn edge_proc(
-    oct: &Octree<NodeData>,
-    nodes: &[octree::Node<NodeData>; 4],
+fn edge_proc<T>(
+    oct: &Octree<NodeData<T>>,
+    nodes: &[octree::Node<NodeData<T>>; 4],
     dir: usize,
     indices_out: &mut Vec<u32>,
-) {
+) where
+    T: Clone,
+{
     let mut all_leaf = true;
 
     for i in 0..4 {
@@ -452,12 +478,14 @@ fn edge_proc(
     }
 }
 
-fn face_proc(
-    oct: &Octree<NodeData>,
-    nodes: &[octree::Node<NodeData>; 2],
+fn face_proc<T>(
+    oct: &Octree<NodeData<T>>,
+    nodes: &[octree::Node<NodeData<T>>; 2],
     dir: usize,
     indices_out: &mut Vec<u32>,
-) {
+) where
+    T: Clone,
+{
     let mut internal_present = false;
 
     for i in 0..2 {
@@ -523,7 +551,10 @@ fn face_proc(
     }
 }
 
-fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out: &mut Vec<u32>) {
+fn cell_proc<T>(oct: &Octree<NodeData<T>>, node: &octree::Node<NodeData<T>>, indices_out: &mut Vec<u32>)
+where
+    T: Clone,
+{
     if let octree::NodeType::Internal(children) = &node.ty() {
         for i in 0..8 {
             let child_id = children[i];
@@ -577,11 +608,14 @@ fn cell_proc(oct: &Octree<NodeData>, node: &octree::Node<NodeData>, indices_out:
     }
 }
 
-pub fn generate_mesh(oct: &Octree<NodeData>) -> Vec<u32> {
+pub fn generate_mesh<T>(oct: &Octree<NodeData<T>>) -> Vec<u32>
+where
+    T: Clone,
+{
     let oct_size = oct.size() as usize;
     let mut indices = Vec::<u32>::with_capacity(oct_size * oct_size * oct_size * 18);
 
-    if let Some(node) = oct.root_node() {
+    if let Some(node) = oct.get_node(0) {
         cell_proc(oct, node, &mut indices);
     }
 

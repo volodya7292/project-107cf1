@@ -30,11 +30,25 @@ impl<T> Node<T> {
     }
 }
 
+#[repr(C)]
+union EncodedNodeData<T: Copy> {
+    children: [u32; 8],
+    leaf: T,
+}
+
+pub const ENCODED_TYPE_INTERNAL: u8 = 0;
+pub const ENCODED_TYPE_LEAF: u8 = 1;
+
+#[repr(C)]
+pub struct EncodedNode<T: Copy> {
+    ty: u8,
+    data: EncodedNodeData<T>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Octree<T> {
     size: u32,
     nodes: Vec<Option<Node<T>>>,
-    root_id: u32,
     free_node_ids: Vec<u32>,
 }
 
@@ -91,12 +105,8 @@ impl<T> Octree<T> {
         &self.nodes[id as usize]
     }
 
-    pub(crate) fn root_node(&self) -> &Option<Node<T>> {
-        self.get_node(0)
-    }
-
     pub(crate) fn set_node(&mut self, position: na::Vector3<u32>, node: Node<T>) {
-        let mut curr_node_id = self.root_id;
+        let mut curr_node_id = 0;
         let mut curr_pos = position;
         let mut curr_size = self.size;
 
@@ -173,6 +183,53 @@ impl<T> Octree<T> {
         // Set new node
         self.nodes[curr_node_id as usize] = Some(node);
     }
+
+    fn encode_node<F, M>(&self, map: &F, node_id: u32, buffer: &mut Vec<EncodedNode<M>>) -> u32
+    where
+        F: Fn(&T) -> M,
+        M: Copy,
+    {
+        if let Some(node) = &self.nodes[node_id as usize] {
+            match &node.ty {
+                NodeType::Internal(children) => {
+                    let mut children = *children;
+
+                    for child in &mut children {
+                        if *child != NODE_ID_NONE {
+                            *child = self.encode_node(map, *child, buffer);
+                        }
+                    }
+
+                    buffer.push(EncodedNode {
+                        ty: ENCODED_TYPE_INTERNAL,
+                        data: EncodedNodeData { children },
+                    });
+                    buffer.len() as u32 - 1
+                }
+                NodeType::Leaf(data) => {
+                    buffer.push(EncodedNode {
+                        ty: ENCODED_TYPE_LEAF,
+                        data: EncodedNodeData { leaf: map(data) },
+                    });
+                    buffer.len() as u32 - 1
+                }
+                NodeType::External(octree) => octree.encode_node(map, 0, buffer),
+            }
+        } else {
+            NODE_ID_NONE
+        }
+    }
+
+    /// Converts octree to an array of encoded nodes.
+    pub fn encode_into_buffer<F, M>(&self, map: F) -> Vec<EncodedNode<M>>
+    where
+        F: Fn(&T) -> M,
+        M: Copy,
+    {
+        let mut buffer = Vec::<EncodedNode<M>>::with_capacity(self.nodes.len());
+        self.encode_node(&map, 0, &mut buffer);
+        buffer
+    }
 }
 
 /// Create a new octree with specified node capacity.
@@ -187,7 +244,6 @@ pub fn new<T>(size: u32) -> Octree<T> {
     Octree {
         size,
         nodes: vec![None],
-        root_id: 0,
         free_node_ids: vec![],
     }
 }
