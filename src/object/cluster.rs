@@ -312,11 +312,7 @@ impl Seam {
                                     continue;
                                 }
 
-                                let data = dc::contour::NodeDataDiscrete::new(
-                                    data.densities,
-                                    ISO_VALUE_NORM,
-                                    data.data,
-                                );
+                                let data = dc::contour::NodeDataDiscrete::new(d, ISO_VALUE_NORM, data.data);
 
                                 self_nodes.normalized_nodes.push(dc::octree::LeafNode::new(
                                     na::try_convert(new_pos).unwrap(),
