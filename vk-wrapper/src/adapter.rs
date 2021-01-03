@@ -77,11 +77,11 @@ impl Adapter {
                 queues.push(Arc::new(Queue {
                     device_wrapper: Arc::clone(&device_wrapper),
                     swapchain_khr: swapchain_khr.clone(),
-                    native: unsafe {
+                    native: Mutex::new(unsafe {
                         device_wrapper
                             .0
                             .get_device_queue(queue_info.queue_family_index, i)
-                    },
+                    }),
                     semaphore: device::create_binary_semaphore(&device_wrapper)?,
                     timeline_sp: Arc::new(device::create_timeline_semaphore(&device_wrapper)?),
                     fence: device::create_fence(&device_wrapper)?,

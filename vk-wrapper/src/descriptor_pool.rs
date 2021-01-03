@@ -14,6 +14,7 @@ pub struct DescriptorPool {
 
 impl DescriptorPool {
     pub fn allocate_input(self: &Arc<Self>) -> Result<Arc<PipelineInput>, vk::Result> {
+        // This lock also used to protect self.native field implicitly
         let mut free_sets = self.free_sets.lock().unwrap();
 
         let native_set = if free_sets.is_empty() {
@@ -25,8 +26,7 @@ impl DescriptorPool {
 
             unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)?[0] }
         } else {
-            let index = free_sets.len() - 1;
-            free_sets.remove(index)
+            free_sets.pop().unwrap()
         };
 
         Ok(Arc::new(PipelineInput {

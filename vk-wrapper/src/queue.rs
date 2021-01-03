@@ -12,7 +12,7 @@ pub struct QueueType(pub(crate) u32);
 pub struct Queue {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
-    pub(crate) native: vk::Queue,
+    pub(crate) native: Mutex<vk::Queue>,
     pub(crate) semaphore: Semaphore,
     pub(crate) timeline_sp: Arc<Semaphore>,
     pub(crate) fence: Fence,
@@ -119,11 +119,13 @@ impl Queue {
             );
         }
 
+        let queue = self.native.lock().unwrap();
+
         fence.reset()?;
         unsafe {
             self.device_wrapper
                 .0
-                .queue_submit(self.native, native_submit_infos.as_slice(), fence.native)?
+                .queue_submit(*queue, native_submit_infos.as_slice(), fence.native)?
         }
         Ok(())
     }
@@ -182,30 +184,28 @@ impl Queue {
             .signal_semaphores(slice::from_ref(&self.semaphore.native))
             .push_next(&mut submit_sp_info);
 
+        let queue = self.native.lock().unwrap();
+
         self.fence.reset()?;
         unsafe {
             self.device_wrapper
                 .0
-                .queue_submit(self.native, &[submit_info.build()], self.fence.native)?
+                .queue_submit(*queue, &[submit_info.build()], self.fence.native)?
         };
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&self.semaphore.native))
             .swapchains(slice::from_ref(&sw_image.swapchain.wrapper.native))
             .image_indices(slice::from_ref(&sw_image.index));
-        let result = unsafe { self.swapchain_khr.queue_present(self.native, &present_info) };
+        let result = unsafe { self.swapchain_khr.queue_present(*queue, &present_info) };
         self.fence.wait()?;
 
         *sw_image.swapchain.curr_image.lock().unwrap() = None;
 
         match result {
             Ok(suboptimal) => Ok(!suboptimal),
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                Err(swapchain::Error::IncompatibleSurface)
-            }
-            Err(e) => {
-                Err(swapchain::Error::VkError(e))
-            }
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(swapchain::Error::IncompatibleSurface),
+            Err(e) => Err(swapchain::Error::VkError(e)),
         }
     }
 
@@ -217,7 +217,7 @@ impl Queue {
 impl PartialEq for Queue {
     fn eq(&self, other: &Self) -> bool {
         self.device_wrapper.0.handle() == other.device_wrapper.0.handle()
-            && self.native == other.native
+            && *self.native.lock().unwrap() == *other.native.lock().unwrap()
             && self.family_index == other.family_index
     }
 }
@@ -288,7 +288,7 @@ impl SubmitPacket {
         Some(sp.signal_value)
     }
 
-    pub fn wait(&self) -> Result<(), vk::Result> {
+    pub fn wait(&mut self) -> Result<(), vk::Result> {
         self.fence.wait()?;
 
         for info in &self.infos {
