@@ -21,7 +21,7 @@ pub struct Program {
 
 impl Program {
     const MOVEMENT_SPEED: f32 = 32.0;
-    const MOUSE_SENSITIVITY: f32 = 0.005;
+    const MOUSE_SENSITIVITY: f32 = 0.003;
 
     pub fn init(&self) {}
 
@@ -62,7 +62,8 @@ impl Program {
                 xrel,
                 yrel,
             } => {
-                self.cursor_rel = (xrel, yrel);
+                self.cursor_rel.0 += xrel;
+                self.cursor_rel.1 += yrel;
             }
             _ => {}
         }

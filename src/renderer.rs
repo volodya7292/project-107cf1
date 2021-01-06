@@ -5,6 +5,7 @@ pub mod material_pipelines;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
+mod systems;
 
 use crate::renderer::texture_atlas::TextureAtlas;
 use crate::resource_file::{ResourceFile, ResourceRef};
@@ -12,14 +13,13 @@ use crate::utils;
 use ktx::KtxInfo;
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
-use order_stat;
 use rayon::prelude::*;
-use specs::prelude::ParallelIterator;
 use specs::storage::ComponentEvent;
-use specs::WorldExt;
 use specs::{Builder, Join, ParJoin};
+use specs::{RunNow, WorldExt};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::ops::{Deref, DerefMut};
+use std::sync::{atomic, Arc, Mutex};
 use std::{cmp, mem, slice};
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
@@ -35,13 +35,16 @@ use vk_wrapper::{
     RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
 };
 
-const DISTANCE_SORT_PER_UPDATE: u32 = 128;
+#[derive(Default)]
+struct DistanceSortedRenderables {
+    entities: Vec<specs::Entity>,
+    curr_sort_count: u32,
+}
 
 pub struct Renderer {
     world: specs::World,
-    renderer_cmp_reader: specs::ReaderId<specs::storage::ComponentEvent>,
-    sorted_render_entities: Vec<specs::Entity>,
-    sort_count: u32,
+    renderer_cmp_reader: Arc<Mutex<specs::ReaderId<specs::storage::ComponentEvent>>>,
+    sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
 
     surface: Arc<Surface>,
     swapchain: Option<Arc<Swapchain>>,
@@ -356,139 +359,29 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
-        let mut removed_entity_count = 0;
+        let camera_pos = self
+            .world
+            .read_component::<component::Camera>()
+            .get(self.get_active_camera())
+            .unwrap()
+            .position();
 
-        // Add new objects to sort
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let entities = self.world.entities();
-            let renderer_comp = self.world.read_component::<component::Renderer>();
-            let renderer_comp_events = renderer_comp.channel().read(&mut self.renderer_cmp_reader);
+        let mut sys0 = systems::RendererCompEventsSystem {
+            renderer_comp_reader: Arc::clone(&self.renderer_cmp_reader),
+            sorted_renderables: Arc::clone(&self.sorted_renderables),
+        };
+        let mut sys1 = systems::DistanceSortSystem {
+            sorted_renderables: Arc::clone(&self.sorted_renderables),
+            camera_pos,
+        };
 
-            let mut inserted = specs::BitSet::new();
-
-            for event in renderer_comp_events {
-                match event {
-                    ComponentEvent::Inserted(i) => {
-                        inserted.add(*i);
-                    }
-                    ComponentEvent::Removed(_) => {
-                        removed_entity_count += 1;
-                    }
-                    _ => {}
-                }
-            }
-
-            for (entity, _comp, _) in (&entities, &renderer_comp, &inserted).join() {
-                self.sorted_render_entities.push(entity);
-            }
-        }
+        let mut dispatcher = specs::DispatcherBuilder::new()
+            .with(sys0, "a", &[])
+            .with(sys1, "b", &["a"])
+            .build();
+        dispatcher.dispatch(&self.world);
 
         self.world.maintain();
-
-        // Replace removed(dead) entities with alive ones
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut swap_entities = Vec::<specs::Entity>::with_capacity(removed_entity_count);
-            let mut new_len = self.sorted_render_entities.len();
-
-            // Find alive entities for replacement
-            for &entity in self.sorted_render_entities.iter().rev() {
-                if self.world.is_alive(entity) {
-                    if removed_entity_count > swap_entities.len() {
-                        swap_entities.push(entity);
-                    } else {
-                        break;
-                    }
-                }
-                new_len -= 1;
-            }
-
-            // Resize vector to trim swapped entities
-            if !self.sorted_render_entities.is_empty() {
-                let def_entity = self.sorted_render_entities[0];
-                self.sorted_render_entities.resize(new_len, def_entity);
-            }
-
-            // Swap entities
-            for entity in &mut self.sorted_render_entities {
-                if !self.world.is_alive(*entity) {
-                    *entity = swap_entities.remove(swap_entities.len() - 1);
-                }
-            }
-
-            // Add the rest of swap_entities that were not swapped due to resized vector
-            self.sorted_render_entities.extend(swap_entities);
-        }
-
-        // Sort render objects from front to back (for Z rejection & occlusion queries)
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let camera_comp = self.world.read_component::<component::Camera>();
-            let transform_comp = self.world.read_component::<component::Transform>();
-            let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
-
-            let camera = camera_comp.get(self.active_camera).unwrap();
-            let camera_pos = camera.position().clone();
-
-            let sort_slice = &mut self.sorted_render_entities[(self.sort_count as usize)..];
-            let to_sort_count = sort_slice.len().min(DISTANCE_SORT_PER_UPDATE as usize);
-
-            if to_sort_count > 0 {
-                order_stat::kth_by(sort_slice, to_sort_count - 1, |&a, &b| {
-                    let a_transform = transform_comp.get(a);
-                    let a_mesh_ref = mesh_ref_comp.get(a);
-                    let b_transform = transform_comp.get(b);
-                    let b_mesh_ref = mesh_ref_comp.get(b);
-
-                    if a_transform.is_none()
-                        || a_mesh_ref.is_none()
-                        || b_transform.is_none()
-                        || b_mesh_ref.is_none()
-                    {
-                        return cmp::Ordering::Equal;
-                    }
-
-                    let a_transform = a_transform.unwrap();
-                    let a_mesh_ref = a_mesh_ref.unwrap();
-                    let b_transform = b_transform.unwrap();
-                    let b_mesh_ref = b_mesh_ref.unwrap();
-
-                    let a_pos = {
-                        let vertex_mesh = &a_mesh_ref.vertex_mesh;
-                        let aabb = {
-                            let vertex_mesh = vertex_mesh.lock().unwrap();
-                            *vertex_mesh.aabb()
-                        };
-                        (aabb.0 + aabb.1) * 0.5 + a_transform.position()
-                    };
-                    let b_pos = {
-                        let vertex_mesh = &b_mesh_ref.vertex_mesh;
-                        let aabb = {
-                            let vertex_mesh = vertex_mesh.lock().unwrap();
-                            *vertex_mesh.aabb()
-                        };
-                        (aabb.0 + aabb.1) * 0.5 + b_transform.position()
-                    };
-
-                    let a_dist = (a_pos - camera_pos).magnitude();
-                    let b_dist = (b_pos - camera_pos).magnitude();
-
-                    if a_dist < b_dist {
-                        cmp::Ordering::Less
-                    } else if a_dist > b_dist {
-                        cmp::Ordering::Greater
-                    } else {
-                        cmp::Ordering::Equal
-                    }
-                });
-            }
-
-            self.sort_count += to_sort_count as u32;
-            if self.sort_count >= self.sorted_render_entities.len() as u32 {
-                self.sort_count = 0;
-            }
-        }
 
         // Update pipeline inputs
         // -------------------------------------------------------------------------------------------------------------
@@ -535,14 +428,14 @@ impl Renderer {
         // Update device buffers of vertex meshes
         // -------------------------------------------------------------------------------------------------------------
         {
-            let mut mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
+            let mut vertex_mesh_comps = self.world.read_component::<component::VertexMesh>();
 
             self.staging_cl.lock().unwrap().begin(true).unwrap();
 
-            (&mut mesh_ref_comp).par_join().for_each(|mesh_ref| {
-                let mut vertex_mesh = mesh_ref.vertex_mesh.lock().unwrap();
+            (&mut vertex_mesh_comps).par_join().for_each(|vertex_mesh| {
+                let mut vertex_mesh = &vertex_mesh.0;
 
-                if vertex_mesh.changed {
+                if vertex_mesh.changed.load(atomic::Ordering::Relaxed) {
                     let mut cl = self.staging_cl.lock().unwrap();
                     cl.copy_buffer_to_device(
                         vertex_mesh.staging_buffer.as_ref().unwrap(),
@@ -552,7 +445,7 @@ impl Renderer {
                         vertex_mesh.staging_buffer.as_ref().unwrap().size(),
                     );
 
-                    vertex_mesh.changed = false;
+                    vertex_mesh.changed.store(false, atomic::Ordering::Relaxed);
                 }
             });
 
@@ -641,9 +534,11 @@ impl Renderer {
 
         let transform_comp = self.world.read_component::<component::Transform>();
         let renderer_comp = self.world.read_component::<component::Renderer>();
-        let mesh_ref_comp = self.world.read_component::<component::VertexMeshRef>();
+        let vertex_mesh_comp = self.world.read_component::<component::VertexMesh>();
 
-        let object_count = self.sorted_render_entities.len();
+        let dsr = self.sorted_renderables.lock().unwrap();
+        let renderables = &dsr.entities;
+        let object_count = renderables.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
         // Record depth object rendering
@@ -670,25 +565,22 @@ impl Renderer {
                         break;
                     }
 
-                    let entity = self.sorted_render_entities[entity_index];
+                    let entity = renderables[entity_index];
 
                     let transform = transform_comp.get(entity);
                     let renderer = renderer_comp.get(entity);
-                    let mesh_ref = mesh_ref_comp.get(entity);
+                    let vertex_mesh = vertex_mesh_comp.get(entity);
 
-                    if transform.is_none() || renderer.is_none() || mesh_ref.is_none() {
+                    if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
                         continue;
                     }
 
                     let transform = transform.unwrap();
                     let renderer = renderer.unwrap();
-                    let mesh_ref = mesh_ref.unwrap();
+                    let vertex_mesh = vertex_mesh.unwrap();
 
-                    let vertex_mesh = &mesh_ref.vertex_mesh;
-                    let aabb = {
-                        let vertex_mesh = vertex_mesh.lock().unwrap();
-                        *vertex_mesh.aabb()
-                    };
+                    let vertex_mesh = &vertex_mesh.0;
+                    let aabb = { *vertex_mesh.aabb() };
 
                     let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position();
                     let radius = ((aabb.1 - aabb.0).component_mul(transform.scale()) * 0.5).magnitude();
@@ -696,7 +588,7 @@ impl Renderer {
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
                     if active_camera.is_sphere_visible(center_position, radius)
-                        && vertex_mesh.lock().unwrap().vertex_count > 0
+                        && vertex_mesh.vertex_count > 0
                     {
                         if renderer.translucent {
                             cl.bind_pipeline(&self.depth_pipeline_r);
@@ -717,11 +609,9 @@ impl Renderer {
         // Record depth cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            let object_count = self.sorted_render_entities.len() as u32;
-
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
-            cl.reset_query_pool(&self.query_pool, 0, object_count);
+            cl.reset_query_pool(&self.query_pool, 0, object_count as u32);
             cl.begin_render_pass(
                 &self.depth_render_pass,
                 self.depth_framebuffer.as_ref().unwrap(),
@@ -730,7 +620,13 @@ impl Renderer {
             );
             cl.execute_secondary(&self.secondary_cmd_lists);
             cl.end_render_pass();
-            cl.copy_query_pool_results_to_host(&self.query_pool, 0, object_count, &self.occlusion_buffer, 0);
+            cl.copy_query_pool_results_to_host(
+                &self.query_pool,
+                0,
+                object_count as u32,
+                &self.occlusion_buffer,
+                0,
+            );
             cl.end().unwrap();
         }
 
@@ -761,12 +657,12 @@ impl Renderer {
                         break;
                     }
 
-                    let entity = self.sorted_render_entities[entity_index];
+                    let entity = renderables[entity_index];
 
                     let renderer = renderer_comp.get(entity);
-                    let mesh_ref = mesh_ref_comp.get(entity);
+                    let vertex_mesh = vertex_mesh_comp.get(entity);
 
-                    if renderer.is_none() || mesh_ref.is_none() {
+                    if renderer.is_none() || vertex_mesh.is_none() {
                         continue;
                     }
 
@@ -776,9 +672,9 @@ impl Renderer {
                     }
 
                     let renderer = renderer.unwrap();
-                    let mesh_ref = mesh_ref.unwrap();
+                    let mesh = vertex_mesh.unwrap();
 
-                    let vertex_mesh = &mesh_ref.vertex_mesh;
+                    let vertex_mesh = &mesh.0;
 
                     let mat_pipeline = &renderer.mat_pipeline;
                     let pipeline = mat_pipeline.request_pipeline(&self.g_render_pass, 0, false);
@@ -1012,7 +908,7 @@ pub fn new(
 ) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
     let mut world = specs::World::new();
     world.register::<component::Transform>();
-    world.register::<component::VertexMeshRef>();
+    world.register::<component::VertexMesh>();
     world.register::<component::Renderer>();
     world.register::<component::Camera>();
 
@@ -1272,9 +1168,8 @@ pub fn new(
 
     let mut renderer = Renderer {
         world,
-        renderer_cmp_reader,
-        sorted_render_entities: vec![],
-        sort_count: 0,
+        renderer_cmp_reader: Arc::new(Mutex::new(renderer_cmp_reader)),
+        sorted_renderables: Arc::new(Mutex::new(Default::default())),
         surface: Arc::clone(surface),
         swapchain: None,
         surface_changed: false,

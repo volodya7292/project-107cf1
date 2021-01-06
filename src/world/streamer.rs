@@ -3,7 +3,6 @@ use crate::object::cluster::Cluster;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
-use nalgebra::SimdComplexField;
 use nalgebra_glm as glm;
 use nalgebra_glm::abs;
 use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
@@ -258,7 +257,7 @@ impl WorldStreamer {
                         );
                         let renderer_comp =
                             component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
-                        let mesh_comp = component::VertexMeshRef::new(&cluster.vertex_mesh().raw());
+                        let mesh_comp = component::VertexMesh::new(&cluster.vertex_mesh().raw());
 
                         let entity = world
                             .create_entity()
@@ -498,6 +497,9 @@ impl WorldStreamer {
 
         // Generate meshes
         {
+            let mut renderer = self.renderer.lock().unwrap();
+            let world = renderer.world_mut();
+
             for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {
                     let mut cluster = world_cluster.cluster.lock().unwrap();
@@ -507,6 +509,15 @@ impl WorldStreamer {
                     // cluster.fill_seam_densities(seam);
                     cluster.update_mesh(seam, 0.0);
                     // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
+                });
+                level.iter().for_each(|(_, world_cluster)| {
+                    let raw_vertex_mesh = component::VertexMesh::new(
+                        &world_cluster.cluster.lock().unwrap().vertex_mesh().raw(),
+                    );
+                    *world
+                        .write_component::<component::VertexMesh>()
+                        .get_mut(world_cluster.entity)
+                        .unwrap() = raw_vertex_mesh;
                 });
             }
             /*for (i, level) in self.clusters.iter().enumerate() {

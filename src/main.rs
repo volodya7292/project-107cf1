@@ -92,31 +92,32 @@ fn main() {
 
     let mut program = program::new(&renderer, &mat_pipelines);
 
-    let mut triangle_mesh = device.create_vertex_mesh::<BasicVertex>().unwrap();
-    triangle_mesh.set_vertices(
-        &[
-            BasicVertex {
-                position: Vector3::new(0.0, -0.5, -3.0),
-                tex_coord: Vector2::new(1.0, 2.0),
-            },
-            BasicVertex {
-                position: Vector3::new(-0.5, 0.5, -3.0),
-                tex_coord: Vector2::new(0.0, 0.0),
-            },
-            BasicVertex {
-                position: Vector3::new(0.5, 0.5, -3.0),
-                tex_coord: Vector2::new(2.0, 0.0),
-            },
-        ],
-        None,
-    );
+    let mut triangle_mesh = device
+        .create_vertex_mesh::<BasicVertex>(
+            &[
+                BasicVertex {
+                    position: Vector3::new(0.0, -0.5, -3.0),
+                    tex_coord: Vector2::new(1.0, 2.0),
+                },
+                BasicVertex {
+                    position: Vector3::new(-0.5, 0.5, -3.0),
+                    tex_coord: Vector2::new(0.0, 0.0),
+                },
+                BasicVertex {
+                    position: Vector3::new(0.5, 0.5, -3.0),
+                    tex_coord: Vector2::new(2.0, 0.0),
+                },
+            ],
+            None,
+        )
+        .unwrap();
 
     let _entity = renderer
         .lock()
         .unwrap()
         .add_entity()
         .with(component::Transform::default())
-        .with(component::VertexMeshRef::new(&triangle_mesh.raw()))
+        .with(component::VertexMesh::new(&triangle_mesh.raw()))
         .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
         .build();
     let _entity = renderer
@@ -128,7 +129,7 @@ fn main() {
             na::Vector3::default(),
             na::Vector3::new(1.0, 1.0, 1.0),
         ))
-        .with(component::VertexMeshRef::new(&triangle_mesh.raw()))
+        .with(component::VertexMesh::new(&triangle_mesh.raw()))
         .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
         .build();
 

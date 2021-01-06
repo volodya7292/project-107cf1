@@ -942,7 +942,7 @@ impl Cluster {
         let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32 * cluster_node_size, &nodes);
         let indices = dc::contour::generate_mesh(&octree);
 
-        // Save nodes into sector cache
+        // Save nodes into sector cache // TODO: update nodes_buffer using this
         sector.node_data_cache = octree.encode_into_buffer(|data| data.data);
 
         (vertices, indices)
@@ -1176,7 +1176,7 @@ impl Cluster {
             }
         }
 
-        self.vertex_mesh.set_vertices(&vertices, Some(&indices));
+        self.vertex_mesh = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
     }
 }
 
@@ -1185,12 +1185,8 @@ pub fn new(device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
         sectors: Default::default(),
         node_size,
         seam_nodes_cache: Default::default(),
-        vertex_mesh: device.create_vertex_mesh().unwrap(),
+        vertex_mesh: Default::default(),
         nodes_buffer: None,
         device: Arc::clone(device),
     }
-}
-
-impl specs::Component for Cluster {
-    type Storage = specs::VecStorage<Self>;
 }
