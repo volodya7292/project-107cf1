@@ -2,7 +2,6 @@ pub mod mesh_simplifier;
 pub mod ordered_hashmap;
 mod qef;
 
-use crate::renderer::vertex_mesh;
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
 use nalgebra as na;
 use std::mem;
@@ -80,6 +79,6 @@ where
     }
 
     for (i, v) in vertices.iter_mut().enumerate() {
-        *v.normal_mut() /= (vertex_triangle_counts[i] as f32);
+        *v.normal_mut() /= vertex_triangle_counts[i] as f32;
     }
 }

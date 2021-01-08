@@ -1,10 +1,10 @@
 use nalgebra as na;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::{Device, Format};
+use vk_wrapper::Format;
 
 #[derive(Debug)]
 pub enum Error {
@@ -39,7 +39,6 @@ macro_rules! __impl_normal_methods {
                 &mut self.normal
             }
         }
-        const D: u32 = 5;
     };
     ($vertex: ty, $i:ident) => {};
 }

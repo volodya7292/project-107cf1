@@ -11,7 +11,6 @@ pub struct Renderer {
     //buffers: HashMap<u32, vkw::RawHostBuffer>,
     // binding id -> renderer impl-specific res index
     pub(in crate::renderer) translucent: bool,
-    pub(in crate::renderer) changed: bool,
 }
 
 impl Renderer {
@@ -27,7 +26,6 @@ impl Renderer {
                 )
                 .unwrap(),
             translucent,
-            changed: true,
         }
     }
 }

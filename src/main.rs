@@ -91,7 +91,7 @@ fn main() {
 
     let mut program = program::new(&renderer, &mat_pipelines);
 
-    let mut triangle_mesh = device
+    let triangle_mesh = device
         .create_vertex_mesh::<BasicVertex>(
             &[
                 BasicVertex {

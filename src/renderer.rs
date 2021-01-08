@@ -16,10 +16,8 @@ use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::convert::TryInto;
-use std::ops::{Deref, DerefMut};
-use std::sync::{atomic, Arc, Mutex};
-use std::{cmp, mem, slice};
+use std::sync::{Arc, Mutex};
+use std::{mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
@@ -346,7 +344,7 @@ impl Renderer {
 
         let camera = {
             let camera_comps = self.scene.camera_components();
-            let mut camera_comps = camera_comps.read().unwrap();
+            let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
@@ -464,7 +462,7 @@ impl Renderer {
 
         let camera = {
             let camera_comps = self.scene.camera_components();
-            let mut camera_comps = camera_comps.read().unwrap();
+            let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 

@@ -1,11 +1,10 @@
-use crate::renderer::vertex_mesh::{VertexImpl, VertexMesh, VertexMeshCreate};
+use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
 use crate::utils;
 use crate::utils::mesh_simplifier;
 use dual_contouring as dc;
 use nalgebra as na;
 use std::collections::{hash_map, HashMap};
 use std::convert::TryInto;
-use std::slice;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 
@@ -343,69 +342,6 @@ pub struct Vertex {
 vertex_impl!(Vertex, position, normal, density);
 
 impl Cluster {
-    fn calc_cell_point(points: &[DensityPoint; 8]) -> Option<na::Vector3<f32>> {
-        let mut c_count = 0u32;
-        let mut vertex = na::Vector3::<f32>::new(0.0, 0.0, 0.0);
-
-        fn cell_interpolate(a: i16, b: i16) -> f32 {
-            ((ISO_VALUE_INT - a) as f32) / ((b - a) as f32)
-        }
-
-        for x in 0..2 {
-            for y in 0..2 {
-                let i0 = index_3d_to_1d_inv([x, y, 0], 2) as usize;
-                let i1 = index_3d_to_1d_inv([x, y, 1], 2) as usize;
-
-                if (points[i0].density > ISO_VALUE_INT as u8) != (points[i1].density > ISO_VALUE_INT as u8) {
-                    vertex += na::Vector3::new(
-                        x as f32,
-                        y as f32,
-                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
-                    );
-                    c_count += 1;
-                }
-            }
-        }
-
-        for x in 0..2 {
-            for z in 0..2 {
-                let i0 = index_3d_to_1d_inv([x, 0, z], 2) as usize;
-                let i1 = index_3d_to_1d_inv([x, 1, z], 2) as usize;
-
-                if (points[i0].density > ISO_VALUE_INT as u8) != (points[i1].density > ISO_VALUE_INT as u8) {
-                    vertex += na::Vector3::new(
-                        x as f32,
-                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
-                        z as f32,
-                    );
-                    c_count += 1;
-                }
-            }
-        }
-
-        for y in 0..2 {
-            for z in 0..2 {
-                let i0 = index_3d_to_1d_inv([0, y, z], 2) as usize;
-                let i1 = index_3d_to_1d_inv([1, y, z], 2) as usize;
-
-                if (points[i0].density > ISO_VALUE_INT as u8) != (points[i1].density > ISO_VALUE_INT as u8) {
-                    vertex += na::Vector3::new(
-                        cell_interpolate(points[i0].density as i16, points[i1].density as i16) as f32,
-                        y as f32,
-                        z as f32,
-                    );
-                    c_count += 1;
-                }
-            }
-        }
-
-        if c_count < 2 {
-            None
-        } else {
-            Some(vertex / (c_count as f32))
-        }
-    }
-
     pub fn calc_sector_position(cell_pos: [u8; 3]) -> [usize; 3] {
         [
             (cell_pos[0] as usize / SECTOR_SIZE).min(SIZE_IN_SECTORS - 1),
@@ -786,7 +722,7 @@ impl Cluster {
                 for i in 0..2 {
                     for j in 0..2 {
                         let xyz_u = na::Vector3::new(i * yc + i * zc, i * xc + j * zc, j * xc + j * yc);
-                        let xyz = (pos + xyz_u * size);
+                        let xyz = pos + xyz_u * size;
 
                         if (xyz.x % self.node_size == 0)
                             && (xyz.y % self.node_size == 0)
@@ -1098,7 +1034,7 @@ impl Cluster {
                 for z in 0..SIZE_IN_SECTORS {
                     let sector_changed = self.sectors[x][y][z].changed;
 
-                    let (mut sector_vertices, sector_indices) = if sector_changed {
+                    let (sector_vertices, sector_indices) = if sector_changed {
                         let sector = &self.sectors[x][y][z];
                         let mut sector_vertices = Vec::with_capacity(SECTOR_VOLUME * MAX_CELL_LAYERS);
                         let mut sector_indices = Vec::with_capacity(SECTOR_VOLUME * MAX_CELL_LAYERS);
@@ -1106,7 +1042,7 @@ impl Cluster {
                         for i in 0..sector.layer_count {
                             let def_seam_layer = SeamLayer::default();
 
-                            let (mut temp_vertices, mut temp_indices) = self.triangulate(
+                            let (mut temp_vertices, temp_indices) = self.triangulate(
                                 [x as u8, y as u8, z as u8],
                                 i,
                                 seam.nodes.get(&i).unwrap_or(&def_seam_layer),

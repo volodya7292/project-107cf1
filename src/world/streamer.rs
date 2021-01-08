@@ -4,7 +4,6 @@ use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::abs;
 use rayon::prelude::*;
 use simdnoise::NoiseBuilder;
 use std::collections::{hash_map, HashMap, HashSet};
@@ -145,8 +144,6 @@ impl WorldStreamer {
         {
             const R: i32 = (LOD0_RANGE / cluster::SIZE) as i32;
             const D: i32 = R * 2 + 1;
-            const R2: usize = (R / 2) as usize;
-            const D2: usize = R2 * 2 + 1;
 
             let mut cluster_layout = vec![HashSet::with_capacity(512); MAX_LOD + 1];
             let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; MAX_LOD + 2];
@@ -491,7 +488,7 @@ impl WorldStreamer {
 
         // Generate meshes
         {
-            let mut renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock().unwrap();
             let scene = renderer.scene();
 
             for (i, level) in self.clusters.iter().enumerate() {

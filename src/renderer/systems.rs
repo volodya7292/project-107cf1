@@ -1,7 +1,6 @@
 use crate::renderer::{component, scene, DistanceSortedRenderables};
 use nalgebra as na;
 use std::cmp;
-use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc, Mutex, RwLock};
 use vk_wrapper as vkw;
 use vk_wrapper::SubmitPacket;
@@ -46,7 +45,7 @@ impl RendererCompEventsData {
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let mut dsr = self.sorted_renderables.lock().unwrap();
-        let mut sorted_renderables = &mut dsr.entities;
+        let sorted_renderables = &mut dsr.entities;
         let mut removed_count = 1;
 
         // Add new objects to sort
@@ -122,7 +121,7 @@ pub(super) struct VertexMeshCompEventsData {
 
 impl VertexMeshCompEventsData {
     fn vertex_mesh_comp_modified(vertex_mesh_comp: &component::VertexMesh, cl: &mut vkw::CmdList) {
-        let mut vertex_mesh = &vertex_mesh_comp.0;
+        let vertex_mesh = &vertex_mesh_comp.0;
 
         if vertex_mesh.changed.load(atomic::Ordering::Relaxed) {
             cl.copy_buffer_to_device(
@@ -138,7 +137,7 @@ impl VertexMeshCompEventsData {
     }
 
     pub fn run(&mut self) {
-        let mut vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
+        let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
         let mut submit = self.staging_submit.lock().unwrap();
         submit.wait().unwrap();
 
