@@ -5,22 +5,22 @@ pub mod material_pipelines;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
+mod scene;
 mod systems;
 
-use crate::renderer::texture_atlas::TextureAtlas;
+use crate::renderer::scene::Scene;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use ktx::KtxInfo;
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use rayon::prelude::*;
-use specs::storage::ComponentEvent;
-use specs::{Builder, Join, ParJoin};
-use specs::{RunNow, WorldExt};
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::sync::{atomic, Arc, Mutex};
 use std::{cmp, mem, slice};
+use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
 use vk_wrapper::pipeline_input::{Binding, BindingRes};
@@ -37,13 +37,12 @@ use vk_wrapper::{
 
 #[derive(Default)]
 struct DistanceSortedRenderables {
-    entities: Vec<specs::Entity>,
+    entities: Vec<u32>,
     curr_sort_count: u32,
 }
 
 pub struct Renderer {
-    world: specs::World,
-    renderer_cmp_reader: Arc<Mutex<specs::ReaderId<specs::storage::ComponentEvent>>>,
+    scene: Scene,
     sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
 
     surface: Arc<Surface>,
@@ -59,7 +58,7 @@ pub struct Renderer {
 
     staging_buffer: HostBuffer<u8>,
     staging_cl: Arc<Mutex<CmdList>>,
-    staging_submit: SubmitPacket,
+    staging_submit: Arc<Mutex<SubmitPacket>>,
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
@@ -86,7 +85,7 @@ pub struct Renderer {
 
     model_inputs: Arc<DescriptorPool>,
 
-    active_camera: specs::Entity,
+    active_camera: u32,
     camera_uniform_buffer: Arc<DeviceBuffer>,
 }
 
@@ -135,42 +134,24 @@ pub struct PerFrameInfo {
     atlas_info: na::Vector4<u32>,
 }
 
-/*struct RenderSystem;
-
-impl<'a> specs::System<'a> for RenderSystem {
-    type SystemData = (
-        specs::ReadStorage<'a, component::Transform>,
-        specs::ReadStorage<'a, component::Renderer>,
-    );
-
-    fn run(&mut self, (transform, renderer): Self::SystemData) {
-        for (trans, rend) in (&transform, &renderer).join() {}
-    }
-}
-*/
-
 impl Renderer {
     pub fn device(&self) -> &Arc<Device> {
         &self.device
     }
 
-    pub fn world(&self) -> &specs::World {
-        &self.world
+    pub fn scene(&self) -> &Scene {
+        &self.scene
     }
 
-    pub fn world_mut(&mut self) -> &mut specs::World {
-        &mut self.world
+    pub fn scene_mut(&mut self) -> &mut Scene {
+        &mut self.scene
     }
 
-    pub fn add_entity(&mut self) -> specs::EntityBuilder {
-        self.world.create_entity()
-    }
-
-    pub fn get_active_camera(&self) -> specs::Entity {
+    pub fn get_active_camera(&self) -> u32 {
         self.active_camera
     }
 
-    pub fn set_active_camera(&mut self, entity: specs::Entity) {
+    pub fn set_active_camera(&mut self, entity: u32) {
         self.active_camera = entity;
     }
 
@@ -269,8 +250,9 @@ impl Renderer {
             if i == update_count || new_used_size > self.staging_buffer.size() as usize {
                 self.staging_cl.lock().unwrap().end().unwrap();
 
-                graphics_queue.submit(&mut self.staging_submit).unwrap();
-                self.staging_submit.wait().unwrap();
+                let mut submit = self.staging_submit.lock().unwrap();
+                graphics_queue.submit(&mut submit).unwrap();
+                submit.wait().unwrap();
 
                 if i == update_count {
                     break;
@@ -293,8 +275,9 @@ impl Renderer {
         // Set camera aspect
         {
             let entity = self.get_active_camera();
-            let mut camera_comp = self.world.write_component::<component::Camera>();
-            let camera = camera_comp.get_mut(entity).unwrap();
+            let camera_comps = self.scene.camera_components();
+            let mut camera_comps = camera_comps.write().unwrap();
+            let camera = camera_comps.get_mut(entity).unwrap();
             camera.set_aspect(new_size.0, new_size.1);
         }
 
@@ -359,143 +342,89 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
-        let camera_pos = self
-            .world
-            .read_component::<component::Camera>()
-            .get(self.get_active_camera())
-            .unwrap()
-            .position();
-
-        let mut sys0 = systems::RendererCompEventsSystem {
-            renderer_comp_reader: Arc::clone(&self.renderer_cmp_reader),
-            sorted_renderables: Arc::clone(&self.sorted_renderables),
-        };
-        let mut sys1 = systems::DistanceSortSystem {
-            sorted_renderables: Arc::clone(&self.sorted_renderables),
-            camera_pos,
-        };
-
-        let mut dispatcher = specs::DispatcherBuilder::new()
-            .with(sys0, "a", &[])
-            .with(sys1, "b", &["a"])
-            .build();
-        dispatcher.dispatch(&self.world);
-
-        self.world.maintain();
-
-        // Update pipeline inputs
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut renderer_comp = self.world.write_component::<component::Renderer>();
-
-            (&mut renderer_comp.par_restrict_mut())
-                .par_join()
-                .for_each(|mut comps| {
-                    let renderer = comps.get_unchecked();
-
-                    if renderer.changed {
-                        let renderer = comps.get_mut_unchecked();
-                        let _mat_pipeline = &renderer.mat_pipeline;
-                        let inputs = &mut renderer.pipeline_inputs;
-
-                        inputs.clear();
-
-                        let depth_per_object = self.depth_per_object_pool.allocate_input().unwrap();
-                        depth_per_object.update(&[Binding {
-                            id: 0,
-                            array_index: 0,
-                            res: BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-                        }]);
-
-                        //let g_per_object = self.g_
-
-                        let uniform_input = self.model_inputs.allocate_input().unwrap();
-                        uniform_input.update(&[Binding {
-                            id: 0,
-                            array_index: 0,
-                            res: BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-                        }]);
-
-                        inputs.extend_from_slice(&[depth_per_object, uniform_input]);
-
-                        renderer.changed = false;
-                    }
-                });
-        }
-
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
-        // Update device buffers of vertex meshes
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut vertex_mesh_comps = self.world.read_component::<component::VertexMesh>();
+        let camera = {
+            let camera_comps = self.scene.camera_components();
+            let mut camera_comps = camera_comps.read().unwrap();
+            *camera_comps.get(self.get_active_camera()).unwrap()
+        };
 
-            self.staging_cl.lock().unwrap().begin(true).unwrap();
+        let mut data0 = systems::RendererCompEventsData {
+            renderer_comps: self.scene.renderer_components(),
+            sorted_renderables: Arc::clone(&self.sorted_renderables),
+            depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
+            model_inputs: Arc::clone(&self.model_inputs),
+        };
 
-            (&mut vertex_mesh_comps).par_join().for_each(|vertex_mesh| {
-                let mut vertex_mesh = &vertex_mesh.0;
+        let vertex_mesh_events = self.scene.vertex_mesh_components().write().unwrap().events();
+        let mut data1 = systems::VertexMeshCompEventsData {
+            events: vertex_mesh_events,
+            vertex_mesh_comps: self.scene.vertex_mesh_components(),
+            device: Arc::clone(&self.device),
+            staging_cl: Arc::clone(&self.staging_cl),
+            staging_submit: Arc::clone(&self.staging_submit),
+        };
 
-                if vertex_mesh.changed.load(atomic::Ordering::Relaxed) {
-                    let mut cl = self.staging_cl.lock().unwrap();
-                    cl.copy_buffer_to_device(
-                        vertex_mesh.staging_buffer.as_ref().unwrap(),
-                        0,
-                        vertex_mesh.buffer.as_ref().unwrap(),
-                        0,
-                        vertex_mesh.staging_buffer.as_ref().unwrap().size(),
-                    );
+        let mut data2 = systems::DistanceSortData {
+            transform_comps: self.scene.transform_components(),
+            vertex_mesh_comps: self.scene.vertex_mesh_components(),
+            sorted_renderables: Arc::clone(&self.sorted_renderables),
+            camera_pos: camera.position(),
+        };
 
-                    vertex_mesh.changed.store(false, atomic::Ordering::Relaxed);
-                }
+        rayon::scope(|s| {
+            rayon::scope(|s| {
+                data0.run();
+                data1.run();
             });
+            rayon::scope(|s| {
+                data2.run();
+            });
+        });
 
-            self.staging_cl.lock().unwrap().end().unwrap();
-
-            graphics_queue.submit(&mut self.staging_submit).unwrap();
-            // TODO: Make more efficient
-            self.staging_submit.wait().unwrap();
-        }
+        // Wait for vertex buffer updates
+        self.staging_submit.lock().unwrap().wait().unwrap();
 
         // Check for transform updates
         // -------------------------------------------------------------------------------------------------------------
         let buffer_updates = Mutex::new(vec![]);
         {
-            let mut transform_comp = self.world.write_component::<component::Transform>();
-            let renderer_comp = self.world.read_component::<component::Renderer>();
+            let renderables = self.scene.renderables();
+            let transform_comps = self.scene.transform_components();
+            let mut transform_comps = transform_comps.write().unwrap();
+            let renderer_comps = self.scene.renderer_components();
+            let renderer_comps = renderer_comps.read().unwrap();
 
-            (&mut transform_comp, &renderer_comp)
-                .par_join()
-                .for_each(|(transform, renderer)| {
-                    if transform.changed {
-                        let matrix = transform.matrix();
-                        let matrix_bytes = unsafe {
-                            slice::from_raw_parts(
-                                &matrix as *const na::Matrix4<f32> as *const u8,
-                                mem::size_of::<na::Matrix4<f32>>(),
-                            )
-                            .to_vec()
-                        };
+            renderables.iter().for_each(|&entity| {
+                let transform = transform_comps.get_mut_unchecked(entity).unwrap();
+                let renderer = renderer_comps.get(entity).unwrap();
 
-                        buffer_updates.lock().unwrap().push((
-                            matrix_bytes,
-                            Arc::clone(&renderer.uniform_buffer),
-                            renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
-                        ));
+                if transform.changed {
+                    let matrix = transform.matrix();
+                    let matrix_bytes = unsafe {
+                        slice::from_raw_parts(
+                            &matrix as *const na::Matrix4<f32> as *const u8,
+                            mem::size_of::<na::Matrix4<f32>>(),
+                        )
+                        .to_vec()
+                    };
 
-                        transform.changed = false;
-                    }
-                });
+                    buffer_updates.lock().unwrap().push((
+                        matrix_bytes,
+                        Arc::clone(&renderer.uniform_buffer),
+                        renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
+                    ));
+
+                    transform.changed = false;
+                }
+            });
         }
-
-        self.update_device_buffers(buffer_updates.lock().unwrap().as_slice());
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
             let per_frame_info = {
-                let camera_comp = self.world.read_component::<component::Camera>();
-                let camera = camera_comp.get(self.active_camera).unwrap();
-
                 let cam_pos = camera.position();
                 let cam_dir = camera.direction();
                 let proj = camera.projection();
@@ -514,7 +443,7 @@ impl Renderer {
                 }
             };
 
-            self.update_device_buffers(&[(
+            buffer_updates.lock().unwrap().push((
                 unsafe {
                     slice::from_raw_parts(
                         &per_frame_info as *const PerFrameInfo as *const u8,
@@ -524,17 +453,27 @@ impl Renderer {
                 },
                 Arc::clone(&self.camera_uniform_buffer),
                 0,
-            )]);
+            ));
         }
+
+        self.update_device_buffers(&buffer_updates.lock().unwrap());
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
-        let camera_component = self.world.read_component::<component::Camera>();
-        let active_camera = camera_component.get(self.active_camera).unwrap();
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
-        let transform_comp = self.world.read_component::<component::Transform>();
-        let renderer_comp = self.world.read_component::<component::Renderer>();
-        let vertex_mesh_comp = self.world.read_component::<component::VertexMesh>();
+        let camera = {
+            let camera_comps = self.scene.camera_components();
+            let mut camera_comps = camera_comps.read().unwrap();
+            *camera_comps.get(self.get_active_camera()).unwrap()
+        };
+
+        let transform_comp = self.scene.transform_components();
+        let transform_comp = transform_comp.read().unwrap();
+        let renderer_comp = self.scene.renderer_components();
+        let renderer_comp = renderer_comp.read().unwrap();
+        let vertex_mesh_comp = self.scene.vertex_mesh_components();
+        let vertex_mesh_comp = vertex_mesh_comp.read().unwrap();
 
         let dsr = self.sorted_renderables.lock().unwrap();
         let renderables = &dsr.entities;
@@ -587,9 +526,7 @@ impl Renderer {
 
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
-                    if active_camera.is_sphere_visible(center_position, radius)
-                        && vertex_mesh.vertex_count > 0
-                    {
+                    if camera.is_sphere_visible(center_position, radius) && vertex_mesh.vertex_count > 0 {
                         if renderer.translucent {
                             cl.bind_pipeline(&self.depth_pipeline_r);
                         } else {
@@ -629,11 +566,11 @@ impl Renderer {
             );
             cl.end().unwrap();
         }
-
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
-        graphics_queue.submit(&mut self.staging_submit).unwrap();
-        self.staging_submit.wait().unwrap();
+        {
+            let mut submit = self.staging_submit.lock().unwrap();
+            graphics_queue.submit(&mut submit).unwrap();
+            submit.wait().unwrap();
+        }
 
         // Record g-buffer object rendering
         // -------------------------------------------------------------------------------------------------------------
@@ -906,22 +843,15 @@ pub fn new(
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
 ) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
-    let mut world = specs::World::new();
-    world.register::<component::Transform>();
-    world.register::<component::VertexMesh>();
-    world.register::<component::Renderer>();
-    world.register::<component::Camera>();
-
-    // Register reader for listening for creation/removing of component::Renderer.
-    // Used to optimize front-to-back distance sorting.
-    let renderer_cmp_reader = world.write_component::<component::Renderer>().register_reader();
+    let mut scene = Scene::new();
 
     // TODO: pipeline cache management
 
-    let active_camera = world
-        .create_entity()
-        .with(component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01))
-        .build();
+    let active_camera = scene.create_entity();
+    scene.camera_components().write().unwrap().set(
+        active_camera,
+        component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
+    );
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
@@ -1167,8 +1097,7 @@ pub fn new(
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
     let mut renderer = Renderer {
-        world,
-        renderer_cmp_reader: Arc::new(Mutex::new(renderer_cmp_reader)),
+        scene,
         sorted_renderables: Arc::new(Mutex::new(Default::default())),
         surface: Arc::clone(surface),
         swapchain: None,
@@ -1186,7 +1115,7 @@ pub fn new(
         ],
         staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
         staging_cl: staging_copy_cl,
-        staging_submit: staging_copy_submit,
+        staging_submit: Arc::new(Mutex::new(staging_copy_submit)),
         sw_framebuffers: vec![],
         query_pool: device.create_query_pool(65536)?,
         occlusion_buffer: device.create_host_buffer(

@@ -5,9 +5,8 @@ use crate::renderer::{component, Renderer};
 use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::abs;
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::prelude::*;
 use simdnoise::NoiseBuilder;
-use specs::{Builder, WorldExt};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -18,7 +17,7 @@ pub const LOD0_RANGE: usize = 128;
 struct WorldCluster {
     cluster: Arc<Mutex<Cluster>>,
     seam: Option<cluster::Seam>,
-    entity: specs::Entity,
+    entity: u32,
     creation_time_secs: u64,
     interior_changed: bool,
     generated: bool,
@@ -223,7 +222,7 @@ impl WorldStreamer {
 
             let mut renderer = self.renderer.lock().unwrap();
             let device = renderer.device().clone();
-            let world = renderer.world_mut();
+            let scene = renderer.scene_mut();
             let curr_time_secs = Instant::now().elapsed().as_secs();
 
             for i in 0..(MAX_LOD + 1) {
@@ -240,7 +239,7 @@ impl WorldStreamer {
                         false
                     }
                 });
-                world.delete_entities(&entities_to_remove).unwrap();
+                scene.remove_renderables(&entities_to_remove);
 
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
@@ -259,12 +258,7 @@ impl WorldStreamer {
                             component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
                         let mesh_comp = component::VertexMesh::new(&cluster.vertex_mesh().raw());
 
-                        let entity = world
-                            .create_entity()
-                            .with(transform_comp)
-                            .with(renderer_comp)
-                            .with(mesh_comp)
-                            .build();
+                        let entity = scene.create_renderable(transform_comp, renderer_comp, mesh_comp);
 
                         entry.insert(WorldCluster {
                             cluster: Arc::new(Mutex::new(cluster)),
@@ -498,7 +492,7 @@ impl WorldStreamer {
         // Generate meshes
         {
             let mut renderer = self.renderer.lock().unwrap();
-            let world = renderer.world_mut();
+            let scene = renderer.scene();
 
             for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {
@@ -514,8 +508,10 @@ impl WorldStreamer {
                     let raw_vertex_mesh = component::VertexMesh::new(
                         &world_cluster.cluster.lock().unwrap().vertex_mesh().raw(),
                     );
-                    *world
-                        .write_component::<component::VertexMesh>()
+                    let vertex_mesh_comps = scene.vertex_mesh_components();
+                    *vertex_mesh_comps
+                        .write()
+                        .unwrap()
                         .get_mut(world_cluster.entity)
                         .unwrap() = raw_vertex_mesh;
                 });

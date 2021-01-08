@@ -8,7 +8,3 @@ impl VertexMesh {
         VertexMesh(Arc::clone(vertex_mesh))
     }
 }
-
-impl specs::Component for VertexMesh {
-    type Storage = specs::VecStorage<Self>;
-}

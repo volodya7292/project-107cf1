@@ -49,7 +49,3 @@ impl Default for Transform {
         }
     }
 }
-
-impl specs::Component for Transform {
-    type Storage = specs::VecStorage<Self>;
-}

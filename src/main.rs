@@ -16,7 +16,6 @@ use na::Vector2;
 use na::Vector3;
 use nalgebra as na;
 use sdl2::keyboard::Keycode;
-use specs::Builder;
 use std::path::Path;
 use std::time::Instant;
 
@@ -112,26 +111,24 @@ fn main() {
         )
         .unwrap();
 
-    let _entity = renderer
-        .lock()
-        .unwrap()
-        .add_entity()
-        .with(component::Transform::default())
-        .with(component::VertexMesh::new(&triangle_mesh.raw()))
-        .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
-        .build();
-    let _entity = renderer
-        .lock()
-        .unwrap()
-        .add_entity()
-        .with(component::Transform::new(
-            na::Vector3::new(0.0, 0.0, 1.0),
-            na::Vector3::default(),
-            na::Vector3::new(1.0, 1.0, 1.0),
-        ))
-        .with(component::VertexMesh::new(&triangle_mesh.raw()))
-        .with(component::Renderer::new(&device, &mat_pipelines.triag(), false))
-        .build();
+    {
+        let mut renderer = renderer.lock().unwrap();
+
+        renderer.scene_mut().create_renderable(
+            component::Transform::default(),
+            component::Renderer::new(&device, &mat_pipelines.triag(), false),
+            component::VertexMesh::new(&triangle_mesh.raw()),
+        );
+        renderer.scene_mut().create_renderable(
+            component::Transform::new(
+                na::Vector3::new(0.0, 0.0, 1.0),
+                na::Vector3::default(),
+                na::Vector3::new(1.0, 1.0, 1.0),
+            ),
+            component::Renderer::new(&device, &mat_pipelines.triag(), false),
+            component::VertexMesh::new(&triangle_mesh.raw()),
+        );
+    }
 
     /*{
         let mut comps = renderer.scene().world.write_component::<component::Transform>();

@@ -31,7 +31,3 @@ impl Renderer {
         }
     }
 }
-
-impl specs::Component for Renderer {
-    type Storage = specs::FlaggedStorage<Self, specs::VecStorage<Self>>;
-}

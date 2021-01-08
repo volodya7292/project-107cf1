@@ -1,20 +1,50 @@
-use crate::renderer::{component, DistanceSortedRenderables};
+use crate::renderer::{component, scene, DistanceSortedRenderables};
 use nalgebra as na;
-use specs::storage::ComponentEvent;
-use specs::{Join, System};
 use std::cmp;
 use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic, Arc, Mutex, RwLock};
+use vk_wrapper as vkw;
+use vk_wrapper::SubmitPacket;
 
-pub(super) struct RendererCompEventsSystem {
-    pub renderer_comp_reader: Arc<Mutex<specs::ReaderId<specs::storage::ComponentEvent>>>,
-    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
+fn renderer_comp_modified(
+    renderer: &mut component::Renderer,
+    depth_per_object_pool: &Arc<vkw::DescriptorPool>,
+    model_inputs: &Arc<vkw::DescriptorPool>,
+) {
+    // Update pipeline inputs
+    // ------------------------------------------------------------------------------------------
+    let _mat_pipeline = &renderer.mat_pipeline;
+    let inputs = &mut renderer.pipeline_inputs;
+
+    inputs.clear();
+
+    let depth_per_object = depth_per_object_pool.allocate_input().unwrap();
+    depth_per_object.update(&[vkw::Binding {
+        id: 0,
+        array_index: 0,
+        res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+    }]);
+
+    let uniform_input = model_inputs.allocate_input().unwrap();
+    uniform_input.update(&[vkw::Binding {
+        id: 0,
+        array_index: 0,
+        res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+    }]);
+
+    inputs.extend_from_slice(&[depth_per_object, uniform_input]);
 }
 
-impl<'a> specs::System<'a> for RendererCompEventsSystem {
-    type SystemData = (specs::Entities<'a>, specs::ReadStorage<'a, component::Renderer>);
+pub(super) struct RendererCompEventsData {
+    pub renderer_comps: Arc<RwLock<scene::ComponentStorage<component::Renderer>>>,
+    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
+    pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
+    pub model_inputs: Arc<vkw::DescriptorPool>,
+}
 
-    fn run(&mut self, (entities, renderer_comps): Self::SystemData) {
+impl RendererCompEventsData {
+    pub fn run(&mut self) {
+        let mut renderer_comps = self.renderer_comps.write().unwrap();
         let mut dsr = self.sorted_renderables.lock().unwrap();
         let mut sorted_renderables = &mut dsr.entities;
         let mut removed_count = 1;
@@ -22,38 +52,41 @@ impl<'a> specs::System<'a> for RendererCompEventsSystem {
         // Add new objects to sort
         // -------------------------------------------------------------------------------------------------------------
         {
-            let renderer_comp_events = renderer_comps
-                .channel()
-                .read(&mut self.renderer_comp_reader.lock().unwrap());
+            let events = renderer_comps.events();
 
-            let mut inserted = specs::BitSet::new();
-
-            for event in renderer_comp_events {
+            for event in events {
                 match event {
-                    ComponentEvent::Inserted(i) => {
-                        inserted.add(*i);
+                    scene::Event::Created(i) => {
+                        renderer_comp_modified(
+                            renderer_comps.get_mut_unchecked(i).unwrap(),
+                            &self.depth_per_object_pool,
+                            &self.model_inputs,
+                        );
+                        sorted_renderables.push(i);
                     }
-                    ComponentEvent::Removed(_) => {
+                    scene::Event::Modified(i) => {
+                        renderer_comp_modified(
+                            renderer_comps.get_mut_unchecked(i).unwrap(),
+                            &self.depth_per_object_pool,
+                            &self.model_inputs,
+                        );
+                    }
+                    scene::Event::Removed(_) => {
                         removed_count += 1;
                     }
-                    _ => {}
                 }
-            }
-
-            for (entity, _comp, _) in (&entities, &renderer_comps, &inserted).join() {
-                sorted_renderables.push(entity);
             }
         }
 
         // Replace removed(dead) entities with alive ones
         // -------------------------------------------------------------------------------------------------------------
         {
-            let mut swap_entities = Vec::<specs::Entity>::with_capacity(removed_count);
+            let mut swap_entities = Vec::<u32>::with_capacity(removed_count);
             let mut new_len = sorted_renderables.len();
 
             // Find alive entities for replacement
             for &entity in sorted_renderables.iter().rev() {
-                if entities.is_alive(entity) {
+                if renderer_comps.is_alive(entity) {
                     if removed_count > swap_entities.len() {
                         swap_entities.push(entity);
                     } else {
@@ -68,7 +101,7 @@ impl<'a> specs::System<'a> for RendererCompEventsSystem {
 
             // Swap entities
             for entity in sorted_renderables.iter_mut() {
-                if !entities.is_alive(*entity) {
+                if !renderer_comps.is_alive(*entity) {
                     *entity = swap_entities.remove(swap_entities.len() - 1);
                 }
             }
@@ -79,23 +112,76 @@ impl<'a> specs::System<'a> for RendererCompEventsSystem {
     }
 }
 
+pub(super) struct VertexMeshCompEventsData {
+    pub events: Vec<scene::Event>,
+    pub vertex_mesh_comps: Arc<RwLock<scene::ComponentStorage<component::VertexMesh>>>,
+    pub device: Arc<vkw::Device>,
+    pub staging_cl: Arc<Mutex<vkw::CmdList>>,
+    pub staging_submit: Arc<Mutex<SubmitPacket>>,
+}
+
+impl VertexMeshCompEventsData {
+    fn vertex_mesh_comp_modified(vertex_mesh_comp: &component::VertexMesh, cl: &mut vkw::CmdList) {
+        let mut vertex_mesh = &vertex_mesh_comp.0;
+
+        if vertex_mesh.changed.load(atomic::Ordering::Relaxed) {
+            cl.copy_buffer_to_device(
+                vertex_mesh.staging_buffer.as_ref().unwrap(),
+                0,
+                vertex_mesh.buffer.as_ref().unwrap(),
+                0,
+                vertex_mesh.staging_buffer.as_ref().unwrap().size(),
+            );
+
+            vertex_mesh.changed.store(false, atomic::Ordering::Relaxed);
+        }
+    }
+
+    pub fn run(&mut self) {
+        let mut vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
+        let mut submit = self.staging_submit.lock().unwrap();
+        submit.wait().unwrap();
+
+        // Update device buffers of vertex meshes
+        // ------------------------------------------------------------------------------------
+        {
+            let mut cl = self.staging_cl.lock().unwrap();
+            cl.begin(true).unwrap();
+
+            for &event in &self.events {
+                match event {
+                    scene::Event::Created(i) => {
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                    }
+                    scene::Event::Modified(i) => {
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                    }
+                    scene::Event::Removed(_) => {}
+                }
+            }
+
+            cl.end().unwrap();
+        }
+
+        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+        graphics_queue.submit(&mut submit).unwrap();
+    }
+}
+
 // Sort render objects from front to back (for Z rejection & occlusion queries)
-pub(super) struct DistanceSortSystem {
+pub(super) struct DistanceSortData {
+    pub transform_comps: Arc<RwLock<scene::ComponentStorage<component::Transform>>>,
+    pub vertex_mesh_comps: Arc<RwLock<scene::ComponentStorage<component::VertexMesh>>>,
     pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
     pub camera_pos: na::Vector3<f32>,
 }
 
-impl DistanceSortSystem {
+impl DistanceSortData {
     const DISTANCE_SORT_PER_UPDATE: usize = 128;
-}
 
-impl<'a> specs::System<'a> for DistanceSortSystem {
-    type SystemData = (
-        specs::ReadStorage<'a, component::Transform>,
-        specs::ReadStorage<'a, component::VertexMesh>,
-    );
-
-    fn run(&mut self, (transform_comps, vertex_mesh_comps): Self::SystemData) {
+    pub fn run(&mut self) {
+        let transform_comps = self.transform_comps.read().unwrap();
+        let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
         let mut dsr = self.sorted_renderables.lock().unwrap();
 
         let curr_sort_count = dsr.curr_sort_count;

@@ -5,7 +5,6 @@ use crate::world;
 use dual_contouring as dc;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
-use specs::{Builder, WorldExt};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -102,8 +101,9 @@ impl Program {
 
             let renderer = self.renderer.lock().unwrap();
             let entity = renderer.get_active_camera();
-            let mut camera_comp = renderer.world().write_component::<component::Camera>();
-            let camera = camera_comp.get_mut(entity).unwrap();
+            let camera_comps = renderer.scene().camera_components();
+            let mut camera_comps = camera_comps.write().unwrap();
+            let camera = camera_comps.get_mut(entity).unwrap();
 
             let ms = Self::MOVEMENT_SPEED * delta_time as f32;
 
@@ -131,16 +131,6 @@ impl Program {
             self.cursor_rel = (0, 0);
 
             //dbg!(camera.position());
-        }
-
-        {
-            /*let renderer = self.renderer.lock().unwrap();
-            let world = renderer.world();
-            let cluster_comp = world.read_component::<cluster::Cluster>();
-
-            for cluster {}
-
-            for */
         }
     }
 }

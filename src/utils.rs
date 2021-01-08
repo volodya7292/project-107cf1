@@ -1,4 +1,5 @@
 pub mod mesh_simplifier;
+pub mod ordered_hashmap;
 mod qef;
 
 use crate::renderer::vertex_mesh;
