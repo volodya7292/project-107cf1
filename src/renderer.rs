@@ -117,7 +117,14 @@ pub enum TextureAtlasType {
     NORMAL = 3,
 }
 
+struct BufferUpdate {
+    buffer: Arc<DeviceBuffer>,
+    offset: u64,
+    data: Vec<u8>,
+}
+
 #[derive(Debug)]
+#[repr(C)]
 pub struct CameraInfo {
     pos: Vector4<f32>,
     dir: Vector4<f32>,
@@ -127,6 +134,7 @@ pub struct CameraInfo {
     info: Vector4<f32>, // .x - FovY
 }
 
+#[repr(C)]
 pub struct PerFrameInfo {
     camera: CameraInfo,
     atlas_info: na::Vector4<u32>,
@@ -211,7 +219,7 @@ impl Renderer {
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
-    fn update_device_buffers(&mut self, updates: &[(Vec<u8>, Arc<DeviceBuffer>, u64)]) {
+    fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
         if updates.is_empty() {
             return;
         }
@@ -226,19 +234,19 @@ impl Renderer {
 
         loop {
             let update = &updates[i];
-            let copy_size = update.0.len();
+            let copy_size = update.data.len();
             let new_used_size = used_size + copy_size;
 
             if copy_size > 0 && new_used_size < self.staging_buffer.size() as usize {
-                self.staging_buffer.write(used_size as u64, &update.0);
+                self.staging_buffer.write(used_size as u64, &update.data);
 
                 let mut cl = self.staging_cl.lock().unwrap();
 
                 cl.copy_buffer_to_device(
                     &self.staging_buffer,
                     used_size as u64,
-                    &update.1,
-                    update.2,
+                    &update.buffer,
+                    update.offset,
                     copy_size as u64,
                 );
                 used_size = new_used_size;
@@ -348,7 +356,7 @@ impl Renderer {
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
-        let mut data0 = systems::RendererCompEventsData {
+        let mut renderer_events_system = systems::RendererCompEventsSystem {
             renderer_comps: self.scene.renderer_components(),
             sorted_renderables: Arc::clone(&self.sorted_renderables),
             depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
@@ -356,7 +364,7 @@ impl Renderer {
         };
 
         let vertex_mesh_events = self.scene.vertex_mesh_components().write().unwrap().events();
-        let mut data1 = systems::VertexMeshCompEventsData {
+        let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
             events: vertex_mesh_events,
             vertex_mesh_comps: self.scene.vertex_mesh_components(),
             device: Arc::clone(&self.device),
@@ -364,60 +372,59 @@ impl Renderer {
             staging_submit: Arc::clone(&self.staging_submit),
         };
 
-        let mut data2 = systems::DistanceSortData {
+        let mut transform_events_system = systems::TransformEventsSystem {
             transform_comps: self.scene.transform_components(),
+            model_transform_comps: self.scene.model_transform_components(),
+        };
+
+        let buffer_updates = Arc::new(Mutex::new(vec![]));
+        let mut world_transform_events_system = systems::WorldTransformEventsSystem {
+            buffer_updates: Arc::clone(&buffer_updates),
+            world_transform_comps: self.scene.world_transform_components(),
+            renderer_comps: self.scene.renderer_components(),
+        };
+
+        let mut distance_sort_system = systems::DistanceSortSystem {
+            world_transform_comps: self.scene.world_transform_components(),
             vertex_mesh_comps: self.scene.vertex_mesh_components(),
             sorted_renderables: Arc::clone(&self.sorted_renderables),
             camera_pos: camera.position(),
         };
 
+        let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
+            parent_comps: self.scene.parent_components(),
+            children_comps: self.scene.children_components(),
+            model_transform_comps: self.scene.model_transform_components(),
+            world_transform_comps: self.scene.world_transform_components(),
+        };
+
         rayon::scope(|s| {
             rayon::scope(|s| {
-                data0.run();
-                data1.run();
+                s.spawn(|s| {
+                    renderer_events_system.run();
+                });
+                s.spawn(|s| {
+                    vertex_mesh_system.run();
+                });
+                s.spawn(|s| {
+                    transform_events_system.run();
+                });
             });
             rayon::scope(|s| {
-                data2.run();
+                hierarchy_propagation_system.run();
+            });
+            rayon::scope(|s| {
+                s.spawn(|s| {
+                    distance_sort_system.run();
+                });
+                s.spawn(|s| {
+                    world_transform_events_system.run();
+                });
             });
         });
 
         // Wait for vertex buffer updates
         self.staging_submit.lock().unwrap().wait().unwrap();
-
-        // Check for transform updates
-        // -------------------------------------------------------------------------------------------------------------
-        let buffer_updates = Mutex::new(vec![]);
-        {
-            let renderables = self.scene.renderables();
-            let transform_comps = self.scene.transform_components();
-            let mut transform_comps = transform_comps.write().unwrap();
-            let renderer_comps = self.scene.renderer_components();
-            let renderer_comps = renderer_comps.read().unwrap();
-
-            renderables.iter().for_each(|&entity| {
-                let transform = transform_comps.get_mut_unchecked(entity).unwrap();
-                let renderer = renderer_comps.get(entity).unwrap();
-
-                if transform.changed {
-                    let matrix = transform.matrix();
-                    let matrix_bytes = unsafe {
-                        slice::from_raw_parts(
-                            &matrix as *const na::Matrix4<f32> as *const u8,
-                            mem::size_of::<na::Matrix4<f32>>(),
-                        )
-                        .to_vec()
-                    };
-
-                    buffer_updates.lock().unwrap().push((
-                        matrix_bytes,
-                        Arc::clone(&renderer.uniform_buffer),
-                        renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
-                    ));
-
-                    transform.changed = false;
-                }
-            });
-        }
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -441,17 +448,18 @@ impl Renderer {
                 }
             };
 
-            buffer_updates.lock().unwrap().push((
-                unsafe {
-                    slice::from_raw_parts(
-                        &per_frame_info as *const PerFrameInfo as *const u8,
-                        mem::size_of_val(&per_frame_info),
-                    )
-                    .to_vec()
-                },
-                Arc::clone(&self.camera_uniform_buffer),
-                0,
-            ));
+            let data = unsafe {
+                slice::from_raw_parts(
+                    &per_frame_info as *const PerFrameInfo as *const u8,
+                    mem::size_of_val(&per_frame_info),
+                )
+                .to_vec()
+            };
+            buffer_updates.lock().unwrap().push(BufferUpdate {
+                buffer: Arc::clone(&self.camera_uniform_buffer),
+                offset: 0,
+                data,
+            });
         }
 
         self.update_device_buffers(&buffer_updates.lock().unwrap());
@@ -466,12 +474,12 @@ impl Renderer {
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
-        let transform_comp = self.scene.transform_components();
-        let transform_comp = transform_comp.read().unwrap();
+        let world_transform_comp = self.scene.world_transform_components();
+        let world_transform_comps = world_transform_comp.read().unwrap();
         let renderer_comp = self.scene.renderer_components();
-        let renderer_comp = renderer_comp.read().unwrap();
+        let renderer_comps = renderer_comp.read().unwrap();
         let vertex_mesh_comp = self.scene.vertex_mesh_components();
-        let vertex_mesh_comp = vertex_mesh_comp.read().unwrap();
+        let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
         let dsr = self.sorted_renderables.lock().unwrap();
         let renderables = &dsr.entities;
@@ -504,9 +512,9 @@ impl Renderer {
 
                     let entity = renderables[entity_index];
 
-                    let transform = transform_comp.get(entity);
-                    let renderer = renderer_comp.get(entity);
-                    let vertex_mesh = vertex_mesh_comp.get(entity);
+                    let transform = world_transform_comps.get(entity);
+                    let renderer = renderer_comps.get(entity);
+                    let vertex_mesh = vertex_mesh_comps.get(entity);
 
                     if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
                         continue;
@@ -519,8 +527,8 @@ impl Renderer {
                     let vertex_mesh = &vertex_mesh.0;
                     let aabb = { *vertex_mesh.aabb() };
 
-                    let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position();
-                    let radius = ((aabb.1 - aabb.0).component_mul(transform.scale()) * 0.5).magnitude();
+                    let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position;
+                    let radius = ((aabb.1 - aabb.0).component_mul(&transform.scale) * 0.5).magnitude();
 
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
@@ -594,8 +602,8 @@ impl Renderer {
 
                     let entity = renderables[entity_index];
 
-                    let renderer = renderer_comp.get(entity);
-                    let vertex_mesh = vertex_mesh_comp.get(entity);
+                    let renderer = renderer_comps.get(entity);
+                    let vertex_mesh = vertex_mesh_comps.get(entity);
 
                     if renderer.is_none() || vertex_mesh.is_none() {
                         continue;

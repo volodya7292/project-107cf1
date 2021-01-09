@@ -17,7 +17,7 @@ impl WorldTransform {
         }
     }
 
-    pub fn combine(&self, model_transform: &mut ModelTransform) -> WorldTransform {
+    pub fn combine(&self, model_transform: &ModelTransform) -> WorldTransform {
         WorldTransform {
             matrix: self.matrix * model_transform.matrix,
             position: self.position + model_transform.position,

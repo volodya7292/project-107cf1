@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct ComponentStorage<T> {
     data: Vec<Option<T>>,
+    available: BitSet,
     created: BitSet,
     modified: BitSet,
     removed: BitSet,
@@ -21,6 +22,7 @@ impl<T> ComponentStorage<T> {
         self.data.resize_with(new_len as usize, || None);
     }
 
+    /// Checks if component is present
     pub fn is_alive(&self, index: u32) -> bool {
         self.data
             .get(index as usize)
@@ -46,6 +48,7 @@ impl<T> ComponentStorage<T> {
             }
         }
 
+        self.available.insert(index);
         *comp = Some(v);
     }
 
@@ -59,6 +62,8 @@ impl<T> ComponentStorage<T> {
             self.removed.insert(index);
         }
         self.modified.remove(index);
+
+        self.available.remove(index);
     }
 
     pub fn get(&self, index: u32) -> Option<&T> {
@@ -76,6 +81,10 @@ impl<T> ComponentStorage<T> {
     /// Get mutable component without emission modification event
     pub fn get_mut_unchecked(&mut self, index: u32) -> Option<&mut T> {
         self.data.get_mut(index as usize).map(|e| e.as_mut()).flatten()
+    }
+
+    pub fn alive_entries(&self) -> &BitSet {
+        &self.available
     }
 
     /// Returns events and clears them internally
@@ -104,6 +113,7 @@ impl<T> Default for ComponentStorage<T> {
     fn default() -> Self {
         ComponentStorage {
             data: vec![],
+            available: Default::default(),
             created: Default::default(),
             modified: Default::default(),
             removed: Default::default(),
@@ -113,6 +123,8 @@ impl<T> Default for ComponentStorage<T> {
 
 #[derive(Default)]
 pub struct Scene {
+    parent_comps: Arc<RwLock<ComponentStorage<component::Parent>>>,
+    children_comps: Arc<RwLock<ComponentStorage<component::Children>>>,
     transform_comps: Arc<RwLock<ComponentStorage<component::Transform>>>,
     model_transform_comps: Arc<RwLock<ComponentStorage<component::ModelTransform>>>,
     world_transform_comps: Arc<RwLock<ComponentStorage<component::WorldTransform>>>,
@@ -122,8 +134,6 @@ pub struct Scene {
 
     entity_count: u32,
     free_indices: Vec<u32>,
-
-    renderables: Vec<u32>,
 }
 
 impl Scene {
@@ -165,7 +175,14 @@ impl Scene {
         self.transform_comps.write().unwrap().set(index, transform);
         self.renderer_comps.write().unwrap().set(index, renderer);
         self.vertex_mesh_comps.write().unwrap().set(index, vertex_mesh);
-        self.renderables.push(index);
+        self.model_transform_comps
+            .write()
+            .unwrap()
+            .set(index, component::ModelTransform::default());
+        self.world_transform_comps
+            .write()
+            .unwrap()
+            .set(index, component::WorldTransform::default());
         index
     }
 
@@ -181,12 +198,28 @@ impl Scene {
         }
     }
 
-    pub fn renderables(&self) -> &[u32] {
-        &self.renderables
+    pub fn parent_components(&self) -> Arc<RwLock<ComponentStorage<component::Parent>>> {
+        Arc::clone(&self.parent_comps)
+    }
+
+    pub fn children_components(&self) -> Arc<RwLock<ComponentStorage<component::Children>>> {
+        Arc::clone(&self.children_comps)
     }
 
     pub fn transform_components(&self) -> Arc<RwLock<ComponentStorage<component::Transform>>> {
         Arc::clone(&self.transform_comps)
+    }
+
+    pub(super) fn model_transform_components(
+        &self,
+    ) -> Arc<RwLock<ComponentStorage<component::ModelTransform>>> {
+        Arc::clone(&self.model_transform_comps)
+    }
+
+    pub(super) fn world_transform_components(
+        &self,
+    ) -> Arc<RwLock<ComponentStorage<component::WorldTransform>>> {
+        Arc::clone(&self.world_transform_comps)
     }
 
     pub fn renderer_components(&self) -> Arc<RwLock<ComponentStorage<component::Renderer>>> {
