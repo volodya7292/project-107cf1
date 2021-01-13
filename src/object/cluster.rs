@@ -1,6 +1,7 @@
 use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
-use crate::utils;
+use crate::renderer::{component, scene};
 use crate::utils::mesh_simplifier;
+use crate::{renderer, utils};
 use dual_contouring as dc;
 use nalgebra as na;
 use std::collections::{hash_map, HashMap};
@@ -38,6 +39,14 @@ pub struct DensityPoint {
     pub(crate) material: u16,
 }
 
+#[derive(Copy, Clone, Default)]
+pub struct Vertex {
+    position: na::Vector3<f32>,
+    normal: na::Vector3<f32>,
+    density: u32,
+}
+vertex_impl!(Vertex, position, normal, density);
+
 struct Sector {
     indices: Box<[[[u32; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     densities: Vec<DensityPoint>,
@@ -51,6 +60,7 @@ struct Sector {
     vertex_count: u32,
     indices_offset: u32,
     index_count: u32,
+    vertex_mesh: renderer::VertexMesh<Vertex>,
 }
 
 #[derive(Copy, Clone)]
@@ -191,6 +201,7 @@ impl Default for Sector {
             vertex_count: 0,
             indices_offset: 0,
             index_count: 0,
+            vertex_mesh: Default::default(),
         }
     }
 }
@@ -332,14 +343,6 @@ impl Seam {
         }
     }
 }
-
-#[derive(Copy, Clone, Default)]
-pub struct Vertex {
-    position: na::Vector3<f32>,
-    normal: na::Vector3<f32>,
-    density: u32,
-}
-vertex_impl!(Vertex, position, normal, density);
 
 impl Cluster {
     pub fn calc_sector_position(cell_pos: [u8; 3]) -> [usize; 3] {
@@ -993,7 +996,7 @@ impl Cluster {
         &self.seam_nodes_cache
     }
 
-    pub fn update_mesh(&mut self, seam: &Seam, lod: f32) {
+    pub fn update_mesh(&mut self, seam: &Seam, simplification_factor: f32) {
         if seam.node_size != self.node_size {
             panic!(
                 "seam.node_size ({}) != self.node_size ({})",
@@ -1050,8 +1053,12 @@ impl Cluster {
 
                             let (temp_vertices, mut temp_indices) = {
                                 let options = mesh_simplifier::Options::new(
-                                    0.125, 10, 128, // 0,
-                                    4.0, 5.0, 0.8,
+                                    0.125,
+                                    10,
+                                    (512 as f32 * (1.0 - simplification_factor)) as usize,
+                                    4.0,
+                                    5.0,
+                                    0.8,
                                 );
 
                                 utils::calc_smooth_mesh_normals(&mut temp_vertices, &temp_indices);
@@ -1113,6 +1120,36 @@ impl Cluster {
         }
 
         self.vertex_mesh = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
+    }
+}
+
+pub struct UpdateComponents<'a> {
+    transform: &'a mut scene::ComponentStorageMut<'a, component::VertexMesh>,
+    renderer: &'a mut scene::ComponentStorageMut<'a, component::VertexMesh>,
+    vertex_mesh: &'a mut scene::ComponentStorageMut<'a, component::VertexMesh>,
+    children: &'a mut scene::ComponentStorageMut<'a, component::Children>,
+}
+
+impl Cluster {
+    pub fn update_renderable(&self, entity: u32, comps: &mut UpdateComponents) {
+        let children = comps.children.get(entity).unwrap();
+
+        if children.0.is_empty() {
+            let children = comps.children.get_mut(entity).unwrap();
+            children.0 = vec![0u32; SIZE_IN_SECTORS * SIZE_IN_SECTORS * SIZE_IN_SECTORS];
+
+            for x in 0..SIZE_IN_SECTORS {
+                for y in 0..SIZE_IN_SECTORS {
+                    for z in 0..SIZE_IN_SECTORS {
+                        let sector = &self.sectors[x][y][z];
+                        let i = index_3d_to_1d([x as u8, y as u8, z as u8], SIZE_IN_SECTORS as u32) as usize;
+
+                        // children[i] =
+                        // sector.vertex_mesh
+                    }
+                }
+            }
+        }
     }
 }
 

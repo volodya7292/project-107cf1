@@ -236,7 +236,7 @@ impl WorldStreamer {
                         false
                     }
                 });
-                scene.remove_renderables(&entities_to_remove);
+                scene.remove_entities(&entities_to_remove);
 
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
@@ -488,8 +488,8 @@ impl WorldStreamer {
 
         // Generate meshes
         {
-            let renderer = self.renderer.lock().unwrap();
-            let scene = renderer.scene();
+            let mut renderer = self.renderer.lock().unwrap();
+            let scene = renderer.scene_mut();
 
             for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {
@@ -498,14 +498,14 @@ impl WorldStreamer {
                     // let seam = self.create_seam_for_cluster(i, pos);
                     let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                     // cluster.fill_seam_densities(seam);
-                    cluster.update_mesh(seam, 0.0);
+                    cluster.update_mesh(seam, 0.75);
                     // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                 });
                 level.iter().for_each(|(_, world_cluster)| {
                     let raw_vertex_mesh = component::VertexMesh::new(
                         &world_cluster.cluster.lock().unwrap().vertex_mesh().raw(),
                     );
-                    let vertex_mesh_comps = scene.vertex_mesh_components();
+                    let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
                     *vertex_mesh_comps
                         .write()
                         .unwrap()

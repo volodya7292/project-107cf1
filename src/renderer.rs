@@ -5,10 +5,12 @@ pub mod material_pipelines;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
-mod scene;
+pub mod scene;
 mod systems;
 
-use crate::renderer::scene::Scene;
+pub use scene::Scene;
+pub use vertex_mesh::VertexMesh;
+
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use ktx::KtxInfo;
@@ -281,7 +283,7 @@ impl Renderer {
         // Set camera aspect
         {
             let entity = self.get_active_camera();
-            let camera_comps = self.scene.camera_components();
+            let camera_comps = self.scene.storage::<component::Camera>();
             let mut camera_comps = camera_comps.write().unwrap();
             let camera = camera_comps.get_mut(entity).unwrap();
             camera.set_aspect(new_size.0, new_size.1);
@@ -348,54 +350,50 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
         let camera = {
-            let camera_comps = self.scene.camera_components();
+            let camera_comps = self.scene.storage::<component::Camera>();
             let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
-            renderer_comps: self.scene.renderer_components(),
+            renderer_comps: self.scene.storage::<component::Renderer>(),
             sorted_renderables: Arc::clone(&self.sorted_renderables),
             depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
             model_inputs: Arc::clone(&self.model_inputs),
         };
 
-        let vertex_mesh_events = self.scene.vertex_mesh_components().write().unwrap().events();
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
-            events: vertex_mesh_events,
-            vertex_mesh_comps: self.scene.vertex_mesh_components(),
+            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             device: Arc::clone(&self.device),
             staging_cl: Arc::clone(&self.staging_cl),
             staging_submit: Arc::clone(&self.staging_submit),
         };
 
         let mut transform_events_system = systems::TransformEventsSystem {
-            transform_comps: self.scene.transform_components(),
-            model_transform_comps: self.scene.model_transform_components(),
+            transform_comps: self.scene.storage::<component::Transform>(),
+            model_transform_comps: self.scene.storage::<component::ModelTransform>(),
         };
 
         let buffer_updates = Arc::new(Mutex::new(vec![]));
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
             buffer_updates: Arc::clone(&buffer_updates),
-            world_transform_comps: self.scene.world_transform_components(),
-            renderer_comps: self.scene.renderer_components(),
+            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            renderer_comps: self.scene.storage::<component::Renderer>(),
         };
 
         let mut distance_sort_system = systems::DistanceSortSystem {
-            world_transform_comps: self.scene.world_transform_components(),
-            vertex_mesh_comps: self.scene.vertex_mesh_components(),
+            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             sorted_renderables: Arc::clone(&self.sorted_renderables),
             camera_pos: camera.position(),
         };
 
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
-            parent_comps: self.scene.parent_components(),
-            children_comps: self.scene.children_components(),
-            model_transform_comps: self.scene.model_transform_components(),
-            world_transform_comps: self.scene.world_transform_components(),
+            parent_comps: self.scene.storage::<component::Parent>(),
+            children_comps: self.scene.storage::<component::Children>(),
+            model_transform_comps: self.scene.storage::<component::ModelTransform>(),
+            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
 
         rayon::scope(|s| {
@@ -469,16 +467,16 @@ impl Renderer {
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
         let camera = {
-            let camera_comps = self.scene.camera_components();
+            let camera_comps = self.scene.storage::<component::Camera>();
             let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
-        let world_transform_comp = self.scene.world_transform_components();
+        let world_transform_comp = self.scene.storage::<component::WorldTransform>();
         let world_transform_comps = world_transform_comp.read().unwrap();
-        let renderer_comp = self.scene.renderer_components();
+        let renderer_comp = self.scene.storage::<component::Renderer>();
         let renderer_comps = renderer_comp.read().unwrap();
-        let vertex_mesh_comp = self.scene.vertex_mesh_components();
+        let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
         let dsr = self.sorted_renderables.lock().unwrap();
@@ -854,7 +852,7 @@ pub fn new(
     // TODO: pipeline cache management
 
     let active_camera = scene.create_entity();
-    scene.camera_components().write().unwrap().set(
+    scene.storage::<component::Camera>().write().unwrap().set(
         active_camera,
         component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
     );

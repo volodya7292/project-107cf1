@@ -99,9 +99,9 @@ impl Program {
                 vel_up_down -= 1;
             }
 
-            let renderer = self.renderer.lock().unwrap();
+            let mut renderer = self.renderer.lock().unwrap();
             let entity = renderer.get_active_camera();
-            let camera_comps = renderer.scene().camera_components();
+            let camera_comps = renderer.scene_mut().storage::<component::Camera>();
             let mut camera_comps = camera_comps.write().unwrap();
             let camera = camera_comps.get_mut(entity).unwrap();
 

@@ -1,13 +1,13 @@
 use crate::renderer::scene::Event;
 use crate::renderer::{component, scene, BufferUpdate, DistanceSortedRenderables};
 use nalgebra as na;
-use std::sync::{atomic, Arc, Mutex, RwLock};
+use std::sync::{atomic, Arc, Mutex};
 use std::{cmp, mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::SubmitPacket;
 
 pub(super) struct RendererCompEventsSystem {
-    pub renderer_comps: Arc<RwLock<scene::ComponentStorage<component::Renderer>>>,
+    pub renderer_comps: scene::LockedStorage<component::Renderer>,
     pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
     pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
     pub model_inputs: Arc<vkw::DescriptorPool>,
@@ -113,8 +113,7 @@ impl RendererCompEventsSystem {
 }
 
 pub(super) struct VertexMeshCompEventsSystem {
-    pub events: Vec<scene::Event>,
-    pub vertex_mesh_comps: Arc<RwLock<scene::ComponentStorage<component::VertexMesh>>>,
+    pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
     pub device: Arc<vkw::Device>,
     pub staging_cl: Arc<Mutex<vkw::CmdList>>,
     pub staging_submit: Arc<Mutex<SubmitPacket>>,
@@ -124,7 +123,7 @@ impl VertexMeshCompEventsSystem {
     fn vertex_mesh_comp_modified(vertex_mesh_comp: &component::VertexMesh, cl: &mut vkw::CmdList) {
         let vertex_mesh = &vertex_mesh_comp.0;
 
-        if vertex_mesh.changed.load(atomic::Ordering::Relaxed) {
+        if vertex_mesh.changed.swap(false, atomic::Ordering::Relaxed) {
             cl.copy_buffer_to_device(
                 vertex_mesh.staging_buffer.as_ref().unwrap(),
                 0,
@@ -132,12 +131,12 @@ impl VertexMeshCompEventsSystem {
                 0,
                 vertex_mesh.staging_buffer.as_ref().unwrap().size(),
             );
-
-            vertex_mesh.changed.store(false, atomic::Ordering::Relaxed);
         }
     }
 
     pub fn run(&mut self) {
+        let events = self.vertex_mesh_comps.write().unwrap().events();
+
         let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
         let mut submit = self.staging_submit.lock().unwrap();
         submit.wait().unwrap();
@@ -148,7 +147,7 @@ impl VertexMeshCompEventsSystem {
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
 
-            for &event in &self.events {
+            for &event in &events {
                 match event {
                     scene::Event::Created(i) => {
                         Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
@@ -170,8 +169,8 @@ impl VertexMeshCompEventsSystem {
 
 // Sort render objects from front to back (for Z rejection & occlusion queries)
 pub(super) struct DistanceSortSystem {
-    pub world_transform_comps: Arc<RwLock<scene::ComponentStorage<component::WorldTransform>>>,
-    pub vertex_mesh_comps: Arc<RwLock<scene::ComponentStorage<component::VertexMesh>>>,
+    pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
+    pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
     pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
     pub camera_pos: na::Vector3<f32>,
 }
@@ -235,8 +234,8 @@ impl DistanceSortSystem {
 
 // Updates model transform matrices
 pub(super) struct TransformEventsSystem {
-    pub transform_comps: Arc<RwLock<scene::ComponentStorage<component::Transform>>>,
-    pub model_transform_comps: Arc<RwLock<scene::ComponentStorage<component::ModelTransform>>>,
+    pub transform_comps: scene::LockedStorage<component::Transform>,
+    pub model_transform_comps: scene::LockedStorage<component::ModelTransform>,
 }
 
 impl TransformEventsSystem {
@@ -272,8 +271,8 @@ impl TransformEventsSystem {
 // Updates world transform uniform buffers
 pub(super) struct WorldTransformEventsSystem {
     pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
-    pub world_transform_comps: Arc<RwLock<scene::ComponentStorage<component::WorldTransform>>>,
-    pub renderer_comps: Arc<RwLock<scene::ComponentStorage<component::Renderer>>>,
+    pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
+    pub renderer_comps: scene::LockedStorage<component::Renderer>,
 }
 
 impl WorldTransformEventsSystem {
@@ -327,10 +326,10 @@ impl WorldTransformEventsSystem {
 
 // Propagates transform hierarchy and calculates world transforms
 pub(super) struct HierarchyPropagationSystem {
-    pub parent_comps: Arc<RwLock<scene::ComponentStorage<component::Parent>>>,
-    pub children_comps: Arc<RwLock<scene::ComponentStorage<component::Children>>>,
-    pub model_transform_comps: Arc<RwLock<scene::ComponentStorage<component::ModelTransform>>>,
-    pub world_transform_comps: Arc<RwLock<scene::ComponentStorage<component::WorldTransform>>>,
+    pub parent_comps: scene::LockedStorage<component::Parent>,
+    pub children_comps: scene::LockedStorage<component::Children>,
+    pub model_transform_comps: scene::LockedStorage<component::ModelTransform>,
+    pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
 }
 
 impl HierarchyPropagationSystem {
@@ -339,10 +338,10 @@ impl HierarchyPropagationSystem {
         parent_world_transform_changed: bool,
         parent_entity: u32,
         entity: u32,
-        parent_comps: &mut scene::ComponentStorage<component::Parent>,
+        parent_comps: &mut scene::ComponentStorageMut<component::Parent>,
         children_comps: &scene::ComponentStorage<component::Children>,
-        model_transform_comps: &mut scene::ComponentStorage<component::ModelTransform>,
-        world_transform_comps: &mut scene::ComponentStorage<component::WorldTransform>,
+        model_transform_comps: &mut scene::ComponentStorageMut<component::ModelTransform>,
+        world_transform_comps: &mut scene::ComponentStorageMut<component::WorldTransform>,
     ) {
         let model_transform = model_transform_comps.get_mut_unchecked(entity).unwrap();
 
