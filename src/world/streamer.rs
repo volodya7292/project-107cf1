@@ -219,7 +219,11 @@ impl WorldStreamer {
 
             let mut renderer = self.renderer.lock().unwrap();
             let device = renderer.device().clone();
-            let scene = renderer.scene_mut();
+            let scene = renderer.scene();
+            let transform_comps = scene.storage::<component::Transform>();
+            let renderer_comps = scene.storage::<component::Renderer>();
+            let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
+
             let curr_time_secs = Instant::now().elapsed().as_secs();
 
             for i in 0..(MAX_LOD + 1) {
@@ -238,6 +242,13 @@ impl WorldStreamer {
                 });
                 scene.remove_entities(&entities_to_remove);
 
+                // -----------------------------------------------------------------------------------
+
+                let mut scene_entities = scene.entities().lock().unwrap();
+                let mut transform_comps = transform_comps.write().unwrap();
+                let mut renderer_comps = renderer_comps.write().unwrap();
+                let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
+
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
                     let node_size = 2_u32.pow(i as u32);
@@ -255,7 +266,10 @@ impl WorldStreamer {
                             component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
                         let mesh_comp = component::VertexMesh::new(&cluster.vertex_mesh().raw());
 
-                        let entity = scene.create_renderable(transform_comp, renderer_comp, mesh_comp);
+                        let entity = scene_entities.create();
+                        transform_comps.set(entity, transform_comp);
+                        renderer_comps.set(entity, renderer_comp);
+                        vertex_mesh_comps.set(entity, mesh_comp);
 
                         entry.insert(WorldCluster {
                             cluster: Arc::new(Mutex::new(cluster)),
@@ -489,7 +503,7 @@ impl WorldStreamer {
         // Generate meshes
         {
             let mut renderer = self.renderer.lock().unwrap();
-            let scene = renderer.scene_mut();
+            let scene = renderer.scene();
 
             for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {

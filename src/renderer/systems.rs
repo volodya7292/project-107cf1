@@ -56,17 +56,18 @@ impl RendererCompEventsSystem {
 
             for event in events {
                 match event {
-                    scene::Event::Created(i) => {
+                    scene::Event::Created(entity) => {
                         Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(i).unwrap(),
+                            renderer_comps.get_mut_unchecked(entity).unwrap(),
                             &self.depth_per_object_pool,
                             &self.model_inputs,
                         );
-                        sorted_renderables.push(i);
+
+                        sorted_renderables.push(entity);
                     }
-                    scene::Event::Modified(i) => {
+                    scene::Event::Modified(entity) => {
                         Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(i).unwrap(),
+                            renderer_comps.get_mut_unchecked(entity).unwrap(),
                             &self.depth_per_object_pool,
                             &self.model_inputs,
                         );
@@ -86,7 +87,7 @@ impl RendererCompEventsSystem {
 
             // Find alive entities for replacement
             for &entity in sorted_renderables.iter().rev() {
-                if renderer_comps.is_alive(entity) {
+                if renderer_comps.contains(entity) {
                     if removed_count > swap_entities.len() {
                         swap_entities.push(entity);
                     } else {
@@ -101,7 +102,7 @@ impl RendererCompEventsSystem {
 
             // Swap entities
             for entity in sorted_renderables.iter_mut() {
-                if !renderer_comps.is_alive(*entity) {
+                if !renderer_comps.contains(*entity) {
                     *entity = swap_entities.remove(swap_entities.len() - 1);
                 }
             }
@@ -251,12 +252,20 @@ impl TransformEventsSystem {
         for event in events {
             match event {
                 Event::Created(entity) => {
+                    if !model_transform_comps.contains(entity) {
+                        model_transform_comps.set(entity, component::ModelTransform::default());
+                    }
+
                     Self::transform_modified(
                         transform_comps.get(entity).unwrap(),
                         model_transform_comps.get_mut(entity).unwrap(),
                     );
                 }
                 Event::Modified(entity) => {
+                    if !model_transform_comps.contains(entity) {
+                        model_transform_comps.set(entity, component::ModelTransform::default());
+                    }
+
                     Self::transform_modified(
                         transform_comps.get(entity).unwrap(),
                         model_transform_comps.get_mut(entity).unwrap(),
@@ -381,8 +390,8 @@ impl HierarchyPropagationSystem {
 
         // !Parent & ModelTransform
         let entities: Vec<usize> = model_transform_comps
-            .alive_entries()
-            .difference(parent_comps.alive_entries())
+            .entries()
+            .difference(parent_comps.entries())
             .collect();
 
         for entity in entities {
@@ -392,7 +401,7 @@ impl HierarchyPropagationSystem {
                 let model_transform_changed = model_transform.changed;
 
                 if model_transform_changed {
-                    *world_transform_comps.get_mut(entity as u32).unwrap() = world_transform;
+                    world_transform_comps.set(entity as u32, world_transform);
                     model_transform.changed = false;
                 }
 

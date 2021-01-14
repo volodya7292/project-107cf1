@@ -151,10 +151,6 @@ impl Renderer {
         &self.scene
     }
 
-    pub fn scene_mut(&mut self) -> &mut Scene {
-        &mut self.scene
-    }
-
     pub fn get_active_camera(&self) -> u32 {
         self.active_camera
     }

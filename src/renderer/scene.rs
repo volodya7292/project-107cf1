@@ -1,11 +1,11 @@
-use crate::renderer::component;
 use ahash::AHashMap;
 use bit_set::BitSet;
 use std::any::TypeId;
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::AtomicU32;
+use std::sync::{atomic, Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 trait Storage: Send + Sync {
     fn len(&self) -> usize;
@@ -42,6 +42,7 @@ where
 
 pub struct RawComponentStorage {
     data: Box<dyn Storage>,
+    allocated_count: Arc<AtomicU32>,
     available: BitSet,
     created: BitSet,
     modified: BitSet,
@@ -56,15 +57,13 @@ pub enum Event {
 }
 
 impl RawComponentStorage {
-    fn new<T>(len: usize) -> RawComponentStorage
+    fn new<T>(allocated_count: &Arc<AtomicU32>) -> RawComponentStorage
     where
         T: 'static + Send + Sync,
     {
-        let mut vec = Vec::<MaybeUninit<T>>::new();
-        vec.resize_with(len, || MaybeUninit::<T>::uninit());
-
         RawComponentStorage {
-            data: Box::new(vec),
+            data: Box::new(Vec::<MaybeUninit<T>>::new()),
+            allocated_count: Arc::clone(allocated_count),
             available: Default::default(),
             created: Default::default(),
             modified: Default::default(),
@@ -73,7 +72,7 @@ impl RawComponentStorage {
     }
 
     /// Checks if component is present
-    pub fn is_alive(&self, index: u32) -> bool {
+    pub fn contains(&self, index: u32) -> bool {
         self.available.contains(index as usize)
     }
 
@@ -86,7 +85,12 @@ impl RawComponentStorage {
 
         let len = self.data.len();
         if index >= len {
-            panic!("index (is {}) should be < len (is {})", index, len);
+            let new_len = self.allocated_count.load(atomic::Ordering::Relaxed) as usize;
+            self.data.resize(new_len);
+
+            if index >= new_len {
+                panic!("index (is {}) should be < len (is {})", index, new_len);
+            }
         }
 
         let val = &mut *(self.data.as_mut_ptr() as *mut MaybeUninit<T>).offset(index as isize);
@@ -179,7 +183,7 @@ impl RawComponentStorage {
         }
     }
 
-    pub fn alive_entries(&self) -> &BitSet {
+    pub fn entries(&self) -> &BitSet {
         &self.available
     }
 
@@ -246,12 +250,12 @@ impl<'a, T> ComponentStorageMut<'a, T> {
         self.raw.events()
     }
 
-    pub fn is_alive(&self, index: u32) -> bool {
-        self.raw.is_alive(index)
+    pub fn contains(&self, index: u32) -> bool {
+        self.raw.contains(index)
     }
 
-    pub fn alive_entries(&self) -> &BitSet {
-        self.raw.alive_entries()
+    pub fn entries(&self) -> &BitSet {
+        self.raw.entries()
     }
 }
 
@@ -278,36 +282,54 @@ impl<T> LockedStorage<T> {
     }
 }
 
-#[derive(Default)]
+pub struct Entities {
+    free_indices: BitSet,
+    allocated_count: Arc<AtomicU32>,
+}
+
+impl Entities {
+    pub fn create(&mut self) -> u32 {
+        if let Some(index) = self.free_indices.iter().next() {
+            self.free_indices.remove(index);
+            index as u32
+        } else {
+            self.allocated_count.fetch_add(1, atomic::Ordering::Relaxed)
+        }
+    }
+}
+
 pub struct Scene {
-    comp_storages: AHashMap<TypeId, Arc<RwLock<RawComponentStorage>>>,
-    entity_count: u32,
-    free_indices: Vec<u32>,
+    entities: Arc<Mutex<Entities>>,
+    allocated_count: Arc<AtomicU32>,
+    comp_storages: Mutex<AHashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
 }
 
 impl Scene {
     pub fn new() -> Scene {
-        Default::default()
-    }
+        let entity_count = Arc::new(AtomicU32::new(0));
 
-    pub fn create_entity(&mut self) -> u32 {
-        if self.free_indices.is_empty() {
-            let index = self.entity_count;
-            self.entity_count += 1;
-
-            for comps in self.comp_storages.values() {
-                let mut comps = comps.write().unwrap();
-                comps.data.resize(self.entity_count as usize);
-            }
-
-            index
-        } else {
-            self.free_indices.pop().unwrap()
+        Scene {
+            entities: Arc::new(Mutex::new(Entities {
+                free_indices: Default::default(),
+                allocated_count: Arc::clone(&entity_count),
+            })),
+            allocated_count: entity_count,
+            comp_storages: Mutex::new(Default::default()),
         }
     }
 
-    pub fn remove_entities(&mut self, indices: &[u32]) {
-        for comps in self.comp_storages.values() {
+    pub fn create_entity(&self) -> u32 {
+        self.entities.lock().unwrap().create()
+    }
+
+    pub fn remove_entities(&self, indices: &[u32]) {
+        self.entities
+            .lock()
+            .unwrap()
+            .free_indices
+            .extend(indices.iter().map(|&v| v as usize));
+
+        for comps in self.comp_storages.lock().unwrap().values() {
             let mut comps = comps.write().unwrap();
 
             for index in indices {
@@ -316,44 +338,18 @@ impl Scene {
         }
     }
 
-    pub fn create_renderable(
-        &mut self,
-        transform: component::Transform,
-        renderer: component::Renderer,
-        vertex_mesh: component::VertexMesh,
-    ) -> u32 {
-        let index = self.create_entity();
-        self.storage::<component::Transform>()
-            .write()
-            .unwrap()
-            .set(index, transform);
-        self.storage::<component::Renderer>()
-            .write()
-            .unwrap()
-            .set(index, renderer);
-        self.storage::<component::VertexMesh>()
-            .write()
-            .unwrap()
-            .set(index, vertex_mesh);
-        self.storage::<component::ModelTransform>()
-            .write()
-            .unwrap()
-            .set(index, component::ModelTransform::default());
-        self.storage::<component::WorldTransform>()
-            .write()
-            .unwrap()
-            .set(index, component::WorldTransform::default());
-        index
+    pub fn entities(&self) -> &Arc<Mutex<Entities>> {
+        &self.entities
     }
 
-    pub fn storage<T>(&mut self) -> LockedStorage<T>
+    pub fn storage<T>(&self) -> LockedStorage<T>
     where
         T: 'static + Send + Sync,
     {
-        let raw_storage = match self.comp_storages.entry(TypeId::of::<T>()) {
+        let raw_storage = match self.comp_storages.lock().unwrap().entry(TypeId::of::<T>()) {
             hash_map::Entry::Occupied(e) => Arc::clone(e.get()),
             hash_map::Entry::Vacant(e) => Arc::clone(e.insert(Arc::new(RwLock::new(
-                RawComponentStorage::new::<T>(self.entity_count as usize),
+                RawComponentStorage::new::<T>(&self.allocated_count),
             )))),
         };
 

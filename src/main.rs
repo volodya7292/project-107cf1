@@ -113,21 +113,39 @@ fn main() {
 
     {
         let mut renderer = renderer.lock().unwrap();
+        let scene = renderer.scene();
+        let mut entities = scene.entities().lock().unwrap();
+        let transform_comps = scene.storage::<component::Transform>();
+        let mut transform_comps = transform_comps.write().unwrap();
+        let renderer_comps = scene.storage::<component::Renderer>();
+        let mut renderer_comps = renderer_comps.write().unwrap();
+        let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
+        let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
 
-        renderer.scene_mut().create_renderable(
-            component::Transform::default(),
+        let ent0 = entities.create();
+
+        transform_comps.set(ent0, component::Transform::default());
+        renderer_comps.set(
+            ent0,
             component::Renderer::new(&device, &mat_pipelines.triag(), false),
-            component::VertexMesh::new(&triangle_mesh.raw()),
         );
-        renderer.scene_mut().create_renderable(
+        vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
+
+        let ent1 = entities.create();
+
+        transform_comps.set(
+            ent0,
             component::Transform::new(
                 na::Vector3::new(0.0, 0.0, 1.0),
                 na::Vector3::default(),
                 na::Vector3::new(1.0, 1.0, 1.0),
             ),
-            component::Renderer::new(&device, &mat_pipelines.triag(), false),
-            component::VertexMesh::new(&triangle_mesh.raw()),
         );
+        renderer_comps.set(
+            ent0,
+            component::Renderer::new(&device, &mat_pipelines.triag(), false),
+        );
+        vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
     }
 
     /*{
