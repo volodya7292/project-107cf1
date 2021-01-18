@@ -19,6 +19,7 @@ use nalgebra::{Matrix4, Vector4};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
@@ -346,6 +347,8 @@ impl Renderer {
     }
 
     pub fn on_update(&mut self) {
+        // let t = Instant::now();
+
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
             let camera_comps = camera_comps.read().unwrap();
@@ -457,6 +460,9 @@ impl Renderer {
         }
 
         self.update_device_buffers(&buffer_updates.lock().unwrap());
+
+        // let t2 = Instant::now();
+        // println!("{}", (t2 - t).as_secs_f64());
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
@@ -524,6 +530,12 @@ impl Renderer {
                     let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position;
                     let radius = ((aabb.1 - aabb.0).component_mul(&transform.scale) * 0.5).magnitude();
 
+                    // TODO ------------------------------------------
+                    // TODO: -> REIMPLEMENT: 1. firstly render depth buffer without queries; 2. render object AABBs using queries
+                    // TODO: Many queries is slow approach, use max 128 queries (distribute one query across multiple objects)
+                    // TODO: OR implement compute-based approach (https://vkguide.dev/docs/gpudriven/compute_culling)
+                    // TODO ------------------------------------------
+
                     cl.begin_query(&self.query_pool, entity_index as u32);
 
                     if camera.is_sphere_visible(center_position, radius) && vertex_mesh.vertex_count > 0 {
@@ -569,7 +581,11 @@ impl Renderer {
         {
             let mut submit = self.staging_submit.lock().unwrap();
             graphics_queue.submit(&mut submit).unwrap();
+
+            let t = Instant::now();
             submit.wait().unwrap();
+            let t2 = Instant::now();
+            println!("depth {}", (t2 - t).as_secs_f64());
         }
 
         // Record g-buffer object rendering
@@ -744,7 +760,13 @@ impl Renderer {
                 &[Arc::clone(&self.staging_cl)],
             )])
             .unwrap();
+
+        let t = Instant::now();
         graphics_queue.submit(&mut final_packet).unwrap();
+        final_packet.wait().unwrap();
+
+        let t2 = Instant::now();
+        println!("color {}", (t2 - t).as_secs_f64());
 
         final_packet.get_signal_value(0).unwrap()
     }

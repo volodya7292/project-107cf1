@@ -2,6 +2,7 @@ use crate::renderer::scene::Event;
 use crate::renderer::{component, scene, BufferUpdate, DistanceSortedRenderables};
 use nalgebra as na;
 use std::sync::{atomic, Arc, Mutex};
+use std::time::Instant;
 use std::{cmp, mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::SubmitPacket;
@@ -287,22 +288,24 @@ pub(super) struct WorldTransformEventsSystem {
 impl WorldTransformEventsSystem {
     fn world_transform_modified(
         world_transform: &component::WorldTransform,
-        renderer: &component::Renderer,
+        renderer: Option<&component::Renderer>,
         buffer_updates: &mut Vec<BufferUpdate>,
     ) {
-        let matrix_bytes = unsafe {
-            slice::from_raw_parts(
-                world_transform.matrix.as_ptr() as *const u8,
-                mem::size_of::<na::Matrix4<f32>>(),
-            )
-            .to_vec()
-        };
+        if let Some(renderer) = renderer {
+            let matrix_bytes = unsafe {
+                slice::from_raw_parts(
+                    world_transform.matrix.as_ptr() as *const u8,
+                    mem::size_of::<na::Matrix4<f32>>(),
+                )
+                .to_vec()
+            };
 
-        buffer_updates.push(BufferUpdate {
-            buffer: Arc::clone(&renderer.uniform_buffer),
-            offset: renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
-            data: matrix_bytes,
-        });
+            buffer_updates.push(BufferUpdate {
+                buffer: Arc::clone(&renderer.uniform_buffer),
+                offset: renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
+                data: matrix_bytes,
+            });
+        }
     }
 
     pub fn run(&mut self) {
@@ -316,14 +319,14 @@ impl WorldTransformEventsSystem {
                 Event::Created(entity) => {
                     Self::world_transform_modified(
                         world_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity).unwrap(),
+                        renderer_comps.get(entity),
                         &mut buffer_updates,
                     );
                 }
                 Event::Modified(entity) => {
                     Self::world_transform_modified(
                         world_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity).unwrap(),
+                        renderer_comps.get(entity),
                         &mut buffer_updates,
                     );
                 }
@@ -353,23 +356,27 @@ impl HierarchyPropagationSystem {
         world_transform_comps: &mut scene::ComponentStorageMut<component::WorldTransform>,
     ) {
         let model_transform = model_transform_comps.get_mut_unchecked(entity).unwrap();
-
-        let new_world_transform = parent_world_transform.combine(model_transform);
         let world_transform_changed = parent_world_transform_changed || model_transform.changed;
 
         if model_transform.changed {
             model_transform.changed = false;
         }
-        if world_transform_changed {
-            *world_transform_comps.get_mut(entity).unwrap() = new_world_transform;
-        }
 
-        *parent_comps.get_mut_unchecked(entity).unwrap() = component::Parent(parent_entity);
+        let world_transform = if world_transform_changed {
+            let new_world_transform = parent_world_transform.combine(model_transform);
+            world_transform_comps.set(entity, new_world_transform);
+            new_world_transform
+        } else {
+            *world_transform_comps.get(entity).unwrap()
+        };
+
+        parent_comps.set(entity, component::Parent(parent_entity));
 
         if let Some(children) = children_comps.get(entity) {
+            assert_eq!(children.0.len(), 0);
             for child in &children.0 {
                 Self::propagate_hierarchy(
-                    new_world_transform,
+                    world_transform,
                     world_transform_changed,
                     entity,
                     *child,

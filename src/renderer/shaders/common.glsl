@@ -75,17 +75,17 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
 #endif
 
 
-// Blue noise sequences
+// R2 low discrepancy sequence
 // ----------------------------------------------------------------------------------------
-float blue_noise_1d(uint n) {
+float r2_noise_1d(uint n) {
     return fract(0.5 + 0.618033988749 * float(n));
 }
 
-vec2 blue_noise_2d(uint n) {
+vec2 r2_noise_2d(uint n) {
     return fract(0.5 + vec2(0.754877666246, 0.569840290998) * float(n));
 }
 
-vec3 blue_noise_3d(uint n) {
+vec3 r2_noise_3d(uint n) {
     return fract(0.5 + vec3(0.819172513396, 0.671043606703, 0.549700477901) * float(n));
 }
 // ----------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 use ahash::AHashMap;
 use bit_set::BitSet;
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -42,7 +42,7 @@ where
 
 pub struct RawComponentStorage {
     data: Box<dyn Storage>,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
     available: BitSet,
     created: BitSet,
     modified: BitSet,
@@ -57,13 +57,13 @@ pub enum Event {
 }
 
 impl RawComponentStorage {
-    fn new<T>(allocated_count: &Arc<AtomicU32>) -> RawComponentStorage
+    fn new<T>(entity_allocated_count: &Arc<AtomicU32>) -> RawComponentStorage
     where
         T: 'static + Send + Sync,
     {
         RawComponentStorage {
             data: Box::new(Vec::<MaybeUninit<T>>::new()),
-            allocated_count: Arc::clone(allocated_count),
+            entity_allocated_count: Arc::clone(entity_allocated_count),
             available: Default::default(),
             created: Default::default(),
             modified: Default::default(),
@@ -85,7 +85,7 @@ impl RawComponentStorage {
 
         let len = self.data.len();
         if index >= len {
-            let new_len = self.allocated_count.load(atomic::Ordering::Relaxed) as usize;
+            let new_len = self.entity_allocated_count.load(atomic::Ordering::Relaxed) as usize;
             self.data.resize(new_len);
 
             if index >= new_len {
@@ -284,7 +284,7 @@ impl<T> LockedStorage<T> {
 
 pub struct Entities {
     free_indices: BitSet,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
 }
 
 impl Entities {
@@ -293,14 +293,27 @@ impl Entities {
             self.free_indices.remove(index);
             index as u32
         } else {
-            self.allocated_count.fetch_add(1, atomic::Ordering::Relaxed)
+            self.entity_allocated_count
+                .fetch_add(1, atomic::Ordering::Relaxed)
         }
+    }
+}
+
+#[derive(Default)]
+pub struct Resources(AHashMap<TypeId, Box<dyn Any + Send + Sync>>);
+
+impl Resources {
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.0
+            .get(&TypeId::of::<T>())
+            .map(|v| v.downcast_ref::<Box<T>>().unwrap().as_ref())
     }
 }
 
 pub struct Scene {
     entities: Arc<Mutex<Entities>>,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
+    resources: Arc<RwLock<Resources>>,
     comp_storages: Mutex<AHashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
 }
 
@@ -311,11 +324,24 @@ impl Scene {
         Scene {
             entities: Arc::new(Mutex::new(Entities {
                 free_indices: Default::default(),
-                allocated_count: Arc::clone(&entity_count),
+                entity_allocated_count: Arc::clone(&entity_count),
             })),
-            allocated_count: entity_count,
+            entity_allocated_count: entity_count,
+            resources: Default::default(),
             comp_storages: Mutex::new(Default::default()),
         }
+    }
+
+    pub fn add_resource<T>(&self, resource: T)
+    where
+        T: 'static + Send + Sync,
+    {
+        self.resources
+            .write()
+            .unwrap()
+            .0
+            .insert(TypeId::of::<T>(), Box::new(resource))
+            .unwrap();
     }
 
     pub fn create_entity(&self) -> u32 {
@@ -338,6 +364,10 @@ impl Scene {
         }
     }
 
+    pub fn resources(&self) -> Arc<RwLock<Resources>> {
+        Arc::clone(&self.resources)
+    }
+
     pub fn entities(&self) -> &Arc<Mutex<Entities>> {
         &self.entities
     }
@@ -349,7 +379,7 @@ impl Scene {
         let raw_storage = match self.comp_storages.lock().unwrap().entry(TypeId::of::<T>()) {
             hash_map::Entry::Occupied(e) => Arc::clone(e.get()),
             hash_map::Entry::Vacant(e) => Arc::clone(e.insert(Arc::new(RwLock::new(
-                RawComponentStorage::new::<T>(&self.allocated_count),
+                RawComponentStorage::new::<T>(&self.entity_allocated_count),
             )))),
         };
 

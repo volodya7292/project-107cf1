@@ -349,14 +349,12 @@ pub trait VertexMeshCmdList {
 
 impl VertexMeshCmdList for vkw::CmdList {
     fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
-        self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-
-        if vertex_mesh.indexed {
-            if vertex_mesh.index_count > 0 {
-                self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
-                self.draw_indexed(vertex_mesh.index_count, 0, 0);
-            }
-        } else {
+        if vertex_mesh.indexed && vertex_mesh.index_count > 0 {
+            self.bind_vertex_buffers(0, &vertex_mesh.bindings);
+            self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
+            self.draw_indexed(vertex_mesh.index_count, 0, 0);
+        } else if vertex_mesh.vertex_count > 0 {
+            self.bind_vertex_buffers(0, &vertex_mesh.bindings);
             self.draw(vertex_mesh.vertex_count, 0);
         }
     }

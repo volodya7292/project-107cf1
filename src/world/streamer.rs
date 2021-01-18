@@ -221,8 +221,6 @@ impl WorldStreamer {
             let device = renderer.device().clone();
             let scene = renderer.scene();
             let transform_comps = scene.storage::<component::Transform>();
-            let renderer_comps = scene.storage::<component::Renderer>();
-            let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
 
             let curr_time_secs = Instant::now().elapsed().as_secs();
 
@@ -246,8 +244,6 @@ impl WorldStreamer {
 
                 let mut scene_entities = scene.entities().lock().unwrap();
                 let mut transform_comps = transform_comps.write().unwrap();
-                let mut renderer_comps = renderer_comps.write().unwrap();
-                let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
 
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
@@ -262,14 +258,9 @@ impl WorldStreamer {
                             na::Vector3::new(0.0, 0.0, 0.0),
                             na::Vector3::new(1.0, 1.0, 1.0),
                         );
-                        let renderer_comp =
-                            component::Renderer::new(&device, &self.cluster_mat_pipeline, false);
-                        let mesh_comp = component::VertexMesh::new(&cluster.vertex_mesh().raw());
 
                         let entity = scene_entities.create();
                         transform_comps.set(entity, transform_comp);
-                        renderer_comps.set(entity, renderer_comp);
-                        vertex_mesh_comps.set(entity, mesh_comp);
 
                         entry.insert(WorldCluster {
                             cluster: Arc::new(Mutex::new(cluster)),
@@ -505,6 +496,27 @@ impl WorldStreamer {
             let mut renderer = self.renderer.lock().unwrap();
             let scene = renderer.scene();
 
+            let entities = scene.entities();
+            let transform_comps = scene.storage::<component::Transform>();
+            let renderer_comps = scene.storage::<component::Renderer>();
+            let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
+            let children_comps = scene.storage::<component::Children>();
+
+            let mut entities = entities.lock().unwrap();
+            let mut transform_comps = transform_comps.write().unwrap();
+            let mut renderer_comps = renderer_comps.write().unwrap();
+            let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
+            let mut children_comps = children_comps.write().unwrap();
+
+            let mut d = cluster::UpdateSystemData {
+                mat_pipeline: Arc::clone(&self.cluster_mat_pipeline),
+                entities: &mut entities,
+                transform: transform_comps,
+                renderer: renderer_comps,
+                vertex_mesh: vertex_mesh_comps,
+                children: children_comps,
+            };
+
             for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {
                     let mut cluster = world_cluster.cluster.lock().unwrap();
@@ -516,15 +528,15 @@ impl WorldStreamer {
                     // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                 });
                 level.iter().for_each(|(_, world_cluster)| {
-                    let raw_vertex_mesh = component::VertexMesh::new(
-                        &world_cluster.cluster.lock().unwrap().vertex_mesh().raw(),
-                    );
-                    let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-                    *vertex_mesh_comps
-                        .write()
+                    // let raw_vertex_mesh = component::VertexMesh::new(
+                    //     &world_cluster.cluster.lock().unwrap().vertex_mesh().raw(),
+                    // );
+                    world_cluster
+                        .cluster
+                        .lock()
                         .unwrap()
-                        .get_mut(world_cluster.entity)
-                        .unwrap() = raw_vertex_mesh;
+                        .update_renderable(world_cluster.entity, &mut d);
+                    // *vertex_mesh_comps.get_mut(world_cluster.entity).unwrap() = raw_vertex_mesh;
                 });
             }
             /*for (i, level) in self.clusters.iter().enumerate() {

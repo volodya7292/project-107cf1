@@ -61,7 +61,7 @@ fn main() {
     let mut window_size = window.vulkan_drawable_size();
 
     let renderer_settings = renderer::Settings {
-        vsync: true,
+        vsync: false,
         texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
