@@ -218,6 +218,10 @@ impl<'a, T> ComponentStorage<'a, T> {
     pub fn get(&self, index: u32) -> Option<&T> {
         unsafe { self.raw.get::<T>(index) }
     }
+
+    pub fn entries(&self) -> &BitSet {
+        self.raw.entries()
+    }
 }
 
 pub struct ComponentStorageMut<'a, T> {

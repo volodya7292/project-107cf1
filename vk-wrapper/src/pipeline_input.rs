@@ -2,6 +2,7 @@ use crate::{DescriptorPool, DeviceBuffer, Image, ImageLayout};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 use std::{slice, sync::Arc};
 
@@ -85,6 +86,7 @@ impl PipelineInput {
             native_writes.push(write_info.build());
         }
 
+        // FIXME: FIX SYNCHRONIZATION
         unsafe {
             self.pool
                 .device
@@ -92,6 +94,20 @@ impl PipelineInput {
                 .0
                 .update_descriptor_sets(&native_writes, &[])
         };
+    }
+}
+
+impl PartialEq for PipelineInput {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+    }
+}
+
+impl Eq for PipelineInput {}
+
+impl Hash for PipelineInput {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.native.hash(state);
     }
 }
 

@@ -82,7 +82,7 @@ impl Adapter {
                             .0
                             .get_device_queue(queue_info.queue_family_index, i)
                     }),
-                    semaphore: device::create_binary_semaphore(&device_wrapper)?,
+                    semaphore: Arc::new(device::create_binary_semaphore(&device_wrapper)?),
                     timeline_sp: Arc::new(device::create_timeline_semaphore(&device_wrapper)?),
                     fence: device::create_fence(&device_wrapper)?,
                     family_index: queue_info.queue_family_index,

@@ -1,5 +1,5 @@
 use crate::renderer::scene::Event;
-use crate::renderer::{component, scene, BufferUpdate, DistanceSortedRenderables};
+use crate::renderer::{component, scene, BufferUpdate};
 use nalgebra as na;
 use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
@@ -9,7 +9,6 @@ use vk_wrapper::SubmitPacket;
 
 pub(super) struct RendererCompEventsSystem {
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
-    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
     pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
     pub model_inputs: Arc<vkw::DescriptorPool>,
 }
@@ -46,70 +45,27 @@ impl RendererCompEventsSystem {
 
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
-        let mut dsr = self.sorted_renderables.lock().unwrap();
-        let sorted_renderables = &mut dsr.entities;
-        let mut removed_count = 1;
+        let events = renderer_comps.events();
 
-        // Add new objects to sort
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let events = renderer_comps.events();
-
-            for event in events {
-                match event {
-                    scene::Event::Created(entity) => {
-                        Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(entity).unwrap(),
-                            &self.depth_per_object_pool,
-                            &self.model_inputs,
-                        );
-
-                        sorted_renderables.push(entity);
-                    }
-                    scene::Event::Modified(entity) => {
-                        Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(entity).unwrap(),
-                            &self.depth_per_object_pool,
-                            &self.model_inputs,
-                        );
-                    }
-                    scene::Event::Removed(_) => {
-                        removed_count += 1;
-                    }
+        for event in events {
+            match event {
+                scene::Event::Created(entity) => {
+                    Self::renderer_comp_modified(
+                        renderer_comps.get_mut_unchecked(entity).unwrap(),
+                        &self.depth_per_object_pool,
+                        &self.model_inputs,
+                    );
                 }
-            }
-        }
-
-        // Replace removed(dead) entities with alive ones
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut swap_entities = Vec::<u32>::with_capacity(removed_count);
-            let mut new_len = sorted_renderables.len();
-
-            // Find alive entities for replacement
-            for &entity in sorted_renderables.iter().rev() {
-                if renderer_comps.contains(entity) {
-                    if removed_count > swap_entities.len() {
-                        swap_entities.push(entity);
-                    } else {
-                        break;
-                    }
+                scene::Event::Modified(entity) => {
+                    Self::renderer_comp_modified(
+                        renderer_comps.get_mut_unchecked(entity).unwrap(),
+                        &self.depth_per_object_pool,
+                        &self.model_inputs,
+                    );
                 }
-                new_len -= 1;
+
+                _ => {}
             }
-
-            // Resize vector to trim swapped entities
-            sorted_renderables.truncate(new_len);
-
-            // Swap entities
-            for entity in sorted_renderables.iter_mut() {
-                if !renderer_comps.contains(*entity) {
-                    *entity = swap_entities.remove(swap_entities.len() - 1);
-                }
-            }
-
-            // Add the rest of swap_entities that were not swapped due to resized vector
-            sorted_renderables.extend(swap_entities);
         }
     }
 }
@@ -166,71 +122,6 @@ impl VertexMeshCompEventsSystem {
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
         graphics_queue.submit(&mut submit).unwrap();
-    }
-}
-
-// Sort render objects from front to back (for Z rejection & occlusion queries)
-pub(super) struct DistanceSortSystem {
-    pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
-    pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
-    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
-    pub camera_pos: na::Vector3<f32>,
-}
-
-impl DistanceSortSystem {
-    const DISTANCE_SORT_PER_UPDATE: usize = 128;
-
-    pub fn run(&mut self) {
-        let transform_comps = self.world_transform_comps.read().unwrap();
-        let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
-        let mut dsr = self.sorted_renderables.lock().unwrap();
-
-        let curr_sort_count = dsr.curr_sort_count;
-        let sort_slice = &mut dsr.entities[(curr_sort_count as usize)..];
-        let to_sort_count = sort_slice.len().min(Self::DISTANCE_SORT_PER_UPDATE);
-
-        if to_sort_count > 0 {
-            sort_slice.select_nth_unstable_by(to_sort_count - 1, |&a, &b| {
-                let a_transform = transform_comps.get(a);
-                let a_mesh = vertex_mesh_comps.get(a);
-                let b_transform = transform_comps.get(b);
-                let b_mesh = vertex_mesh_comps.get(b);
-
-                if a_transform.is_none() || a_mesh.is_none() || b_transform.is_none() || b_mesh.is_none() {
-                    return cmp::Ordering::Equal;
-                }
-
-                let a_transform = a_transform.unwrap();
-                let a_mesh = a_mesh.unwrap();
-                let b_transform = b_transform.unwrap();
-                let b_mesh = b_mesh.unwrap();
-
-                let a_pos = {
-                    let aabb = *a_mesh.0.aabb();
-                    (aabb.0 + aabb.1) * 0.5 + a_transform.position
-                };
-                let b_pos = {
-                    let aabb = *b_mesh.0.aabb();
-                    (aabb.0 + aabb.1) * 0.5 + b_transform.position
-                };
-
-                let a_dist = (a_pos - self.camera_pos).magnitude();
-                let b_dist = (b_pos - self.camera_pos).magnitude();
-
-                if a_dist < b_dist {
-                    cmp::Ordering::Less
-                } else if a_dist > b_dist {
-                    cmp::Ordering::Greater
-                } else {
-                    cmp::Ordering::Equal
-                }
-            });
-        }
-
-        dsr.curr_sort_count += to_sort_count as u32;
-        if dsr.curr_sort_count >= dsr.entities.len() as u32 {
-            dsr.curr_sort_count = 0;
-        }
     }
 }
 

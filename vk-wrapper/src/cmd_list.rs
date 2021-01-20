@@ -5,9 +5,10 @@ use crate::{
     BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
     Pipeline, PipelineInput, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
+use ahash::AHashSet;
 use ash::{version::DeviceV1_0, vk};
-use std::mem;
 use std::sync::{Arc, Mutex};
+use std::{mem, ptr};
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -17,13 +18,16 @@ pub struct CmdList {
     pub(crate) render_passes: Vec<Arc<RenderPass>>,
     pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
     pub(crate) secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
-    pub(crate) pipelines: Vec<Arc<Pipeline>>,
+    pub(crate) pipelines: AHashSet<Arc<Pipeline>>,
     pub(crate) pipeline_signatures: Vec<Arc<PipelineSignature>>,
-    pub(crate) pipeline_inputs: Vec<Arc<PipelineInput>>,
+    pub(crate) pipeline_inputs: AHashSet<Arc<PipelineInput>>,
     pub(crate) buffers: Vec<Arc<Buffer>>,
     pub(crate) images: Vec<Arc<Image>>,
     pub(crate) query_pools: Vec<Arc<QueryPool>>,
+    pub(crate) last_pipeline: *const Pipeline,
 }
+
+unsafe impl Send for CmdList {}
 
 impl CmdList {
     pub(crate) fn clear_resources(&mut self) {
@@ -36,6 +40,7 @@ impl CmdList {
         self.buffers.clear();
         self.images.clear();
         self.query_pools.clear();
+        self.last_pipeline = ptr::null();
     }
 
     pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
@@ -231,7 +236,7 @@ impl CmdList {
 
     /// Returns whether pipeline is already bound
     pub fn bind_pipeline(&mut self, pipeline: &Arc<Pipeline>) -> bool {
-        if !self.pipelines.is_empty() && pipeline == self.pipelines.last().unwrap() {
+        if Arc::as_ptr(pipeline) == self.last_pipeline {
             return true;
         }
         unsafe {
@@ -239,7 +244,12 @@ impl CmdList {
                 .0
                 .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
         };
-        self.pipelines.push(Arc::clone(pipeline));
+
+        // if !self.pipelines.contains(pipeline) {
+        //     self.pipelines.insert(Arc::clone(pipeline));
+        // }
+        self.last_pipeline = Arc::as_ptr(pipeline);
+
         false
     }
 
@@ -260,7 +270,10 @@ impl CmdList {
                 &[],
             )
         };
-        self.pipeline_inputs.push(Arc::clone(pipeline_input));
+
+        if !self.pipeline_inputs.contains(pipeline_input) {
+            self.pipeline_inputs.insert(Arc::clone(pipeline_input));
+        }
     }
 
     pub fn bind_graphics_input(

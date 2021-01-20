@@ -3,8 +3,8 @@ use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::slice;
 use std::sync::{Arc, Mutex};
+use std::{ptr, slice};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueueType(pub(crate) u32);
@@ -13,7 +13,7 @@ pub struct Queue {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) native: Mutex<vk::Queue>,
-    pub(crate) semaphore: Semaphore,
+    pub(crate) semaphore: Arc<Semaphore>,
     pub(crate) timeline_sp: Arc<Semaphore>,
     pub(crate) fence: Fence,
     pub(crate) family_index: u32,
@@ -42,12 +42,13 @@ impl Queue {
             render_passes: vec![],
             framebuffers: vec![],
             secondary_cmd_lists: vec![],
-            pipelines: vec![],
+            pipelines: Default::default(),
             pipeline_signatures: vec![],
-            pipeline_inputs: vec![],
+            pipeline_inputs: Default::default(),
             buffers: vec![],
             images: vec![],
             query_pools: Default::default(),
+            last_pipeline: ptr::null(),
         })))
     }
 
@@ -59,7 +60,7 @@ impl Queue {
         self.create_cmd_list(vk::CommandBufferLevel::SECONDARY)
     }
 
-    fn submit_infos(&self, submit_infos: &[SubmitInfo], fence: &Fence) -> Result<(), vk::Result> {
+    fn submit_infos(&self, submit_infos: &[SubmitInfo], fence: &mut Fence) -> Result<(), vk::Result> {
         let mut semaphore_count = 0;
         let mut cmd_list_count = 0;
         for info in submit_infos.iter() {
@@ -122,11 +123,13 @@ impl Queue {
         let queue = self.native.lock().unwrap();
 
         fence.reset()?;
+
         unsafe {
             self.device_wrapper
                 .0
                 .queue_submit(*queue, native_submit_infos.as_slice(), fence.native)?
         }
+
         Ok(())
     }
 
@@ -154,13 +157,13 @@ impl Queue {
             info.completion_signal_sp = Some(signal_sp);
         }
 
-        self.submit_infos(packet.infos.as_slice(), &packet.fence)?;
+        self.submit_infos(packet.infos.as_slice(), &mut packet.fence)?;
         *sp_last_signal_value = new_last_signal_value;
 
         // Remove implicitly added semaphores
         for info in &mut packet.infos {
-            info.wait_semaphores.remove(info.wait_semaphores.len() - 1);
-            info.signal_semaphores.remove(info.signal_semaphores.len() - 1);
+            info.wait_semaphores.pop();
+            info.signal_semaphores.pop();
         }
 
         Ok(())
@@ -169,56 +172,37 @@ impl Queue {
     pub fn present(
         &self,
         sw_image: SwapchainImage,
-        wait_semaphore: &Semaphore,
-        wait_value: u64,
+        // wait_semaphore: &Semaphore,
+        // wait_value: u64,
     ) -> Result<bool, swapchain::Error> {
-        let wait_dst_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-        let signal_value = 0u64;
-        let mut submit_sp_info = vk::TimelineSemaphoreSubmitInfo::builder()
-            .wait_semaphore_values(slice::from_ref(&wait_value))
-            .signal_semaphore_values(slice::from_ref(&signal_value));
-        let submit_info = vk::SubmitInfo::builder()
-            .wait_semaphores(slice::from_ref(&wait_semaphore.native))
-            .wait_dst_stage_mask(slice::from_ref(&wait_dst_stage))
-            //.command_buffers(slice::from_ref(&cmd_list.native))
-            .signal_semaphores(slice::from_ref(&self.semaphore.native))
-            .push_next(&mut submit_sp_info);
-
         let queue = self.native.lock().unwrap();
-
-        self.fence.reset()?;
-        unsafe {
-            self.device_wrapper
-                .0
-                .queue_submit(*queue, &[submit_info.build()], self.fence.native)?
-        };
+        let swapchain = sw_image.swapchain.wrapper.native.lock().unwrap();
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&self.semaphore.native))
-            .swapchains(slice::from_ref(&sw_image.swapchain.wrapper.native))
+            .swapchains(slice::from_ref(&*swapchain))
             .image_indices(slice::from_ref(&sw_image.index));
         let result = unsafe { self.swapchain_khr.queue_present(*queue, &present_info) };
-        self.fence.wait()?;
-
-        *sw_image.swapchain.curr_image.lock().unwrap() = None;
 
         match result {
-            Ok(suboptimal) => Ok(!suboptimal),
+            Ok(suboptimal) => Ok(suboptimal),
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(swapchain::Error::IncompatibleSurface),
             Err(e) => Err(swapchain::Error::VkError(e)),
         }
     }
 
-    pub fn get_semaphore(&self) -> Arc<Semaphore> {
-        Arc::clone(&self.timeline_sp)
+    pub fn frame_semaphore(&self) -> &Arc<Semaphore> {
+        &self.semaphore
+    }
+
+    pub fn timeline_semaphore(&self) -> &Arc<Semaphore> {
+        &self.timeline_sp
     }
 }
 
 impl PartialEq for Queue {
     fn eq(&self, other: &Self) -> bool {
-        self.device_wrapper.0.handle() == other.device_wrapper.0.handle()
-            && *self.native.lock().unwrap() == *other.native.lock().unwrap()
-            && self.family_index == other.family_index
+        *self.native.lock().unwrap() == *other.native.lock().unwrap()
     }
 }
 
@@ -244,11 +228,15 @@ pub struct SubmitInfo {
 }
 
 impl SubmitInfo {
-    pub fn new(wait_semaphores: &[WaitSemaphore], cmd_lists: &[Arc<Mutex<CmdList>>]) -> SubmitInfo {
+    pub fn new(
+        wait_semaphores: &[WaitSemaphore],
+        cmd_lists: &[Arc<Mutex<CmdList>>],
+        signal_semaphores: &[SignalSemaphore],
+    ) -> SubmitInfo {
         SubmitInfo {
             wait_semaphores: wait_semaphores.to_vec(),
             cmd_lists: cmd_lists.to_vec(),
-            signal_semaphores: vec![],
+            signal_semaphores: signal_semaphores.to_vec(),
             completion_signal_sp: None,
         }
     }

@@ -77,6 +77,7 @@ fn main() {
     )
     .unwrap();
 
+    let mat_pipelines;
     {
         let mut renderer = renderer.lock().unwrap();
         let index = renderer.add_texture(
@@ -85,9 +86,9 @@ fn main() {
         );
 
         renderer.load_texture(index);
-    }
 
-    let mat_pipelines = material_pipelines::create(&resources, &device);
+        mat_pipelines = material_pipelines::create(&resources, &mut renderer);
+    }
 
     let mut program = program::new(&renderer, &mat_pipelines);
 
@@ -233,5 +234,7 @@ fn main() {
         let end_t = Instant::now();
         let t = end_t.duration_since(start_t);
         delta_time = t.as_secs_f64();
+
+        println!("{} - {}", delta_time, 1.0 / delta_time);
     }
 }

@@ -486,12 +486,12 @@ impl Device {
 
         let swapchain_wrapper = Arc::new(SwapchainWrapper {
             device: Arc::clone(self),
-            native: unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? },
+            native: Mutex::new(unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? }),
         });
 
         let images: Result<Vec<Arc<Image>>, vk::Result> = unsafe {
-            self.swapchain_khr
-                .get_swapchain_images(swapchain_wrapper.native)?
+            let native_swapchain = swapchain_wrapper.native.lock().unwrap();
+            self.swapchain_khr.get_swapchain_images(*native_swapchain)?
         }
         .iter()
         .map(|&native_image| {
@@ -547,7 +547,6 @@ impl Device {
             _surface: Arc::clone(surface),
             semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
             images: images?,
-            curr_image: Mutex::new(None),
         }))
     }
 

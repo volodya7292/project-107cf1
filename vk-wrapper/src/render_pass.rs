@@ -151,17 +151,17 @@ impl RenderPass {
     }
 }
 
-impl Eq for RenderPass {}
-
 impl PartialEq for RenderPass {
     fn eq(&self, other: &Self) -> bool {
-        (self as *const Self) == (other as *const Self)
+        self.native == other.native
     }
 }
 
+impl Eq for RenderPass {}
+
 impl Hash for RenderPass {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_usize(self as *const Self as usize);
+        self.native.hash(state);
     }
 }
 

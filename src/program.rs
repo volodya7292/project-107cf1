@@ -131,7 +131,6 @@ impl Program {
             self.cursor_rel = (0, 0);
 
             // dbg!(camera.position());
-            println!("{}", 1.0 / delta_time);
         }
     }
 }

@@ -165,7 +165,7 @@ pub fn new(
     let cmd_list = graphics_queue.create_primary_cmd_list()?;
 
     let mut submit_packet =
-        device.create_submit_packet(&[vkw::SubmitInfo::new(&[], &[Arc::clone(&cmd_list)])])?;
+        device.create_submit_packet(&[vkw::SubmitInfo::new(&[], &[Arc::clone(&cmd_list)], &[])])?;
 
     // Change image initial layout
     {

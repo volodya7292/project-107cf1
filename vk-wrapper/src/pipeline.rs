@@ -1,6 +1,7 @@
 use crate::{Device, PipelineSignature, RenderPass};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -104,8 +105,8 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn signature(&self) -> Arc<PipelineSignature> {
-        Arc::clone(&self.signature)
+    pub fn signature(&self) -> &Arc<PipelineSignature> {
+        &self.signature
     }
 }
 
@@ -113,7 +114,13 @@ impl Eq for Pipeline {}
 
 impl PartialEq for Pipeline {
     fn eq(&self, other: &Self) -> bool {
-        (self as *const Pipeline) == (other as *const Pipeline)
+        self.native == other.native
+    }
+}
+
+impl Hash for Pipeline {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.native.hash(state);
     }
 }
 

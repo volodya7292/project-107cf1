@@ -1,6 +1,8 @@
-use std::collections::{hash_map, HashMap};
+use crate::renderer::Renderer;
+use ahash::{AHashMap, AHashSet};
+use std::collections::{hash_map, HashSet};
 use std::mem;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use vk_wrapper as vkw;
 
 pub trait UniformStruct {
@@ -19,42 +21,46 @@ macro_rules! uniform_struct_impl {
     };
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct PipelineMapping {
+    pub render_pass: Arc<vkw::RenderPass>,
+    pub subpass_index: u32,
+    pub cull_back_faces: bool,
+}
+
 pub struct MaterialPipeline {
     device: Arc<vkw::Device>,
     signature: Arc<vkw::PipelineSignature>,
-    pipelines: Mutex<HashMap<(Arc<vkw::RenderPass>, u32, bool), Arc<vkw::Pipeline>>>,
+    pipelines: AHashMap<PipelineMapping, Arc<vkw::Pipeline>>,
     uniform_buffer_size: u32,
     uniform_buffer_model_offset: u32,
 }
 
 impl MaterialPipeline {
-    pub fn request_pipeline(
-        &self,
-        render_pass: &Arc<vkw::RenderPass>,
-        subpass_index: u32,
-        translucency: bool,
-    ) -> Arc<vkw::Pipeline> {
-        let mut pipelines = self.pipelines.lock().unwrap();
-        match pipelines.entry((Arc::clone(render_pass), subpass_index, translucency)) {
-            hash_map::Entry::Occupied(entry) => Arc::clone(entry.get()),
+    pub fn prepare_pipeline(&mut self, mapping: &PipelineMapping) {
+        match self.pipelines.entry(mapping.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 let pipeline = self
                     .device
                     .create_graphics_pipeline(
-                        render_pass,
-                        subpass_index,
+                        &mapping.render_pass,
+                        mapping.subpass_index,
                         vkw::PrimitiveTopology::TRIANGLE_LIST,
                         vkw::PipelineDepthStencil::new()
                             .depth_test(true)
                             .depth_write(false),
-                        vkw::PipelineRasterization::new().cull_back_faces(!translucency),
+                        vkw::PipelineRasterization::new().cull_back_faces(mapping.cull_back_faces),
                         &self.signature,
                     )
                     .unwrap();
                 entry.insert(Arc::clone(&pipeline));
-                pipeline
             }
+            _ => {}
         }
+    }
+
+    pub fn get_pipeline(&self, mapping: &PipelineMapping) -> Option<&Arc<vkw::Pipeline>> {
+        self.pipelines.get(mapping)
     }
 
     pub fn uniform_buffer_size(&self) -> u32 {
@@ -67,20 +73,27 @@ impl MaterialPipeline {
     }
 }
 
-pub fn new<T: UniformStruct>(
-    device: &Arc<vkw::Device>,
-    vertex_shader: &Arc<vkw::Shader>,
-    g_pixel_shader: &Arc<vkw::Shader>,
-) -> Arc<MaterialPipeline> {
-    let signature = device
-        .create_pipeline_signature(&[Arc::clone(vertex_shader), Arc::clone(g_pixel_shader)])
-        .unwrap();
+impl Renderer {
+    pub fn create_material_pipeline<T: UniformStruct>(
+        &mut self,
+        vertex_shader: &Arc<vkw::Shader>,
+        g_pixel_shader: &Arc<vkw::Shader>,
+    ) -> Arc<MaterialPipeline> {
+        let device = Arc::clone(&self.device);
 
-    Arc::new(MaterialPipeline {
-        device: Arc::clone(device),
-        signature,
-        pipelines: Default::default(),
-        uniform_buffer_size: mem::size_of::<T>() as u32,
-        uniform_buffer_model_offset: T::model_offset(),
-    })
+        let signature = device
+            .create_pipeline_signature(&[Arc::clone(vertex_shader), Arc::clone(g_pixel_shader)])
+            .unwrap();
+
+        let mut mat_pipeline = MaterialPipeline {
+            device,
+            signature,
+            pipelines: Default::default(),
+            uniform_buffer_size: mem::size_of::<T>() as u32,
+            uniform_buffer_model_offset: T::model_offset(),
+        };
+        self.prepare_material(&mut mat_pipeline);
+
+        Arc::new(mat_pipeline)
+    }
 }

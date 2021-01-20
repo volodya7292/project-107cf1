@@ -95,20 +95,6 @@ where
             base: self.vec.iter_mut(),
         }
     }
-
-    pub fn partial_sort_unstable_by<F>(&mut self, slice_start: usize, k: usize, mut compare: F)
-    where
-        F: FnMut((&K, &V), (&K, &V)) -> cmp::Ordering,
-    {
-        if k == 0 {
-            return;
-        }
-
-        let range = slice_start..(slice_start + k);
-        self.vec[range.clone()]
-            .select_nth_unstable_by(k - 1, |a, b| compare((&a.key, &a.value), (&b.key, &b.value)));
-        self.update_map(range);
-    }
 }
 
 impl<K, V, S> Default for OrderedHashMap<K, V, S>
