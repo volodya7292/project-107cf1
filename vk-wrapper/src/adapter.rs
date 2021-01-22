@@ -84,7 +84,6 @@ impl Adapter {
                     }),
                     semaphore: Arc::new(device::create_binary_semaphore(&device_wrapper)?),
                     timeline_sp: Arc::new(device::create_timeline_semaphore(&device_wrapper)?),
-                    fence: device::create_fence(&device_wrapper)?,
                     family_index: queue_info.queue_family_index,
                 }));
             }

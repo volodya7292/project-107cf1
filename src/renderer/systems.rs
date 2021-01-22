@@ -10,60 +10,78 @@ use vk_wrapper::SubmitPacket;
 pub(super) struct RendererCompEventsSystem {
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
     pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
-    pub model_inputs: Arc<vkw::DescriptorPool>,
+    pub model_inputs_pool: Arc<vkw::DescriptorPool>,
 }
 
 impl RendererCompEventsSystem {
+    fn renderer_comp_created(
+        renderer: &mut component::Renderer,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+    ) {
+        renderer.pipeline_inputs = vec![
+            depth_per_object_pool.alloc().unwrap(),
+            model_inputs_pool.alloc().unwrap(),
+        ];
+    }
+
     fn renderer_comp_modified(
         renderer: &mut component::Renderer,
-        depth_per_object_pool: &Arc<vkw::DescriptorPool>,
-        model_inputs: &Arc<vkw::DescriptorPool>,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
-        let _mat_pipeline = &renderer.mat_pipeline;
         let inputs = &mut renderer.pipeline_inputs;
 
-        inputs.clear();
+        depth_per_object_pool.update(
+            inputs[0],
+            &[vkw::Binding {
+                id: 0,
+                array_index: 0,
+                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+            }],
+        );
 
-        let depth_per_object = depth_per_object_pool.allocate_input().unwrap();
-        depth_per_object.update(&[vkw::Binding {
-            id: 0,
-            array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-        }]);
-
-        let uniform_input = model_inputs.allocate_input().unwrap();
-        uniform_input.update(&[vkw::Binding {
-            id: 0,
-            array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-        }]);
-
-        inputs.extend_from_slice(&[depth_per_object, uniform_input]);
+        model_inputs_pool.update(
+            inputs[1],
+            &[vkw::Binding {
+                id: 0,
+                array_index: 0,
+                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+            }],
+        );
     }
 
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
+        let mut depth_per_object_pool = self.depth_per_object_pool.lock().unwrap();
+        let mut model_inputs_pool = self.model_inputs_pool.lock().unwrap();
 
         for event in events {
             match event {
                 scene::Event::Created(entity) => {
+                    let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
+
+                    Self::renderer_comp_created(
+                        renderer_comp,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
                     Self::renderer_comp_modified(
-                        renderer_comps.get_mut_unchecked(entity).unwrap(),
-                        &self.depth_per_object_pool,
-                        &self.model_inputs,
+                        renderer_comp,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
                     );
                 }
                 scene::Event::Modified(entity) => {
                     Self::renderer_comp_modified(
                         renderer_comps.get_mut_unchecked(entity).unwrap(),
-                        &self.depth_per_object_pool,
-                        &self.model_inputs,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
                     );
                 }
-
                 _ => {}
             }
         }

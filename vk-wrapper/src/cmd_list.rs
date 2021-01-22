@@ -2,13 +2,18 @@ use crate::buffer::Buffer;
 use crate::device::DeviceWrapper;
 use crate::render_pass::vk_clear_value;
 use crate::{
-    BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
-    Pipeline, PipelineInput, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
+    BufferBarrier, ClearValue, DescriptorPool, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier,
+    ImageLayout, Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use ahash::AHashSet;
 use ash::{version::DeviceV1_0, vk};
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr};
+
+pub(crate) struct UsedDescriptorPool {
+    _pool: Arc<DescriptorPool>,
+    descriptor_sets: Vec<vk::DescriptorSet>,
+}
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -20,7 +25,7 @@ pub struct CmdList {
     pub(crate) secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
     pub(crate) pipelines: AHashSet<Arc<Pipeline>>,
     pub(crate) pipeline_signatures: Vec<Arc<PipelineSignature>>,
-    pub(crate) pipeline_inputs: AHashSet<Arc<PipelineInput>>,
+    pub(crate) descriptor_pools: Vec<UsedDescriptorPool>,
     pub(crate) buffers: Vec<Arc<Buffer>>,
     pub(crate) images: Vec<Arc<Image>>,
     pub(crate) query_pools: Vec<Arc<QueryPool>>,
@@ -36,7 +41,7 @@ impl CmdList {
         self.secondary_cmd_lists.clear();
         self.pipelines.clear();
         self.pipeline_signatures.clear();
-        self.pipeline_inputs.clear();
+        self.descriptor_pools.clear();
         self.buffers.clear();
         self.images.clear();
         self.query_pools.clear();
@@ -253,36 +258,57 @@ impl CmdList {
         false
     }
 
+    pub fn use_descriptor_pool(&mut self, descriptor_pool: Arc<DescriptorPool>) -> u32 {
+        let descriptor_sets = descriptor_pool.0.lock().unwrap().allocated.clone();
+
+        self.descriptor_pools.push(UsedDescriptorPool {
+            _pool: descriptor_pool,
+            descriptor_sets,
+        });
+
+        (self.descriptor_pools.len() - 1) as u32
+    }
+
     fn bind_pipeline_input(
         &mut self,
         signature: &Arc<PipelineSignature>,
         bind_point: vk::PipelineBindPoint,
         set_id: u32,
-        pipeline_input: &Arc<PipelineInput>,
+        used_descriptor_pool: u32,
+        descriptor_set_id: u32,
     ) {
+        let native_set = self
+            .descriptor_pools
+            .get(used_descriptor_pool as usize)
+            .unwrap()
+            .descriptor_sets[descriptor_set_id as usize];
+
         unsafe {
             self.device_wrapper.0.cmd_bind_descriptor_sets(
                 self.native,
                 bind_point,
                 signature.pipeline_layout,
                 set_id,
-                &[pipeline_input.native],
+                &[native_set],
                 &[],
-            )
+            );
         };
-
-        if !self.pipeline_inputs.contains(pipeline_input) {
-            self.pipeline_inputs.insert(Arc::clone(pipeline_input));
-        }
     }
 
     pub fn bind_graphics_input(
         &mut self,
         signature: &Arc<PipelineSignature>,
         set_id: u32,
-        pipeline_input: &Arc<PipelineInput>,
+        used_descriptor_pool: u32,
+        descriptor_set_id: u32,
     ) {
-        self.bind_pipeline_input(signature, vk::PipelineBindPoint::GRAPHICS, set_id, pipeline_input);
+        self.bind_pipeline_input(
+            signature,
+            vk::PipelineBindPoint::GRAPHICS,
+            set_id,
+            used_descriptor_pool,
+            descriptor_set_id,
+        );
     }
 
     /// buffers (max: 16): [buffer, offset]

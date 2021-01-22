@@ -25,17 +25,16 @@ use std::{mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
-use vk_wrapper::pipeline_input::{Binding, BindingRes};
 use vk_wrapper::queue::SignalSemaphore;
 use vk_wrapper::{
-    swapchain, AccessFlags, BindingType, DescriptorPool, HostBuffer, Image, ImageUsageFlags, ShaderBinding,
-    ShaderBindingMod, ShaderStage, SwapchainImage,
+    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, HostBuffer, Image,
+    ImageUsageFlags, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
-    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineInput,
-    PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue,
-    RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
+    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue, RenderPass, SubmitInfo,
+    SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
 };
 
 pub struct Renderer {
@@ -68,19 +67,21 @@ pub struct Renderer {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_frame_in: Arc<PipelineInput>,
     depth_per_object_pool: Arc<DescriptorPool>,
+    depth_per_frame_pool: Arc<DescriptorPool>,
+    depth_per_frame_in: u32,
 
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
-    g_per_frame_in: Arc<PipelineInput>,
+    g_per_frame_pool: Arc<DescriptorPool>,
+    g_per_frame_in: u32,
     g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
 
-    model_inputs: Arc<DescriptorPool>,
+    model_inputs_pool: Arc<DescriptorPool>,
 
     active_camera: u32,
     camera_uniform_buffer: Arc<DeviceBuffer>,
@@ -365,7 +366,7 @@ impl Renderer {
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             renderer_comps: self.scene.storage::<component::Renderer>(),
             depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
-            model_inputs: Arc::clone(&self.model_inputs),
+            model_inputs_pool: Arc::clone(&self.model_inputs_pool),
         };
 
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
@@ -483,6 +484,7 @@ impl Renderer {
 
         // Record depth object rendering
         // -------------------------------------------------------------------------------------------------------------
+        // let t0 = Instant::now();
         self.secondary_cmd_lists
             .par_iter()
             .enumerate()
@@ -497,7 +499,10 @@ impl Renderer {
                 )
                 .unwrap();
 
-                cl.bind_graphics_input(&self.depth_signature, 0, &self.depth_per_frame_in);
+                let used_depth_pool = cl.use_descriptor_pool(Arc::clone(&self.depth_per_frame_pool));
+                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
+
+                cl.bind_graphics_input(&self.depth_signature, 0, used_depth_pool, self.depth_per_frame_in);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -541,12 +546,20 @@ impl Renderer {
                         cl.bind_pipeline(&self.depth_pipeline_rw);
                     }
 
-                    cl.bind_graphics_input(&self.depth_signature, 1, &renderer.pipeline_inputs[0]);
+                    cl.bind_graphics_input(
+                        &self.depth_signature,
+                        1,
+                        used_model_inputs_pool,
+                        renderer.pipeline_inputs[0],
+                    );
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
                 cl.end().unwrap();
             });
+
+        // let t1 = Instant::now();
+        // println!("update_: {}", (t1 - t0).as_secs_f64());
 
         // Record depth cmd list
         // -------------------------------------------------------------------------------------------------------------
@@ -590,8 +603,10 @@ impl Renderer {
                 )
                 .unwrap();
 
-                let t0 = Instant::now();
+                let used_g_per_frame_pool = cl.use_descriptor_pool(Arc::clone(&self.g_per_frame_pool));
+                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
 
+                let t0 = Instant::now();
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
                     if entity_index >= object_count {
@@ -623,9 +638,14 @@ impl Renderer {
                     // Arc::clone(&self.g_per_frame_in);
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, &self.g_per_frame_in);
+                        cl.bind_graphics_input(&signature, 0, used_g_per_frame_pool, self.g_per_frame_in);
                     }
-                    cl.bind_graphics_input(&signature, 1, &renderer.pipeline_inputs[1]);
+                    cl.bind_graphics_input(
+                        &signature,
+                        1,
+                        used_model_inputs_pool,
+                        renderer.pipeline_inputs[1],
+                    );
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -921,7 +941,8 @@ pub fn new(
         PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
-    let depth_per_frame_in = depth_signature.create_pool(0, 1)?.allocate_input()?;
+    let depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
+    let depth_per_frame_in = depth_per_frame_pool.lock().unwrap().alloc()?;
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1038,7 +1059,8 @@ pub fn new(
             ),
         ])
         .unwrap();
-    let g_per_frame_in = g_signature.create_pool(0, 1)?.allocate_input().unwrap();
+    let g_per_frame_pool = g_signature.create_pool(0, 1)?;
+    let g_per_frame_in = g_per_frame_pool.lock().unwrap().alloc()?;
 
     let tile_count = max_texture_count;
     let texture_atlases = [
@@ -1085,23 +1107,29 @@ pub fn new(
     ];
 
     // Update pipeline inputs
-    depth_per_frame_in.update(&[Binding {
-        id: 0,
-        array_index: 0,
-        res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
-    }]);
-    g_per_frame_in.update(&[
-        Binding {
+    depth_per_frame_pool.lock().unwrap().update(
+        depth_per_frame_in,
+        &[Binding {
             id: 0,
             array_index: 0,
             res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
-        },
-        Binding {
-            id: 1,
-            array_index: 0,
-            res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
-        },
-    ]);
+        }],
+    );
+    g_per_frame_pool.lock().unwrap().update(
+        g_per_frame_in,
+        &[
+            Binding {
+                id: 0,
+                array_index: 0,
+                res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+            },
+            Binding {
+                id: 1,
+                array_index: 0,
+                res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+            },
+        ],
+    );
 
     let staging_cl = graphics_queue.create_primary_cmd_list()?;
     let staging_submit =
@@ -1144,16 +1172,18 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
+        depth_per_frame_pool,
         depth_per_frame_in,
         depth_per_object_pool: depth_signature.create_pool(1, 65535)?,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
+        g_per_frame_pool,
         g_per_frame_in,
         g_per_object_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
-        model_inputs: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
+        model_inputs_pool: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
         active_camera,
         camera_uniform_buffer: per_frame_uniform_buffer,
     };

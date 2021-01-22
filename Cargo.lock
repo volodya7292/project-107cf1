@@ -1031,6 +1031,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "smallvec"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
+
+[[package]]
 name = "spirv_cross"
 version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1148,10 +1154,12 @@ dependencies = [
  "ahash",
  "ash",
  "ash-window",
+ "bit-set",
  "bitflags",
  "lazy_static",
  "log",
  "raw-window-handle",
+ "smallvec",
  "spirv_cross",
  "vk-mem",
 ]

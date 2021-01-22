@@ -15,7 +15,6 @@ pub struct Queue {
     pub(crate) native: Mutex<vk::Queue>,
     pub(crate) semaphore: Arc<Semaphore>,
     pub(crate) timeline_sp: Arc<Semaphore>,
-    pub(crate) fence: Fence,
     pub(crate) family_index: u32,
 }
 
@@ -44,7 +43,7 @@ impl Queue {
             secondary_cmd_lists: vec![],
             pipelines: Default::default(),
             pipeline_signatures: vec![],
-            pipeline_inputs: Default::default(),
+            descriptor_pools: vec![],
             buffers: vec![],
             images: vec![],
             query_pools: Default::default(),
