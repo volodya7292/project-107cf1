@@ -11,6 +11,7 @@ mod systems;
 pub use scene::Scene;
 pub use vertex_mesh::VertexMesh;
 
+use crate::renderer::material_pipeline::{MaterialPipeline, PipelineMapping};
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use ktx::KtxInfo;
@@ -19,31 +20,25 @@ use nalgebra::{Matrix4, Vector4};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use std::{mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
-use vk_wrapper::pipeline_input::{Binding, BindingRes};
+use vk_wrapper::queue::SignalSemaphore;
 use vk_wrapper::{
-    swapchain, AccessFlags, BindingType, DescriptorPool, HostBuffer, Image, ImageUsageFlags, ShaderBinding,
-    ShaderBindingMod, ShaderStage, SwapchainImage,
+    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, HostBuffer, Image,
+    ImageUsageFlags, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
-    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineInput,
-    PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue,
-    RenderPass, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
+    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue, RenderPass, SubmitInfo,
+    SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
 };
-
-#[derive(Default)]
-struct DistanceSortedRenderables {
-    entities: Vec<u32>,
-    curr_sort_count: u32,
-}
 
 pub struct Renderer {
     scene: Scene,
-    sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
 
     surface: Arc<Surface>,
     swapchain: Option<Arc<Swapchain>>,
@@ -59,10 +54,11 @@ pub struct Renderer {
     staging_buffer: HostBuffer<u8>,
     staging_cl: Arc<Mutex<CmdList>>,
     staging_submit: Arc<Mutex<SubmitPacket>>,
+    final_cl: Arc<Mutex<CmdList>>,
+    final_submit: SubmitPacket,
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
-    query_pool: Arc<QueryPool>,
     occlusion_buffer: HostBuffer<u32>,
     secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
 
@@ -71,19 +67,21 @@ pub struct Renderer {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_frame_in: Arc<PipelineInput>,
     depth_per_object_pool: Arc<DescriptorPool>,
+    depth_per_frame_pool: Arc<DescriptorPool>,
+    depth_per_frame_in: u32,
 
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
-    g_per_frame_in: Arc<PipelineInput>,
+    g_per_frame_pool: Arc<DescriptorPool>,
+    g_per_frame_in: u32,
     g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
 
-    model_inputs: Arc<DescriptorPool>,
+    model_inputs_pool: Arc<DescriptorPool>,
 
     active_camera: u32,
     camera_uniform_buffer: Arc<DeviceBuffer>,
@@ -214,6 +212,19 @@ impl Renderer {
             self.free_texture_indices[*atlas_type as usize].push(*tex_index);
         }
         *tex_index = None;
+    }
+
+    pub fn prepare_material(&self, material_pipeline: &mut MaterialPipeline) {
+        material_pipeline.prepare_pipeline(&PipelineMapping {
+            render_pass: Arc::clone(&self.g_render_pass),
+            subpass_index: 0,
+            cull_back_faces: false,
+        });
+        material_pipeline.prepare_pipeline(&PipelineMapping {
+            render_pass: Arc::clone(&self.g_render_pass),
+            subpass_index: 0,
+            cull_back_faces: true,
+        });
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
@@ -354,9 +365,8 @@ impl Renderer {
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             renderer_comps: self.scene.storage::<component::Renderer>(),
-            sorted_renderables: Arc::clone(&self.sorted_renderables),
             depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
-            model_inputs: Arc::clone(&self.model_inputs),
+            model_inputs_pool: Arc::clone(&self.model_inputs_pool),
         };
 
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
@@ -376,13 +386,6 @@ impl Renderer {
             buffer_updates: Arc::clone(&buffer_updates),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
-        };
-
-        let mut distance_sort_system = systems::DistanceSortSystem {
-            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
-            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
-            sorted_renderables: Arc::clone(&self.sorted_renderables),
-            camera_pos: camera.position(),
         };
 
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
@@ -409,16 +412,10 @@ impl Renderer {
             });
             rayon::scope(|s| {
                 s.spawn(|s| {
-                    distance_sort_system.run();
-                });
-                s.spawn(|s| {
                     world_transform_events_system.run();
                 });
             });
         });
-
-        // Wait for vertex buffer updates
-        self.staging_submit.lock().unwrap().wait().unwrap();
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -456,10 +453,16 @@ impl Renderer {
             });
         }
 
+        // Wait for vertex buffer updates
+        self.staging_submit.lock().unwrap().wait().unwrap();
+
         self.update_device_buffers(&buffer_updates.lock().unwrap());
+
+        // let t2 = Instant::now();
+        // println!("{}", (t2 - t).as_secs_f64());
     }
 
-    fn on_render(&mut self, sw_image: &SwapchainImage) -> u64 {
+    fn on_render(&mut self, sw_image: &SwapchainImage) {
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
         let camera = {
@@ -475,8 +478,7 @@ impl Renderer {
         let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
-        let dsr = self.sorted_renderables.lock().unwrap();
-        let renderables = &dsr.entities;
+        let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
         let object_count = renderables.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
@@ -496,7 +498,10 @@ impl Renderer {
                 )
                 .unwrap();
 
-                cl.bind_graphics_input(&self.depth_signature, 0, &self.depth_per_frame_in);
+                let used_depth_pool = cl.use_descriptor_pool(Arc::clone(&self.depth_per_frame_pool));
+                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
+
+                cl.bind_graphics_input(&self.depth_signature, 0, used_depth_pool, self.depth_per_frame_in);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -504,11 +509,11 @@ impl Renderer {
                         break;
                     }
 
-                    let entity = renderables[entity_index];
+                    let renderable = renderables[entity_index];
 
-                    let transform = world_transform_comps.get(entity);
-                    let renderer = renderer_comps.get(entity);
-                    let vertex_mesh = vertex_mesh_comps.get(entity);
+                    let transform = world_transform_comps.get(renderable);
+                    let renderer = renderer_comps.get(renderable);
+                    let vertex_mesh = vertex_mesh_comps.get(renderable);
 
                     if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
                         continue;
@@ -524,20 +529,29 @@ impl Renderer {
                     let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position;
                     let radius = ((aabb.1 - aabb.0).component_mul(&transform.scale) * 0.5).magnitude();
 
-                    cl.begin_query(&self.query_pool, entity_index as u32);
+                    // TODO ------------------------------------------
+                    // TODO: -> REIMPLEMENT: 1. firstly render depth buffer without queries; 2. render object AABBs using queries
+                    // TODO: Many queries is slow approach, use max 128 queries (distribute one query across multiple objects)
+                    // TODO: OR implement compute-based approach (https://vkguide.dev/docs/gpudriven/compute_culling)
+                    // TODO ------------------------------------------
 
-                    if camera.is_sphere_visible(center_position, radius) && vertex_mesh.vertex_count > 0 {
-                        if renderer.translucent {
-                            cl.bind_pipeline(&self.depth_pipeline_r);
-                        } else {
-                            cl.bind_pipeline(&self.depth_pipeline_rw);
-                        }
-
-                        cl.bind_graphics_input(&self.depth_signature, 1, &renderer.pipeline_inputs[0]);
-                        cl.bind_and_draw_vertex_mesh(&vertex_mesh);
+                    if !camera.is_sphere_visible(center_position, radius) || vertex_mesh.vertex_count == 0 {
+                        continue;
                     }
 
-                    cl.end_query(entity_index as u32);
+                    if renderer.translucent {
+                        cl.bind_pipeline(&self.depth_pipeline_r);
+                    } else {
+                        cl.bind_pipeline(&self.depth_pipeline_rw);
+                    }
+
+                    cl.bind_graphics_input(
+                        &self.depth_signature,
+                        1,
+                        used_model_inputs_pool,
+                        renderer.pipeline_inputs[0],
+                    );
+                    cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
                 cl.end().unwrap();
@@ -548,7 +562,6 @@ impl Renderer {
         {
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
-            cl.reset_query_pool(&self.query_pool, 0, object_count as u32);
             cl.begin_render_pass(
                 &self.depth_render_pass,
                 self.depth_framebuffer.as_ref().unwrap(),
@@ -557,13 +570,6 @@ impl Renderer {
             );
             cl.execute_secondary(&self.secondary_cmd_lists);
             cl.end_render_pass();
-            cl.copy_query_pool_results_to_host(
-                &self.query_pool,
-                0,
-                object_count as u32,
-                &self.occlusion_buffer,
-                0,
-            );
             cl.end().unwrap();
         }
         {
@@ -572,8 +578,16 @@ impl Renderer {
             submit.wait().unwrap();
         }
 
+        // TODO: separate depth & g-buffer cmd lists (for performance reasons)
+
         // Record g-buffer object rendering
         // -------------------------------------------------------------------------------------------------------------
+        let pipeline_mapping = PipelineMapping {
+            render_pass: Arc::clone(&self.g_render_pass),
+            subpass_index: 0,
+            cull_back_faces: true,
+        };
+        let t0 = Instant::now();
         self.secondary_cmd_lists
             .par_iter()
             .enumerate()
@@ -588,53 +602,64 @@ impl Renderer {
                 )
                 .unwrap();
 
+                let used_g_per_frame_pool = cl.use_descriptor_pool(Arc::clone(&self.g_per_frame_pool));
+                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
+
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
                     if entity_index >= object_count {
                         break;
                     }
 
-                    let entity = renderables[entity_index];
+                    let renderable = renderables[entity_index];
 
-                    let renderer = renderer_comps.get(entity);
-                    let vertex_mesh = vertex_mesh_comps.get(entity);
+                    let renderer = renderer_comps.get(renderable).unwrap();
+                    let vertex_mesh = vertex_mesh_comps.get(renderable);
 
-                    if renderer.is_none() || vertex_mesh.is_none() {
+                    if vertex_mesh.is_none() {
                         continue;
                     }
 
                     // Check query_pool occlusion results
                     if self.occlusion_buffer[entity_index] == 0 {
-                        continue;
+                        // TODO
+                        // continue;
                     }
 
-                    let renderer = renderer.unwrap();
                     let mesh = vertex_mesh.unwrap();
-
                     let vertex_mesh = &mesh.0;
 
                     let mat_pipeline = &renderer.mat_pipeline;
-                    let pipeline = mat_pipeline.request_pipeline(&self.g_render_pass, 0, false);
+                    let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
                     let signature = pipeline.signature();
 
-                    let already_bound = cl.bind_pipeline(&pipeline);
+                    let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, &self.g_per_frame_in);
+                        cl.bind_graphics_input(&signature, 0, used_g_per_frame_pool, self.g_per_frame_in);
                     }
-                    cl.bind_graphics_input(&signature, 1, &renderer.pipeline_inputs[1]);
+                    cl.bind_graphics_input(
+                        &signature,
+                        1,
+                        used_model_inputs_pool,
+                        renderer.pipeline_inputs[1],
+                    );
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
                 cl.end().unwrap();
             });
+        let t1 = Instant::now();
+        println!("g rec {}", (t1 - t0).as_secs_f64());
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
-
-            let mut cl = self.staging_cl.lock().unwrap();
+            // !!! Do not render anything in final cl except copying some image into swapchain image.
+            // Uniform/vertex buffers may be being updated at this moment.
+            let mut cl = self.final_cl.lock().unwrap();
             cl.begin(true).unwrap();
+
+            // let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
 
             // TODO: translucency
             /*cl.barrier_image(
@@ -671,11 +696,11 @@ impl Renderer {
             cl.execute_secondary(&self.secondary_cmd_lists);
             cl.end_render_pass();
 
-            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0);
             let sw_image = self.sw_framebuffers[sw_image.get_index() as usize].get_image(0);
+            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0);
 
             cl.barrier_image(
-                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
                 PipelineStageFlags::TRANSFER,
                 &[
                     albedo.barrier_queue(
@@ -733,35 +758,37 @@ impl Renderer {
             cl.end().unwrap();
         }
 
-        let mut final_packet = self
-            .device
-            .create_submit_packet(&[SubmitInfo::new(
-                &[WaitSemaphore {
-                    semaphore: self.swapchain.as_ref().unwrap().get_semaphore(),
-                    wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
-                    wait_value: 0,
-                }],
-                &[Arc::clone(&self.staging_cl)],
-            )])
-            .unwrap();
-        graphics_queue.submit(&mut final_packet).unwrap();
-
-        final_packet.get_signal_value(0).unwrap()
+        graphics_queue.submit(&mut self.final_submit).unwrap();
     }
 
     pub fn on_draw(&mut self) {
         let device = Arc::clone(&self.device);
         let adapter = device.get_adapter();
-        let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
         let surface = &self.surface;
 
         if adapter.is_surface_valid(surface).unwrap() {
             if self.surface_changed {
+                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+
                 self.swapchain = Some(
                     device
                         .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
                         .unwrap(),
                 );
+                self.final_submit
+                    .set(&[SubmitInfo::new(
+                        &[WaitSemaphore {
+                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().get_semaphore()),
+                            wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // TODO: change if necessary
+                            wait_value: 0,
+                        }],
+                        &[Arc::clone(&self.final_cl)],
+                        &[SignalSemaphore {
+                            semaphore: Arc::clone(present_queue.frame_semaphore()),
+                            signal_value: 0,
+                        }],
+                    )])
+                    .unwrap();
                 self.create_main_framebuffers();
                 self.surface_changed = false;
             }
@@ -769,29 +796,34 @@ impl Renderer {
             let swapchain = Arc::clone(self.swapchain.as_ref().unwrap());
             let acquire_result = swapchain.acquire_image();
 
-            if let Ok((sw_image, optimal)) = acquire_result {
-                if !optimal {
+            match acquire_result {
+                Ok((sw_image, suboptimal)) => {
+                    self.surface_changed |= suboptimal;
+
+                    self.on_update();
+                    self.final_submit.wait().unwrap();
+                    self.on_render(&sw_image);
+
+                    let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+                    let present_result = present_queue.present(sw_image);
+
+                    match present_result {
+                        Ok(suboptimal) => {
+                            self.surface_changed |= suboptimal;
+                        }
+                        Err(swapchain::Error::IncompatibleSurface) => {
+                            self.surface_changed = true;
+                        }
+                        _ => {
+                            present_result.unwrap();
+                        }
+                    }
+                }
+                Err(swapchain::Error::IncompatibleSurface) => {
                     self.surface_changed = true;
                 }
-
-                self.on_update();
-                let wait_value = self.on_render(&sw_image);
-
-                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-                if !present_queue
-                    .present(sw_image, &graphics_queue.get_semaphore(), wait_value)
-                    .unwrap_or(false)
-                {
-                    self.surface_changed = true;
-                }
-            } else {
-                match acquire_result {
-                    Err(swapchain::Error::IncompatibleSurface) => {
-                        self.surface_changed = true;
-                    }
-                    _ => {
-                        acquire_result.unwrap();
-                    }
+                _ => {
+                    acquire_result.unwrap();
                 }
             }
         }
@@ -857,7 +889,7 @@ pub fn new(
 
     // Create secondary cmd lists for multithread recording
     let mut secondary_cmd_lists = vec![];
-    for _ in 0..num_cpus::get() {
+    for _ in 0..num_cpus::get_physical().min(8) {
         secondary_cmd_lists.push(graphics_queue.create_secondary_cmd_list()?);
     }
 
@@ -908,7 +940,8 @@ pub fn new(
         PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
-    let depth_per_frame_in = depth_signature.create_pool(0, 1)?.allocate_input()?;
+    let depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
+    let depth_per_frame_in = depth_per_frame_pool.lock().unwrap().alloc()?;
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1025,7 +1058,8 @@ pub fn new(
             ),
         ])
         .unwrap();
-    let g_per_frame_in = g_signature.create_pool(0, 1)?.allocate_input().unwrap();
+    let g_per_frame_pool = g_signature.create_pool(0, 1)?;
+    let g_per_frame_in = g_per_frame_pool.lock().unwrap().alloc()?;
 
     let tile_count = max_texture_count;
     let texture_atlases = [
@@ -1072,33 +1106,41 @@ pub fn new(
     ];
 
     // Update pipeline inputs
-    depth_per_frame_in.update(&[Binding {
-        id: 0,
-        array_index: 0,
-        res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
-    }]);
-    g_per_frame_in.update(&[
-        Binding {
+    depth_per_frame_pool.lock().unwrap().update(
+        depth_per_frame_in,
+        &[Binding {
             id: 0,
             array_index: 0,
             res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
-        },
-        Binding {
-            id: 1,
-            array_index: 0,
-            res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
-        },
-    ]);
+        }],
+    );
+    g_per_frame_pool.lock().unwrap().update(
+        g_per_frame_in,
+        &[
+            Binding {
+                id: 0,
+                array_index: 0,
+                res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+            },
+            Binding {
+                id: 1,
+                array_index: 0,
+                res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+            },
+        ],
+    );
 
-    let staging_copy_cl = graphics_queue.create_primary_cmd_list()?;
-    let staging_copy_submit =
-        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_copy_cl)])])?;
+    let staging_cl = graphics_queue.create_primary_cmd_list()?;
+    let staging_submit =
+        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])?;
+
+    let final_cl = graphics_queue.create_primary_cmd_list()?;
+    let final_submit = device.create_submit_packet(&[])?;
 
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
     let mut renderer = Renderer {
         scene,
-        sorted_renderables: Arc::new(Mutex::new(Default::default())),
         surface: Arc::clone(surface),
         swapchain: None,
         surface_changed: false,
@@ -1114,10 +1156,11 @@ pub fn new(
             free_indices.clone(),
         ],
         staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
-        staging_cl: staging_copy_cl,
-        staging_submit: Arc::new(Mutex::new(staging_copy_submit)),
+        staging_cl,
+        staging_submit: Arc::new(Mutex::new(staging_submit)),
+        final_cl,
+        final_submit,
         sw_framebuffers: vec![],
-        query_pool: device.create_query_pool(65536)?,
         occlusion_buffer: device.create_host_buffer(
             vkw::BufferUsageFlags::TRANSFER_DST,
             (mem::size_of::<u32>() * 65535) as u64,
@@ -1128,16 +1171,18 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
+        depth_per_frame_pool,
         depth_per_frame_in,
         depth_per_object_pool: depth_signature.create_pool(1, 65535)?,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
+        g_per_frame_pool,
         g_per_frame_in,
         g_per_object_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
-        model_inputs: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
+        model_inputs_pool: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
         active_camera,
         camera_uniform_buffer: per_frame_uniform_buffer,
     };

@@ -1,5 +1,6 @@
 use crate::{AccessFlags, Device, Queue};
 use ash::vk;
+use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 use std::{marker::PhantomData, mem, ptr};
@@ -12,6 +13,20 @@ pub(crate) struct Buffer {
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
     pub(crate) _bytesize: u64,
+}
+
+impl PartialEq for Buffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+    }
+}
+
+impl Eq for Buffer {}
+
+impl Hash for Buffer {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.native.hash(state);
+    }
 }
 
 impl Drop for Buffer {

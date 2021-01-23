@@ -9,7 +9,7 @@ pub struct Fence {
 }
 
 impl Fence {
-    pub(crate) fn reset(&self) -> Result<(), vk::Result> {
+    pub(crate) fn reset(&mut self) -> Result<(), vk::Result> {
         self.wait()?;
         unsafe { self.device_wrapper.0.reset_fences(&[self.native]) }
     }

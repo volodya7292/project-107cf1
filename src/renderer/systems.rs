@@ -1,114 +1,105 @@
+use crate::renderer::component::{Renderer, VertexMesh};
 use crate::renderer::scene::Event;
-use crate::renderer::{component, scene, BufferUpdate, DistanceSortedRenderables};
+use crate::renderer::{component, scene, BufferUpdate};
 use nalgebra as na;
 use std::sync::{atomic, Arc, Mutex};
+use std::time::Instant;
 use std::{cmp, mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::SubmitPacket;
 
 pub(super) struct RendererCompEventsSystem {
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
-    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
     pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
-    pub model_inputs: Arc<vkw::DescriptorPool>,
+    pub model_inputs_pool: Arc<vkw::DescriptorPool>,
 }
 
 impl RendererCompEventsSystem {
+    fn renderer_comp_created(
+        renderer: &mut component::Renderer,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+    ) {
+        renderer.pipeline_inputs = vec![
+            depth_per_object_pool.alloc().unwrap(),
+            model_inputs_pool.alloc().unwrap(),
+        ];
+    }
+
     fn renderer_comp_modified(
         renderer: &mut component::Renderer,
-        depth_per_object_pool: &Arc<vkw::DescriptorPool>,
-        model_inputs: &Arc<vkw::DescriptorPool>,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
-        let _mat_pipeline = &renderer.mat_pipeline;
         let inputs = &mut renderer.pipeline_inputs;
 
-        inputs.clear();
+        depth_per_object_pool.update(
+            inputs[0],
+            &[vkw::Binding {
+                id: 0,
+                array_index: 0,
+                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+            }],
+        );
 
-        let depth_per_object = depth_per_object_pool.allocate_input().unwrap();
-        depth_per_object.update(&[vkw::Binding {
-            id: 0,
-            array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-        }]);
+        model_inputs_pool.update(
+            inputs[1],
+            &[vkw::Binding {
+                id: 0,
+                array_index: 0,
+                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+            }],
+        );
+    }
 
-        let uniform_input = model_inputs.allocate_input().unwrap();
-        uniform_input.update(&[vkw::Binding {
-            id: 0,
-            array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-        }]);
-
-        inputs.extend_from_slice(&[depth_per_object, uniform_input]);
+    fn renderer_comp_removed(
+        renderer: &mut component::Renderer,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+    ) {
+        depth_per_object_pool.free(renderer.pipeline_inputs[0]);
+        model_inputs_pool.free(renderer.pipeline_inputs[1]);
     }
 
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
-        let mut dsr = self.sorted_renderables.lock().unwrap();
-        let sorted_renderables = &mut dsr.entities;
-        let mut removed_count = 1;
+        let events = renderer_comps.events();
+        let mut depth_per_object_pool = self.depth_per_object_pool.lock().unwrap();
+        let mut model_inputs_pool = self.model_inputs_pool.lock().unwrap();
 
-        // Add new objects to sort
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let events = renderer_comps.events();
+        for event in events {
+            match event {
+                scene::Event::Created(entity) => {
+                    let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
 
-            for event in events {
-                match event {
-                    scene::Event::Created(entity) => {
-                        Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(entity).unwrap(),
-                            &self.depth_per_object_pool,
-                            &self.model_inputs,
-                        );
-
-                        sorted_renderables.push(entity);
-                    }
-                    scene::Event::Modified(entity) => {
-                        Self::renderer_comp_modified(
-                            renderer_comps.get_mut_unchecked(entity).unwrap(),
-                            &self.depth_per_object_pool,
-                            &self.model_inputs,
-                        );
-                    }
-                    scene::Event::Removed(_) => {
-                        removed_count += 1;
-                    }
+                    Self::renderer_comp_created(
+                        renderer_comp,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
+                    Self::renderer_comp_modified(
+                        renderer_comp,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
+                }
+                scene::Event::Modified(entity) => {
+                    Self::renderer_comp_modified(
+                        renderer_comps.get_mut_unchecked(entity).unwrap(),
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
+                }
+                Event::Removed(_, mut renderer) => {
+                    Self::renderer_comp_removed(
+                        &mut renderer,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
                 }
             }
-        }
-
-        // Replace removed(dead) entities with alive ones
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut swap_entities = Vec::<u32>::with_capacity(removed_count);
-            let mut new_len = sorted_renderables.len();
-
-            // Find alive entities for replacement
-            for &entity in sorted_renderables.iter().rev() {
-                if renderer_comps.contains(entity) {
-                    if removed_count > swap_entities.len() {
-                        swap_entities.push(entity);
-                    } else {
-                        break;
-                    }
-                }
-                new_len -= 1;
-            }
-
-            // Resize vector to trim swapped entities
-            sorted_renderables.truncate(new_len);
-
-            // Swap entities
-            for entity in sorted_renderables.iter_mut() {
-                if !renderer_comps.contains(*entity) {
-                    *entity = swap_entities.remove(swap_entities.len() - 1);
-                }
-            }
-
-            // Add the rest of swap_entities that were not swapped due to resized vector
-            sorted_renderables.extend(swap_entities);
         }
     }
 }
@@ -148,15 +139,15 @@ impl VertexMeshCompEventsSystem {
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
 
-            for &event in &events {
+            for event in &events {
                 match event {
                     scene::Event::Created(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
                     }
                     scene::Event::Modified(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
                     }
-                    scene::Event::Removed(_) => {}
+                    _ => {}
                 }
             }
 
@@ -165,71 +156,6 @@ impl VertexMeshCompEventsSystem {
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
         graphics_queue.submit(&mut submit).unwrap();
-    }
-}
-
-// Sort render objects from front to back (for Z rejection & occlusion queries)
-pub(super) struct DistanceSortSystem {
-    pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
-    pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
-    pub sorted_renderables: Arc<Mutex<DistanceSortedRenderables>>,
-    pub camera_pos: na::Vector3<f32>,
-}
-
-impl DistanceSortSystem {
-    const DISTANCE_SORT_PER_UPDATE: usize = 128;
-
-    pub fn run(&mut self) {
-        let transform_comps = self.world_transform_comps.read().unwrap();
-        let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
-        let mut dsr = self.sorted_renderables.lock().unwrap();
-
-        let curr_sort_count = dsr.curr_sort_count;
-        let sort_slice = &mut dsr.entities[(curr_sort_count as usize)..];
-        let to_sort_count = sort_slice.len().min(Self::DISTANCE_SORT_PER_UPDATE);
-
-        if to_sort_count > 0 {
-            sort_slice.select_nth_unstable_by(to_sort_count - 1, |&a, &b| {
-                let a_transform = transform_comps.get(a);
-                let a_mesh = vertex_mesh_comps.get(a);
-                let b_transform = transform_comps.get(b);
-                let b_mesh = vertex_mesh_comps.get(b);
-
-                if a_transform.is_none() || a_mesh.is_none() || b_transform.is_none() || b_mesh.is_none() {
-                    return cmp::Ordering::Equal;
-                }
-
-                let a_transform = a_transform.unwrap();
-                let a_mesh = a_mesh.unwrap();
-                let b_transform = b_transform.unwrap();
-                let b_mesh = b_mesh.unwrap();
-
-                let a_pos = {
-                    let aabb = *a_mesh.0.aabb();
-                    (aabb.0 + aabb.1) * 0.5 + a_transform.position
-                };
-                let b_pos = {
-                    let aabb = *b_mesh.0.aabb();
-                    (aabb.0 + aabb.1) * 0.5 + b_transform.position
-                };
-
-                let a_dist = (a_pos - self.camera_pos).magnitude();
-                let b_dist = (b_pos - self.camera_pos).magnitude();
-
-                if a_dist < b_dist {
-                    cmp::Ordering::Less
-                } else if a_dist > b_dist {
-                    cmp::Ordering::Greater
-                } else {
-                    cmp::Ordering::Equal
-                }
-            });
-        }
-
-        dsr.curr_sort_count += to_sort_count as u32;
-        if dsr.curr_sort_count >= dsr.entities.len() as u32 {
-            dsr.curr_sort_count = 0;
-        }
     }
 }
 
@@ -287,22 +213,24 @@ pub(super) struct WorldTransformEventsSystem {
 impl WorldTransformEventsSystem {
     fn world_transform_modified(
         world_transform: &component::WorldTransform,
-        renderer: &component::Renderer,
+        renderer: Option<&component::Renderer>,
         buffer_updates: &mut Vec<BufferUpdate>,
     ) {
-        let matrix_bytes = unsafe {
-            slice::from_raw_parts(
-                world_transform.matrix.as_ptr() as *const u8,
-                mem::size_of::<na::Matrix4<f32>>(),
-            )
-            .to_vec()
-        };
+        if let Some(renderer) = renderer {
+            let matrix_bytes = unsafe {
+                slice::from_raw_parts(
+                    world_transform.matrix.as_ptr() as *const u8,
+                    mem::size_of::<na::Matrix4<f32>>(),
+                )
+                .to_vec()
+            };
 
-        buffer_updates.push(BufferUpdate {
-            buffer: Arc::clone(&renderer.uniform_buffer),
-            offset: renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
-            data: matrix_bytes,
-        });
+            buffer_updates.push(BufferUpdate {
+                buffer: Arc::clone(&renderer.uniform_buffer),
+                offset: renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
+                data: matrix_bytes,
+            });
+        }
     }
 
     pub fn run(&mut self) {
@@ -316,14 +244,14 @@ impl WorldTransformEventsSystem {
                 Event::Created(entity) => {
                     Self::world_transform_modified(
                         world_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity).unwrap(),
+                        renderer_comps.get(entity),
                         &mut buffer_updates,
                     );
                 }
                 Event::Modified(entity) => {
                     Self::world_transform_modified(
                         world_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity).unwrap(),
+                        renderer_comps.get(entity),
                         &mut buffer_updates,
                     );
                 }
@@ -353,23 +281,27 @@ impl HierarchyPropagationSystem {
         world_transform_comps: &mut scene::ComponentStorageMut<component::WorldTransform>,
     ) {
         let model_transform = model_transform_comps.get_mut_unchecked(entity).unwrap();
-
-        let new_world_transform = parent_world_transform.combine(model_transform);
         let world_transform_changed = parent_world_transform_changed || model_transform.changed;
 
         if model_transform.changed {
             model_transform.changed = false;
         }
-        if world_transform_changed {
-            *world_transform_comps.get_mut(entity).unwrap() = new_world_transform;
-        }
 
-        *parent_comps.get_mut_unchecked(entity).unwrap() = component::Parent(parent_entity);
+        let world_transform = if world_transform_changed {
+            let new_world_transform = parent_world_transform.combine(model_transform);
+            world_transform_comps.set(entity, new_world_transform);
+            new_world_transform
+        } else {
+            *world_transform_comps.get(entity).unwrap()
+        };
+
+        parent_comps.set(entity, component::Parent(parent_entity));
 
         if let Some(children) = children_comps.get(entity) {
+            assert_eq!(children.0.len(), 0);
             for child in &children.0 {
                 Self::propagate_hierarchy(
-                    new_world_transform,
+                    world_transform,
                     world_transform_changed,
                     entity,
                     *child,

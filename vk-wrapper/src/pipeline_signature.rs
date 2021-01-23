@@ -1,3 +1,4 @@
+use crate::descriptor_pool::DescriptorPoolWrapper;
 use crate::{DescriptorPool, Device, Shader, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -31,13 +32,16 @@ impl PipelineSignature {
             .max_sets(max_inputs)
             .pool_sizes(&pool_sizes);
 
-        Ok(Arc::new(DescriptorPool {
+        Ok(Arc::new(DescriptorPool(Mutex::new(DescriptorPoolWrapper {
             device: Arc::clone(&self.device),
             signature: Arc::clone(&self),
-            descriptor_set: set_id,
+            set_layout_id: set_id,
             native: unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None)? },
-            free_sets: Mutex::new(Vec::with_capacity(max_inputs as usize)),
-        }))
+            allocated: vec![],
+            free_sets: Default::default(),
+            _used_buffers: Default::default(),
+            _used_images: Default::default(),
+        }))))
     }
 }
 

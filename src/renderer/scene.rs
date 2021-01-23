@@ -1,30 +1,38 @@
 use ahash::AHashMap;
 use bit_set::BitSet;
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::hash_map;
+use std::hash::Hash;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
+use std::mem;
 use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 trait Storage: Send + Sync {
+    fn push(&mut self) -> *mut u8;
     fn len(&self) -> usize;
     fn resize(&mut self, new_len: usize);
     fn as_ptr(&self) -> *const u8;
     fn as_mut_ptr(&mut self) -> *mut u8;
     fn swap_remove(&mut self, index: usize);
+    fn clear(&mut self);
 }
 
-impl<T> Storage for Vec<MaybeUninit<T>>
+impl<T> Storage for Vec<Option<T>>
 where
     T: Send + Sync,
 {
+    fn push(&mut self) -> *mut u8 {
+        Vec::push(self, None);
+        self.last_mut().unwrap() as *mut Option<T> as *mut u8
+    }
+
     fn len(&self) -> usize {
         Vec::len(self)
     }
 
     fn resize(&mut self, new_len: usize) {
-        Vec::resize_with(self, new_len, || MaybeUninit::<T>::uninit());
+        Vec::resize_with(self, new_len, || None);
     }
 
     fn as_ptr(&self) -> *const u8 {
@@ -38,36 +46,42 @@ where
     fn swap_remove(&mut self, index: usize) {
         Vec::swap_remove(self, index);
     }
+
+    fn clear(&mut self) {
+        Vec::clear(self);
+    }
 }
 
 pub struct RawComponentStorage {
     data: Box<dyn Storage>,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
     available: BitSet,
     created: BitSet,
     modified: BitSet,
-    removed: BitSet,
+    removed: AHashMap<u32, u32>,
+    removed_values: Box<dyn Storage>,
 }
 
 #[derive(Copy, Clone)]
-pub enum Event {
+pub enum Event<T> {
     Created(u32),
     Modified(u32),
-    Removed(u32),
+    Removed(u32, T),
 }
 
 impl RawComponentStorage {
-    fn new<T>(allocated_count: &Arc<AtomicU32>) -> RawComponentStorage
+    fn new<T>(entity_allocated_count: &Arc<AtomicU32>) -> RawComponentStorage
     where
         T: 'static + Send + Sync,
     {
         RawComponentStorage {
-            data: Box::new(Vec::<MaybeUninit<T>>::new()),
-            allocated_count: Arc::clone(allocated_count),
+            data: Box::new(Vec::<Option<T>>::new()),
+            entity_allocated_count: Arc::clone(entity_allocated_count),
             available: Default::default(),
             created: Default::default(),
             modified: Default::default(),
             removed: Default::default(),
+            removed_values: Box::new(Vec::<Option<T>>::new()),
         }
     }
 
@@ -85,7 +99,7 @@ impl RawComponentStorage {
 
         let len = self.data.len();
         if index >= len {
-            let new_len = self.allocated_count.load(atomic::Ordering::Relaxed) as usize;
+            let new_len = self.entity_allocated_count.load(atomic::Ordering::Relaxed) as usize;
             self.data.resize(new_len);
 
             if index >= new_len {
@@ -93,23 +107,22 @@ impl RawComponentStorage {
             }
         }
 
-        let val = &mut *(self.data.as_mut_ptr() as *mut MaybeUninit<T>).offset(index as isize);
+        let val = &mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize);
 
         if !self.available.insert(index) {
-            val.as_mut_ptr().drop_in_place();
-
             if !self.created.contains(index) {
                 self.modified.insert(index);
             }
         } else {
-            if self.removed.remove(index) {
+            if let Some(v) = self.removed.remove(&(index as u32)) {
+                self.removed_values.swap_remove(v as usize);
                 self.modified.insert(index);
             } else {
                 self.created.insert(index);
             }
         }
 
-        val.as_mut_ptr().write(v);
+        *val = Some(v);
     }
 
     /// # Safety
@@ -122,14 +135,15 @@ impl RawComponentStorage {
             panic!("index (is {}) should be < len (is {})", index, len);
         }
 
-        let val = &mut *(self.data.as_mut_ptr() as *mut MaybeUninit<T>).offset(index as isize);
+        let val = &mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize);
+        let val = mem::replace(val, None);
 
-        if self.available.remove(index) {
-            val.as_mut_ptr().drop_in_place();
-        }
+        self.available.remove(index);
 
         if !self.created.remove(index) {
-            self.removed.insert(index);
+            *(self.removed_values.push() as *mut Option<T>) = val;
+            self.removed
+                .insert(index as u32, (self.removed_values.len() - 1) as u32);
         }
         self.modified.remove(index);
     }
@@ -140,7 +154,7 @@ impl RawComponentStorage {
         let index = index as usize;
 
         if self.available.contains(index) {
-            Some(&*(&*(self.data.as_ptr() as *const MaybeUninit<T>).offset(index as isize)).as_ptr())
+            (&*(self.data.as_ptr() as *const Option<T>).offset(index as isize)).as_ref()
         } else {
             None
         }
@@ -157,10 +171,7 @@ impl RawComponentStorage {
             self.created.remove(index);
             self.modified.insert(index);
 
-            Some(
-                &mut *(&mut *(self.data.as_mut_ptr() as *mut MaybeUninit<T>).offset(index as isize))
-                    .as_mut_ptr(),
-            )
+            (&mut *(&mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize))).as_mut()
         } else {
             None
         }
@@ -174,10 +185,7 @@ impl RawComponentStorage {
         let index = index as usize;
 
         if self.available.contains(index) {
-            Some(
-                &mut *(&mut *(self.data.as_mut_ptr() as *mut MaybeUninit<T>).offset(index as isize))
-                    .as_mut_ptr(),
-            )
+            (&mut *(&mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize))).as_mut()
         } else {
             None
         }
@@ -188,7 +196,7 @@ impl RawComponentStorage {
     }
 
     /// Returns events and clears them internally
-    pub fn events(&mut self) -> Vec<Event> {
+    pub unsafe fn events<T>(&mut self) -> Vec<Event<T>> {
         let mut events = Vec::with_capacity(self.created.len() + self.modified.len() + self.removed.len());
 
         for index in &self.created {
@@ -197,13 +205,18 @@ impl RawComponentStorage {
         for index in &self.modified {
             events.push(Event::Modified(index as u32));
         }
-        for index in &self.removed {
-            events.push(Event::Removed(index as u32));
+        for (&index, &rm_i) in &self.removed {
+            let val = &mut *(self.removed_values.as_mut_ptr().offset(rm_i as isize) as *mut Option<T>);
+
+            if let Some(val) = mem::replace(val, None) {
+                events.push(Event::Removed(index as u32, val));
+            }
         }
 
         self.created.clear();
         self.modified.clear();
         self.removed.clear();
+        self.removed_values.clear();
 
         events
     }
@@ -217,6 +230,10 @@ pub struct ComponentStorage<'a, T> {
 impl<'a, T> ComponentStorage<'a, T> {
     pub fn get(&self, index: u32) -> Option<&T> {
         unsafe { self.raw.get::<T>(index) }
+    }
+
+    pub fn entries(&self) -> &BitSet {
+        self.raw.entries()
     }
 }
 
@@ -246,8 +263,8 @@ impl<'a, T> ComponentStorageMut<'a, T> {
         unsafe { self.raw.get_mut_unchecked(index) }
     }
 
-    pub fn events(&mut self) -> Vec<Event> {
-        self.raw.events()
+    pub fn events(&mut self) -> Vec<Event<T>> {
+        unsafe { self.raw.events() }
     }
 
     pub fn contains(&self, index: u32) -> bool {
@@ -284,7 +301,7 @@ impl<T> LockedStorage<T> {
 
 pub struct Entities {
     free_indices: BitSet,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
 }
 
 impl Entities {
@@ -293,14 +310,27 @@ impl Entities {
             self.free_indices.remove(index);
             index as u32
         } else {
-            self.allocated_count.fetch_add(1, atomic::Ordering::Relaxed)
+            self.entity_allocated_count
+                .fetch_add(1, atomic::Ordering::Relaxed)
         }
+    }
+}
+
+#[derive(Default)]
+pub struct Resources(AHashMap<TypeId, Box<dyn Any + Send + Sync>>);
+
+impl Resources {
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.0
+            .get(&TypeId::of::<T>())
+            .map(|v| v.downcast_ref::<Box<T>>().unwrap().as_ref())
     }
 }
 
 pub struct Scene {
     entities: Arc<Mutex<Entities>>,
-    allocated_count: Arc<AtomicU32>,
+    entity_allocated_count: Arc<AtomicU32>,
+    resources: Arc<RwLock<Resources>>,
     comp_storages: Mutex<AHashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
 }
 
@@ -311,11 +341,24 @@ impl Scene {
         Scene {
             entities: Arc::new(Mutex::new(Entities {
                 free_indices: Default::default(),
-                allocated_count: Arc::clone(&entity_count),
+                entity_allocated_count: Arc::clone(&entity_count),
             })),
-            allocated_count: entity_count,
+            entity_allocated_count: entity_count,
+            resources: Default::default(),
             comp_storages: Mutex::new(Default::default()),
         }
+    }
+
+    pub fn add_resource<T>(&self, resource: T)
+    where
+        T: 'static + Send + Sync,
+    {
+        self.resources
+            .write()
+            .unwrap()
+            .0
+            .insert(TypeId::of::<T>(), Box::new(resource))
+            .unwrap();
     }
 
     pub fn create_entity(&self) -> u32 {
@@ -338,6 +381,10 @@ impl Scene {
         }
     }
 
+    pub fn resources(&self) -> Arc<RwLock<Resources>> {
+        Arc::clone(&self.resources)
+    }
+
     pub fn entities(&self) -> &Arc<Mutex<Entities>> {
         &self.entities
     }
@@ -349,7 +396,7 @@ impl Scene {
         let raw_storage = match self.comp_storages.lock().unwrap().entry(TypeId::of::<T>()) {
             hash_map::Entry::Occupied(e) => Arc::clone(e.get()),
             hash_map::Entry::Vacant(e) => Arc::clone(e.insert(Arc::new(RwLock::new(
-                RawComponentStorage::new::<T>(&self.allocated_count),
+                RawComponentStorage::new::<T>(&self.entity_allocated_count),
             )))),
         };
 

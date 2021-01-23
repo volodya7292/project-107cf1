@@ -130,7 +130,7 @@ impl Program {
 
             self.cursor_rel = (0, 0);
 
-            //dbg!(camera.position());
+            // dbg!(camera.position());
         }
     }
 }
