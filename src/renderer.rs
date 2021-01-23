@@ -482,6 +482,8 @@ impl Renderer {
         let object_count = renderables.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
+        // TODO: inspect deleted renderables to free their descriptors
+
         // Record depth object rendering
         // -------------------------------------------------------------------------------------------------------------
         // let t0 = Instant::now();
@@ -589,6 +591,7 @@ impl Renderer {
             subpass_index: 0,
             cull_back_faces: true,
         };
+        let t0 = Instant::now();
         self.secondary_cmd_lists
             .par_iter()
             .enumerate()
@@ -651,6 +654,8 @@ impl Renderer {
 
                 cl.end().unwrap();
             });
+        let t1 = Instant::now();
+        // println!("g rec {}", (t1 - t0).as_secs_f64());
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
@@ -701,11 +706,11 @@ impl Renderer {
             let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0);
 
             cl.barrier_image(
-                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
                 PipelineStageFlags::TRANSFER,
                 &[
                     albedo.barrier_queue(
-                        AccessFlags::COLOR_ATTACHMENT_WRITE,
+                        AccessFlags::default(),
                         AccessFlags::TRANSFER_READ,
                         ImageLayout::SHADER_READ,
                         ImageLayout::TRANSFER_SRC,
