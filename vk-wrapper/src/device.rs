@@ -207,6 +207,7 @@ impl Device {
         Ok(Arc::new(DeviceBuffer { buffer }))
     }
 
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
     fn create_image(
         self: &Arc<Self>,
         image_type: ImageType,
@@ -248,7 +249,11 @@ impl Device {
                 1,
             )
         };
-        let mip_levels = max_mip_levels.min(format_props.max_mip_levels);
+        let mip_levels = if max_mip_levels == 0 {
+            utils::log2(size.0.max(size.1).max(size.2)) + 1
+        } else {
+            max_mip_levels.min(format_props.max_mip_levels)
+        };
 
         let image_info = vk::ImageCreateInfo::builder()
             .image_type(image_type.0)
@@ -326,11 +331,11 @@ impl Device {
                 .address_mode_u(vk::SamplerAddressMode::REPEAT)
                 .address_mode_v(vk::SamplerAddressMode::REPEAT)
                 .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                .anisotropy_enable(max_anisotropy != 1f32)
+                .anisotropy_enable(max_anisotropy != 1_f32)
                 .max_anisotropy(max_anisotropy)
                 .compare_enable(false)
                 .min_lod(0.0)
-                .max_lod(max_mip_levels as f32 - 1.0)
+                .max_lod(mip_levels as f32 - 1.0)
                 .unnormalized_coordinates(false);
             let sampler = unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? };
 
