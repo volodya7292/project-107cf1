@@ -710,7 +710,7 @@ impl Renderer {
                 PipelineStageFlags::TRANSFER,
                 &[
                     albedo.barrier_queue(
-                        AccessFlags::default(),
+                        AccessFlags::COLOR_ATTACHMENT_WRITE,
                         AccessFlags::TRANSFER_READ,
                         ImageLayout::SHADER_READ,
                         ImageLayout::TRANSFER_SRC,
