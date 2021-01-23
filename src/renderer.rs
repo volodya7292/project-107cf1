@@ -482,11 +482,8 @@ impl Renderer {
         let object_count = renderables.len();
         let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
 
-        // TODO: inspect deleted renderables to free their descriptors
-
         // Record depth object rendering
         // -------------------------------------------------------------------------------------------------------------
-        // let t0 = Instant::now();
         self.secondary_cmd_lists
             .par_iter()
             .enumerate()
@@ -560,9 +557,6 @@ impl Renderer {
                 cl.end().unwrap();
             });
 
-        // let t1 = Instant::now();
-        // println!("update_: {}", (t1 - t0).as_secs_f64());
-
         // Record depth cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
@@ -583,6 +577,8 @@ impl Renderer {
             graphics_queue.submit(&mut submit).unwrap();
             submit.wait().unwrap();
         }
+
+        // TODO: separate depth & g-buffer cmd lists (for performance reasons)
 
         // Record g-buffer object rendering
         // -------------------------------------------------------------------------------------------------------------
@@ -609,7 +605,6 @@ impl Renderer {
                 let used_g_per_frame_pool = cl.use_descriptor_pool(Arc::clone(&self.g_per_frame_pool));
                 let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
 
-                let t0 = Instant::now();
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
                     if entity_index >= object_count {
@@ -638,7 +633,6 @@ impl Renderer {
                     let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
                     let signature = pipeline.signature();
 
-                    // Arc::clone(&self.g_per_frame_in);
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
                         cl.bind_graphics_input(&signature, 0, used_g_per_frame_pool, self.g_per_frame_in);
@@ -655,7 +649,7 @@ impl Renderer {
                 cl.end().unwrap();
             });
         let t1 = Instant::now();
-        // println!("g rec {}", (t1 - t0).as_secs_f64());
+        println!("g rec {}", (t1 - t0).as_secs_f64());
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
@@ -895,7 +889,7 @@ pub fn new(
 
     // Create secondary cmd lists for multithread recording
     let mut secondary_cmd_lists = vec![];
-    for _ in 0..num_cpus::get() {
+    for _ in 0..num_cpus::get_physical().min(8) {
         secondary_cmd_lists.push(graphics_queue.create_secondary_cmd_list()?);
     }
 

@@ -5,7 +5,7 @@ use crate::{
     BufferBarrier, ClearValue, DescriptorPool, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier,
     ImageLayout, Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
-use ahash::AHashSet;
+use ahash::AHashMap;
 use ash::{version::DeviceV1_0, vk};
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr};
@@ -23,10 +23,10 @@ pub struct CmdList {
     pub(crate) render_passes: Vec<Arc<RenderPass>>,
     pub(crate) framebuffers: Vec<Arc<Framebuffer>>,
     pub(crate) secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
-    pub(crate) pipelines: AHashSet<Arc<Pipeline>>,
+    pub(crate) pipelines: AHashMap<Arc<Pipeline>, bool>,
     pub(crate) pipeline_signatures: Vec<Arc<PipelineSignature>>,
     pub(crate) descriptor_pools: Vec<UsedDescriptorPool>,
-    pub(crate) buffers: Vec<Arc<Buffer>>,
+    pub(crate) buffers: AHashMap<Arc<Buffer>, bool>,
     pub(crate) images: Vec<Arc<Image>>,
     pub(crate) query_pools: Vec<Arc<QueryPool>>,
     pub(crate) last_pipeline: *const Pipeline,
@@ -39,13 +39,38 @@ impl CmdList {
         self.render_passes.clear();
         self.framebuffers.clear();
         self.secondary_cmd_lists.clear();
-        self.pipelines.clear();
         self.pipeline_signatures.clear();
         self.descriptor_pools.clear();
-        self.buffers.clear();
         self.images.clear();
         self.query_pools.clear();
         self.last_pipeline = ptr::null();
+
+        self.pipelines.retain(|_, v| {
+            let save = *v;
+            *v = false;
+            save
+        });
+        self.buffers.retain(|_, v| {
+            let save = *v;
+            *v = false;
+            save
+        });
+    }
+
+    fn use_pipeline(&mut self, pipeline: &Arc<Pipeline>) {
+        if let Some(a) = self.pipelines.get_mut(pipeline) {
+            *a = true;
+        } else {
+            self.pipelines.insert(Arc::clone(pipeline), true);
+        }
+    }
+
+    fn use_buffer(&mut self, buffer: &Arc<Buffer>) {
+        if let Some(a) = self.buffers.get_mut(buffer) {
+            *a = true;
+        } else {
+            self.buffers.insert(Arc::clone(buffer), true);
+        }
     }
 
     pub fn begin(&mut self, one_time_execution: bool) -> Result<(), vk::Result> {
@@ -244,15 +269,14 @@ impl CmdList {
         if Arc::as_ptr(pipeline) == self.last_pipeline {
             return true;
         }
+
         unsafe {
             self.device_wrapper
                 .0
                 .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
         };
 
-        // if !self.pipelines.contains(pipeline) {
-        //     self.pipelines.insert(Arc::clone(pipeline));
-        // }
+        self.use_pipeline(pipeline);
         self.last_pipeline = Arc::as_ptr(pipeline);
 
         false
@@ -316,12 +340,10 @@ impl CmdList {
         let mut native_buffers = [vk::Buffer::default(); 16];
         let mut offsets = [0u64; 16];
 
-        self.buffers.reserve(buffers.len());
-
         for (i, (buffer, offset)) in buffers.iter().enumerate() {
             native_buffers[i] = buffer.buffer.native;
             offsets[i] = *offset;
-            self.buffers.push(Arc::clone(&buffer.buffer));
+            self.use_buffer(&buffer.buffer);
         }
 
         unsafe {
@@ -343,7 +365,8 @@ impl CmdList {
                 vk::IndexType::UINT32,
             )
         };
-        self.buffers.push(Arc::clone(&buffer.buffer));
+
+        self.use_buffer(&buffer.buffer);
     }
 
     pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
@@ -387,8 +410,9 @@ impl CmdList {
                 &[region],
             )
         };
-        self.buffers
-            .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
+
+        self.use_buffer(&src_buffer.buffer);
+        self.use_buffer(&dst_buffer.buffer);
     }
 
     pub fn copy_buffer_to_host<T>(
@@ -416,8 +440,9 @@ impl CmdList {
                 &[region],
             )
         };
-        self.buffers
-            .extend_from_slice(&[Arc::clone(&src_buffer.buffer), Arc::clone(&dst_buffer.buffer)]);
+
+        self.use_buffer(&src_buffer.buffer);
+        self.use_buffer(&dst_buffer.buffer);
     }
 
     pub fn copy_host_buffer_to_image_2d(
@@ -462,7 +487,7 @@ impl CmdList {
             )
         };
 
-        self.buffers.push(Arc::clone(&src_buffer.buffer));
+        self.use_buffer(&src_buffer.buffer);
         self.images.push(Arc::clone(dst_image));
     }
 
@@ -612,7 +637,7 @@ impl CmdList {
             )
         };
         self.query_pools.push(Arc::clone(query_pool));
-        self.buffers.push(Arc::clone(&dst_buffer.buffer));
+        self.use_buffer(&dst_buffer.buffer);
     }
 
     pub fn clear_image(&mut self, image: &Arc<Image>, layout: ImageLayout, color: ClearValue) {
@@ -661,7 +686,7 @@ impl CmdList {
             .to_vec()
             .iter()
             .map(|v| {
-                self.buffers.push(Arc::clone(&v.buffer));
+                self.use_buffer(&v.buffer);
                 v.native
             })
             .collect();

@@ -1,3 +1,4 @@
+use crate::renderer::component::{Renderer, VertexMesh};
 use crate::renderer::scene::Event;
 use crate::renderer::{component, scene, BufferUpdate};
 use nalgebra as na;
@@ -53,6 +54,15 @@ impl RendererCompEventsSystem {
         );
     }
 
+    fn renderer_comp_removed(
+        renderer: &mut component::Renderer,
+        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
+        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+    ) {
+        depth_per_object_pool.free(renderer.pipeline_inputs[0]);
+        model_inputs_pool.free(renderer.pipeline_inputs[1]);
+    }
+
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
@@ -82,7 +92,13 @@ impl RendererCompEventsSystem {
                         &mut model_inputs_pool,
                     );
                 }
-                _ => {}
+                Event::Removed(_, mut renderer) => {
+                    Self::renderer_comp_removed(
+                        &mut renderer,
+                        &mut depth_per_object_pool,
+                        &mut model_inputs_pool,
+                    );
+                }
             }
         }
     }
@@ -123,15 +139,15 @@ impl VertexMeshCompEventsSystem {
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
 
-            for &event in &events {
+            for event in &events {
                 match event {
                     scene::Event::Created(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
                     }
                     scene::Event::Modified(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(i).unwrap(), &mut *cl);
+                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
                     }
-                    scene::Event::Removed(_) => {}
+                    _ => {}
                 }
             }
 

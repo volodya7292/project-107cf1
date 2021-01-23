@@ -44,7 +44,7 @@ impl Queue {
             pipelines: Default::default(),
             pipeline_signatures: vec![],
             descriptor_pools: vec![],
-            buffers: vec![],
+            buffers: Default::default(),
             images: vec![],
             query_pools: Default::default(),
             last_pipeline: ptr::null(),
