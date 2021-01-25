@@ -12,6 +12,7 @@ pub mod entry;
 pub mod format;
 pub mod framebuffer;
 pub mod image;
+pub mod image_view;
 pub mod instance;
 pub mod pipeline;
 pub mod pipeline_signature;
@@ -23,6 +24,7 @@ pub mod surface;
 pub mod swapchain;
 
 use buffer::Buffer;
+use image::ImageWrapper;
 use semaphore::Semaphore;
 use swapchain::SwapchainWrapper;
 
@@ -49,6 +51,7 @@ pub use image::ImageBarrier;
 pub use image::ImageLayout;
 pub use image::ImageType;
 pub use image::ImageUsageFlags;
+pub use image_view::ImageView;
 pub use instance::Instance;
 pub use pipeline::AccessFlags;
 pub use pipeline::Pipeline;

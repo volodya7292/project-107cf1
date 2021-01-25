@@ -11,17 +11,18 @@ mod systems;
 pub use scene::Scene;
 pub use vertex_mesh::VertexMesh;
 
-use crate::renderer::material_pipeline::{MaterialPipeline, PipelineMapping};
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use ktx::KtxInfo;
+use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use rayon::prelude::*;
+use scene::ComponentStorage;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::{mem, slice};
+use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
@@ -60,7 +61,8 @@ pub struct Renderer {
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
     occlusion_buffer: HostBuffer<u32>,
-    secondary_cmd_lists: Vec<Arc<Mutex<CmdList>>>,
+    depth_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
+    g_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
 
     depth_render_pass: Arc<RenderPass>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
@@ -70,6 +72,9 @@ pub struct Renderer {
     depth_per_object_pool: Arc<DescriptorPool>,
     depth_per_frame_pool: Arc<DescriptorPool>,
     depth_per_frame_in: u32,
+
+    depth_pyramid_pipeline: Arc<Pipeline>,
+    depth_pyramid_signature: Arc<PipelineSignature>,
 
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
@@ -283,79 +288,6 @@ impl Renderer {
         self.settings = settings;
     }
 
-    pub fn on_resize(&mut self, new_size: (u32, u32)) {
-        self.surface_size = new_size;
-        self.surface_changed = true;
-
-        // Set camera aspect
-        {
-            let entity = self.get_active_camera();
-            let camera_comps = self.scene.storage::<component::Camera>();
-            let mut camera_comps = camera_comps.write().unwrap();
-            let camera = camera_comps.get_mut(entity).unwrap();
-            camera.set_aspect(new_size.0, new_size.1);
-        }
-
-        self.depth_framebuffer = Some(self.depth_render_pass.create_framebuffer(new_size, &[]).unwrap());
-
-        self.g_framebuffer = Some(
-            self.g_render_pass
-                .create_framebuffer(
-                    new_size,
-                    &[
-                        (
-                            0,
-                            ImageMod::AdditionalUsage(
-                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::TRANSFER_SRC,
-                            ),
-                        ),
-                        (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (2, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (3, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (
-                            4,
-                            ImageMod::OverrideImage(self.depth_framebuffer.as_ref().unwrap().get_image(0)),
-                        ),
-                        (
-                            5,
-                            ImageMod::OverrideImage(
-                                self.device
-                                    .create_image_2d(
-                                        Format::R32_UINT,
-                                        1,
-                                        1.0,
-                                        ImageUsageFlags::STORAGE,
-                                        new_size,
-                                    )
-                                    .unwrap(),
-                            ),
-                        ),
-                    ],
-                )
-                .unwrap(),
-        );
-
-        self.translucency_head_image = Some(
-            self.device
-                .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
-                .unwrap(),
-        );
-
-        self.translucency_texel_image = Some(
-            self.device
-                .create_image_3d(
-                    vkw::Format::RG32_UINT, // color & depth
-                    vkw::ImageUsageFlags::STORAGE,
-                    (
-                        new_size.0,
-                        new_size.1,
-                        self.settings.translucency_max_depth as u32,
-                    ),
-                )
-                .unwrap(),
-        )
-    }
-
     pub fn on_update(&mut self) {
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
@@ -462,29 +394,18 @@ impl Renderer {
         // println!("{}", (t2 - t).as_secs_f64());
     }
 
-    fn on_render(&mut self, sw_image: &SwapchainImage) {
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
-        let camera = {
-            let camera_comps = self.scene.storage::<component::Camera>();
-            let camera_comps = camera_comps.read().unwrap();
-            *camera_comps.get(self.get_active_camera()).unwrap()
-        };
-
-        let world_transform_comp = self.scene.storage::<component::WorldTransform>();
-        let world_transform_comps = world_transform_comp.read().unwrap();
-        let renderer_comp = self.scene.storage::<component::Renderer>();
-        let renderer_comps = renderer_comp.read().unwrap();
-        let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
-        let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
-
-        let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
+    fn record_depth_cmd_lists(
+        &self,
+        renderables: &[u32],
+        camera: &component::Camera,
+        world_transform_comps: &ComponentStorage<component::WorldTransform>,
+        renderer_comps: &ComponentStorage<component::Renderer>,
+        vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
+    ) {
         let object_count = renderables.len();
-        let draw_count_step = object_count / self.secondary_cmd_lists.len() + 1;
+        let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
 
-        // Record depth object rendering
-        // -------------------------------------------------------------------------------------------------------------
-        self.secondary_cmd_lists
+        self.depth_secondary_cls
             .par_iter()
             .enumerate()
             .for_each(|(i, cmd_list)| {
@@ -556,39 +477,24 @@ impl Renderer {
 
                 cl.end().unwrap();
             });
+    }
 
-        // Record depth cmd list
-        // -------------------------------------------------------------------------------------------------------------
-        {
-            let mut cl = self.staging_cl.lock().unwrap();
-            cl.begin(true).unwrap();
-            cl.begin_render_pass(
-                &self.depth_render_pass,
-                self.depth_framebuffer.as_ref().unwrap(),
-                &[ClearValue::Depth(1.0)],
-                true,
-            );
-            cl.execute_secondary(&self.secondary_cmd_lists);
-            cl.end_render_pass();
-            cl.end().unwrap();
-        }
-        {
-            let mut submit = self.staging_submit.lock().unwrap();
-            graphics_queue.submit(&mut submit).unwrap();
-            submit.wait().unwrap();
-        }
+    fn record_g_cmd_lists(
+        &self,
+        renderables: &[u32],
+        renderer_comps: &ComponentStorage<component::Renderer>,
+        vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
+    ) {
+        let object_count = renderables.len();
+        let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
 
-        // TODO: separate depth & g-buffer cmd lists (for performance reasons)
-
-        // Record g-buffer object rendering
-        // -------------------------------------------------------------------------------------------------------------
         let pipeline_mapping = PipelineMapping {
             render_pass: Arc::clone(&self.g_render_pass),
             subpass_index: 0,
             cull_back_faces: true,
         };
-        let t0 = Instant::now();
-        self.secondary_cmd_lists
+
+        self.g_secondary_cls
             .par_iter()
             .enumerate()
             .for_each(|(i, cmd_list)| {
@@ -648,8 +554,73 @@ impl Renderer {
 
                 cl.end().unwrap();
             });
-        let t1 = Instant::now();
-        println!("g rec {}", (t1 - t0).as_secs_f64());
+    }
+
+    fn on_render(&mut self, sw_image: &SwapchainImage) {
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+
+        let camera = {
+            let camera_comps = self.scene.storage::<component::Camera>();
+            let camera_comps = camera_comps.read().unwrap();
+            *camera_comps.get(self.get_active_camera()).unwrap()
+        };
+
+        let world_transform_comp = self.scene.storage::<component::WorldTransform>();
+        let world_transform_comps = world_transform_comp.read().unwrap();
+        let renderer_comp = self.scene.storage::<component::Renderer>();
+        let renderer_comps = renderer_comp.read().unwrap();
+        let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
+        let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
+
+        let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
+        let object_count = renderables.len();
+
+        self.record_depth_cmd_lists(
+            &renderables,
+            &camera,
+            &world_transform_comps,
+            &renderer_comps,
+            &vertex_mesh_comps,
+        );
+
+        // TODO: separate images & image views
+
+        // Record depth cmd list
+        // -------------------------------------------------------------------------------------------------------------
+        {
+            let mut cl = self.staging_cl.lock().unwrap();
+            cl.begin(true).unwrap();
+            cl.begin_render_pass(
+                &self.depth_render_pass,
+                self.depth_framebuffer.as_ref().unwrap(),
+                &[ClearValue::Depth(1.0)],
+                true,
+            );
+            cl.execute_secondary(&self.depth_secondary_cls);
+            cl.end_render_pass();
+
+            let depth_image = self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
+            // let d = depth_image.create_view().mip_level_count(0).build().unwrap();
+
+            cl.barrier_image(
+                PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                PipelineStageFlags::COMPUTE,
+                &[depth_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .old_layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT)
+                    .new_layout(ImageLayout::DEPTH_READ)],
+            );
+            cl.end().unwrap();
+        }
+        {
+            let mut submit = self.staging_submit.lock().unwrap();
+            graphics_queue.submit(&mut submit).unwrap();
+            submit.wait().unwrap();
+        }
+
+        self.record_g_cmd_lists(&renderables, &renderer_comps, &vertex_mesh_comps);
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
@@ -693,11 +664,13 @@ impl Renderer {
                 ],
                 true,
             );
-            cl.execute_secondary(&self.secondary_cmd_lists);
+            cl.execute_secondary(&self.g_secondary_cls);
             cl.end_render_pass();
 
-            let sw_image = self.sw_framebuffers[sw_image.get_index() as usize].get_image(0);
-            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0);
+            let sw_image = self.sw_framebuffers[sw_image.get_index() as usize]
+                .get_image(0)
+                .unwrap();
+            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
 
             cl.barrier_image(
                 PipelineStageFlags::BOTTOM_OF_PIPE,
@@ -829,6 +802,95 @@ impl Renderer {
         }
     }
 
+    pub fn on_resize(&mut self, new_size: (u32, u32)) {
+        self.surface_size = new_size;
+        self.surface_changed = true;
+
+        // Set camera aspect
+        {
+            let entity = self.get_active_camera();
+            let camera_comps = self.scene.storage::<component::Camera>();
+            let mut camera_comps = camera_comps.write().unwrap();
+            let camera = camera_comps.get_mut(entity).unwrap();
+            camera.set_aspect(new_size.0, new_size.1);
+        }
+
+        let depth_image = self
+            .device
+            .create_image_2d(
+                Format::D32_FLOAT,
+                0,
+                1.0,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                new_size,
+            )
+            .unwrap();
+        self.depth_framebuffer = Some(
+            self.depth_render_pass
+                .create_framebuffer(new_size, &[(0, ImageMod::OverrideImage(depth_image))])
+                .unwrap(),
+        );
+
+        self.g_framebuffer = Some(
+            self.g_render_pass
+                .create_framebuffer(
+                    new_size,
+                    &[
+                        (
+                            0,
+                            ImageMod::AdditionalUsage(
+                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::TRANSFER_SRC,
+                            ),
+                        ),
+                        (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
+                        (2, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
+                        (3, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
+                        (
+                            4,
+                            ImageMod::OverrideImage(Arc::clone(
+                                self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap(),
+                            )),
+                        ),
+                        (
+                            5,
+                            ImageMod::OverrideImage(
+                                self.device
+                                    .create_image_2d(
+                                        Format::R32_UINT,
+                                        1,
+                                        1.0,
+                                        ImageUsageFlags::STORAGE,
+                                        new_size,
+                                    )
+                                    .unwrap(),
+                            ),
+                        ),
+                    ],
+                )
+                .unwrap(),
+        );
+
+        self.translucency_head_image = Some(
+            self.device
+                .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
+                .unwrap(),
+        );
+
+        self.translucency_texel_image = Some(
+            self.device
+                .create_image_3d(
+                    vkw::Format::RG32_UINT, // color & depth
+                    vkw::ImageUsageFlags::STORAGE,
+                    (
+                        new_size.0,
+                        new_size.1,
+                        self.settings.translucency_max_depth as u32,
+                    ),
+                )
+                .unwrap(),
+        )
+    }
+
     fn create_main_framebuffers(&mut self) {
         self.sw_framebuffers.clear();
 
@@ -887,11 +949,15 @@ pub fn new(
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
-    // Create secondary cmd lists for multithread recording
-    let mut secondary_cmd_lists = vec![];
-    for _ in 0..num_cpus::get_physical().min(8) {
-        secondary_cmd_lists.push(graphics_queue.create_secondary_cmd_list()?);
-    }
+    // Create secondary cmd lists for multi-threaded recording
+    let phys_cores = num_cpus::get_physical();
+
+    let mut depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+        .take(phys_cores)
+        .collect();
+    let mut g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+        .take(phys_cores)
+        .collect();
 
     // Create per-frame uniform buffer
     let per_frame_uniform_buffer = device.create_device_buffer(
@@ -942,6 +1008,25 @@ pub fn new(
     )?;
     let depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
     let depth_per_frame_in = depth_per_frame_pool.lock().unwrap().alloc()?;
+
+    // Depth pyramid pipeline
+    // -----------------------------------------------------------------------------------------------------------------
+
+    let depth_pyramid_compute = device
+        .create_shader(
+            &resources
+                .get("shaders/depth_pyramid.comp.spv")
+                .unwrap()
+                .read()
+                .unwrap(),
+            &[],
+            &[],
+        )
+        .unwrap();
+    let depth_pyramid_signature = device
+        .create_pipeline_signature(&[depth_pyramid_compute])
+        .unwrap();
+    let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1165,7 +1250,8 @@ pub fn new(
             vkw::BufferUsageFlags::TRANSFER_DST,
             (mem::size_of::<u32>() * 65535) as u64,
         )?,
-        secondary_cmd_lists,
+        depth_secondary_cls,
+        g_secondary_cls,
         depth_render_pass,
         depth_framebuffer: None,
         depth_signature: Arc::clone(&depth_signature),
@@ -1173,6 +1259,7 @@ pub fn new(
         depth_pipeline_rw,
         depth_per_frame_pool,
         depth_per_frame_in,
+        depth_pyramid_pipeline,
         depth_per_object_pool: depth_signature.create_pool(1, 65535)?,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
@@ -1185,6 +1272,7 @@ pub fn new(
         model_inputs_pool: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
         active_camera,
         camera_uniform_buffer: per_frame_uniform_buffer,
+        depth_pyramid_signature,
     };
     renderer.on_resize(size);
 

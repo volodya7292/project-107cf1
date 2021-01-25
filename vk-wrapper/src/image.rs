@@ -1,5 +1,5 @@
 use crate::swapchain::SwapchainWrapper;
-use crate::{AccessFlags, Device, Format, Queue};
+use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::Arc;
@@ -43,18 +43,111 @@ pub struct ImageBarrier {
     pub(crate) image: Arc<Image>,
 }
 
-pub struct Image {
+impl ImageBarrier {
+    pub fn src_access_mask(mut self, src_access_mask: AccessFlags) -> Self {
+        self.native.src_access_mask = src_access_mask.0;
+        self
+    }
+
+    pub fn dst_access_mask(mut self, dst_access_mask: AccessFlags) -> Self {
+        self.native.dst_access_mask = dst_access_mask.0;
+        self
+    }
+
+    pub fn old_layout(mut self, old_layout: ImageLayout) -> Self {
+        self.native.old_layout = old_layout.0;
+        self
+    }
+
+    pub fn new_layout(mut self, new_layout: ImageLayout) -> Self {
+        self.native.new_layout = new_layout.0;
+        self
+    }
+}
+
+pub(in crate) struct ImageWrapper {
     pub(crate) device: Arc<Device>,
     pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,
-    pub(crate) view: vk::ImageView,
-    pub(crate) sampler: vk::Sampler,
-    pub(crate) aspect: vk::ImageAspectFlags,
     pub(crate) owned_handle: bool,
+    pub(crate) ty: ImageType,
     pub(crate) format: Format,
+    pub(crate) aspect: vk::ImageAspectFlags,
+}
+
+impl ImageWrapper {
+    pub fn create_view(self: &Arc<Self>) -> ImageViewBuilder {
+        let ty = match self.ty {
+            ImageType(vk::ImageType::TYPE_2D) => vk::ImageViewType::TYPE_2D,
+            ImageType(vk::ImageType::TYPE_3D) => vk::ImageViewType::TYPE_3D,
+            _ => {
+                unreachable!()
+            }
+        };
+
+        ImageViewBuilder {
+            image_wrapper: Arc::clone(self),
+            info: vk::ImageViewCreateInfo::builder()
+                .image(self.native)
+                .view_type(ty)
+                .format(self.format.0)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                })
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: self.aspect,
+                    base_mip_level: 0,
+                    level_count: vk::REMAINING_MIP_LEVELS,
+                    base_array_layer: 0,
+                    layer_count: vk::REMAINING_ARRAY_LAYERS,
+                })
+                .build(),
+        }
+    }
+}
+
+pub struct Image {
+    pub(crate) wrapper: Arc<ImageWrapper>,
+    pub(crate) view: Arc<ImageView>,
+    pub(crate) sampler: vk::Sampler,
     pub(crate) size: (u32, u32, u32),
     pub(crate) mip_levels: u32,
+}
+
+pub struct ImageViewBuilder {
+    image_wrapper: Arc<ImageWrapper>,
+    info: vk::ImageViewCreateInfo,
+}
+
+impl ImageViewBuilder {
+    pub fn base_mip_level(mut self, level: u32) -> Self {
+        self.info.subresource_range.base_mip_level = level;
+        self
+    }
+
+    pub fn mip_level_count(mut self, count: u32) -> Self {
+        self.info.subresource_range.level_count = count;
+        self
+    }
+
+    pub fn build(self) -> Result<Arc<ImageView>, DeviceError> {
+        let native = unsafe {
+            self.image_wrapper
+                .device
+                .wrapper
+                .0
+                .create_image_view(&self.info, None)?
+        };
+
+        Ok(Arc::new(ImageView {
+            image_wrapper: self.image_wrapper,
+            native,
+        }))
+    }
 }
 
 impl Image {
@@ -70,11 +163,15 @@ impl Image {
     }
 
     pub fn format(&self) -> Format {
-        self.format
+        self.wrapper.format
     }
 
     pub fn mip_levels(&self) -> u32 {
         self.mip_levels
+    }
+
+    pub fn create_view(&self) -> ImageViewBuilder {
+        self.wrapper.create_view()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -97,10 +194,10 @@ impl Image {
                 .new_layout(new_layout.0)
                 .src_queue_family_index(src_queue.family_index)
                 .dst_queue_family_index(dst_queue.family_index)
-                .image(self.native)
+                .image(self.wrapper.native)
                 .subresource_range(
                     vk::ImageSubresourceRange::builder()
-                        .aspect_mask(self.aspect)
+                        .aspect_mask(self.wrapper.aspect)
                         .base_mip_level(base_mip_level)
                         .level_count(level_count)
                         .base_array_layer(0)
@@ -132,23 +229,45 @@ impl Image {
             vk::REMAINING_MIP_LEVELS,
         )
     }
+
+    pub fn barrier(self: &Arc<Self>) -> ImageBarrier {
+        ImageBarrier {
+            native: vk::ImageMemoryBarrier::builder()
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(self.wrapper.native)
+                .subresource_range(
+                    vk::ImageSubresourceRange::builder()
+                        .aspect_mask(self.wrapper.aspect)
+                        .base_mip_level(0)
+                        .level_count(vk::REMAINING_MIP_LEVELS)
+                        .base_array_layer(0)
+                        .layer_count(vk::REMAINING_ARRAY_LAYERS)
+                        .build(),
+                )
+                .build(),
+            image: Arc::clone(self),
+        }
+    }
+}
+
+impl Drop for ImageWrapper {
+    fn drop(&mut self) {
+        if self.owned_handle {
+            self.device
+                .allocator
+                .destroy_image(self.native, &self.allocation)
+                .unwrap();
+        }
+    }
 }
 
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
             if self.sampler != vk::Sampler::default() {
-                self.device.wrapper.0.destroy_sampler(self.sampler, None);
+                self.wrapper.device.wrapper.0.destroy_sampler(self.sampler, None);
             }
-            if self.view != vk::ImageView::default() {
-                self.device.wrapper.0.destroy_image_view(self.view, None);
-            }
-        }
-        if self.owned_handle {
-            self.device
-                .allocator
-                .destroy_image(self.native, &self.allocation)
-                .unwrap();
         }
     }
 }

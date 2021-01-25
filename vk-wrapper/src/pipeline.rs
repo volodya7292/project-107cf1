@@ -13,6 +13,8 @@ impl PipelineStageFlags {
     pub const TRANSFER: Self = Self(vk::PipelineStageFlags::TRANSFER);
     pub const COLOR_ATTACHMENT_OUTPUT: Self = Self(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
     pub const PIXEL_SHADER: Self = Self(vk::PipelineStageFlags::FRAGMENT_SHADER);
+    pub const LATE_FRAGMENT_TESTS: Self = Self(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS);
+    pub const COMPUTE: Self = Self(vk::PipelineStageFlags::COMPUTE_SHADER);
     pub const BOTTOM_OF_PIPE: Self = Self(vk::PipelineStageFlags::BOTTOM_OF_PIPE);
     pub const ALL_GRAPHICS: Self = Self(vk::PipelineStageFlags::ALL_GRAPHICS);
     pub const ALL_COMMANDS: Self = Self(vk::PipelineStageFlags::ALL_COMMANDS);
@@ -25,6 +27,7 @@ vk_bitflags_impl!(AccessFlags, vk::AccessFlags);
 impl AccessFlags {
     pub const COLOR_ATTACHMENT_READ: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_READ);
     pub const COLOR_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+    pub const DEPTH_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
     pub const UNIFORM_READ: Self = Self(vk::AccessFlags::UNIFORM_READ);
     pub const TRANSFER_READ: Self = Self(vk::AccessFlags::TRANSFER_READ);
     pub const TRANSFER_WRITE: Self = Self(vk::AccessFlags::TRANSFER_WRITE);

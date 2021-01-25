@@ -232,9 +232,8 @@ fn main() {
         renderer.lock().unwrap().on_draw();
 
         let end_t = Instant::now();
-        let t = end_t.duration_since(start_t);
-        delta_time = t.as_secs_f64();
+        delta_time = (end_t - start_t).as_secs_f64();
 
-        println!("{} - {}", delta_time, 1.0 / delta_time);
+        println!("{}", delta_time);
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Device, DeviceBuffer, Image, ImageLayout, PipelineSignature};
+use crate::{Device, DeviceBuffer, Image, ImageLayout, ImageView, PipelineSignature};
 use ahash::AHashMap;
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -36,7 +36,7 @@ pub struct DescriptorPoolWrapper {
     pub(crate) allocated: Vec<vk::DescriptorSet>,
     pub(crate) free_sets: BitSet,
     pub(crate) _used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
-    pub(crate) _used_images: AHashMap<BindingMapping, Arc<Image>>,
+    pub(crate) _used_image_views: AHashMap<BindingMapping, Arc<ImageView>>,
 }
 
 pub struct DescriptorPool(pub(in crate) Mutex<DescriptorPoolWrapper>);
@@ -110,12 +110,12 @@ impl DescriptorPoolWrapper {
                 BindingRes::Image(image, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
                         sampler: image.sampler,
-                        image_view: image.view,
+                        image_view: image.view.native,
                         image_layout: layout.0,
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
 
-                    self._used_images.insert(mapping, Arc::clone(image));
+                    self._used_image_views.insert(mapping, Arc::clone(&image.view));
                 }
             }
 

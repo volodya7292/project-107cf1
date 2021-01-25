@@ -460,7 +460,7 @@ impl CmdList {
             buffer_row_length: 0,
             buffer_image_height: 0,
             image_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: dst_image.aspect,
+                aspect_mask: dst_image.wrapper.aspect,
                 mip_level: dst_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
@@ -481,7 +481,7 @@ impl CmdList {
             self.device_wrapper.0.cmd_copy_buffer_to_image(
                 self.native,
                 src_buffer.buffer.native,
-                dst_image.native,
+                dst_image.wrapper.native,
                 dst_image_layout.0,
                 &[region],
             )
@@ -505,7 +505,7 @@ impl CmdList {
     ) {
         let region = vk::ImageCopy {
             src_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: src_image.aspect,
+                aspect_mask: src_image.wrapper.aspect,
                 mip_level: src_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
@@ -516,7 +516,7 @@ impl CmdList {
                 z: 0,
             },
             dst_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: dst_image.aspect,
+                aspect_mask: dst_image.wrapper.aspect,
                 mip_level: dst_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
@@ -536,9 +536,9 @@ impl CmdList {
         unsafe {
             self.device_wrapper.0.cmd_copy_image(
                 self.native,
-                src_image.native,
+                src_image.wrapper.native,
                 src_image_layout.0,
-                dst_image.native,
+                dst_image.wrapper.native,
                 dst_image_layout.0,
                 &[region],
             );
@@ -563,7 +563,7 @@ impl CmdList {
     ) {
         let region = vk::ImageBlit {
             src_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: src_image.aspect,
+                aspect_mask: src_image.wrapper.aspect,
                 mip_level: src_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
@@ -581,7 +581,7 @@ impl CmdList {
                 },
             ],
             dst_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: dst_image.aspect,
+                aspect_mask: dst_image.wrapper.aspect,
                 mip_level: dst_mip_level,
                 base_array_layer: 0,
                 layer_count: 1,
@@ -603,9 +603,9 @@ impl CmdList {
         unsafe {
             self.device_wrapper.0.cmd_blit_image(
                 self.native,
-                src_image.native,
+                src_image.wrapper.native,
                 src_image_layout.0,
-                dst_image.native,
+                dst_image.wrapper.native,
                 dst_image_layout.0,
                 &[region],
                 vk::Filter::NEAREST,
@@ -642,7 +642,7 @@ impl CmdList {
 
     pub fn clear_image(&mut self, image: &Arc<Image>, layout: ImageLayout, color: ClearValue) {
         let range = vk::ImageSubresourceRange {
-            aspect_mask: image.aspect,
+            aspect_mask: image.wrapper.aspect,
             base_mip_level: 0,
             level_count: 1,
             base_array_layer: 0,
@@ -651,18 +651,18 @@ impl CmdList {
         let clear_value = vk_clear_value(&color);
 
         unsafe {
-            if image.aspect == vk::ImageAspectFlags::COLOR {
+            if image.wrapper.aspect == vk::ImageAspectFlags::COLOR {
                 self.device_wrapper.0.cmd_clear_color_image(
                     self.native,
-                    image.native,
+                    image.wrapper.native,
                     layout.0,
                     &clear_value.color,
                     &[range],
                 );
-            } else if image.aspect == vk::ImageAspectFlags::DEPTH {
+            } else if image.wrapper.aspect == vk::ImageAspectFlags::DEPTH {
                 self.device_wrapper.0.cmd_clear_depth_stencil_image(
                     self.native,
-                    image.native,
+                    image.wrapper.native,
                     layout.0,
                     &clear_value.depth_stencil,
                     &[range],

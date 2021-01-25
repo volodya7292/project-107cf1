@@ -1,7 +1,7 @@
 use crate::format::DEPTH_FORMAT;
 use crate::{
     device::DeviceError, AccessFlags, Device, Format, Framebuffer, Image, ImageLayout, ImageUsageFlags,
-    PipelineStageFlags,
+    ImageView, PipelineStageFlags,
 };
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -64,6 +64,7 @@ pub struct RenderPass {
 #[derive(Clone)]
 pub enum ImageMod {
     OverrideImage(Arc<Image>),
+    OverrideImageView(Arc<ImageView>),
     AdditionalUsage(ImageUsageFlags),
 }
 
@@ -101,6 +102,7 @@ impl RenderPass {
         attachment_mods: &[(u32, ImageMod)],
     ) -> Result<Arc<Framebuffer>, DeviceError> {
         let attachment_mods: HashMap<u32, ImageMod> = attachment_mods.iter().cloned().collect();
+        let mut image_views = Vec::with_capacity(self.attachments.len());
         let mut images = Vec::with_capacity(self.attachments.len());
         let mut native_image_views = Vec::with_capacity(self.attachments.len());
 
@@ -111,11 +113,16 @@ impl RenderPass {
                 ImageUsageFlags::COLOR_ATTACHMENT
             };
             let mut override_image = None;
+            let mut override_image_view = None;
 
             if let Some(attachment_mod) = attachment_mods.get(&(i as u32)) {
                 match attachment_mod {
                     ImageMod::OverrideImage(i) => {
-                        override_image = Some(i);
+                        override_image = Some(Arc::clone(&i));
+                        override_image_view = Some(Arc::clone(&i.view));
+                    }
+                    ImageMod::OverrideImageView(v) => {
+                        override_image_view = Some(Arc::clone(v));
                     }
                     ImageMod::AdditionalUsage(u) => {
                         usage |= *u;
@@ -123,14 +130,18 @@ impl RenderPass {
                 }
             }
 
-            let image = if let Some(override_image) = override_image {
-                Arc::clone(override_image)
+            let (image, image_view) = if let Some(override_image_view) = override_image_view {
+                (override_image, override_image_view)
             } else {
-                self.device
-                    .create_image_2d(attachment.format, 1, 1f32, usage, size)?
+                let image = self
+                    .device
+                    .create_image_2d(attachment.format, 1, 1f32, usage, size)?;
+                let view = Arc::clone(&image.view);
+                (Some(image), view)
             };
 
-            native_image_views.push(image.view);
+            native_image_views.push(image_view.native);
+            image_views.push(image_view);
             images.push(image);
         }
 
@@ -146,6 +157,7 @@ impl RenderPass {
             _render_pass: Arc::clone(self),
             native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },
             images,
+            _image_views: image_views,
             size,
         }))
     }

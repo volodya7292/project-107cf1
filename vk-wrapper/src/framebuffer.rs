@@ -1,4 +1,4 @@
-use crate::{Device, Image, RenderPass};
+use crate::{Device, Image, ImageView, RenderPass};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::Arc;
@@ -7,13 +7,15 @@ pub struct Framebuffer {
     pub(crate) device: Arc<Device>,
     pub(crate) _render_pass: Arc<RenderPass>,
     pub(crate) native: vk::Framebuffer,
-    pub(crate) images: Vec<Arc<Image>>,
+    pub(crate) images: Vec<Option<Arc<Image>>>,
+    pub(crate) _image_views: Vec<Arc<ImageView>>,
     pub(crate) size: (u32, u32),
 }
 
 impl Framebuffer {
-    pub fn get_image(&self, index: u32) -> Arc<Image> {
-        Arc::clone(&self.images[index as usize])
+    /// May return [`None`] if attachment at `index` was overridden by image view at framebuffer creation.
+    pub fn get_image(&self, index: u32) -> Option<&Arc<Image>> {
+        self.images.get(index as usize)?.as_ref()
     }
 }
 

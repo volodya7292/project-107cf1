@@ -1,3 +1,4 @@
+use crate::ImageWrapper;
 use crate::SwapchainWrapper;
 use crate::FORMAT_SIZES;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
@@ -211,7 +212,6 @@ impl Device {
     fn create_image(
         self: &Arc<Self>,
         image_type: ImageType,
-        view_type: vk::ImageViewType,
         format: Format,
         max_mip_levels: u32,
         max_anisotropy: f32,
@@ -286,32 +286,14 @@ impl Device {
         } else {
             vk::ImageAspectFlags::COLOR
         };
-        let view_info = vk::ImageViewCreateInfo::builder()
-            .image(image)
-            .view_type(view_type)
-            .format(format.0)
-            .components(vk::ComponentMapping {
-                r: vk::ComponentSwizzle::IDENTITY,
-                g: vk::ComponentSwizzle::IDENTITY,
-                b: vk::ComponentSwizzle::IDENTITY,
-                a: vk::ComponentSwizzle::IDENTITY,
-            })
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: aspect,
-                base_mip_level: 0,
-                level_count: mip_levels,
-                base_array_layer: 0,
-                layer_count: array_layers,
-            });
-        let (view, sampler) = if usage.intersects(
+
+        let sampler = if usage.intersects(
             ImageUsageFlags::COLOR_ATTACHMENT
                 | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
                 | ImageUsageFlags::INPUT_ATTACHMENT
                 | ImageUsageFlags::SAMPLED
                 | ImageUsageFlags::STORAGE,
         ) {
-            let view = unsafe { self.wrapper.0.create_image_view(&view_info, None)? };
-
             let linear_filter_supported = self
                 .adapter
                 .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
@@ -331,29 +313,34 @@ impl Device {
                 .address_mode_u(vk::SamplerAddressMode::REPEAT)
                 .address_mode_v(vk::SamplerAddressMode::REPEAT)
                 .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                .anisotropy_enable(max_anisotropy != 1_f32)
+                .anisotropy_enable(max_anisotropy != 1.0)
                 .max_anisotropy(max_anisotropy)
                 .compare_enable(false)
                 .min_lod(0.0)
                 .max_lod(mip_levels as f32 - 1.0)
                 .unnormalized_coordinates(false);
-            let sampler = unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? };
 
-            (view, sampler)
+            unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? }
         } else {
-            (vk::ImageView::default(), vk::Sampler::default())
+            vk::Sampler::default()
         };
 
-        Ok(Arc::new(Image {
+        let image_wrapper = Arc::new(ImageWrapper {
             device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
             allocation: alloc,
+            owned_handle: true,
+            ty: image_type,
+            format,
+            aspect,
+        });
+        let view = image_wrapper.create_view().build()?;
+
+        Ok(Arc::new(Image {
+            wrapper: image_wrapper,
             view,
             sampler,
-            aspect,
-            owned_handle: true,
-            format,
             size,
             mip_levels,
         }))
@@ -369,7 +356,6 @@ impl Device {
     ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(
             Image::TYPE_2D,
-            vk::ImageViewType::TYPE_2D,
             format,
             max_mip_levels,
             max_anisotropy,
@@ -384,15 +370,7 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(
-            Image::TYPE_3D,
-            vk::ImageViewType::TYPE_3D,
-            format,
-            1,
-            1.0,
-            usage,
-            preferred_size,
-        )
+        self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size)
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
@@ -494,30 +472,12 @@ impl Device {
             native: Mutex::new(unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? }),
         });
 
-        let images: Result<Vec<Arc<Image>>, vk::Result> = unsafe {
+        let images: Result<Vec<Arc<Image>>, DeviceError> = unsafe {
             let native_swapchain = swapchain_wrapper.native.lock().unwrap();
             self.swapchain_khr.get_swapchain_images(*native_swapchain)?
         }
         .iter()
         .map(|&native_image| {
-            let view_info = vk::ImageViewCreateInfo::builder()
-                .image(native_image)
-                .view_type(vk::ImageViewType::TYPE_2D)
-                .format(s_format.format)
-                .components(vk::ComponentMapping {
-                    r: vk::ComponentSwizzle::IDENTITY,
-                    g: vk::ComponentSwizzle::IDENTITY,
-                    b: vk::ComponentSwizzle::IDENTITY,
-                    a: vk::ComponentSwizzle::IDENTITY,
-                })
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                });
-
             let sampler_info = vk::SamplerCreateInfo::builder()
                 .mag_filter(vk::Filter::NEAREST)
                 .min_filter(vk::Filter::NEAREST)
@@ -531,16 +491,22 @@ impl Device {
                 .max_lod(0f32)
                 .unnormalized_coordinates(false);
 
-            Ok(Arc::new(Image {
+            let image_wrapper = Arc::new(ImageWrapper {
                 device: Arc::clone(self),
                 _swapchain_wrapper: Some(Arc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
-                view: unsafe { self.wrapper.0.create_image_view(&view_info, None)? },
-                sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
-                aspect: view_info.subresource_range.aspect_mask,
                 owned_handle: false,
+                ty: Image::TYPE_2D,
                 format: Format(s_format.format),
+                aspect: vk::ImageAspectFlags::COLOR,
+            });
+            let view = image_wrapper.create_view().build()?;
+
+            Ok(Arc::new(Image {
+                wrapper: image_wrapper,
+                view,
+                sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
                 size: (size.0, size.1, 1),
                 mip_levels: 1,
             }))

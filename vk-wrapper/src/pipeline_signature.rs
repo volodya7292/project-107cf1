@@ -40,7 +40,7 @@ impl PipelineSignature {
             allocated: vec![],
             free_sets: Default::default(),
             _used_buffers: Default::default(),
-            _used_images: Default::default(),
+            _used_image_views: Default::default(),
         }))))
     }
 }
