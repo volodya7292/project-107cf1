@@ -29,13 +29,13 @@ use vk_wrapper as vkw;
 use vk_wrapper::queue::SignalSemaphore;
 use vk_wrapper::{
     swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, HostBuffer, Image,
-    ImageUsageFlags, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
+    ImageUsageFlags, ImageView, Sampler, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
     Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueryPool, Queue, RenderPass, SubmitInfo,
-    SubmitPacket, Subpass, Surface, Swapchain, WaitSemaphore,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, SubmitInfo, SubmitPacket,
+    Subpass, Surface, Swapchain, WaitSemaphore,
 };
 
 pub struct Renderer {
@@ -65,6 +65,7 @@ pub struct Renderer {
     g_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
 
     depth_render_pass: Arc<RenderPass>,
+    depth_pyramid_image: Option<Arc<Image>>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
@@ -75,6 +76,9 @@ pub struct Renderer {
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     depth_pyramid_signature: Arc<PipelineSignature>,
+    depth_pyramid_pool: Option<Arc<DescriptorPool>>,
+    depth_pyramid_descs: Vec<u32>,
+    depth_pyramid_sampler: Arc<Sampler>,
 
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
@@ -143,6 +147,12 @@ pub struct CameraInfo {
 pub struct PerFrameInfo {
     camera: CameraInfo,
     atlas_info: na::Vector4<u32>,
+}
+
+const COMPUTE_LOCAL_THREADS: u32 = 32;
+
+fn calc_group_count(thread_count: u32) -> u32 {
+    (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
 impl Renderer {
@@ -573,7 +583,6 @@ impl Renderer {
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
         let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
-        let object_count = renderables.len();
 
         self.record_depth_cmd_lists(
             &renderables,
@@ -582,8 +591,6 @@ impl Renderer {
             &renderer_comps,
             &vertex_mesh_comps,
         );
-
-        // TODO: separate images & image views
 
         // Record depth cmd list
         // -------------------------------------------------------------------------------------------------------------
@@ -600,18 +607,70 @@ impl Renderer {
             cl.end_render_pass();
 
             let depth_image = self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-            // let d = depth_image.create_view().mip_level_count(0).build().unwrap();
+            let depth_pyramid_image = self.depth_pyramid_image.as_ref().unwrap();
+
+            // Build depth pyramid
+            // ------------------------------------------------------------------
+            cl.barrier_image(
+                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::COMPUTE,
+                &[depth_pyramid_image
+                    .barrier()
+                    .dst_access_mask(AccessFlags::SHADER_WRITE)
+                    .old_layout(ImageLayout::UNDEFINED)
+                    .new_layout(ImageLayout::GENERAL)],
+            );
+
+            let used_depth_pyramid_pool =
+                cl.use_descriptor_pool(Arc::clone(self.depth_pyramid_pool.as_ref().unwrap()));
+
+            cl.bind_pipeline(&self.depth_pyramid_pipeline);
+
+            for i in 0..(depth_pyramid_image.mip_levels() as usize) {
+                let size = depth_pyramid_image.size_2d();
+                let level_width = (size.0 >> i).max(1);
+                let level_height = (size.1 >> i).max(1);
+
+                cl.bind_compute_input(
+                    &self.depth_pyramid_signature,
+                    0,
+                    used_depth_pyramid_pool,
+                    self.depth_pyramid_descs[i],
+                );
+
+                cl.push_constants(&self.depth_pyramid_signature, ShaderStage::COMPUTE, 0, unsafe {
+                    &[
+                        mem::transmute(level_width as f32),
+                        mem::transmute(level_height as f32),
+                    ]
+                });
+
+                cl.dispatch(calc_group_count(level_width), calc_group_count(level_height), 1);
+
+                cl.barrier_image(
+                    PipelineStageFlags::COMPUTE,
+                    PipelineStageFlags::COMPUTE,
+                    &[depth_pyramid_image
+                        .barrier()
+                        .src_access_mask(AccessFlags::SHADER_WRITE)
+                        .dst_access_mask(AccessFlags::SHADER_READ)
+                        .old_layout(ImageLayout::GENERAL)
+                        .new_layout(ImageLayout::GENERAL)
+                        .mip_levels(i as u32, 1)],
+                );
+            }
 
             cl.barrier_image(
-                PipelineStageFlags::LATE_FRAGMENT_TESTS,
                 PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
                 &[depth_image
                     .barrier()
-                    .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_READ)
-                    .old_layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT)
+                    .src_access_mask(AccessFlags::SHADER_READ)
+                    .dst_access_mask(Default::default())
+                    .old_layout(ImageLayout::SHADER_READ)
                     .new_layout(ImageLayout::DEPTH_READ)],
             );
+
             cl.end().unwrap();
         }
         {
@@ -625,7 +684,7 @@ impl Renderer {
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            // !!! Do not render anything in final cl except copying some image into swapchain image.
+            // Note: Do not render anything in final cl except copying some image into swapchain image.
             // Uniform/vertex buffers may be being updated at this moment.
             let mut cl = self.final_cl.lock().unwrap();
             cl.begin(true).unwrap();
@@ -673,7 +732,7 @@ impl Renderer {
             let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
 
             cl.barrier_image(
-                PipelineStageFlags::BOTTOM_OF_PIPE,
+                PipelineStageFlags::ALL_GRAPHICS,
                 PipelineStageFlags::TRANSFER,
                 &[
                     albedo.barrier_queue(
@@ -819,15 +878,93 @@ impl Renderer {
             .device
             .create_image_2d(
                 Format::D32_FLOAT,
-                0,
+                1,
                 1.0,
-                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
                 new_size,
             )
             .unwrap();
+        self.depth_pyramid_image = Some(
+            self.device
+                .create_image_2d(
+                    Format::R32_FLOAT,
+                    0,
+                    1.0,
+                    ImageUsageFlags::SAMPLED | ImageUsageFlags::STORAGE,
+                    // Note: prev_power_of_two makes sure all reductions are at most by 2x2
+                    // which makes sure they are conservative
+                    (
+                        utils::prev_power_of_two(new_size.0),
+                        utils::prev_power_of_two(new_size.1),
+                    ),
+                )
+                .unwrap(),
+        );
+        let depth_pyramid_levels = self.depth_pyramid_image.as_ref().unwrap().mip_levels();
+        let depth_pyramid_views: Vec<Arc<ImageView>> = (0..depth_pyramid_levels)
+            .map(|i| {
+                self.depth_pyramid_image
+                    .as_ref()
+                    .unwrap()
+                    .create_view()
+                    .base_mip_level(i)
+                    .mip_level_count(1)
+                    .build()
+                    .unwrap()
+            })
+            .collect();
+
+        self.depth_pyramid_pool = Some(
+            self.depth_pyramid_signature
+                .create_pool(0, depth_pyramid_levels)
+                .unwrap(),
+        );
+        self.depth_pyramid_descs = {
+            let mut pool = self.depth_pyramid_pool.as_ref().unwrap().lock().unwrap();
+            (0..depth_pyramid_levels as usize)
+                .map(|i| {
+                    let id = pool.alloc().unwrap();
+                    pool.update(
+                        id,
+                        &[
+                            Binding {
+                                id: 0,
+                                array_index: 0,
+                                res: if i == 0 {
+                                    BindingRes::ImageViewSampler(
+                                        Arc::clone(depth_image.view()),
+                                        Arc::clone(&self.depth_pyramid_sampler),
+                                        ImageLayout::SHADER_READ,
+                                    )
+                                } else {
+                                    BindingRes::ImageViewSampler(
+                                        Arc::clone(&depth_pyramid_views[i - 1]),
+                                        Arc::clone(&self.depth_pyramid_sampler),
+                                        ImageLayout::GENERAL,
+                                    )
+                                },
+                            },
+                            Binding {
+                                id: 1,
+                                array_index: 0,
+                                res: BindingRes::ImageView(
+                                    Arc::clone(&depth_pyramid_views[i]),
+                                    ImageLayout::GENERAL,
+                                ),
+                            },
+                        ],
+                    );
+                    id
+                })
+                .collect()
+        };
+
         self.depth_framebuffer = Some(
             self.depth_render_pass
-                .create_framebuffer(new_size, &[(0, ImageMod::OverrideImage(depth_image))])
+                .create_framebuffer(
+                    new_size,
+                    &[(0, ImageMod::OverrideImage(Arc::clone(&depth_image)))],
+                )
                 .unwrap(),
         );
 
@@ -845,12 +982,7 @@ impl Renderer {
                         (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
                         (2, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
                         (3, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (
-                            4,
-                            ImageMod::OverrideImage(Arc::clone(
-                                self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap(),
-                            )),
-                        ),
+                        (4, ImageMod::OverrideImage(Arc::clone(&depth_image))),
                         (
                             5,
                             ImageMod::OverrideImage(
@@ -937,7 +1069,7 @@ pub fn new(
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
 ) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
-    let mut scene = Scene::new();
+    let scene = Scene::new();
 
     // TODO: pipeline cache management
 
@@ -952,10 +1084,10 @@ pub fn new(
     // Create secondary cmd lists for multi-threaded recording
     let phys_cores = num_cpus::get_physical();
 
-    let mut depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+    let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
         .collect();
-    let mut g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+    let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
         .collect();
 
@@ -972,7 +1104,7 @@ pub fn new(
         &[Attachment {
             format: Format::D32_FLOAT,
             init_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::DEPTH_READ,
+            final_layout: ImageLayout::SHADER_READ,
             load_store: LoadStore::InitClearFinalSave,
         }],
         &[Subpass {
@@ -1027,6 +1159,9 @@ pub fn new(
         .create_pipeline_signature(&[depth_pyramid_compute])
         .unwrap();
     let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
+    let depth_pyramid_sampler = device
+        .create_reduction_sampler(Sampler::REDUCTION_MIN, 16.0)
+        .unwrap();
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1253,6 +1388,7 @@ pub fn new(
         depth_secondary_cls,
         g_secondary_cls,
         depth_render_pass,
+        depth_pyramid_image: None,
         depth_framebuffer: None,
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
@@ -1273,6 +1409,9 @@ pub fn new(
         active_camera,
         camera_uniform_buffer: per_frame_uniform_buffer,
         depth_pyramid_signature,
+        depth_pyramid_pool: None,
+        depth_pyramid_descs: vec![],
+        depth_pyramid_sampler,
     };
     renderer.on_resize(size);
 

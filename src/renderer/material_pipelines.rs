@@ -1,5 +1,5 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::{material_pipeline, Renderer};
+use crate::renderer::Renderer;
 use crate::resource_file::ResourceFile;
 use nalgebra as na;
 use std::sync::Arc;

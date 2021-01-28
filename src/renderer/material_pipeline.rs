@@ -1,6 +1,6 @@
 use crate::renderer::Renderer;
-use ahash::{AHashMap, AHashSet};
-use std::collections::{hash_map, HashSet};
+use ahash::AHashMap;
+use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
 use vk_wrapper as vkw;

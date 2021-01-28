@@ -197,6 +197,7 @@ impl Instance {
                 require_feature12!(runtime_descriptor_array);
                 require_feature12!(separate_depth_stencil_layouts);
                 require_feature12!(timeline_semaphore);
+                require_feature12!(sampler_filter_minmax);
 
                 enabled_features12.vulkan_memory_model = available_features12.vulkan_memory_model;
                 enabled_features12.vulkan_memory_model_device_scope =
@@ -235,7 +236,8 @@ impl Instance {
                     | vk::FormatFeatureFlags::BLIT_SRC
                     | vk::FormatFeatureFlags::BLIT_DST
                     | vk::FormatFeatureFlags::TRANSFER_SRC
-                    | vk::FormatFeatureFlags::TRANSFER_DST;
+                    | vk::FormatFeatureFlags::TRANSFER_DST
+                    | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_MINMAX;
 
                 // Image formats
                 for format in format::IMAGE_FORMATS.iter() {

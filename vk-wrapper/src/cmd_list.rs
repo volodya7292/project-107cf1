@@ -3,12 +3,13 @@ use crate::device::DeviceWrapper;
 use crate::render_pass::vk_clear_value;
 use crate::{
     BufferBarrier, ClearValue, DescriptorPool, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier,
-    ImageLayout, Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
+    ImageLayout, ImageView, Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass, Sampler,
+    ShaderStage,
 };
 use ahash::AHashMap;
 use ash::{version::DeviceV1_0, vk};
 use std::sync::{Arc, Mutex};
-use std::{mem, ptr};
+use std::{mem, ptr, slice};
 
 pub(crate) struct UsedDescriptorPool {
     _pool: Arc<DescriptorPool>,
@@ -28,6 +29,8 @@ pub struct CmdList {
     pub(crate) descriptor_pools: Vec<UsedDescriptorPool>,
     pub(crate) buffers: AHashMap<Arc<Buffer>, bool>,
     pub(crate) images: Vec<Arc<Image>>,
+    pub(crate) image_views: AHashMap<Arc<ImageView>, bool>,
+    pub(crate) samplers: AHashMap<Arc<Sampler>, bool>,
     pub(crate) query_pools: Vec<Arc<QueryPool>>,
     pub(crate) last_pipeline: *const Pipeline,
 }
@@ -55,6 +58,17 @@ impl CmdList {
             *v = false;
             save
         });
+        // TODO: images
+        self.image_views.retain(|_, v| {
+            let save = *v;
+            *v = false;
+            save
+        });
+        self.samplers.retain(|_, v| {
+            let save = *v;
+            *v = false;
+            save
+        });
     }
 
     fn use_pipeline(&mut self, pipeline: &Arc<Pipeline>) {
@@ -70,6 +84,22 @@ impl CmdList {
             *a = true;
         } else {
             self.buffers.insert(Arc::clone(buffer), true);
+        }
+    }
+
+    fn use_image_view(&mut self, image_view: &Arc<ImageView>) {
+        if let Some(a) = self.image_views.get_mut(image_view) {
+            *a = true;
+        } else {
+            self.image_views.insert(Arc::clone(image_view), true);
+        }
+    }
+
+    fn use_sampler(&mut self, sampler: &Arc<Sampler>) {
+        if let Some(a) = self.samplers.get_mut(sampler) {
+            *a = true;
+        } else {
+            self.samplers.insert(Arc::clone(sampler), true);
         }
     }
 
@@ -283,7 +313,19 @@ impl CmdList {
     }
 
     pub fn use_descriptor_pool(&mut self, descriptor_pool: Arc<DescriptorPool>) -> u32 {
-        let descriptor_sets = descriptor_pool.0.lock().unwrap().allocated.clone();
+        let descriptor_sets = {
+            let pool = descriptor_pool.lock().unwrap();
+
+            pool.used_buffers
+                .iter()
+                .for_each(|(_, b)| self.use_buffer(&b.buffer));
+            pool.used_image_views
+                .iter()
+                .for_each(|(_, v)| self.use_image_view(v));
+            pool.used_samplers.iter().for_each(|(_, s)| self.use_sampler(s));
+
+            pool.allocated.clone()
+        };
 
         self.descriptor_pools.push(UsedDescriptorPool {
             _pool: descriptor_pool,
@@ -335,6 +377,22 @@ impl CmdList {
         );
     }
 
+    pub fn bind_compute_input(
+        &mut self,
+        signature: &Arc<PipelineSignature>,
+        set_id: u32,
+        used_descriptor_pool: u32,
+        descriptor_set_id: u32,
+    ) {
+        self.bind_pipeline_input(
+            signature,
+            vk::PipelineBindPoint::COMPUTE,
+            set_id,
+            used_descriptor_pool,
+            descriptor_set_id,
+        );
+    }
+
     /// buffers (max: 16): [buffer, offset]
     pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(Arc<DeviceBuffer>, u64)]) {
         let mut native_buffers = [vk::Buffer::default(); 16];
@@ -369,6 +427,27 @@ impl CmdList {
         self.use_buffer(&buffer.buffer);
     }
 
+    pub fn push_constants(
+        &mut self,
+        signature: &Arc<PipelineSignature>,
+        stage: ShaderStage,
+        base_index: u32,
+        constants: &[u32],
+    ) {
+        unsafe {
+            let data = slice::from_raw_parts(constants.as_ptr() as *const u8, constants.len() * 4);
+            assert!(data.len() <= 128);
+
+            self.device_wrapper.0.cmd_push_constants(
+                self.native,
+                signature.pipeline_layout,
+                stage.0,
+                base_index * 4,
+                data,
+            )
+        };
+    }
+
     pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
         unsafe {
             self.device_wrapper
@@ -382,6 +461,14 @@ impl CmdList {
             self.device_wrapper
                 .0
                 .cmd_draw_indexed(self.native, index_count, 1, first_index, vertex_offset, 0)
+        };
+    }
+
+    pub fn dispatch(&mut self, group_count_x: u32, group_count_y: u32, group_count_z: u32) {
+        unsafe {
+            self.device_wrapper
+                .0
+                .cmd_dispatch(self.native, group_count_x, group_count_y, group_count_z)
         };
     }
 

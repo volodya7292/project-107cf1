@@ -39,8 +39,9 @@ impl PipelineSignature {
             native: unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None)? },
             allocated: vec![],
             free_sets: Default::default(),
-            _used_buffers: Default::default(),
-            _used_image_views: Default::default(),
+            used_buffers: Default::default(),
+            used_image_views: Default::default(),
+            used_samplers: Default::default(),
         }))))
     }
 }

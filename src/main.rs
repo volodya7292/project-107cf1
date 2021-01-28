@@ -61,7 +61,7 @@ fn main() {
     let mut window_size = window.vulkan_drawable_size();
 
     let renderer_settings = renderer::Settings {
-        vsync: false,
+        vsync: true,
         texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
@@ -233,7 +233,5 @@ fn main() {
 
         let end_t = Instant::now();
         delta_time = (end_t - start_t).as_secs_f64();
-
-        println!("{}", delta_time);
     }
 }

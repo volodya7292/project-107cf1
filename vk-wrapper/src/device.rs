@@ -1,6 +1,5 @@
-use crate::ImageWrapper;
-use crate::SwapchainWrapper;
 use crate::FORMAT_SIZES;
+use crate::IMAGE_FORMATS;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
     utils, BindingType, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
@@ -8,8 +7,11 @@ use crate::{
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
+use crate::{ImageWrapper, SamplerReduction};
 use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
+use crate::{Sampler, DEPTH_FORMAT};
+use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
@@ -218,6 +220,10 @@ impl Device {
         usage: ImageUsageFlags,
         mut size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
+        if !IMAGE_FORMATS.contains(&format) && !BC_IMAGE_FORMATS.contains(&format) && format != DEPTH_FORMAT {
+            panic!("Image format {:?} is not supported!", format);
+        }
+
         let format_props = self.adapter.get_image_format_properties(
             format.0,
             image_type.0,
@@ -340,12 +346,16 @@ impl Device {
         Ok(Arc::new(Image {
             wrapper: image_wrapper,
             view,
-            sampler,
+            sampler: Arc::new(Sampler {
+                device: Arc::clone(self),
+                native: sampler,
+            }),
             size,
             mip_levels,
         }))
     }
 
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
     pub fn create_image_2d(
         self: &Arc<Self>,
         format: Format,
@@ -371,6 +381,35 @@ impl Device {
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size)
+    }
+
+    pub fn create_reduction_sampler(
+        self: &Arc<Self>,
+        mode: SamplerReduction,
+        max_lod: f32,
+    ) -> Result<Arc<Sampler>, DeviceError> {
+        let mut reduction_info = vk::SamplerReductionModeCreateInfo::builder()
+            .reduction_mode(mode.0)
+            .build();
+
+        let sampler_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+            .anisotropy_enable(false)
+            .compare_enable(false)
+            .min_lod(0.0)
+            .max_lod(max_lod)
+            .unnormalized_coordinates(false)
+            .push_next(&mut reduction_info);
+
+        Ok(Arc::new(Sampler {
+            device: Arc::clone(self),
+            native: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+        }))
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
@@ -506,7 +545,10 @@ impl Device {
             Ok(Arc::new(Image {
                 wrapper: image_wrapper,
                 view,
-                sampler: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+                sampler: Arc::new(Sampler {
+                    device: Arc::clone(self),
+                    native: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+                }),
                 size: (size.0, size.1, 1),
                 mip_levels: 1,
             }))

@@ -50,6 +50,10 @@ unsafe extern "system" fn vk_debug_callback(
         _ => info!(target: "vulkan", "[{}] {:?}", msg_type, msg),
     }
 
+    if cfg!(debug_assertions) {
+        panic!("Vulkan validation");
+    }
+
     0
 }
 

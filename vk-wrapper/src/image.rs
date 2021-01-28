@@ -1,5 +1,5 @@
 use crate::swapchain::SwapchainWrapper;
-use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue};
+use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
 use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::Arc;
@@ -63,6 +63,20 @@ impl ImageBarrier {
         self.native.new_layout = new_layout.0;
         self
     }
+
+    pub fn base_mip_level(mut self, base_mip_level: u32) -> Self {
+        self.native.subresource_range.base_mip_level = base_mip_level;
+        self
+    }
+
+    pub fn level_count(mut self, level_count: u32) -> Self {
+        self.native.subresource_range.level_count = level_count;
+        self
+    }
+
+    pub fn mip_levels(self, base_mip_level: u32, level_count: u32) -> Self {
+        self.base_mip_level(base_mip_level).level_count(level_count)
+    }
 }
 
 pub(in crate) struct ImageWrapper {
@@ -113,7 +127,7 @@ impl ImageWrapper {
 pub struct Image {
     pub(crate) wrapper: Arc<ImageWrapper>,
     pub(crate) view: Arc<ImageView>,
-    pub(crate) sampler: vk::Sampler,
+    pub(crate) sampler: Arc<Sampler>,
     pub(crate) size: (u32, u32, u32),
     pub(crate) mip_levels: u32,
 }
@@ -131,6 +145,11 @@ impl ImageViewBuilder {
 
     pub fn mip_level_count(mut self, count: u32) -> Self {
         self.info.subresource_range.level_count = count;
+        self
+    }
+
+    pub fn format(mut self, format: Format) -> Self {
+        self.info.format = format.0;
         self
     }
 
@@ -168,6 +187,10 @@ impl Image {
 
     pub fn mip_levels(&self) -> u32 {
         self.mip_levels
+    }
+
+    pub fn view(&self) -> &Arc<ImageView> {
+        &self.view
     }
 
     pub fn create_view(&self) -> ImageViewBuilder {
@@ -258,16 +281,6 @@ impl Drop for ImageWrapper {
                 .allocator
                 .destroy_image(self.native, &self.allocation)
                 .unwrap();
-        }
-    }
-}
-
-impl Drop for Image {
-    fn drop(&mut self) {
-        unsafe {
-            if self.sampler != vk::Sampler::default() {
-                self.wrapper.device.wrapper.0.destroy_sampler(self.sampler, None);
-            }
         }
     }
 }

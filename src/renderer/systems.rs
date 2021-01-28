@@ -1,10 +1,8 @@
-use crate::renderer::component::{Renderer, VertexMesh};
 use crate::renderer::scene::Event;
 use crate::renderer::{component, scene, BufferUpdate};
 use nalgebra as na;
 use std::sync::{atomic, Arc, Mutex};
-use std::time::Instant;
-use std::{cmp, mem, slice};
+use std::{mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::SubmitPacket;
 

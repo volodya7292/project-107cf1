@@ -2,7 +2,7 @@ use std::collections::{hash_map, HashMap};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FusedIterator;
 use std::ops::Range;
-use std::{cmp, slice};
+use std::slice;
 
 #[derive(Clone)]
 struct Element<K, V> {

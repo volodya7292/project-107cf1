@@ -1,4 +1,4 @@
-use crate::{Device, DeviceBuffer, Image, ImageLayout, ImageView, PipelineSignature};
+use crate::{Device, DeviceBuffer, Image, ImageLayout, ImageView, PipelineSignature, Sampler};
 use ahash::AHashMap;
 use ash::version::DeviceV1_0;
 use ash::vk;
@@ -13,6 +13,8 @@ pub enum BindingRes {
     /// [buffer, offset, range]
     BufferRange(Arc<DeviceBuffer>, u64, u64),
     Image(Arc<Image>, ImageLayout),
+    ImageView(Arc<ImageView>, ImageLayout),
+    ImageViewSampler(Arc<ImageView>, Arc<Sampler>, ImageLayout),
 }
 
 pub struct Binding {
@@ -21,7 +23,7 @@ pub struct Binding {
     pub res: BindingRes,
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct BindingMapping {
     descriptor_set_id: u32,
     binding_id: u32,
@@ -35,8 +37,9 @@ pub struct DescriptorPoolWrapper {
     pub(crate) native: vk::DescriptorPool,
     pub(crate) allocated: Vec<vk::DescriptorSet>,
     pub(crate) free_sets: BitSet,
-    pub(crate) _used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
-    pub(crate) _used_image_views: AHashMap<BindingMapping, Arc<ImageView>>,
+    pub(crate) used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
+    pub(crate) used_image_views: AHashMap<BindingMapping, Arc<ImageView>>,
+    pub(crate) used_samplers: AHashMap<BindingMapping, Arc<Sampler>>,
 }
 
 pub struct DescriptorPool(pub(in crate) Mutex<DescriptorPoolWrapper>);
@@ -95,7 +98,7 @@ impl DescriptorPoolWrapper {
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
 
-                    self._used_buffers.insert(mapping, Arc::clone(buffer));
+                    self.used_buffers.insert(mapping, Arc::clone(buffer));
                 }
                 BindingRes::BufferRange(buffer, offset, range) => {
                     native_buffer_infos.push(vk::DescriptorBufferInfo {
@@ -105,17 +108,39 @@ impl DescriptorPoolWrapper {
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
 
-                    self._used_buffers.insert(mapping, Arc::clone(buffer));
+                    self.used_buffers.insert(mapping, Arc::clone(buffer));
                 }
                 BindingRes::Image(image, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
-                        sampler: image.sampler,
+                        sampler: image.sampler.native,
                         image_view: image.view.native,
                         image_layout: layout.0,
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
 
-                    self._used_image_views.insert(mapping, Arc::clone(&image.view));
+                    self.used_image_views.insert(mapping, Arc::clone(&image.view));
+                    self.used_samplers.insert(mapping, Arc::clone(&image.sampler));
+                }
+                BindingRes::ImageView(image_view, layout) => {
+                    native_image_infos.push(vk::DescriptorImageInfo {
+                        sampler: Default::default(),
+                        image_view: image_view.native,
+                        image_layout: layout.0,
+                    });
+                    write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
+
+                    self.used_image_views.insert(mapping, Arc::clone(&image_view));
+                }
+                BindingRes::ImageViewSampler(image_view, sampler, layout) => {
+                    native_image_infos.push(vk::DescriptorImageInfo {
+                        sampler: sampler.native,
+                        image_view: image_view.native,
+                        image_layout: layout.0,
+                    });
+                    write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
+
+                    self.used_image_views.insert(mapping, Arc::clone(&image_view));
+                    self.used_samplers.insert(mapping, Arc::clone(&sampler));
                 }
             }
 

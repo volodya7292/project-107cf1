@@ -2,7 +2,6 @@ use ahash::AHashMap;
 use bit_set::BitSet;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
-use std::hash::Hash;
 use std::marker::PhantomData;
 use std::mem;
 use std::sync::atomic::AtomicU32;

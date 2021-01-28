@@ -33,6 +33,8 @@ impl AccessFlags {
     pub const TRANSFER_WRITE: Self = Self(vk::AccessFlags::TRANSFER_WRITE);
     pub const SHADER_READ: Self = Self(vk::AccessFlags::SHADER_READ);
     pub const SHADER_WRITE: Self = Self(vk::AccessFlags::SHADER_WRITE);
+    pub const MEMORY_READ: Self = Self(vk::AccessFlags::MEMORY_READ);
+    pub const MEMORY_WRITE: Self = Self(vk::AccessFlags::MEMORY_WRITE);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -46,6 +46,8 @@ impl Queue {
             descriptor_pools: vec![],
             buffers: Default::default(),
             images: vec![],
+            image_views: Default::default(),
+            samplers: Default::default(),
             query_pools: Default::default(),
             last_pipeline: ptr::null(),
         })))

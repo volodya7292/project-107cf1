@@ -10,6 +10,15 @@ pub fn is_pow_of_2(n: u64) -> bool {
     (n & (n - 1)) == 0
 }
 
+pub fn prev_power_of_two(mut n: u32) -> u32 {
+    n = n | (n >> 1);
+    n = n | (n >> 2);
+    n = n | (n >> 4);
+    n = n | (n >> 8);
+    n = n | (n >> 16);
+    n - (n >> 1)
+}
+
 pub fn next_power_of_two(mut n: u32) -> u32 {
     n -= 1;
     n |= n >> 1;
@@ -17,8 +26,7 @@ pub fn next_power_of_two(mut n: u32) -> u32 {
     n |= n >> 4;
     n |= n >> 8;
     n |= n >> 16;
-    n += 1;
-    n
+    n + 1
 }
 
 pub fn make_mul_of(n: u32, m: u32) -> u32 {
