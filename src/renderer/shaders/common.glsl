@@ -35,7 +35,9 @@ struct Camera {
     mat4 proj;
     mat4 view;
     mat4 proj_view;
-    vec4 info;// .x - FovY
+    float z_near;
+    float fovy;
+    vec2 _pad;
 };
 
 struct PerFrameInfo {

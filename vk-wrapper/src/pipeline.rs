@@ -16,6 +16,7 @@ impl PipelineStageFlags {
     pub const LATE_FRAGMENT_TESTS: Self = Self(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS);
     pub const COMPUTE: Self = Self(vk::PipelineStageFlags::COMPUTE_SHADER);
     pub const BOTTOM_OF_PIPE: Self = Self(vk::PipelineStageFlags::BOTTOM_OF_PIPE);
+    pub const HOST: Self = Self(vk::PipelineStageFlags::HOST);
     pub const ALL_GRAPHICS: Self = Self(vk::PipelineStageFlags::ALL_GRAPHICS);
     pub const ALL_COMMANDS: Self = Self(vk::PipelineStageFlags::ALL_COMMANDS);
 }
@@ -35,6 +36,8 @@ impl AccessFlags {
     pub const SHADER_WRITE: Self = Self(vk::AccessFlags::SHADER_WRITE);
     pub const MEMORY_READ: Self = Self(vk::AccessFlags::MEMORY_READ);
     pub const MEMORY_WRITE: Self = Self(vk::AccessFlags::MEMORY_WRITE);
+    pub const HOST_READ: Self = Self(vk::AccessFlags::HOST_READ);
+    pub const HOST_WRITE: Self = Self(vk::AccessFlags::HOST_WRITE);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

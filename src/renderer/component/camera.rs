@@ -8,7 +8,7 @@ pub struct Camera {
     rotation: Vector3<f32>,
     aspect: f32,
     fovy: f32,
-    near: f32,
+    z_near: f32,
     frustum: [Vector4<f32>; 6],
 }
 
@@ -41,7 +41,7 @@ impl Camera {
             rotation: Vector3::new(0.0, 0.0, 0.0),
             aspect,
             fovy,
-            near,
+            z_near: near,
             frustum,
         }
     }
@@ -52,7 +52,7 @@ impl Camera {
     }
 
     pub fn projection(&self) -> Matrix4<f32> {
-        glm::infinite_perspective_rh_zo(self.aspect, self.fovy, self.near)
+        glm::infinite_perspective_rh_zo(self.aspect, self.fovy, self.z_near)
     }
 
     pub fn view(&self) -> Matrix4<f32> {
@@ -62,6 +62,10 @@ impl Camera {
         mat *= Rotation3::from_axis_angle(&Vector3::z_axis(), self.rotation.z).to_homogeneous();
         mat *= Translation3::from(-self.position).to_homogeneous();
         mat
+    }
+
+    pub fn z_near(&self) -> f32 {
+        self.z_near
     }
 
     pub fn aspect(&self) -> f32 {
@@ -109,7 +113,7 @@ impl Camera {
         self.update_frustum();
     }
 
-    pub fn is_sphere_visible(&self, pos: Vector3<f32>, radius: f32) -> bool {
+    pub fn is_sphere_visible(&self, pos: &Vector3<f32>, radius: f32) -> bool {
         for i in 0..6 {
             if self.frustum[i].x * pos.x
                 + self.frustum[i].y * pos.y

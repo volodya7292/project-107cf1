@@ -17,6 +17,7 @@ use ktx::KtxInfo;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
+use nalgebra_glm as glm;
 use rayon::prelude::*;
 use scene::ComponentStorage;
 use std::collections::HashMap;
@@ -25,10 +26,9 @@ use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
-use vk_wrapper as vkw;
 use vk_wrapper::queue::SignalSemaphore;
 use vk_wrapper::{
-    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, HostBuffer, Image,
+    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, DeviceError, HostBuffer, Image,
     ImageUsageFlags, ImageView, Sampler, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
 };
 use vk_wrapper::{
@@ -60,7 +60,6 @@ pub struct Renderer {
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
-    occlusion_buffer: HostBuffer<u32>,
     depth_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
     g_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
 
@@ -80,6 +79,15 @@ pub struct Renderer {
     depth_pyramid_descs: Vec<u32>,
     depth_pyramid_sampler: Arc<Sampler>,
 
+    cull_pipeline: Arc<Pipeline>,
+    cull_signature: Arc<PipelineSignature>,
+    cull_pool: Arc<DescriptorPool>,
+    cull_descriptor: u32,
+    cull_buffer: Arc<DeviceBuffer>,
+    cull_host_buffer: HostBuffer<CullObject>,
+    visibility_buffer: Arc<DeviceBuffer>,
+    visibility_host_buffer: HostBuffer<u32>,
+
     g_render_pass: Arc<RenderPass>,
     g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
@@ -93,7 +101,7 @@ pub struct Renderer {
     model_inputs_pool: Arc<DescriptorPool>,
 
     active_camera: u32,
-    camera_uniform_buffer: Arc<DeviceBuffer>,
+    per_frame_ub: Arc<DeviceBuffer>,
 }
 
 #[derive(Copy, Clone)]
@@ -140,15 +148,37 @@ pub struct CameraInfo {
     proj: Matrix4<f32>,
     view: Matrix4<f32>,
     proj_view: Matrix4<f32>,
-    info: Vector4<f32>, // .x - FovY
+    z_near: f32,
+    fovy: f32,
+    _pad: [f32; 2],
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct PerFrameInfo {
     camera: CameraInfo,
     atlas_info: na::Vector4<u32>,
 }
 
+#[repr(C)]
+struct DepthPyramidConstants {
+    size: na::Vector2<f32>,
+}
+
+#[repr(C)]
+struct CullObject {
+    sphere: na::Vector4<f32>,
+    id: u32,
+    _pad: [u32; 3],
+}
+
+#[repr(C)]
+struct CullConstants {
+    pyramid_size: na::Vector2<f32>,
+    object_count: u32,
+}
+
+const MAX_OBJECT_COUNT: u32 = 65535;
 const COMPUTE_LOCAL_THREADS: u32 = 32;
 
 fn calc_group_count(thread_count: u32) -> u32 {
@@ -337,23 +367,23 @@ impl Renderer {
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
 
-        rayon::scope(|s| {
+        rayon::scope(|_| {
             rayon::scope(|s| {
-                s.spawn(|s| {
+                s.spawn(|_| {
                     renderer_events_system.run();
                 });
-                s.spawn(|s| {
+                s.spawn(|_| {
                     vertex_mesh_system.run();
                 });
-                s.spawn(|s| {
+                s.spawn(|_| {
                     transform_events_system.run();
                 });
             });
-            rayon::scope(|s| {
+            rayon::scope(|_| {
                 hierarchy_propagation_system.run();
             });
             rayon::scope(|s| {
-                s.spawn(|s| {
+                s.spawn(|_| {
                     world_transform_events_system.run();
                 });
             });
@@ -375,7 +405,9 @@ impl Renderer {
                         proj,
                         view,
                         proj_view: proj * view,
-                        info: Vector4::new(camera.fovy(), 0.0, 0.0, 0.0),
+                        z_near: camera.z_near(),
+                        fovy: camera.fovy(),
+                        _pad: [0.0; 2],
                     },
                     atlas_info: na::Vector4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
                 }
@@ -389,7 +421,7 @@ impl Renderer {
                 .to_vec()
             };
             buffer_updates.lock().unwrap().push(BufferUpdate {
-                buffer: Arc::clone(&self.camera_uniform_buffer),
+                buffer: Arc::clone(&self.per_frame_ub),
                 offset: 0,
                 data,
             });
@@ -405,20 +437,24 @@ impl Renderer {
     }
 
     fn record_depth_cmd_lists(
-        &self,
+        &mut self,
         renderables: &[u32],
         camera: &component::Camera,
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
         vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
-    ) {
+    ) -> u32 {
         let object_count = renderables.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
+
+        let mut cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
         self.depth_secondary_cls
             .par_iter()
             .enumerate()
             .for_each(|(i, cmd_list)| {
+                let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
+
                 let mut cl = cmd_list.lock().unwrap();
 
                 cl.begin_secondary_graphics(
@@ -455,20 +491,24 @@ impl Renderer {
                     let vertex_mesh = vertex_mesh.unwrap();
 
                     let vertex_mesh = &vertex_mesh.0;
-                    let aabb = { *vertex_mesh.aabb() };
 
-                    let center_position = (aabb.0 + aabb.1) * 0.5 + transform.position;
-                    let radius = ((aabb.1 - aabb.0).component_mul(&transform.scale) * 0.5).magnitude();
-
-                    // TODO ------------------------------------------
-                    // TODO: -> REIMPLEMENT: 1. firstly render depth buffer without queries; 2. render object AABBs using queries
-                    // TODO: Many queries is slow approach, use max 128 queries (distribute one query across multiple objects)
-                    // TODO: OR implement compute-based approach (https://vkguide.dev/docs/gpudriven/compute_culling)
-                    // TODO ------------------------------------------
-
-                    if !camera.is_sphere_visible(center_position, radius) || vertex_mesh.vertex_count == 0 {
+                    if vertex_mesh.vertex_count == 0 {
                         continue;
                     }
+
+                    let sphere = vertex_mesh.sphere();
+                    let center = sphere.center() + transform.position;
+                    let radius = sphere.radius() * glm::comp_max(&transform.scale);
+
+                    if !camera.is_sphere_visible(&center, radius) {
+                        continue;
+                    }
+
+                    curr_cull_objects.push(CullObject {
+                        sphere: na::Vector4::new(center.x, center.y, center.z, radius),
+                        id: entity_index as u32,
+                        _pad: [0; 3],
+                    });
 
                     if renderer.translucent {
                         cl.bind_pipeline(&self.depth_pipeline_r);
@@ -486,7 +526,18 @@ impl Renderer {
                 }
 
                 cl.end().unwrap();
+
+                cull_objects.lock().unwrap().extend(curr_cull_objects);
             });
+
+        let cull_objects = cull_objects.into_inner().unwrap();
+        let count = cull_objects.len() as u32;
+
+        cull_objects.into_iter().enumerate().for_each(|(i, obj)| {
+            self.cull_host_buffer[i] = obj;
+        });
+
+        count
     }
 
     fn record_g_cmd_lists(
@@ -537,9 +588,8 @@ impl Renderer {
                     }
 
                     // Check query_pool occlusion results
-                    if self.occlusion_buffer[entity_index] == 0 {
-                        // TODO
-                        // continue;
+                    if self.visibility_host_buffer[entity_index] == 0 {
+                        continue;
                     }
 
                     let mesh = vertex_mesh.unwrap();
@@ -567,7 +617,8 @@ impl Renderer {
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) {
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+        let device = Arc::clone(&self.device);
+        let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
@@ -583,8 +634,9 @@ impl Renderer {
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
         let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
+        let object_count = renderables.len() as u32;
 
-        self.record_depth_cmd_lists(
+        let frustum_visible_objects = self.record_depth_cmd_lists(
             &renderables,
             &camera,
             &world_transform_comps,
@@ -592,8 +644,6 @@ impl Renderer {
             &vertex_mesh_comps,
         );
 
-        // Record depth cmd list
-        // -------------------------------------------------------------------------------------------------------------
         {
             let mut cl = self.staging_cl.lock().unwrap();
             cl.begin(true).unwrap();
@@ -612,13 +662,20 @@ impl Renderer {
             // Build depth pyramid
             // ------------------------------------------------------------------
             cl.barrier_image(
-                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::ALL_GRAPHICS,
                 PipelineStageFlags::COMPUTE,
-                &[depth_pyramid_image
-                    .barrier()
-                    .dst_access_mask(AccessFlags::SHADER_WRITE)
-                    .old_layout(ImageLayout::UNDEFINED)
-                    .new_layout(ImageLayout::GENERAL)],
+                &[
+                    depth_image
+                        .barrier()
+                        .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
+                        .dst_access_mask(AccessFlags::SHADER_READ)
+                        .layout(ImageLayout::SHADER_READ),
+                    depth_pyramid_image
+                        .barrier()
+                        .dst_access_mask(AccessFlags::SHADER_WRITE)
+                        .old_layout(ImageLayout::UNDEFINED)
+                        .new_layout(ImageLayout::GENERAL),
+                ],
             );
 
             let used_depth_pyramid_pool =
@@ -638,12 +695,10 @@ impl Renderer {
                     self.depth_pyramid_descs[i],
                 );
 
-                cl.push_constants(&self.depth_pyramid_signature, ShaderStage::COMPUTE, 0, unsafe {
-                    &[
-                        mem::transmute(level_width as f32),
-                        mem::transmute(level_height as f32),
-                    ]
-                });
+                let constants = DepthPyramidConstants {
+                    size: na::Vector2::new(level_width as f32, level_height as f32),
+                };
+                cl.push_constants(&self.depth_pyramid_signature, &constants);
 
                 cl.dispatch(calc_group_count(level_width), calc_group_count(level_height), 1);
 
@@ -669,6 +724,64 @@ impl Renderer {
                     .dst_access_mask(Default::default())
                     .old_layout(ImageLayout::SHADER_READ)
                     .new_layout(ImageLayout::DEPTH_READ)],
+            );
+
+            // Compute visibilities
+            // ------------------------------------------------------------------
+            let used_cull_pool = cl.use_descriptor_pool(Arc::clone(&self.cull_pool));
+
+            cl.copy_buffer_to_device(
+                &self.cull_host_buffer,
+                0,
+                &self.cull_buffer,
+                0,
+                frustum_visible_objects as u64,
+            );
+            cl.clear_buffer(&self.visibility_buffer, 0);
+
+            cl.barrier_buffer(
+                PipelineStageFlags::TRANSFER,
+                PipelineStageFlags::COMPUTE,
+                &[
+                    self.cull_buffer
+                        .barrier()
+                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                        .dst_access_mask(AccessFlags::SHADER_READ),
+                    self.visibility_buffer
+                        .barrier()
+                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                        .dst_access_mask(AccessFlags::SHADER_WRITE),
+                ],
+            );
+
+            cl.bind_pipeline(&self.cull_pipeline);
+            cl.bind_compute_input(&self.cull_signature, 0, used_cull_pool, self.cull_descriptor);
+
+            let pyramid_size = depth_pyramid_image.size_2d();
+            let constants = CullConstants {
+                pyramid_size: na::Vector2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
+                object_count: frustum_visible_objects,
+            };
+            cl.push_constants(&self.cull_signature, &constants);
+
+            cl.dispatch(calc_group_count(frustum_visible_objects), 1, 1);
+
+            cl.barrier_buffer(
+                PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::TRANSFER,
+                &[self
+                    .visibility_buffer
+                    .barrier()
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::TRANSFER_READ)],
+            );
+
+            cl.copy_buffer_to_host(
+                &self.visibility_buffer,
+                0,
+                &self.visibility_host_buffer,
+                0,
+                object_count as u64,
             );
 
             cl.end().unwrap();
@@ -834,7 +947,10 @@ impl Renderer {
 
                     self.on_update();
                     self.final_submit.wait().unwrap();
+                    let t0 = Instant::now();
                     self.on_render(&sw_image);
+                    let t1 = Instant::now();
+                    println!("render {}", (t1 - t0).as_secs_f64());
 
                     let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
                     let present_result = present_queue.present(sw_image);
@@ -959,6 +1075,36 @@ impl Renderer {
                 .collect()
         };
 
+        self.cull_pool.lock().unwrap().update(
+            self.cull_descriptor,
+            &[
+                Binding {
+                    id: 0,
+                    array_index: 0,
+                    res: BindingRes::ImageViewSampler(
+                        Arc::clone(self.depth_pyramid_image.as_ref().unwrap().view()),
+                        Arc::clone(&self.depth_pyramid_sampler),
+                        ImageLayout::GENERAL,
+                    ),
+                },
+                Binding {
+                    id: 1,
+                    array_index: 0,
+                    res: BindingRes::Buffer(Arc::clone(&self.per_frame_ub)),
+                },
+                Binding {
+                    id: 2,
+                    array_index: 0,
+                    res: BindingRes::Buffer(Arc::clone(&self.cull_buffer)),
+                },
+                Binding {
+                    id: 3,
+                    array_index: 0,
+                    res: BindingRes::Buffer(Arc::clone(&self.visibility_buffer)),
+                },
+            ],
+        );
+
         self.depth_framebuffer = Some(
             self.depth_render_pass
                 .create_framebuffer(
@@ -1011,8 +1157,8 @@ impl Renderer {
         self.translucency_texel_image = Some(
             self.device
                 .create_image_3d(
-                    vkw::Format::RG32_UINT, // color & depth
-                    vkw::ImageUsageFlags::STORAGE,
+                    Format::RG32_UINT, // color & depth
+                    ImageUsageFlags::STORAGE,
                     (
                         new_size.0,
                         new_size.1,
@@ -1020,7 +1166,7 @@ impl Renderer {
                     ),
                 )
                 .unwrap(),
-        )
+        );
     }
 
     fn create_main_framebuffers(&mut self) {
@@ -1068,7 +1214,7 @@ pub fn new(
     device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
-) -> Result<Arc<Mutex<Renderer>>, vkw::DeviceError> {
+) -> Result<Arc<Mutex<Renderer>>, DeviceError> {
     let scene = Scene::new();
 
     // TODO: pipeline cache management
@@ -1080,16 +1226,7 @@ pub fn new(
     );
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
-
-    // Create secondary cmd lists for multi-threaded recording
     let phys_cores = num_cpus::get_physical();
-
-    let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
-        .take(phys_cores)
-        .collect();
-    let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
-        .take(phys_cores)
-        .collect();
 
     // Create per-frame uniform buffer
     let per_frame_uniform_buffer = device.create_device_buffer(
@@ -1141,6 +1278,10 @@ pub fn new(
     let depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
     let depth_per_frame_in = depth_per_frame_pool.lock().unwrap().alloc()?;
 
+    let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+        .take(phys_cores)
+        .collect();
+
     // Depth pyramid pipeline
     // -----------------------------------------------------------------------------------------------------------------
 
@@ -1159,8 +1300,41 @@ pub fn new(
         .create_pipeline_signature(&[depth_pyramid_compute])
         .unwrap();
     let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
-    let depth_pyramid_sampler = device
-        .create_reduction_sampler(Sampler::REDUCTION_MIN, 16.0)
+    let depth_pyramid_sampler = device.create_reduction_sampler(Sampler::REDUCTION_MAX).unwrap();
+
+    // Cull pipeline
+    // -----------------------------------------------------------------------------------------------------------------
+    let cull_compute = device
+        .create_shader(
+            &resources.get("shaders/cull.comp.spv").unwrap().read().unwrap(),
+            &[],
+            &[],
+        )
+        .unwrap();
+    let cull_signature = device.create_pipeline_signature(&[cull_compute]).unwrap();
+    let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
+    let cull_pool = cull_signature.create_pool(0, 1).unwrap();
+    let cull_descriptor = cull_pool.lock().unwrap().alloc().unwrap();
+
+    let cull_buffer = device
+        .create_device_buffer(
+            BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_DST,
+            mem::size_of::<CullObject>() as u64,
+            MAX_OBJECT_COUNT as u64,
+        )
+        .unwrap();
+    let cull_host_buffer = device
+        .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, MAX_OBJECT_COUNT as u64)
+        .unwrap();
+    let visibility_buffer = device
+        .create_device_buffer(
+            BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
+            mem::size_of::<u32>() as u64,
+            MAX_OBJECT_COUNT as u64,
+        )
+        .unwrap();
+    let visibility_host_buffer = device
+        .create_host_buffer(BufferUsageFlags::TRANSFER_DST, MAX_OBJECT_COUNT as u64)
         .unwrap();
 
     // Create G-Buffer pass resources
@@ -1280,6 +1454,9 @@ pub fn new(
         .unwrap();
     let g_per_frame_pool = g_signature.create_pool(0, 1)?;
     let g_per_frame_in = g_per_frame_pool.lock().unwrap().alloc()?;
+    let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
+        .take(phys_cores)
+        .collect();
 
     let tile_count = max_texture_count;
     let texture_atlases = [
@@ -1381,10 +1558,7 @@ pub fn new(
         final_cl,
         final_submit,
         sw_framebuffers: vec![],
-        occlusion_buffer: device.create_host_buffer(
-            vkw::BufferUsageFlags::TRANSFER_DST,
-            (mem::size_of::<u32>() * 65535) as u64,
-        )?,
+        visibility_buffer,
         depth_secondary_cls,
         g_secondary_cls,
         depth_render_pass,
@@ -1393,10 +1567,19 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
+        depth_per_object_pool: depth_signature.create_pool(1, MAX_OBJECT_COUNT)?,
         depth_per_frame_pool,
         depth_per_frame_in,
         depth_pyramid_pipeline,
-        depth_per_object_pool: depth_signature.create_pool(1, 65535)?,
+        depth_pyramid_signature,
+        depth_pyramid_pool: None,
+        depth_pyramid_descs: vec![],
+        depth_pyramid_sampler,
+        cull_pipeline,
+        cull_signature,
+        cull_pool,
+        cull_descriptor,
+        cull_buffer,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
@@ -1405,13 +1588,11 @@ pub fn new(
         g_per_object_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
-        model_inputs_pool: g_signature.create_pool(1, 65535)?, // TODO: REMOVE
+        model_inputs_pool: g_signature.create_pool(1, MAX_OBJECT_COUNT)?,
         active_camera,
-        camera_uniform_buffer: per_frame_uniform_buffer,
-        depth_pyramid_signature,
-        depth_pyramid_pool: None,
-        depth_pyramid_descs: vec![],
-        depth_pyramid_sampler,
+        per_frame_ub: per_frame_uniform_buffer,
+        visibility_host_buffer,
+        cull_host_buffer,
     };
     renderer.on_resize(size);
 

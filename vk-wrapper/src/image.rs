@@ -64,6 +64,10 @@ impl ImageBarrier {
         self
     }
 
+    pub fn layout(self, layout: ImageLayout) -> Self {
+        self.old_layout(layout).new_layout(layout)
+    }
+
     pub fn base_mip_level(mut self, base_mip_level: u32) -> Self {
         self.native.subresource_range.base_mip_level = base_mip_level;
         self

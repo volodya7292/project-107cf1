@@ -1,0 +1,83 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+struct CullObject {
+    vec4 sphere;
+    uint id;
+    uint _pad[3];
+};
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0) uniform sampler2D depthPyramid;
+
+layout(binding = 1) uniform per_frame_data {
+    PerFrameInfo info;
+};
+
+layout(std430, binding = 2) readonly buffer ObjectBuffer {
+    CullObject objects[];
+};
+
+layout(std430, binding = 3) writeonly buffer VisibilityBuffer {
+    uint visibility[];
+};
+
+layout(push_constant) uniform PushConstants {
+    vec2 pyramid_size;
+    uint object_count;
+} data;
+
+// 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere. Michael Mara, Morgan McGuire. 2013
+bool project_sphere(vec3 C, float r, float znear, float P00, float P11, out vec4 aabb) {
+    if (C.z < r + znear)
+        return false;
+
+    vec2 cx = -C.xz;
+    vec2 vx = vec2(sqrt(dot(cx, cx) - r * r), r);
+    vec2 minx = mat2(vx.x, vx.y, -vx.y, vx.x) * cx;
+    vec2 maxx = mat2(vx.x, -vx.y, vx.y, vx.x) * cx;
+
+    vec2 cy = -C.yz;
+    vec2 vy = vec2(sqrt(dot(cy, cy) - r * r), r);
+    vec2 miny = mat2(vy.x, vy.y, -vy.y, vy.x) * cy;
+    vec2 maxy = mat2(vy.x, -vy.y, vy.y, vy.x) * cy;
+
+    aabb = vec4(minx.x / minx.y * P00, miny.x / miny.y * P11, maxx.x / maxx.y * P00, maxy.x / maxy.y * P11);
+    aabb = aabb.xwzy * vec4(0.5f, -0.5f, 0.5f, -0.5f) + vec4(0.5f);// clip space -> uv space
+
+    return true;
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+
+    if (id < data.object_count) {
+        CullObject object = objects[id];
+        vec3 center = (info.camera.view * vec4(object.sphere.xyz, 1)).xyz;
+        //center.y = -center.y;
+        center.z = -center.z;
+        float radius = object.sphere.w;
+
+        float z_near = info.camera.z_near;
+        float p00 = info.camera.proj[0][0];
+        float p11 = info.camera.proj[1][1];
+        vec4 proj_aabb;
+        bool visible = true;
+
+        if (project_sphere(center, radius, z_near, p00, p11, proj_aabb)) {
+            float width = (proj_aabb.z - proj_aabb.x) * data.pyramid_size.x;
+            float height = (proj_aabb.w - proj_aabb.y) * data.pyramid_size.y;
+            float level = floor(log2(max(width, height)));
+
+            // Sampler is set up to do min reduction, so this computes the minimum depth of a 2x2 texel quad
+            float depth = textureLod(depthPyramid, (proj_aabb.xy + proj_aabb.zw) * 0.5, level).x;
+            float depth_sphere = 1.0 - z_near / (center.z - radius);
+
+            visible = depth_sphere <= depth;
+        }
+
+        visibility[object.id] = uint(visible);
+    }
+}

@@ -61,7 +61,7 @@ fn main() {
     let mut window_size = window.vulkan_drawable_size();
 
     let renderer_settings = renderer::Settings {
-        vsync: true,
+        vsync: false,
         texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
@@ -132,21 +132,21 @@ fn main() {
         );
         vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
 
-        let ent1 = entities.create();
-
-        transform_comps.set(
-            ent0,
-            component::Transform::new(
-                na::Vector3::new(0.0, 0.0, 1.0),
-                na::Vector3::default(),
-                na::Vector3::new(1.0, 1.0, 1.0),
-            ),
-        );
-        renderer_comps.set(
-            ent0,
-            component::Renderer::new(&device, &mat_pipelines.triag(), false),
-        );
-        vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
+        // let ent1 = entities.create();
+        //
+        // transform_comps.set(
+        //     ent1,
+        //     component::Transform::new(
+        //         na::Vector3::new(0.0, 0.0, 1.0),
+        //         na::Vector3::default(),
+        //         na::Vector3::new(1.0, 1.0, 1.0),
+        //     ),
+        // );
+        // renderer_comps.set(
+        //     ent1,
+        //     component::Renderer::new(&device, &mat_pipelines.triag(), false),
+        // );
+        // vertex_mesh_comps.set(ent1, component::VertexMesh::new(&triangle_mesh.raw()));
     }
 
     /*{

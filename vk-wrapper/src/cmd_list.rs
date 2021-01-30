@@ -4,10 +4,10 @@ use crate::render_pass::vk_clear_value;
 use crate::{
     BufferBarrier, ClearValue, DescriptorPool, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier,
     ImageLayout, ImageView, Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass, Sampler,
-    ShaderStage,
 };
 use ahash::AHashMap;
 use ash::{version::DeviceV1_0, vk};
+use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr, slice};
 
@@ -427,23 +427,17 @@ impl CmdList {
         self.use_buffer(&buffer.buffer);
     }
 
-    pub fn push_constants(
-        &mut self,
-        signature: &Arc<PipelineSignature>,
-        stage: ShaderStage,
-        base_index: u32,
-        constants: &[u32],
-    ) {
-        unsafe {
-            let data = slice::from_raw_parts(constants.as_ptr() as *const u8, constants.len() * 4);
-            assert!(data.len() <= 128);
+    pub fn push_constants<T>(&mut self, signature: &Arc<PipelineSignature>, data: &T) {
+        let size = mem::size_of_val(data);
+        assert!(size <= 128);
 
+        unsafe {
             self.device_wrapper.0.cmd_push_constants(
                 self.native,
                 signature.pipeline_layout,
-                stage.0,
-                base_index * 4,
-                data,
+                vk::ShaderStageFlags::ALL,
+                0,
+                slice::from_raw_parts(data as *const T as *const u8, size),
             )
         };
     }
@@ -727,6 +721,19 @@ impl CmdList {
         self.use_buffer(&dst_buffer.buffer);
     }
 
+    pub fn clear_buffer(&mut self, buffer: &Arc<DeviceBuffer>, value: u32) {
+        unsafe {
+            self.device_wrapper.0.cmd_fill_buffer(
+                self.native,
+                buffer.buffer.native,
+                0,
+                vk::WHOLE_SIZE,
+                value,
+            );
+        }
+        self.use_buffer(&buffer.buffer);
+    }
+
     pub fn clear_image(&mut self, image: &Arc<Image>, layout: ImageLayout, color: ClearValue) {
         let range = vk::ImageSubresourceRange {
             aspect_mask: image.wrapper.aspect,
@@ -819,7 +826,7 @@ impl CmdList {
     }
 
     pub fn execute_secondary(&mut self, cmd_lists: &[Arc<Mutex<CmdList>>]) {
-        let native_cmd_lists: Vec<vk::CommandBuffer> = cmd_lists
+        let native_cmd_lists: SmallVec<[vk::CommandBuffer; 64]> = cmd_lists
             .iter()
             .map(|cmd_list| cmd_list.lock().unwrap().native)
             .collect();

@@ -130,6 +130,22 @@ impl VertexMember for na::Vector4<u32> {
 }
 
 #[derive(Default)]
+pub struct Sphere {
+    center: na::Vector3<f32>,
+    radius: f32,
+}
+
+impl Sphere {
+    pub fn center(&self) -> &na::Vector3<f32> {
+        &self.center
+    }
+
+    pub fn radius(&self) -> f32 {
+        self.radius
+    }
+}
+
+#[derive(Default)]
 pub struct RawVertexMesh {
     indexed: bool,
     pub(in crate::renderer) staging_buffer: Option<vkw::HostBuffer<u8>>,
@@ -138,6 +154,7 @@ pub struct RawVertexMesh {
     pub(in crate::renderer) vertex_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
+    sphere: Sphere,
     bindings: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
     indices_offset: u64,
     pub(in crate::renderer) changed: AtomicBool,
@@ -146,6 +163,10 @@ pub struct RawVertexMesh {
 impl RawVertexMesh {
     pub fn aabb(&self) -> &(na::Vector3<f32>, na::Vector3<f32>) {
         &self.aabb
+    }
+
+    pub fn sphere(&self) -> &Sphere {
+        &self.sphere
     }
 }
 
@@ -313,13 +334,18 @@ impl VertexMeshCreate for vkw::Device {
             }
 
             // Calculate bounds
-            let mut aabb = (
-                (*vertices[0].position()).clone(),
-                (*vertices[0].position()).clone(),
-            );
+            let mut aabb = (*vertices[0].position(), *vertices[0].position());
+
             for vertex in &vertices[1..] {
                 aabb.0 = aabb.0.inf(vertex.position());
                 aabb.1 = aabb.1.sup(vertex.position());
+            }
+
+            let mut center = (aabb.0 + aabb.1) / 2.0;
+            let mut radius = 0.0;
+
+            for vertex in &vertices[0..] {
+                radius = (center - vertex.position()).magnitude().max(radius);
             }
 
             RawVertexMesh {
@@ -330,6 +356,7 @@ impl VertexMeshCreate for vkw::Device {
                 vertex_count: vertices.len() as u32,
                 index_count: indices.len() as u32,
                 aabb,
+                sphere: Sphere { center, radius },
                 bindings,
                 indices_offset: indices_offset as u64,
                 changed: AtomicBool::new(true),

@@ -51,6 +51,18 @@ pub struct BufferBarrier {
     pub(crate) buffer: Arc<Buffer>,
 }
 
+impl BufferBarrier {
+    pub fn src_access_mask(mut self, src_access_mask: AccessFlags) -> Self {
+        self.native.src_access_mask = src_access_mask.0;
+        self
+    }
+
+    pub fn dst_access_mask(mut self, dst_access_mask: AccessFlags) -> Self {
+        self.native.dst_access_mask = dst_access_mask.0;
+        self
+    }
+}
+
 pub struct HostBuffer<T> {
     pub(crate) _type_marker: PhantomData<T>,
     pub(crate) buffer: Arc<Buffer>,
@@ -209,6 +221,19 @@ impl<T> HostBuffer<T> {
             }
         }
     }
+
+    pub fn barrier(&self) -> BufferBarrier {
+        BufferBarrier {
+            native: vk::BufferMemoryBarrier::builder()
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .buffer(self.buffer.native)
+                .offset(0)
+                .size(vk::WHOLE_SIZE)
+                .build(),
+            buffer: Arc::clone(&self.buffer),
+        }
+    }
 }
 
 unsafe impl<T> Send for HostBuffer<T> {}
@@ -233,6 +258,19 @@ impl DeviceBuffer {
                 .dst_access_mask(dst_access_mask.0)
                 .src_queue_family_index(src_queue.family_index)
                 .dst_queue_family_index(dst_queue.family_index)
+                .buffer(self.buffer.native)
+                .offset(0)
+                .size(vk::WHOLE_SIZE)
+                .build(),
+            buffer: Arc::clone(&self.buffer),
+        }
+    }
+
+    pub fn barrier(&self) -> BufferBarrier {
+        BufferBarrier {
+            native: vk::BufferMemoryBarrier::builder()
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .buffer(self.buffer.native)
                 .offset(0)
                 .size(vk::WHOLE_SIZE)

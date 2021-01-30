@@ -386,7 +386,6 @@ impl Device {
     pub fn create_reduction_sampler(
         self: &Arc<Self>,
         mode: SamplerReduction,
-        max_lod: f32,
     ) -> Result<Arc<Sampler>, DeviceError> {
         let mut reduction_info = vk::SamplerReductionModeCreateInfo::builder()
             .reduction_mode(mode.0)
@@ -402,7 +401,7 @@ impl Device {
             .anisotropy_enable(false)
             .compare_enable(false)
             .min_lod(0.0)
-            .max_lod(max_lod)
+            .max_lod(vk::LOD_CLAMP_NONE)
             .unnormalized_coordinates(false)
             .push_next(&mut reduction_info);
 
@@ -877,7 +876,6 @@ impl Device {
         let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
 
         let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
-        let mut push_constant_ranges = HashMap::<ShaderStage, (u32, u32)>::new();
         let mut push_constants_size = 0u32;
 
         for shader in shaders {
@@ -924,10 +922,7 @@ impl Device {
                 }
             }
 
-            if shader.push_constants_size > 0 {
-                push_constant_ranges.insert(shader.stage, (push_constants_size, shader.push_constants_size));
-                push_constants_size += shader.push_constants_size;
-            }
+            push_constants_size += shader.push_constants_size;
         }
 
         let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
@@ -953,17 +948,11 @@ impl Device {
             .collect();
 
         let pipeline_layout = {
-            // Push constants
-            let mut native_push_constant_ranges =
-                Vec::<vk::PushConstantRange>::with_capacity(push_constant_ranges.len());
-
-            for (stage, range) in &push_constant_ranges {
-                native_push_constant_ranges.push(vk::PushConstantRange {
-                    stage_flags: stage.0,
-                    offset: range.0,
-                    size: range.1,
-                });
-            }
+            let push_constant_range = vk::PushConstantRange {
+                stage_flags: vk::ShaderStageFlags::ALL,
+                offset: 0,
+                size: push_constants_size,
+            };
 
             // Layout
             let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
@@ -972,9 +961,13 @@ impl Device {
                 .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
                 .collect();
 
-            let layout_create_info = vk::PipelineLayoutCreateInfo::builder()
-                .set_layouts(&set_layouts)
-                .push_constant_ranges(&native_push_constant_ranges);
+            let mut layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
+
+            if push_constants_size > 0 {
+                layout_create_info =
+                    layout_create_info.push_constant_ranges(slice::from_ref(&push_constant_range));
+            }
+
             unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? }
         };
 
@@ -984,7 +977,6 @@ impl Device {
             pipeline_layout,
             descriptor_sizes,
             binding_types,
-            _push_constant_ranges: push_constant_ranges,
             _push_constants_size: push_constants_size,
             shaders,
         }))
@@ -1077,7 +1069,6 @@ impl Device {
             pipeline_layout,
             descriptor_sizes,
             binding_types,
-            _push_constant_ranges: Default::default(),
             _push_constants_size: 0,
             shaders: Default::default(),
         }))
