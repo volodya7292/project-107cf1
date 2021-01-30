@@ -1004,6 +1004,8 @@ impl Renderer {
         self.surface_size = new_size;
         self.surface_changed = true;
 
+        self.device.wait_idle().unwrap();
+
         // Set camera aspect
         {
             let entity = self.get_active_camera();
