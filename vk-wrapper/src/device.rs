@@ -1297,6 +1297,13 @@ impl Device {
             fence: create_fence(&self.wrapper)?,
         })
     }
+
+    pub fn wait_idle(&self) -> Result<(), vk::Result> {
+        for queue in &self.queues {
+            queue.wait_idle()?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Device {

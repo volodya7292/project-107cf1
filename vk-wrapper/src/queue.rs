@@ -3,7 +3,7 @@ use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{ptr, slice};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -12,7 +12,7 @@ pub struct QueueType(pub(crate) u32);
 pub struct Queue {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
-    pub(crate) native: Mutex<vk::Queue>,
+    pub(crate) native: RwLock<vk::Queue>,
     pub(crate) semaphore: Arc<Semaphore>,
     pub(crate) timeline_sp: Arc<Semaphore>,
     pub(crate) family_index: u32,
@@ -110,7 +110,7 @@ impl Queue {
             );
         }
 
-        let queue = self.native.lock().unwrap();
+        let queue = self.native.write().unwrap();
 
         fence.reset()?;
 
@@ -162,7 +162,7 @@ impl Queue {
     }
 
     pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
-        let queue = self.native.lock().unwrap();
+        let queue = self.native.write().unwrap();
         let swapchain = sw_image.swapchain.wrapper.native.lock().unwrap();
 
         let present_info = vk::PresentInfoKHR::builder()
@@ -185,11 +185,16 @@ impl Queue {
     pub fn timeline_semaphore(&self) -> &Arc<Semaphore> {
         &self.timeline_sp
     }
+
+    pub fn wait_idle(&self) -> Result<(), vk::Result> {
+        let queue = self.native.write().unwrap();
+        unsafe { self.device_wrapper.0.queue_wait_idle(*queue) }
+    }
 }
 
 impl PartialEq for Queue {
     fn eq(&self, other: &Self) -> bool {
-        *self.native.lock().unwrap() == *other.native.lock().unwrap()
+        *self.native.read().unwrap() == *other.native.read().unwrap()
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{AccessFlags, Device, Queue};
+use crate::{AccessFlags, Device};
 use ash::vk;
 use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
@@ -245,27 +245,6 @@ pub struct DeviceBuffer {
 }
 
 impl DeviceBuffer {
-    pub fn barrier_queue(
-        &self,
-        src_access_mask: AccessFlags,
-        dst_access_mask: AccessFlags,
-        src_queue: &Queue,
-        dst_queue: &Queue,
-    ) -> BufferBarrier {
-        BufferBarrier {
-            native: vk::BufferMemoryBarrier::builder()
-                .src_access_mask(src_access_mask.0)
-                .dst_access_mask(dst_access_mask.0)
-                .src_queue_family_index(src_queue.family_index)
-                .dst_queue_family_index(dst_queue.family_index)
-                .buffer(self.buffer.native)
-                .offset(0)
-                .size(vk::WHOLE_SIZE)
-                .build(),
-            buffer: Arc::clone(&self.buffer),
-        }
-    }
-
     pub fn barrier(&self) -> BufferBarrier {
         BufferBarrier {
             native: vk::BufferMemoryBarrier::builder()

@@ -8,7 +8,7 @@ use ash::{
     version::{DeviceV1_0, InstanceV1_0},
     vk,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
@@ -77,7 +77,7 @@ impl Adapter {
                 queues.push(Arc::new(Queue {
                     device_wrapper: Arc::clone(&device_wrapper),
                     swapchain_khr: swapchain_khr.clone(),
-                    native: Mutex::new(unsafe {
+                    native: RwLock::new(unsafe {
                         device_wrapper
                             .0
                             .get_device_queue(queue_info.queue_family_index, i)

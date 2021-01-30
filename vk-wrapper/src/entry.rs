@@ -46,12 +46,11 @@ unsafe extern "system" fn vk_debug_callback(
 
     match message_severity {
         vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => warn!(target: "vulkan", "[{}] {:?}", msg_type, msg),
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => error!(target: "vulkan", "[{}] {:?}", msg_type, msg),
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+            error!(target: "vulkan", "[{}] {:?}", msg_type, msg);
+            panic!("Vulkan validation");
+        }
         _ => info!(target: "vulkan", "[{}] {:?}", msg_type, msg),
-    }
-
-    if cfg!(debug_assertions) {
-        panic!("Vulkan validation");
     }
 
     0

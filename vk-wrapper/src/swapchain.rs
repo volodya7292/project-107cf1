@@ -1,5 +1,4 @@
 use crate::{Device, Image, Semaphore, Surface};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::{Arc, Mutex};
 
@@ -22,8 +21,8 @@ pub(crate) struct SwapchainWrapper {
 
 impl Drop for SwapchainWrapper {
     fn drop(&mut self) {
+        self.device.wait_idle().unwrap();
         unsafe {
-            self.device.wrapper.0.device_wait_idle().unwrap();
             self.device
                 .swapchain_khr
                 .destroy_swapchain(*self.native.lock().unwrap(), None);

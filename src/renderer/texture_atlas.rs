@@ -69,14 +69,12 @@ impl TextureAtlas {
             cl.barrier_image(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
                 vkw::PipelineStageFlags::TRANSFER,
-                &[self.image.barrier_queue(
-                    vkw::AccessFlags::default(),
-                    vkw::AccessFlags::TRANSFER_WRITE,
-                    vkw::ImageLayout::SHADER_READ,
-                    vkw::ImageLayout::TRANSFER_DST,
-                    graphics_queue,
-                    graphics_queue,
-                )],
+                &[self
+                    .image
+                    .barrier()
+                    .dst_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
+                    .old_layout(vkw::ImageLayout::SHADER_READ)
+                    .new_layout(vkw::ImageLayout::TRANSFER_DST)],
             );
 
             let mut offset = 0;
@@ -100,14 +98,12 @@ impl TextureAtlas {
             cl.barrier_image(
                 vkw::PipelineStageFlags::TRANSFER,
                 vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
-                &[self.image.barrier_queue(
-                    vkw::AccessFlags::TRANSFER_WRITE,
-                    vkw::AccessFlags::default(),
-                    vkw::ImageLayout::TRANSFER_DST,
-                    vkw::ImageLayout::SHADER_READ,
-                    graphics_queue,
-                    graphics_queue,
-                )],
+                &[self
+                    .image
+                    .barrier()
+                    .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
+                    .old_layout(vkw::ImageLayout::TRANSFER_DST)
+                    .new_layout(vkw::ImageLayout::SHADER_READ)],
             );
 
             cl.end().unwrap()
@@ -176,14 +172,10 @@ pub fn new(
         cl.barrier_image(
             vkw::PipelineStageFlags::TOP_OF_PIPE,
             vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
-            &[image.barrier_queue(
-                vkw::AccessFlags::default(),
-                vkw::AccessFlags::default(),
-                vkw::ImageLayout::UNDEFINED,
-                vkw::ImageLayout::SHADER_READ,
-                graphics_queue,
-                graphics_queue,
-            )],
+            &[image
+                .barrier()
+                .old_layout(vkw::ImageLayout::UNDEFINED)
+                .new_layout(vkw::ImageLayout::SHADER_READ)],
         );
         cl.end()?;
     }

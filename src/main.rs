@@ -233,6 +233,6 @@ fn main() {
 
         let end_t = Instant::now();
         delta_time = (end_t - start_t).as_secs_f64();
-        println!("{}", delta_time);
+        // println!("{}", delta_time);
     }
 }

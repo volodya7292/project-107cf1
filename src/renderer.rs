@@ -55,8 +55,8 @@ pub struct Renderer {
     staging_buffer: HostBuffer<u8>,
     staging_cl: Arc<Mutex<CmdList>>,
     staging_submit: Arc<Mutex<SubmitPacket>>,
-    final_cl: Arc<Mutex<CmdList>>,
-    final_submit: SubmitPacket,
+    final_cl: [Arc<Mutex<CmdList>>; 2],
+    final_submit: [SubmitPacket; 2],
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
@@ -776,8 +776,8 @@ impl Renderer {
         // -------------------------------------------------------------------------------------------------------------
         {
             // Note: Do not render anything in final cl except copying some image into swapchain image.
-            // Uniform/vertex buffers may be being updated at this moment.
-            let mut cl = self.final_cl.lock().unwrap();
+            // Uniform/vertex  may be being updated at this moment.
+            let mut cl = self.final_cl[0].lock().unwrap();
             cl.begin(true).unwrap();
 
             // let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
@@ -817,31 +817,24 @@ impl Renderer {
             cl.execute_secondary(&self.g_secondary_cls);
             cl.end_render_pass();
 
-            let sw_image = self.sw_framebuffers[sw_image.get_index() as usize]
-                .get_image(0)
-                .unwrap();
+            let sw_image = sw_image.get_image();
             let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
 
             cl.barrier_image(
                 PipelineStageFlags::ALL_GRAPHICS,
                 PipelineStageFlags::TRANSFER,
                 &[
-                    albedo.barrier_queue(
-                        AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        AccessFlags::TRANSFER_READ,
-                        ImageLayout::SHADER_READ,
-                        ImageLayout::TRANSFER_SRC,
-                        graphics_queue,
-                        graphics_queue,
-                    ),
-                    sw_image.barrier_queue(
-                        AccessFlags::default(),
-                        AccessFlags::TRANSFER_WRITE,
-                        ImageLayout::UNDEFINED,
-                        ImageLayout::TRANSFER_DST,
-                        graphics_queue,
-                        graphics_queue,
-                    ),
+                    albedo
+                        .barrier()
+                        .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+                        .dst_access_mask(AccessFlags::TRANSFER_READ)
+                        .old_layout(ImageLayout::SHADER_READ)
+                        .new_layout(ImageLayout::TRANSFER_SRC),
+                    sw_image
+                        .barrier()
+                        .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+                        .old_layout(ImageLayout::UNDEFINED)
+                        .new_layout(ImageLayout::TRANSFER_DST),
                 ],
             );
             cl.blit_image_2d(
@@ -850,39 +843,82 @@ impl Renderer {
                 (0, 0),
                 albedo.size_2d(),
                 0,
-                &sw_image,
+                sw_image,
                 ImageLayout::TRANSFER_DST,
                 (0, 0),
                 sw_image.size_2d(),
                 0,
             );
+
+            let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+
             cl.barrier_image(
                 PipelineStageFlags::TRANSFER,
                 PipelineStageFlags::BOTTOM_OF_PIPE,
                 &[
-                    albedo.barrier_queue(
-                        AccessFlags::TRANSFER_READ,
-                        AccessFlags::default(),
-                        ImageLayout::TRANSFER_SRC,
-                        ImageLayout::SHADER_READ,
-                        graphics_queue,
-                        graphics_queue,
-                    ),
-                    sw_image.barrier_queue(
-                        AccessFlags::TRANSFER_WRITE,
-                        AccessFlags::default(),
-                        ImageLayout::TRANSFER_DST,
-                        ImageLayout::PRESENT,
-                        graphics_queue,
-                        graphics_queue,
-                    ),
+                    albedo
+                        .barrier()
+                        .src_access_mask(AccessFlags::TRANSFER_READ)
+                        .old_layout(ImageLayout::TRANSFER_SRC)
+                        .new_layout(ImageLayout::SHADER_READ),
+                    sw_image
+                        .barrier()
+                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                        .old_layout(ImageLayout::TRANSFER_DST)
+                        .new_layout(ImageLayout::PRESENT)
+                        .src_queue(graphics_queue)
+                        .dst_queue(if graphics_queue == present_queue {
+                            graphics_queue
+                        } else {
+                            present_queue
+                        }),
                 ],
             );
+
             cl.end().unwrap();
         }
 
+        let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+
         unsafe {
-            graphics_queue.submit(&mut self.final_submit).unwrap();
+            graphics_queue.submit(&mut self.final_submit[0]).unwrap();
+
+            if graphics_queue != present_queue {
+                {
+                    let mut cl = self.final_cl[1].lock().unwrap();
+                    cl.begin(true).unwrap();
+                    cl.barrier_image(
+                        PipelineStageFlags::TOP_OF_PIPE,
+                        PipelineStageFlags::BOTTOM_OF_PIPE,
+                        &[sw_image
+                            .get_image()
+                            .barrier()
+                            .old_layout(ImageLayout::TRANSFER_DST)
+                            .new_layout(ImageLayout::PRESENT)
+                            .src_queue(graphics_queue)
+                            .dst_queue(present_queue)],
+                    );
+                    cl.end().unwrap();
+                }
+
+                self.final_submit[1]
+                    .set(&[SubmitInfo::new(
+                        &[WaitSemaphore {
+                            semaphore: Arc::clone(graphics_queue.timeline_semaphore()),
+                            wait_dst_mask: PipelineStageFlags::ALL_COMMANDS,
+                            wait_value: self.final_submit[0].get_signal_value(0).unwrap(),
+                        }],
+                        &[Arc::clone(&self.final_cl[1])],
+                        &[SignalSemaphore {
+                            semaphore: Arc::clone(present_queue.frame_semaphore()),
+                            signal_value: 0,
+                        }],
+                    )])
+                    .unwrap();
+
+                present_queue.submit(&mut self.final_submit[1]).unwrap();
+                self.final_submit[1].wait().unwrap();
+            }
         }
     }
 
@@ -893,6 +929,7 @@ impl Renderer {
 
         if adapter.is_surface_valid(surface).unwrap() {
             if self.surface_changed {
+                let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
                 let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
                 self.swapchain = Some(
@@ -900,20 +937,28 @@ impl Renderer {
                         .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
                         .unwrap(),
                 );
-                self.final_submit
+
+                let signal_sem = &[SignalSemaphore {
+                    semaphore: Arc::clone(present_queue.frame_semaphore()),
+                    signal_value: 0,
+                }];
+
+                self.final_submit[0]
                     .set(&[SubmitInfo::new(
                         &[WaitSemaphore {
                             semaphore: Arc::clone(self.swapchain.as_ref().unwrap().get_semaphore()),
                             wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // TODO: change if necessary
                             wait_value: 0,
                         }],
-                        &[Arc::clone(&self.final_cl)],
-                        &[SignalSemaphore {
-                            semaphore: Arc::clone(present_queue.frame_semaphore()),
-                            signal_value: 0,
-                        }],
+                        &[Arc::clone(&self.final_cl[0])],
+                        if graphics_queue == present_queue {
+                            signal_sem
+                        } else {
+                            &[]
+                        },
                     )])
                     .unwrap();
+
                 self.create_main_framebuffers();
                 self.surface_changed = false;
             }
@@ -926,7 +971,8 @@ impl Renderer {
                     self.surface_changed |= suboptimal;
 
                     self.on_update();
-                    self.final_submit.wait().unwrap();
+                    self.final_submit[0].wait().unwrap();
+                    self.final_submit[1].wait().unwrap();
                     self.on_render(&sw_image);
 
                     let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
@@ -1203,6 +1249,7 @@ pub fn new(
     );
 
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
+    let present_queue = device.get_queue(Queue::TYPE_PRESENT);
     let phys_cores = num_cpus::get_physical();
 
     // Create per-frame uniform buffer
@@ -1508,8 +1555,14 @@ pub fn new(
     let staging_submit =
         device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])?;
 
-    let final_cl = graphics_queue.create_primary_cmd_list()?;
-    let final_submit = device.create_submit_packet(&[])?;
+    let final_cl = [
+        graphics_queue.create_primary_cmd_list()?,
+        present_queue.create_primary_cmd_list()?,
+    ];
+    let final_submit = [
+        device.create_submit_packet(&[])?,
+        device.create_submit_packet(&[])?,
+    ];
 
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
@@ -1574,4 +1627,10 @@ pub fn new(
     renderer.on_resize(size);
 
     Ok(Arc::new(Mutex::new(renderer)))
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        self.device.wait_idle().unwrap();
+    }
 }

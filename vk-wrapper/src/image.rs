@@ -81,6 +81,16 @@ impl ImageBarrier {
     pub fn mip_levels(self, base_mip_level: u32, level_count: u32) -> Self {
         self.base_mip_level(base_mip_level).level_count(level_count)
     }
+
+    pub fn src_queue(mut self, src_queue: &Queue) -> Self {
+        self.native.src_queue_family_index = src_queue.family_index;
+        self
+    }
+
+    pub fn dst_queue(mut self, dst_queue: &Queue) -> Self {
+        self.native.dst_queue_family_index = dst_queue.family_index;
+        self
+    }
 }
 
 pub(in crate) struct ImageWrapper {
@@ -199,62 +209,6 @@ impl Image {
 
     pub fn create_view(&self) -> ImageViewBuilder {
         self.wrapper.create_view()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn barrier_queue_level(
-        self: &Arc<Self>,
-        src_access_mask: AccessFlags,
-        dst_access_mask: AccessFlags,
-        old_layout: ImageLayout,
-        new_layout: ImageLayout,
-        src_queue: &Queue,
-        dst_queue: &Queue,
-        base_mip_level: u32,
-        level_count: u32,
-    ) -> ImageBarrier {
-        ImageBarrier {
-            native: vk::ImageMemoryBarrier::builder()
-                .src_access_mask(src_access_mask.0)
-                .dst_access_mask(dst_access_mask.0)
-                .old_layout(old_layout.0)
-                .new_layout(new_layout.0)
-                .src_queue_family_index(src_queue.family_index)
-                .dst_queue_family_index(dst_queue.family_index)
-                .image(self.wrapper.native)
-                .subresource_range(
-                    vk::ImageSubresourceRange::builder()
-                        .aspect_mask(self.wrapper.aspect)
-                        .base_mip_level(base_mip_level)
-                        .level_count(level_count)
-                        .base_array_layer(0)
-                        .layer_count(vk::REMAINING_ARRAY_LAYERS)
-                        .build(),
-                )
-                .build(),
-            image: Arc::clone(self),
-        }
-    }
-
-    pub fn barrier_queue(
-        self: &Arc<Self>,
-        src_access_mask: AccessFlags,
-        dst_access_mask: AccessFlags,
-        old_layout: ImageLayout,
-        new_layout: ImageLayout,
-        src_queue: &Queue,
-        dst_queue: &Queue,
-    ) -> ImageBarrier {
-        self.barrier_queue_level(
-            src_access_mask,
-            dst_access_mask,
-            old_layout,
-            new_layout,
-            src_queue,
-            dst_queue,
-            0,
-            vk::REMAINING_MIP_LEVELS,
-        )
     }
 
     pub fn barrier(self: &Arc<Self>) -> ImageBarrier {
