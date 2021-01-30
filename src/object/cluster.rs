@@ -1,5 +1,5 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::vertex_mesh::{VertexMesh, VertexMeshCreate};
+use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
 use crate::utils::mesh_simplifier;
 use crate::{renderer, utils};
@@ -1046,7 +1046,7 @@ impl Cluster {
                                 seam.nodes.get(&i).unwrap_or(&def_seam_layer),
                             );
 
-                            let (temp_vertices, mut temp_indices) = {
+                            let (temp_vertices, temp_indices) = {
                                 let options = mesh_simplifier::Options::new(
                                     0.125,
                                     10,

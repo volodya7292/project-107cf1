@@ -341,7 +341,7 @@ impl VertexMeshCreate for vkw::Device {
                 aabb.1 = aabb.1.sup(vertex.position());
             }
 
-            let mut center = (aabb.0 + aabb.1) / 2.0;
+            let center = (aabb.0 + aabb.1) / 2.0;
             let mut radius = 0.0;
 
             for vertex in &vertices[0..] {

@@ -30,12 +30,18 @@ pub(crate) struct BindingMapping {
     array_index: u32,
 }
 
+#[derive(Copy, Clone)]
+pub struct DescriptorSet {
+    pub(crate) native: vk::DescriptorSet,
+    id: u32,
+}
+
 pub struct DescriptorPoolWrapper {
     pub(crate) device: Arc<Device>,
     pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) set_layout_id: u32,
     pub(crate) native: vk::DescriptorPool,
-    pub(crate) allocated: Vec<vk::DescriptorSet>,
+    pub(crate) allocated: Vec<DescriptorSet>,
     pub(crate) free_sets: BitSet,
     pub(crate) used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
     pub(crate) used_image_views: AHashMap<BindingMapping, Arc<ImageView>>,
@@ -45,10 +51,10 @@ pub struct DescriptorPoolWrapper {
 pub struct DescriptorPool(pub(in crate) Mutex<DescriptorPoolWrapper>);
 
 impl DescriptorPoolWrapper {
-    pub fn alloc(&mut self) -> Result<u32, vk::Result> {
+    pub fn alloc(&mut self) -> Result<DescriptorSet, vk::Result> {
         if let Some(id) = self.free_sets.iter().next() {
             self.free_sets.remove(id);
-            Ok(id as u32)
+            Ok(self.allocated[id])
         } else {
             let alloc_info = vk::DescriptorSetAllocateInfo::builder()
                 .descriptor_pool(self.native)
@@ -56,22 +62,24 @@ impl DescriptorPoolWrapper {
                     &self.signature.native[self.set_layout_id as usize],
                 ));
 
-            self.allocated
-                .push(unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)?[0] });
-            Ok((self.allocated.len() - 1) as u32)
+            let descriptor_set = DescriptorSet {
+                native: unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)?[0] },
+                id: self.allocated.len() as u32,
+            };
+            self.allocated.push(descriptor_set);
+
+            Ok(descriptor_set)
         }
     }
 
-    pub fn free(&mut self, descriptor_set_id: u32) {
-        self.free_sets.insert(descriptor_set_id as usize);
+    pub fn free(&mut self, descriptor_set: DescriptorSet) {
+        self.free_sets.insert(descriptor_set.id as usize);
     }
 
-    pub fn update(&mut self, descriptor_set_id: u32, updates: &[Binding]) {
-        if self.free_sets.contains(descriptor_set_id as usize) {
+    pub fn update(&mut self, descriptor_set: DescriptorSet, updates: &[Binding]) {
+        if self.free_sets.contains(descriptor_set.id as usize) {
             panic!("descriptor set isn't allocated!");
         }
-
-        let native_set = self.allocated[descriptor_set_id as usize];
 
         let mut native_buffer_infos = SmallVec::<[vk::DescriptorBufferInfo; 8]>::with_capacity(updates.len());
         let mut native_image_infos = SmallVec::<[vk::DescriptorImageInfo; 8]>::with_capacity(updates.len());
@@ -79,12 +87,12 @@ impl DescriptorPoolWrapper {
 
         for binding in updates {
             let mut write_info = vk::WriteDescriptorSet::builder()
-                .dst_set(native_set)
+                .dst_set(descriptor_set.native)
                 .dst_binding(binding.id)
                 .dst_array_element(binding.array_index)
                 .descriptor_type(self.signature.binding_types[&binding.id]);
             let mapping = BindingMapping {
-                descriptor_set_id,
+                descriptor_set_id: descriptor_set.id,
                 binding_id: binding.id,
                 array_index: binding.array_index,
             };

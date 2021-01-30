@@ -217,7 +217,7 @@ impl WorldStreamer {
                 }
             }
 
-            let mut renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock().unwrap();
             let device = renderer.device().clone();
             let scene = renderer.scene();
             let transform_comps = scene.storage::<component::Transform>();
@@ -493,7 +493,7 @@ impl WorldStreamer {
 
         // Generate meshes
         {
-            let mut renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock().unwrap();
             let scene = renderer.scene();
 
             let entities = scene.entities();
@@ -503,10 +503,10 @@ impl WorldStreamer {
             let children_comps = scene.storage::<component::Children>();
 
             let mut entities = entities.lock().unwrap();
-            let mut transform_comps = transform_comps.write().unwrap();
-            let mut renderer_comps = renderer_comps.write().unwrap();
-            let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
-            let mut children_comps = children_comps.write().unwrap();
+            let transform_comps = transform_comps.write().unwrap();
+            let renderer_comps = renderer_comps.write().unwrap();
+            let vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
+            let children_comps = children_comps.write().unwrap();
 
             let mut d = cluster::UpdateSystemData {
                 mat_pipeline: Arc::clone(&self.cluster_mat_pipeline),

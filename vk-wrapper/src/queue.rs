@@ -38,17 +38,6 @@ impl Queue {
             pool: native_pool,
             native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
             one_time_exec: false,
-            render_passes: vec![],
-            framebuffers: vec![],
-            secondary_cmd_lists: vec![],
-            pipelines: Default::default(),
-            pipeline_signatures: vec![],
-            descriptor_pools: vec![],
-            buffers: Default::default(),
-            images: vec![],
-            image_views: Default::default(),
-            samplers: Default::default(),
-            query_pools: Default::default(),
             last_pipeline: ptr::null(),
         })))
     }
@@ -134,7 +123,9 @@ impl Queue {
         Ok(())
     }
 
-    pub fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
+    /// # Safety
+    /// All resources used in command lists must be valid
+    pub unsafe fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
         if packet.infos.is_empty() {
             return Ok(());
         }
@@ -170,12 +161,7 @@ impl Queue {
         Ok(())
     }
 
-    pub fn present(
-        &self,
-        sw_image: SwapchainImage,
-        // wait_semaphore: &Semaphore,
-        // wait_value: u64,
-    ) -> Result<bool, swapchain::Error> {
+    pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
         let queue = self.native.lock().unwrap();
         let swapchain = sw_image.swapchain.wrapper.native.lock().unwrap();
 

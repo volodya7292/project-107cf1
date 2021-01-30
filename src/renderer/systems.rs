@@ -18,7 +18,7 @@ impl RendererCompEventsSystem {
         depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
         model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
     ) {
-        renderer.pipeline_inputs = vec![
+        renderer.descriptor_sets = vec![
             depth_per_object_pool.alloc().unwrap(),
             model_inputs_pool.alloc().unwrap(),
         ];
@@ -31,7 +31,7 @@ impl RendererCompEventsSystem {
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
-        let inputs = &mut renderer.pipeline_inputs;
+        let inputs = &mut renderer.descriptor_sets;
 
         depth_per_object_pool.update(
             inputs[0],
@@ -57,8 +57,8 @@ impl RendererCompEventsSystem {
         depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
         model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
     ) {
-        depth_per_object_pool.free(renderer.pipeline_inputs[0]);
-        model_inputs_pool.free(renderer.pipeline_inputs[1]);
+        depth_per_object_pool.free(renderer.descriptor_sets[0]);
+        model_inputs_pool.free(renderer.descriptor_sets[1]);
     }
 
     pub fn run(&mut self) {
@@ -153,7 +153,9 @@ impl VertexMeshCompEventsSystem {
         }
 
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
-        graphics_queue.submit(&mut submit).unwrap();
+        unsafe {
+            graphics_queue.submit(&mut submit).unwrap();
+        }
     }
 }
 

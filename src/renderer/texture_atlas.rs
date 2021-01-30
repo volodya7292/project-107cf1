@@ -113,7 +113,9 @@ impl TextureAtlas {
             cl.end().unwrap()
         }
 
-        graphics_queue.submit(&mut self.submit_packet).unwrap();
+        unsafe {
+            graphics_queue.submit(&mut self.submit_packet).unwrap();
+        }
         self.submit_packet.wait().unwrap();
         Ok(())
     }
@@ -186,7 +188,9 @@ pub fn new(
         cl.end()?;
     }
 
-    graphics_queue.submit(&mut submit_packet)?;
+    unsafe {
+        graphics_queue.submit(&mut submit_packet)?;
+    }
     submit_packet.wait()?;
 
     Ok(TextureAtlas {

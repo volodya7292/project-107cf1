@@ -8,7 +8,6 @@ use simdnoise::NoiseBuilder;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use vk_wrapper as vkw;
 
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
@@ -21,8 +20,6 @@ pub struct Program {
 impl Program {
     const MOVEMENT_SPEED: f32 = 32.0;
     const MOUSE_SENSITIVITY: f32 = 0.003;
-
-    pub fn init(&self) {}
 
     pub fn on_event(&mut self, event: sdl2::event::Event) {
         use sdl2::event::Event;
@@ -99,7 +96,7 @@ impl Program {
                 vel_up_down -= 1;
             }
 
-            let mut renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock().unwrap();
             let entity = renderer.get_active_camera();
             let camera_comps = renderer.scene().storage::<component::Camera>();
             let mut camera_comps = camera_comps.write().unwrap();

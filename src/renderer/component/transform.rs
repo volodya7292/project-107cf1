@@ -4,7 +4,6 @@ pub struct Transform {
     pub(in crate::renderer) position: Vector3<f32>,
     pub(in crate::renderer) rotation: Vector3<f32>,
     pub(in crate::renderer) scale: Vector3<f32>,
-    pub(in crate::renderer) changed: bool,
 }
 
 impl Transform {
@@ -13,7 +12,6 @@ impl Transform {
             position,
             rotation,
             scale,
-            changed: true,
         }
     }
 
@@ -45,7 +43,6 @@ impl Default for Transform {
             position: Vector3::new(0.0, 0.0, 0.0),
             rotation: Vector3::new(0.0, 0.0, 0.0),
             scale: Vector3::new(1.0, 1.0, 1.0),
-            changed: true,
         }
     }
 }

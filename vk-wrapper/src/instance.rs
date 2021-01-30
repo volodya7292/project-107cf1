@@ -25,10 +25,6 @@ pub fn enumerate_required_window_extensions(
 }
 
 impl Instance {
-    pub fn handle(&self) -> vk::Instance {
-        self.native.handle()
-    }
-
     pub fn create_surface(
         self: &Arc<Self>,
         window_handle: &impl raw_window_handle::HasRawWindowHandle,

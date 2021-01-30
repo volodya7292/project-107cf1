@@ -26,10 +26,10 @@ use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
-use vk_wrapper::queue::SignalSemaphore;
 use vk_wrapper::{
-    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, DeviceError, HostBuffer, Image,
-    ImageUsageFlags, ImageView, Sampler, ShaderBinding, ShaderBindingMod, ShaderStage, SwapchainImage,
+    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, DescriptorSet, DeviceError,
+    HostBuffer, Image, ImageUsageFlags, ImageView, Sampler, ShaderBinding, ShaderBindingMod, ShaderStage,
+    SignalSemaphore, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
@@ -71,18 +71,18 @@ pub struct Renderer {
     depth_pipeline_rw: Arc<Pipeline>,
     depth_per_object_pool: Arc<DescriptorPool>,
     depth_per_frame_pool: Arc<DescriptorPool>,
-    depth_per_frame_in: u32,
+    depth_per_frame_in: DescriptorSet,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     depth_pyramid_signature: Arc<PipelineSignature>,
     depth_pyramid_pool: Option<Arc<DescriptorPool>>,
-    depth_pyramid_descs: Vec<u32>,
+    depth_pyramid_descs: Vec<DescriptorSet>,
     depth_pyramid_sampler: Arc<Sampler>,
 
     cull_pipeline: Arc<Pipeline>,
     cull_signature: Arc<PipelineSignature>,
     cull_pool: Arc<DescriptorPool>,
-    cull_descriptor: u32,
+    cull_desc: DescriptorSet,
     cull_buffer: Arc<DeviceBuffer>,
     cull_host_buffer: HostBuffer<CullObject>,
     visibility_buffer: Arc<DeviceBuffer>,
@@ -92,7 +92,7 @@ pub struct Renderer {
     g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
     g_per_frame_pool: Arc<DescriptorPool>,
-    g_per_frame_in: u32,
+    g_per_frame_desc: DescriptorSet,
     g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
@@ -100,7 +100,7 @@ pub struct Renderer {
 
     model_inputs_pool: Arc<DescriptorPool>,
 
-    active_camera: u32,
+    active_camera_desc: u32,
     per_frame_ub: Arc<DeviceBuffer>,
 }
 
@@ -195,11 +195,11 @@ impl Renderer {
     }
 
     pub fn get_active_camera(&self) -> u32 {
-        self.active_camera
+        self.active_camera_desc
     }
 
     pub fn set_active_camera(&mut self, entity: u32) {
-        self.active_camera = entity;
+        self.active_camera_desc = entity;
     }
 
     /// Add texture to renderer
@@ -273,7 +273,7 @@ impl Renderer {
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
-    fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
+    unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
         if updates.is_empty() {
             return;
         }
@@ -430,7 +430,9 @@ impl Renderer {
         // Wait for vertex buffer updates
         self.staging_submit.lock().unwrap().wait().unwrap();
 
-        self.update_device_buffers(&buffer_updates.lock().unwrap());
+        unsafe {
+            self.update_device_buffers(&buffer_updates.lock().unwrap());
+        }
 
         // let t2 = Instant::now();
         // println!("{}", (t2 - t).as_secs_f64());
@@ -447,7 +449,7 @@ impl Renderer {
         let object_count = renderables.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
 
-        let mut cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
+        let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
         self.depth_secondary_cls
             .par_iter()
@@ -465,10 +467,7 @@ impl Renderer {
                 )
                 .unwrap();
 
-                let used_depth_pool = cl.use_descriptor_pool(Arc::clone(&self.depth_per_frame_pool));
-                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
-
-                cl.bind_graphics_input(&self.depth_signature, 0, used_depth_pool, self.depth_per_frame_in);
+                cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -516,12 +515,7 @@ impl Renderer {
                         cl.bind_pipeline(&self.depth_pipeline_rw);
                     }
 
-                    cl.bind_graphics_input(
-                        &self.depth_signature,
-                        1,
-                        used_model_inputs_pool,
-                        renderer.pipeline_inputs[0],
-                    );
+                    cl.bind_graphics_input(&self.depth_signature, 1, renderer.descriptor_sets[0]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -569,9 +563,6 @@ impl Renderer {
                 )
                 .unwrap();
 
-                let used_g_per_frame_pool = cl.use_descriptor_pool(Arc::clone(&self.g_per_frame_pool));
-                let used_model_inputs_pool = cl.use_descriptor_pool(Arc::clone(&self.model_inputs_pool));
-
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
                     if entity_index >= object_count {
@@ -601,14 +592,9 @@ impl Renderer {
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, used_g_per_frame_pool, self.g_per_frame_in);
+                        cl.bind_graphics_input(&signature, 0, self.g_per_frame_desc);
                     }
-                    cl.bind_graphics_input(
-                        &signature,
-                        1,
-                        used_model_inputs_pool,
-                        renderer.pipeline_inputs[1],
-                    );
+                    cl.bind_graphics_input(&signature, 1, renderer.descriptor_sets[1]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -678,9 +664,6 @@ impl Renderer {
                 ],
             );
 
-            let used_depth_pyramid_pool =
-                cl.use_descriptor_pool(Arc::clone(self.depth_pyramid_pool.as_ref().unwrap()));
-
             cl.bind_pipeline(&self.depth_pyramid_pipeline);
 
             for i in 0..(depth_pyramid_image.mip_levels() as usize) {
@@ -688,12 +671,7 @@ impl Renderer {
                 let level_width = (size.0 >> i).max(1);
                 let level_height = (size.1 >> i).max(1);
 
-                cl.bind_compute_input(
-                    &self.depth_pyramid_signature,
-                    0,
-                    used_depth_pyramid_pool,
-                    self.depth_pyramid_descs[i],
-                );
+                cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i]);
 
                 let constants = DepthPyramidConstants {
                     size: na::Vector2::new(level_width as f32, level_height as f32),
@@ -728,8 +706,6 @@ impl Renderer {
 
             // Compute visibilities
             // ------------------------------------------------------------------
-            let used_cull_pool = cl.use_descriptor_pool(Arc::clone(&self.cull_pool));
-
             cl.copy_buffer_to_device(
                 &self.cull_host_buffer,
                 0,
@@ -755,7 +731,7 @@ impl Renderer {
             );
 
             cl.bind_pipeline(&self.cull_pipeline);
-            cl.bind_compute_input(&self.cull_signature, 0, used_cull_pool, self.cull_descriptor);
+            cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc);
 
             let pyramid_size = depth_pyramid_image.size_2d();
             let constants = CullConstants {
@@ -788,7 +764,9 @@ impl Renderer {
         }
         {
             let mut submit = self.staging_submit.lock().unwrap();
-            graphics_queue.submit(&mut submit).unwrap();
+            unsafe {
+                graphics_queue.submit(&mut submit).unwrap();
+            }
             submit.wait().unwrap();
         }
 
@@ -903,7 +881,9 @@ impl Renderer {
             cl.end().unwrap();
         }
 
-        graphics_queue.submit(&mut self.final_submit).unwrap();
+        unsafe {
+            graphics_queue.submit(&mut self.final_submit).unwrap();
+        }
     }
 
     pub fn on_draw(&mut self) {
@@ -947,10 +927,7 @@ impl Renderer {
 
                     self.on_update();
                     self.final_submit.wait().unwrap();
-                    let t0 = Instant::now();
                     self.on_render(&sw_image);
-                    let t1 = Instant::now();
-                    println!("render {}", (t1 - t0).as_secs_f64());
 
                     let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
                     let present_result = present_queue.present(sw_image);
@@ -1076,7 +1053,7 @@ impl Renderer {
         };
 
         self.cull_pool.lock().unwrap().update(
-            self.cull_descriptor,
+            self.cull_desc,
             &[
                 Binding {
                     id: 0,
@@ -1578,18 +1555,18 @@ pub fn new(
         cull_pipeline,
         cull_signature,
         cull_pool,
-        cull_descriptor,
+        cull_desc: cull_descriptor,
         cull_buffer,
         g_render_pass,
         g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
         g_per_frame_pool,
-        g_per_frame_in,
+        g_per_frame_desc: g_per_frame_in,
         g_per_object_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
         model_inputs_pool: g_signature.create_pool(1, MAX_OBJECT_COUNT)?,
-        active_camera,
+        active_camera_desc: active_camera,
         per_frame_ub: per_frame_uniform_buffer,
         visibility_host_buffer,
         cull_host_buffer,

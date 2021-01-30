@@ -113,7 +113,7 @@ fn main() {
         .unwrap();
 
     {
-        let mut renderer = renderer.lock().unwrap();
+        let renderer = renderer.lock().unwrap();
         let scene = renderer.scene();
         let mut entities = scene.entities().lock().unwrap();
         let transform_comps = scene.storage::<component::Transform>();
@@ -233,5 +233,6 @@ fn main() {
 
         let end_t = Instant::now();
         delta_time = (end_t - start_t).as_secs_f64();
+        println!("{}", delta_time);
     }
 }
