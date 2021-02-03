@@ -9,7 +9,7 @@ pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
-    pub(crate) _elem_size: u64,
+    pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
     pub(crate) _bytesize: u64,
@@ -39,7 +39,21 @@ impl Drop for Buffer {
 }
 
 #[derive(Clone)]
-pub struct RawHostBuffer(Arc<Buffer>);
+pub struct RawHostBuffer(pub(crate) Arc<Buffer>);
+
+impl RawHostBuffer {
+    pub fn device(&self) -> &Arc<Device> {
+        &self.0.device
+    }
+
+    pub fn element_size(&self) -> u64 {
+        self.0.elem_size
+    }
+
+    pub fn size(&self) -> u64 {
+        self.0.size
+    }
+}
 
 unsafe impl Send for RawHostBuffer {}
 
@@ -245,6 +259,10 @@ pub struct DeviceBuffer {
 }
 
 impl DeviceBuffer {
+    pub fn size(&self) -> u64 {
+        self.buffer.size
+    }
+
     pub fn barrier(&self) -> BufferBarrier {
         BufferBarrier {
             native: vk::BufferMemoryBarrier::builder()

@@ -194,6 +194,8 @@ impl Instance {
                 require_feature12!(separate_depth_stencil_layouts);
                 require_feature12!(timeline_semaphore);
                 require_feature12!(sampler_filter_minmax);
+                require_feature12!(storage_buffer8_bit_access);
+                require_feature12!(shader_int8);
 
                 enabled_features12.vulkan_memory_model = available_features12.vulkan_memory_model;
                 enabled_features12.vulkan_memory_model_device_scope =

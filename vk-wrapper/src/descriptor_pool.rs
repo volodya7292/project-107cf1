@@ -4,9 +4,8 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use bit_set::BitSet;
 use smallvec::SmallVec;
-use std::ops::Deref;
 use std::slice;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub enum BindingRes {
     Buffer(Arc<DeviceBuffer>),
@@ -33,14 +32,20 @@ pub(crate) struct BindingMapping {
 #[derive(Copy, Clone)]
 pub struct DescriptorSet {
     pub(crate) native: vk::DescriptorSet,
-    id: u32,
+    pub(crate) id: u32,
 }
 
-pub struct DescriptorPoolWrapper {
+pub struct NativeDescriptorPool {
+    pub(crate) handle: vk::DescriptorPool,
+    pub(crate) size: u32,
+    pub(crate) allocated_count: u32,
+}
+
+pub struct DescriptorPool {
     pub(crate) device: Arc<Device>,
     pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) set_layout_id: u32,
-    pub(crate) native: vk::DescriptorPool,
+    pub(crate) native: SmallVec<[NativeDescriptorPool; 16]>,
     pub(crate) allocated: Vec<DescriptorSet>,
     pub(crate) free_sets: BitSet,
     pub(crate) used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
@@ -48,16 +53,31 @@ pub struct DescriptorPoolWrapper {
     pub(crate) used_samplers: AHashMap<BindingMapping, Arc<Sampler>>,
 }
 
-pub struct DescriptorPool(pub(in crate) Mutex<DescriptorPoolWrapper>);
-
-impl DescriptorPoolWrapper {
+impl DescriptorPool {
     pub fn alloc(&mut self) -> Result<DescriptorSet, vk::Result> {
         if let Some(id) = self.free_sets.iter().next() {
             self.free_sets.remove(id);
             Ok(self.allocated[id])
         } else {
+            let (last_size, last_allocated_count) = {
+                let last = self.native.last().unwrap();
+                (last.size, last.allocated_count)
+            };
+
+            if last_allocated_count == last_size {
+                let next_size = (last_size + 1).next_power_of_two();
+                let next_pool = NativeDescriptorPool {
+                    handle: self.signature.create_native_pool(self.set_layout_id, next_size)?,
+                    size: next_size,
+                    allocated_count: 0,
+                };
+
+                self.native.push(next_pool);
+            }
+
+            let native_pool = self.native.last_mut().unwrap();
             let alloc_info = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(self.native)
+                .descriptor_pool(native_pool.handle)
                 .set_layouts(slice::from_ref(
                     &self.signature.native[self.set_layout_id as usize],
                 ));
@@ -66,8 +86,9 @@ impl DescriptorPoolWrapper {
                 native: unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)?[0] },
                 id: self.allocated.len() as u32,
             };
-            self.allocated.push(descriptor_set);
+            native_pool.allocated_count += 1;
 
+            self.allocated.push(descriptor_set);
             Ok(descriptor_set)
         }
     }
@@ -80,6 +101,9 @@ impl DescriptorPoolWrapper {
         if self.free_sets.contains(descriptor_set.id as usize) {
             panic!("descriptor set isn't allocated!");
         }
+        if updates.is_empty() {
+            return;
+        }
 
         let mut native_buffer_infos = SmallVec::<[vk::DescriptorBufferInfo; 8]>::with_capacity(updates.len());
         let mut native_image_infos = SmallVec::<[vk::DescriptorImageInfo; 8]>::with_capacity(updates.len());
@@ -90,7 +114,7 @@ impl DescriptorPoolWrapper {
                 .dst_set(descriptor_set.native)
                 .dst_binding(binding.id)
                 .dst_array_element(binding.array_index)
-                .descriptor_type(self.signature.binding_types[&binding.id]);
+                .descriptor_type(self.signature.binding_types[self.set_layout_id as usize][&binding.id]);
             let mapping = BindingMapping {
                 descriptor_set_id: descriptor_set.id,
                 binding_id: binding.id,
@@ -159,16 +183,10 @@ impl DescriptorPoolWrapper {
     }
 }
 
-impl Drop for DescriptorPoolWrapper {
+impl Drop for DescriptorPool {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_descriptor_pool(self.native, None) };
-    }
-}
-
-impl Deref for DescriptorPool {
-    type Target = Mutex<DescriptorPoolWrapper>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        for native in &self.native {
+            unsafe { self.device.wrapper.0.destroy_descriptor_pool(native.handle, None) };
+        }
     }
 }

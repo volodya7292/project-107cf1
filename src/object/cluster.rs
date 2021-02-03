@@ -5,9 +5,11 @@ use crate::utils::mesh_simplifier;
 use crate::{renderer, utils};
 use dual_contouring as dc;
 use nalgebra as na;
+use smallvec::smallvec;
 use std::collections::{hash_map, HashMap};
 use std::convert::TryInto;
 use std::sync::Arc;
+use std::{mem, slice};
 use vk_wrapper as vkw;
 
 const SECTOR_SIZE: usize = 16;
@@ -57,7 +59,7 @@ vertex_impl!(Vertex, position, normal, density);
 struct Sector {
     indices: Box<[[[u32; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     densities: Vec<DensityPoint>,
-    node_data_cache: Vec<dc::octree::EncodedNode<[PointData; 8]>>,
+    node_data_cache: Vec<u8>,
     layer_count: u8,
     indices_changed: bool,
     changed: bool,
@@ -74,6 +76,8 @@ pub struct DensityPointInfo {
     pub(crate) pos: [u8; 4],
     pub(crate) point: DensityPoint,
 }
+
+type EncodedNode = dc::octree::EncodedNode<[PointData; 8]>;
 
 impl Sector {
     /// pos: [x, y, z, layer index]
@@ -879,8 +883,19 @@ impl Cluster {
         let octree = dc::octree::from_nodes((SECTOR_SIZE * 2) as u32 * cluster_node_size, &nodes);
         let indices = dc::contour::generate_mesh(&octree);
 
-        // Save nodes into sector cache // TODO: update nodes_buffer using this
-        sector.node_data_cache = octree.encode_into_buffer(|data| data.data);
+        // Save nodes into sector cache
+        let encoded_nodes: Vec<EncodedNode> = octree.encode_into_buffer(|data| data.data);
+        let raw_node_data = &mut sector.node_data_cache;
+
+        raw_node_data.clear();
+        raw_node_data.extend((SECTOR_SIZE as u32 * self.node_size).to_ne_bytes().iter());
+        raw_node_data.extend(unsafe {
+            slice::from_raw_parts(
+                encoded_nodes.as_ptr() as *const u8,
+                encoded_nodes.len() * mem::size_of::<EncodedNode>(),
+            )
+            .iter()
+        });
 
         (vertices, indices)
     }
@@ -1125,10 +1140,19 @@ impl Cluster {
                         na::Vector3::from_element(1.0),
                     ),
                 );
-                renderer_comps.set(
-                    ent,
-                    component::Renderer::new(&self.device, &data.mat_pipeline, false),
-                );
+
+                let node_buffer = &self.sectors[p[0]][p[1]][p[2]].node_data_cache;
+
+                let mut renderer = component::Renderer::new(&self.device, &data.mat_pipeline, false);
+
+                if !node_buffer.is_empty() {
+                    *renderer.resources_mut() = smallvec![(
+                        1,
+                        component::renderer::Resource::buffer(&self.device, node_buffer).unwrap(),
+                    )];
+                }
+
+                renderer_comps.set(ent, renderer);
             }
         }
 

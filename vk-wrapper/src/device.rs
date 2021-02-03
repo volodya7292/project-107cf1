@@ -16,7 +16,7 @@ use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
 
@@ -172,7 +172,7 @@ impl Device {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
-                _elem_size: elem_size,
+                elem_size,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
                 _bytesize: bytesize as u64,
@@ -867,16 +867,20 @@ impl Device {
     pub fn create_pipeline_signature(
         self: &Arc<Self>,
         shaders: &[Arc<Shader>],
+        additional_bindings: &[(ShaderStage, &[ShaderBinding])],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
+        let additional_bindings: HashMap<ShaderStage, &[ShaderBinding]> =
+            additional_bindings.iter().cloned().collect();
+
         // MAX 4 descriptor sets
-        // [descriptor_set, bindings]
         let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
-        let mut binding_flags: [Vec<vk::DescriptorBindingFlagsEXT>; 4] = Default::default();
+        let mut binding_flags: [Vec<vk::DescriptorBindingFlags>; 4] = Default::default();
         let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
         let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
-
-        let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
+        let mut binding_types: [HashMap<u32, vk::DescriptorType>; 4] = Default::default();
         let mut push_constants_size = 0u32;
+
+        let mut read_bindings = HashSet::<(u32, u32)>::new();
 
         for shader in shaders {
             for (_name, binding) in &shader.bindings {
@@ -897,7 +901,8 @@ impl Device {
 
                 descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
                     .descriptor_count += binding.count;
-                binding_types.insert(binding.id, binding.binding_type.0);
+                binding_types[set].insert(binding.id, binding.binding_type.0);
+                read_bindings.insert((set as u32, binding.id));
 
                 let native_binding = native_bindings[set].iter_mut().find(|b| b.binding == binding.id);
 
@@ -923,6 +928,49 @@ impl Device {
             }
 
             push_constants_size += shader.push_constants_size;
+        }
+
+        for (stage, &bindings) in &additional_bindings {
+            for binding in bindings {
+                let set = binding.descriptor_set as usize;
+                let descriptor_sizes = &mut descriptor_sizes[set];
+                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+
+                if read_bindings.contains(&(set as u32, binding.id)) {
+                    continue;
+                }
+
+                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
+                {
+                    entry.insert(descriptor_sizes.len() as u32);
+                    descriptor_sizes.push(
+                        vk::DescriptorPoolSize::builder()
+                            .ty(binding.binding_type.0)
+                            .descriptor_count(0)
+                            .build(),
+                    );
+                }
+
+                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
+                    .descriptor_count += binding.count;
+                binding_types[set].insert(binding.id, binding.binding_type.0);
+
+                native_bindings[set].push(
+                    vk::DescriptorSetLayoutBinding::builder()
+                        .binding(binding.id)
+                        .descriptor_type(binding.binding_type.0)
+                        .descriptor_count(binding.count)
+                        .stage_flags(stage.0)
+                        .build(),
+                );
+
+                let mut flags = vk::DescriptorBindingFlags::default();
+                if binding.count > 1 {
+                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                }
+
+                binding_flags[set].push(flags);
+            }
         }
 
         let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
@@ -979,98 +1027,6 @@ impl Device {
             binding_types,
             _push_constants_size: push_constants_size,
             shaders,
-        }))
-    }
-
-    pub fn create_custom_pipeline_signature(
-        self: &Arc<Self>,
-        bindings: &[(ShaderStage, &[ShaderBinding])],
-    ) -> Result<Arc<PipelineSignature>, vk::Result> {
-        let bindings: HashMap<ShaderStage, &[ShaderBinding]> = bindings.iter().cloned().collect();
-
-        // MAX 4 descriptor sets
-        // [descriptor_set, bindings]
-        let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
-        let mut binding_flags: [Vec<vk::DescriptorBindingFlagsEXT>; 4] = Default::default();
-        let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
-        let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
-
-        let mut binding_types = HashMap::<u32, vk::DescriptorType>::new();
-
-        for (stage, &bindings) in &bindings {
-            for binding in bindings {
-                let set = binding.descriptor_set as usize;
-                let descriptor_sizes = &mut descriptor_sizes[set];
-                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
-
-                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
-                {
-                    entry.insert(descriptor_sizes.len() as u32);
-                    descriptor_sizes.push(
-                        vk::DescriptorPoolSize::builder()
-                            .ty(binding.binding_type.0)
-                            .descriptor_count(0)
-                            .build(),
-                    );
-                }
-
-                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
-                    .descriptor_count += binding.count;
-                binding_types.insert(binding.id, binding.binding_type.0);
-
-                native_bindings[set].push(
-                    vk::DescriptorSetLayoutBinding::builder()
-                        .binding(binding.id)
-                        .descriptor_type(binding.binding_type.0)
-                        .descriptor_count(binding.count)
-                        .stage_flags(stage.0)
-                        .build(),
-                );
-
-                let mut flags = vk::DescriptorBindingFlags::default();
-                if binding.count > 1 {
-                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
-                }
-
-                binding_flags[set].push(flags);
-            }
-        }
-
-        let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
-
-        for (i, bindings) in native_bindings.iter().enumerate() {
-            if !bindings.is_empty() {
-                let mut binding_flags_info =
-                    vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
-
-                let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-                    .bindings(bindings)
-                    .push_next(&mut binding_flags_info);
-
-                native_descriptor_sets[i] =
-                    unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? };
-            }
-        }
-
-        let pipeline_layout = {
-            let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
-                .iter()
-                .cloned()
-                .filter(|&set_layout| set_layout != vk::DescriptorSetLayout::default())
-                .collect();
-
-            let layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&set_layouts);
-            unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? }
-        };
-
-        Ok(Arc::new(PipelineSignature {
-            device: Arc::clone(self),
-            native: native_descriptor_sets,
-            pipeline_layout,
-            descriptor_sizes,
-            binding_types,
-            _push_constants_size: 0,
-            shaders: Default::default(),
         }))
     }
 

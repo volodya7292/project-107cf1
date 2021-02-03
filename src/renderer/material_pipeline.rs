@@ -1,3 +1,4 @@
+use crate::renderer;
 use crate::renderer::Renderer;
 use ahash::AHashMap;
 use std::collections::hash_map;
@@ -59,6 +60,10 @@ impl MaterialPipeline {
         }
     }
 
+    pub fn signature(&self) -> &Arc<vkw::PipelineSignature> {
+        &self.signature
+    }
+
     pub fn get_pipeline(&self, mapping: &PipelineMapping) -> Option<&Arc<vkw::Pipeline>> {
         self.pipelines.get(mapping)
     }
@@ -82,7 +87,10 @@ impl Renderer {
         let device = Arc::clone(&self.device);
 
         let signature = device
-            .create_pipeline_signature(&[Arc::clone(vertex_shader), Arc::clone(g_pixel_shader)])
+            .create_pipeline_signature(
+                &[Arc::clone(vertex_shader), Arc::clone(g_pixel_shader)],
+                &*renderer::ADDITIONAL_PIPELINE_BINDINGS,
+            )
             .unwrap();
 
         let mut mat_pipeline = MaterialPipeline {
@@ -92,7 +100,7 @@ impl Renderer {
             uniform_buffer_size: mem::size_of::<T>() as u32,
             uniform_buffer_model_offset: T::model_offset(),
         };
-        self.prepare_material(&mut mat_pipeline);
+        self.prepare_material_pipeline(&mut mat_pipeline);
 
         Arc::new(mat_pipeline)
     }

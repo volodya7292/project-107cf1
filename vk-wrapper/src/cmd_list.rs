@@ -1,10 +1,10 @@
 use crate::render_pass::vk_clear_value;
-use crate::DescriptorSet;
 use crate::DeviceWrapper;
 use crate::{
     BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
     Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
+use crate::{DescriptorSet, RawHostBuffer};
 use ash::{version::DeviceV1_0, vk};
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
@@ -16,6 +16,12 @@ pub struct CmdList {
     pub(crate) native: vk::CommandBuffer,
     pub(crate) one_time_exec: bool,
     pub(crate) last_pipeline: *const Pipeline,
+}
+
+pub struct CopyRegion {
+    pub src_element_index: u64,
+    pub dst_element_index: u64,
+    pub size: u64,
 }
 
 unsafe impl Send for CmdList {}
@@ -334,6 +340,68 @@ impl CmdList {
             self.device_wrapper.0.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
+                dst_buffer.buffer.native,
+                &[region],
+            )
+        };
+    }
+
+    pub fn copy_buffer_regions_to_device<T>(
+        &mut self,
+        src_buffer: &HostBuffer<T>,
+        dst_buffer: &Arc<DeviceBuffer>,
+        regions: &[CopyRegion],
+    ) {
+        let regions: SmallVec<[vk::BufferCopy; 128]> = regions
+            .iter()
+            .filter_map(|region| {
+                if region.size > 0 {
+                    Some(vk::BufferCopy {
+                        src_offset: region.src_element_index * src_buffer.buffer.aligned_elem_size,
+                        dst_offset: region.dst_element_index * src_buffer.buffer.aligned_elem_size,
+                        size: region.size * src_buffer.buffer.aligned_elem_size,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if regions.is_empty() {
+            return;
+        }
+
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer(
+                self.native,
+                src_buffer.buffer.native,
+                dst_buffer.buffer.native,
+                &regions,
+            )
+        };
+    }
+
+    pub fn copy_raw_host_buffer_to_device(
+        &mut self,
+        src_buffer: &RawHostBuffer,
+        src_element_index: u64,
+        dst_buffer: &Arc<DeviceBuffer>,
+        dst_element_index: u64,
+        size: u64,
+    ) {
+        if size == 0 {
+            return;
+        }
+
+        let region = vk::BufferCopy {
+            src_offset: src_element_index * src_buffer.0.aligned_elem_size,
+            dst_offset: dst_element_index * src_buffer.0.aligned_elem_size,
+            size: size * src_buffer.0.aligned_elem_size,
+        };
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer(
+                self.native,
+                src_buffer.0.native,
                 dst_buffer.buffer.native,
                 &[region],
             )

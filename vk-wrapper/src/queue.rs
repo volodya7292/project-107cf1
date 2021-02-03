@@ -3,6 +3,7 @@ use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use smallvec::SmallVec;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{ptr, slice};
 
@@ -213,9 +214,9 @@ pub struct SignalSemaphore {
 
 #[derive(Clone)]
 pub struct SubmitInfo {
-    wait_semaphores: Vec<WaitSemaphore>,
-    cmd_lists: Vec<Arc<Mutex<CmdList>>>,
-    signal_semaphores: Vec<SignalSemaphore>,
+    wait_semaphores: SmallVec<[WaitSemaphore; 4]>,
+    cmd_lists: SmallVec<[Arc<Mutex<CmdList>>; 4]>,
+    signal_semaphores: SmallVec<[SignalSemaphore; 4]>,
     completion_signal_sp: Option<SignalSemaphore>,
 }
 
@@ -226,9 +227,9 @@ impl SubmitInfo {
         signal_semaphores: &[SignalSemaphore],
     ) -> SubmitInfo {
         SubmitInfo {
-            wait_semaphores: wait_semaphores.to_vec(),
-            cmd_lists: cmd_lists.to_vec(),
-            signal_semaphores: signal_semaphores.to_vec(),
+            wait_semaphores: wait_semaphores.iter().cloned().collect(),
+            cmd_lists: cmd_lists.iter().cloned().collect(),
+            signal_semaphores: signal_semaphores.iter().cloned().collect(),
             completion_signal_sp: None,
         }
     }

@@ -142,7 +142,7 @@ pub fn new(
     tile_count: u32,
     tile_width: u32,
 ) -> Result<TextureAtlas, vkw::DeviceError> {
-    let max_tile_width = utils::next_power_of_two(tile_width);
+    let max_tile_width = tile_width.next_power_of_two();
     let width_in_tiles = (tile_count as f64).sqrt().ceil() as u32;
     let width = width_in_tiles * max_tile_width;
     let max_mip_levels = if mipmaps {

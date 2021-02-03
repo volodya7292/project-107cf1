@@ -47,7 +47,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
     let cluster = {
         let triag_vertex = device
             .create_shader(
-                &resources.get("shaders/triag2.vert.spv").unwrap().read().unwrap(),
+                &resources.get("shaders/cluster.vert.spv").unwrap().read().unwrap(),
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
                     ("inNormal", vkw::Format::RGB32_FLOAT),
@@ -58,7 +58,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             .unwrap();
         let triag_g_pixel = device
             .create_shader(
-                &resources.get("shaders/triag2.frag.spv").unwrap().read().unwrap(),
+                &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
                 &[],
                 &[],
             )

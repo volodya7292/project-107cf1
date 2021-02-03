@@ -1,7 +1,7 @@
 mod camera;
 mod model_transform;
 mod relation;
-mod renderer;
+pub mod renderer;
 mod transform;
 mod vertex_mesh;
 mod world_transform;

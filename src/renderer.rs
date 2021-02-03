@@ -13,23 +13,25 @@ pub use vertex_mesh::VertexMesh;
 
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
+use ahash::AHashMap;
 use ktx::KtxInfo;
+use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use rayon::prelude::*;
 use scene::ComponentStorage;
-use std::collections::HashMap;
+use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::{
-    swapchain, AccessFlags, Binding, BindingRes, BindingType, DescriptorPool, DescriptorSet, DeviceError,
-    HostBuffer, Image, ImageUsageFlags, ImageView, Sampler, ShaderBinding, ShaderBindingMod, ShaderStage,
-    SignalSemaphore, SwapchainImage,
+    swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
+    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, ShaderBinding,
+    ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
@@ -69,19 +71,19 @@ pub struct Renderer {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_object_pool: Arc<DescriptorPool>,
-    depth_per_frame_pool: Arc<DescriptorPool>,
+    depth_per_object_pool: Option<DescriptorPool>,
+    _depth_per_frame_pool: DescriptorPool,
     depth_per_frame_in: DescriptorSet,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     depth_pyramid_signature: Arc<PipelineSignature>,
-    depth_pyramid_pool: Option<Arc<DescriptorPool>>,
+    depth_pyramid_pool: Option<DescriptorPool>,
     depth_pyramid_descs: Vec<DescriptorSet>,
     depth_pyramid_sampler: Arc<Sampler>,
 
     cull_pipeline: Arc<Pipeline>,
     cull_signature: Arc<PipelineSignature>,
-    cull_pool: Arc<DescriptorPool>,
+    cull_pool: DescriptorPool,
     cull_desc: DescriptorSet,
     cull_buffer: Arc<DeviceBuffer>,
     cull_host_buffer: HostBuffer<CullObject>,
@@ -89,19 +91,20 @@ pub struct Renderer {
     visibility_host_buffer: HostBuffer<u32>,
 
     g_render_pass: Arc<RenderPass>,
-    g_signature: Arc<PipelineSignature>,
     g_framebuffer: Option<Arc<Framebuffer>>,
-    g_per_frame_pool: Arc<DescriptorPool>,
+    _g_per_frame_pool: DescriptorPool,
     g_per_frame_desc: DescriptorSet,
-    g_per_object_pools: HashMap<Arc<Pipeline>, Arc<DescriptorPool>>,
+    g_per_pipeline_pools: Option<AHashMap<Arc<PipelineSignature>, DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
 
-    model_inputs_pool: Arc<DescriptorPool>,
-
     active_camera_desc: u32,
     per_frame_ub: Arc<DeviceBuffer>,
+    material_buffer: Arc<DeviceBuffer>,
+    material_updates: AHashMap<u32, MaterialInfo>,
+
+    renderables: Arc<Mutex<AHashMap<u32, Renderable>>>,
 }
 
 #[derive(Copy, Clone)]
@@ -134,15 +137,40 @@ pub enum TextureAtlasType {
     NORMAL = 3,
 }
 
-struct BufferUpdate {
+struct BufferUpdate1 {
     buffer: Arc<DeviceBuffer>,
     offset: u64,
     data: Vec<u8>,
 }
 
+struct BufferUpdate2 {
+    src_buffer: RawHostBuffer,
+    src_offset: u64,
+    dst_buffer: Arc<DeviceBuffer>,
+    dst_offset: u64,
+    size: u64,
+}
+
+struct BufferUpdate3 {
+    buffer: Arc<DeviceBuffer>,
+    data: Vec<u8>,
+    // (src data offset, dst offset, size)
+    regions: Vec<(u64, u64, u64)>,
+}
+
+enum BufferUpdate {
+    Type1(BufferUpdate1),
+    Type2(BufferUpdate2),
+    Type3(BufferUpdate3),
+}
+
+struct Renderable {
+    buffers: SmallVec<[Arc<DeviceBuffer>; 4]>,
+}
+
 #[derive(Debug)]
 #[repr(C)]
-pub struct CameraInfo {
+struct CameraInfo {
     pos: Vector4<f32>,
     dir: Vector4<f32>,
     proj: Matrix4<f32>,
@@ -155,9 +183,19 @@ pub struct CameraInfo {
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct PerFrameInfo {
+struct PerFrameInfo {
     camera: CameraInfo,
     atlas_info: na::Vector4<u32>,
+}
+
+#[repr(C)]
+pub struct MaterialInfo {
+    diffuse_tex_id: u32,
+    specular_tex_id: u32,
+    normal_tex_id: u32,
+    diffuse: na::Vector4<f32>,
+    specular: na::Vector4<f32>,
+    emission: na::Vector4<f32>,
 }
 
 #[repr(C)]
@@ -179,7 +217,76 @@ struct CullConstants {
 }
 
 const MAX_OBJECT_COUNT: u32 = 65535;
+const MAX_MATERIAL_COUNT: u32 = 4096;
 const COMPUTE_LOCAL_THREADS: u32 = 32;
+
+lazy_static! {
+static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]); 3] = [
+    (
+        ShaderStage::VERTEX,
+        &[
+            // Per object info
+            ShaderBinding {
+                binding_type: BindingType::UNIFORM_BUFFER,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 1,
+                id: 0,
+                count: 1,
+            },
+        ],
+    ),
+    (
+        ShaderStage::VERTEX | ShaderStage::PIXEL,
+        &[
+            // Per frame info
+            ShaderBinding {
+                binding_type: BindingType::UNIFORM_BUFFER,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 0,
+                id: 0,
+                count: 1,
+            },
+        ],
+    ),
+    (
+        ShaderStage::PIXEL,
+        &[
+            // Albedo atlas
+            ShaderBinding {
+                binding_type: BindingType::SAMPLED_IMAGE,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 0,
+                id: 1,
+                count: 1,
+            },
+            // Specular atlas
+            ShaderBinding {
+                binding_type: BindingType::SAMPLED_IMAGE,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 0,
+                id: 2,
+                count: 1,
+            },
+            // Normal atlas
+            ShaderBinding {
+                binding_type: BindingType::SAMPLED_IMAGE,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 0,
+                id: 3,
+                count: 1,
+            },
+            // Material buffer
+            ShaderBinding {
+                binding_type: BindingType::STORAGE_BUFFER,
+                binding_mod: ShaderBindingMod::DEFAULT,
+                descriptor_set: 0,
+                id: 4,
+                count: 1,
+            },
+        ],
+    ),
+];
+}
 
 fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
@@ -259,7 +366,7 @@ impl Renderer {
         *tex_index = None;
     }
 
-    pub fn prepare_material(&self, material_pipeline: &mut MaterialPipeline) {
+    pub fn prepare_material_pipeline(&mut self, material_pipeline: &mut MaterialPipeline) {
         material_pipeline.prepare_pipeline(&PipelineMapping {
             render_pass: Arc::clone(&self.g_render_pass),
             subpass_index: 0,
@@ -270,6 +377,17 @@ impl Renderer {
             subpass_index: 0,
             cull_back_faces: true,
         });
+
+        let g_per_pipeline_pools = self.g_per_pipeline_pools.as_mut().unwrap();
+        let signature = material_pipeline.signature();
+
+        if !g_per_pipeline_pools.contains_key(signature) {
+            g_per_pipeline_pools.insert(Arc::clone(signature), signature.create_pool(1, 16).unwrap());
+        }
+    }
+
+    pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
+        self.material_updates.insert(id, info);
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
@@ -281,45 +399,86 @@ impl Renderer {
         let update_count = updates.len();
 
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-        self.staging_cl.lock().unwrap().begin(true).unwrap();
 
+        let staging_size = self.staging_buffer.size();
         let mut used_size = 0;
         let mut i = 0;
 
-        loop {
-            let update = &updates[i];
-            let copy_size = update.data.len();
-            let new_used_size = used_size + copy_size;
-
-            if copy_size > 0 && new_used_size < self.staging_buffer.size() as usize {
-                self.staging_buffer.write(used_size as u64, &update.data);
-
+        while i < update_count {
+            {
                 let mut cl = self.staging_cl.lock().unwrap();
+                cl.begin(true).unwrap();
 
-                cl.copy_buffer_to_device(
-                    &self.staging_buffer,
-                    used_size as u64,
-                    &update.buffer,
-                    update.offset,
-                    copy_size as u64,
-                );
-                used_size = new_used_size;
-                i += 1;
-            }
+                while i < update_count {
+                    let update = &updates[i];
 
-            if i == update_count || new_used_size > self.staging_buffer.size() as usize {
-                self.staging_cl.lock().unwrap().end().unwrap();
+                    let (copy_size, new_used_size) = match update {
+                        BufferUpdate::Type1(update) => {
+                            let copy_size = update.data.len() as u64;
+                            assert!(copy_size <= staging_size);
+                            (copy_size, used_size + copy_size)
+                        }
+                        BufferUpdate::Type2(update) => (update.size, used_size),
+                        BufferUpdate::Type3(update) => {
+                            let copy_size = update.data.len() as u64;
+                            assert!(copy_size <= staging_size);
+                            (copy_size, used_size + copy_size)
+                        }
+                    };
 
-                let mut submit = self.staging_submit.lock().unwrap();
-                graphics_queue.submit(&mut submit).unwrap();
-                submit.wait().unwrap();
+                    if new_used_size > staging_size {
+                        used_size = 0;
+                        break;
+                    }
 
-                if i == update_count {
-                    break;
-                } else if i < update_count {
-                    self.staging_cl.lock().unwrap().begin(true).unwrap();
+                    match update {
+                        BufferUpdate::Type1(update) => {
+                            self.staging_buffer.write(used_size as u64, &update.data);
+
+                            cl.copy_buffer_to_device(
+                                &self.staging_buffer,
+                                used_size,
+                                &update.buffer,
+                                update.offset,
+                                copy_size,
+                            );
+                        }
+                        BufferUpdate::Type2(update) => {
+                            cl.copy_raw_host_buffer_to_device(
+                                &update.src_buffer,
+                                update.src_offset,
+                                &update.dst_buffer,
+                                update.dst_offset,
+                                update.size,
+                            );
+                        }
+                        BufferUpdate::Type3(update) => {
+                            self.staging_buffer.write(used_size as u64, &update.data);
+
+                            let regions: SmallVec<[CopyRegion; 128]> = update
+                                .regions
+                                .iter()
+                                .map(|region| CopyRegion {
+                                    src_element_index: used_size + region.0,
+                                    dst_element_index: region.1,
+                                    size: region.2,
+                                })
+                                .collect();
+
+                            cl.copy_buffer_regions_to_device(&self.staging_buffer, &update.buffer, &regions);
+                        }
+                    }
+
+                    used_size = new_used_size;
+                    i += 1;
                 }
+
+                cl.end().unwrap();
             }
+
+            let mut submit = self.staging_submit.lock().unwrap();
+            graphics_queue.submit(&mut submit).unwrap();
+            submit.wait().unwrap();
         }
     }
 
@@ -334,18 +493,21 @@ impl Renderer {
             let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
+        let buffer_updates = Arc::new(Mutex::new(vec![]));
+        let buffer_updates2 = Arc::new(Mutex::new(vec![]));
+        let buffer_updates3 = Arc::new(Mutex::new(vec![]));
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             renderer_comps: self.scene.storage::<component::Renderer>(),
-            depth_per_object_pool: Arc::clone(&self.depth_per_object_pool),
-            model_inputs_pool: Arc::clone(&self.model_inputs_pool),
+            depth_per_object_pool: self.depth_per_object_pool.take().unwrap(),
+            g_per_pipeline_pools: self.g_per_pipeline_pools.take().unwrap(),
+            renderables: Arc::clone(&self.renderables),
+            buffer_updates: Arc::clone(&buffer_updates),
         };
 
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
-            device: Arc::clone(&self.device),
-            staging_cl: Arc::clone(&self.staging_cl),
-            staging_submit: Arc::clone(&self.staging_submit),
+            buffer_updates: Arc::clone(&buffer_updates2),
         };
 
         let mut transform_events_system = systems::TransformEventsSystem {
@@ -353,9 +515,8 @@ impl Renderer {
             model_transform_comps: self.scene.storage::<component::ModelTransform>(),
         };
 
-        let buffer_updates = Arc::new(Mutex::new(vec![]));
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
-            buffer_updates: Arc::clone(&buffer_updates),
+            buffer_updates: Arc::clone(&buffer_updates3),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
         };
@@ -389,6 +550,9 @@ impl Renderer {
             });
         });
 
+        self.depth_per_object_pool = Some(renderer_events_system.depth_per_object_pool);
+        self.g_per_pipeline_pools = Some(renderer_events_system.g_per_pipeline_pools);
+
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
@@ -420,11 +584,45 @@ impl Renderer {
                 )
                 .to_vec()
             };
-            buffer_updates.lock().unwrap().push(BufferUpdate {
-                buffer: Arc::clone(&self.per_frame_ub),
-                offset: 0,
-                data,
-            });
+            buffer_updates
+                .lock()
+                .unwrap()
+                .push(BufferUpdate::Type1(BufferUpdate1 {
+                    buffer: Arc::clone(&self.per_frame_ub),
+                    offset: 0,
+                    data,
+                }));
+        }
+
+        // Update material buffer
+        // -------------------------------------------------------------------------------------------------------------
+        if !self.material_updates.is_empty() {
+            let mut data = Vec::<MaterialInfo>::with_capacity(self.material_updates.len());
+            let mat_size = mem::size_of::<MaterialInfo>() as u64;
+
+            let regions: Vec<(u64, u64, u64)> = self
+                .material_updates
+                .drain()
+                .enumerate()
+                .map(|(i, info)| {
+                    data.push(info.1);
+                    (i as u64 * mat_size, info.0 as u64 * mat_size, mat_size)
+                })
+                .collect();
+
+            let data =
+                unsafe { slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mat_size as usize) };
+
+            buffer_updates
+                .lock()
+                .unwrap()
+                .push(BufferUpdate::Type3(BufferUpdate3 {
+                    buffer: Arc::clone(&self.material_buffer),
+                    data: data.to_vec(),
+                    regions,
+                }));
+
+            unsafe { self.update_device_buffers(&[]) };
         }
 
         // Wait for vertex buffer updates
@@ -432,6 +630,8 @@ impl Renderer {
 
         unsafe {
             self.update_device_buffers(&buffer_updates.lock().unwrap());
+            self.update_device_buffers(&buffer_updates2.lock().unwrap());
+            self.update_device_buffers(&buffer_updates3.lock().unwrap());
         }
 
         // let t2 = Instant::now();
@@ -970,9 +1170,11 @@ impl Renderer {
                 Ok((sw_image, suboptimal)) => {
                     self.surface_changed |= suboptimal;
 
-                    self.on_update();
+                    // Note: wait for render completion before on_update()
+                    // to not destroy DeviceBuffers after entity deletion in on_update()
                     self.final_submit[0].wait().unwrap();
                     self.final_submit[1].wait().unwrap();
+                    self.on_update();
                     self.on_render(&sw_image);
 
                     let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
@@ -1061,7 +1263,9 @@ impl Renderer {
                 .unwrap(),
         );
         self.depth_pyramid_descs = {
-            let mut pool = self.depth_pyramid_pool.as_ref().unwrap().lock().unwrap();
+            let sampler = &self.depth_pyramid_sampler;
+            let pool = self.depth_pyramid_pool.as_mut().unwrap();
+
             (0..depth_pyramid_levels as usize)
                 .map(|i| {
                     let id = pool.alloc().unwrap();
@@ -1074,13 +1278,13 @@ impl Renderer {
                                 res: if i == 0 {
                                     BindingRes::ImageViewSampler(
                                         Arc::clone(depth_image.view()),
-                                        Arc::clone(&self.depth_pyramid_sampler),
+                                        Arc::clone(&sampler),
                                         ImageLayout::SHADER_READ,
                                     )
                                 } else {
                                     BindingRes::ImageViewSampler(
                                         Arc::clone(&depth_pyramid_views[i - 1]),
-                                        Arc::clone(&self.depth_pyramid_sampler),
+                                        Arc::clone(&sampler),
                                         ImageLayout::GENERAL,
                                     )
                                 },
@@ -1100,7 +1304,7 @@ impl Renderer {
                 .collect()
         };
 
-        self.cull_pool.lock().unwrap().update(
+        self.cull_pool.update(
             self.cull_desc,
             &[
                 Binding {
@@ -1254,12 +1458,18 @@ pub fn new(
     let present_queue = device.get_queue(Queue::TYPE_PRESENT);
     let phys_cores = num_cpus::get_physical();
 
-    // Create per-frame uniform buffer
     let per_frame_uniform_buffer = device.create_device_buffer(
         BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
         mem::size_of::<PerFrameInfo>() as u64,
         1,
     )?;
+    let material_buffer = device
+        .create_device_buffer(
+            BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::STORAGE,
+            mem::size_of::<MaterialInfo>() as u64,
+            MAX_MATERIAL_COUNT as u64,
+        )
+        .unwrap();
 
     // Create depth pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1284,7 +1494,7 @@ pub fn new(
         &[("inPosition", Format::RGB32_FLOAT)],
         &[],
     )?;
-    let depth_signature = device.create_pipeline_signature(&[depth_vertex])?;
+    let depth_signature = device.create_pipeline_signature(&[depth_vertex], &[])?;
     let depth_pipeline_r = device.create_graphics_pipeline(
         &depth_render_pass,
         0,
@@ -1301,8 +1511,8 @@ pub fn new(
         PipelineRasterization::new().cull_back_faces(true),
         &depth_signature,
     )?;
-    let depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
-    let depth_per_frame_in = depth_per_frame_pool.lock().unwrap().alloc()?;
+    let mut depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
+    let depth_per_frame_in = depth_per_frame_pool.alloc()?;
 
     let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
@@ -1323,7 +1533,7 @@ pub fn new(
         )
         .unwrap();
     let depth_pyramid_signature = device
-        .create_pipeline_signature(&[depth_pyramid_compute])
+        .create_pipeline_signature(&[depth_pyramid_compute], &[])
         .unwrap();
     let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
     let depth_pyramid_sampler = device.create_reduction_sampler(Sampler::REDUCTION_MAX).unwrap();
@@ -1337,10 +1547,10 @@ pub fn new(
             &[],
         )
         .unwrap();
-    let cull_signature = device.create_pipeline_signature(&[cull_compute]).unwrap();
+    let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
     let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
-    let cull_pool = cull_signature.create_pool(0, 1).unwrap();
-    let cull_descriptor = cull_pool.lock().unwrap().alloc().unwrap();
+    let mut cull_pool = cull_signature.create_pool(0, 1).unwrap();
+    let cull_descriptor = cull_pool.alloc().unwrap();
 
     let cull_buffer = device
         .create_device_buffer(
@@ -1436,50 +1646,10 @@ pub fn new(
         &[],
     )?;
     let g_signature = device
-        .create_custom_pipeline_signature(&[
-            (
-                ShaderStage::VERTEX,
-                &[
-                    // Per object info
-                    ShaderBinding {
-                        binding_type: BindingType::UNIFORM_BUFFER,
-                        binding_mod: ShaderBindingMod::DEFAULT,
-                        descriptor_set: 1,
-                        id: 0,
-                        count: 1,
-                    },
-                ],
-            ),
-            (
-                ShaderStage::VERTEX | ShaderStage::PIXEL,
-                &[
-                    // Per frame info
-                    ShaderBinding {
-                        binding_type: BindingType::UNIFORM_BUFFER,
-                        binding_mod: ShaderBindingMod::DEFAULT,
-                        descriptor_set: 0,
-                        id: 0,
-                        count: 1,
-                    },
-                ],
-            ),
-            (
-                ShaderStage::PIXEL,
-                &[
-                    // Albedo atlas
-                    ShaderBinding {
-                        binding_type: BindingType::SAMPLED_IMAGE,
-                        binding_mod: ShaderBindingMod::DEFAULT,
-                        descriptor_set: 0,
-                        id: 1,
-                        count: 1,
-                    },
-                ],
-            ),
-        ])
+        .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
         .unwrap();
-    let g_per_frame_pool = g_signature.create_pool(0, 1)?;
-    let g_per_frame_in = g_per_frame_pool.lock().unwrap().alloc()?;
+    let mut g_per_frame_pool = g_signature.create_pool(0, 1)?;
+    let g_per_frame_in = g_per_frame_pool.alloc()?;
     let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
         .collect();
@@ -1529,7 +1699,7 @@ pub fn new(
     ];
 
     // Update pipeline inputs
-    depth_per_frame_pool.lock().unwrap().update(
+    depth_per_frame_pool.update(
         depth_per_frame_in,
         &[Binding {
             id: 0,
@@ -1537,7 +1707,7 @@ pub fn new(
             res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
         }],
     );
-    g_per_frame_pool.lock().unwrap().update(
+    g_per_frame_pool.update(
         g_per_frame_in,
         &[
             Binding {
@@ -1549,6 +1719,21 @@ pub fn new(
                 id: 1,
                 array_index: 0,
                 res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+            },
+            Binding {
+                id: 2,
+                array_index: 0,
+                res: BindingRes::Image(Arc::clone(&texture_atlases[1].image()), ImageLayout::SHADER_READ),
+            },
+            Binding {
+                id: 3,
+                array_index: 0,
+                res: BindingRes::Image(Arc::clone(&texture_atlases[3].image()), ImageLayout::SHADER_READ),
+            },
+            Binding {
+                id: 4,
+                array_index: 0,
+                res: BindingRes::Buffer(Arc::clone(&material_buffer)),
             },
         ],
     );
@@ -1599,8 +1784,8 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
-        depth_per_object_pool: depth_signature.create_pool(1, MAX_OBJECT_COUNT)?,
-        depth_per_frame_pool,
+        depth_per_object_pool: Some(depth_signature.create_pool(1, MAX_OBJECT_COUNT)?),
+        _depth_per_frame_pool: depth_per_frame_pool,
         depth_per_frame_in,
         depth_pyramid_pipeline,
         depth_pyramid_signature,
@@ -1613,18 +1798,19 @@ pub fn new(
         cull_desc: cull_descriptor,
         cull_buffer,
         g_render_pass,
-        g_signature: Arc::clone(&g_signature),
         g_framebuffer: None,
-        g_per_frame_pool,
+        _g_per_frame_pool: g_per_frame_pool,
         g_per_frame_desc: g_per_frame_in,
-        g_per_object_pools: Default::default(),
+        g_per_pipeline_pools: Some(Default::default()),
         translucency_head_image: None,
         translucency_texel_image: None,
-        model_inputs_pool: g_signature.create_pool(1, MAX_OBJECT_COUNT)?,
         active_camera_desc: active_camera,
         per_frame_ub: per_frame_uniform_buffer,
         visibility_host_buffer,
         cull_host_buffer,
+        renderables: Default::default(),
+        material_buffer,
+        material_updates: Default::default(),
     };
     renderer.on_resize(size);
 

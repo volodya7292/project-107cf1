@@ -1,33 +1,41 @@
 use crate::renderer::scene::Event;
-use crate::renderer::{component, scene, BufferUpdate};
+use crate::renderer::{component, scene, BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable};
+use ahash::AHashMap;
 use nalgebra as na;
+use smallvec::{smallvec, SmallVec};
 use std::sync::{atomic, Arc, Mutex};
 use std::{mem, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::SubmitPacket;
 
 pub(super) struct RendererCompEventsSystem {
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
-    pub depth_per_object_pool: Arc<vkw::DescriptorPool>,
-    pub model_inputs_pool: Arc<vkw::DescriptorPool>,
+    pub depth_per_object_pool: vkw::DescriptorPool,
+    pub g_per_pipeline_pools: AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+    pub renderables: Arc<Mutex<AHashMap<u32, Renderable>>>,
+    pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
 }
 
 impl RendererCompEventsSystem {
     fn renderer_comp_created(
         renderer: &mut component::Renderer,
-        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
-        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+        depth_per_object_pool: &mut vkw::DescriptorPool,
+        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
         renderer.descriptor_sets = vec![
             depth_per_object_pool.alloc().unwrap(),
-            model_inputs_pool.alloc().unwrap(),
+            g_per_pipeline_pools
+                .get_mut(renderer.mat_pipeline.signature())
+                .unwrap()
+                .alloc()
+                .unwrap(),
         ];
     }
 
     fn renderer_comp_modified(
         renderer: &mut component::Renderer,
-        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
-        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+        depth_per_object_pool: &mut vkw::DescriptorPool,
+        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        buffer_updates: &mut Vec<BufferUpdate>,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
@@ -42,30 +50,56 @@ impl RendererCompEventsSystem {
             }],
         );
 
-        model_inputs_pool.update(
-            inputs[1],
-            &[vkw::Binding {
-                id: 0,
-                array_index: 0,
-                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
-            }],
-        );
+        let mut updates: SmallVec<[vkw::Binding; 4]> = smallvec![vkw::Binding {
+            id: 0,
+            array_index: 0,
+            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+        }];
+
+        for (binding_id, res) in &mut renderer.resources {
+            if let component::renderer::Resource::Buffer(buf_res) = res {
+                if buf_res.changed {
+                    let data = mem::replace(&mut buf_res.buffer, vec![]);
+
+                    buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
+                        buffer: Arc::clone(&buf_res.device_buffer),
+                        offset: 0,
+                        data,
+                    }));
+                    buf_res.changed = false;
+
+                    updates.push(vkw::Binding {
+                        id: *binding_id,
+                        array_index: 0,
+                        res: vkw::BindingRes::Buffer(Arc::clone(&buf_res.device_buffer)),
+                    });
+                }
+            }
+        }
+
+        g_per_pipeline_pools
+            .get_mut(renderer.mat_pipeline.signature())
+            .unwrap()
+            .update(inputs[1], &updates);
     }
 
     fn renderer_comp_removed(
         renderer: &mut component::Renderer,
-        depth_per_object_pool: &mut vkw::DescriptorPoolWrapper,
-        model_inputs_pool: &mut vkw::DescriptorPoolWrapper,
+        depth_per_object_pool: &mut vkw::DescriptorPool,
+        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
         depth_per_object_pool.free(renderer.descriptor_sets[0]);
-        model_inputs_pool.free(renderer.descriptor_sets[1]);
+        g_per_pipeline_pools
+            .get_mut(renderer.mat_pipeline.signature())
+            .unwrap()
+            .free(renderer.descriptor_sets[2]);
     }
 
     pub fn run(&mut self) {
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
-        let mut depth_per_object_pool = self.depth_per_object_pool.lock().unwrap();
-        let mut model_inputs_pool = self.model_inputs_pool.lock().unwrap();
+        let mut renderables = self.renderables.lock().unwrap();
+        let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
         for event in events {
             match event {
@@ -74,28 +108,40 @@ impl RendererCompEventsSystem {
 
                     Self::renderer_comp_created(
                         renderer_comp,
-                        &mut depth_per_object_pool,
-                        &mut model_inputs_pool,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
                     );
                     Self::renderer_comp_modified(
                         renderer_comp,
-                        &mut depth_per_object_pool,
-                        &mut model_inputs_pool,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
+                        &mut *buffer_updates,
+                    );
+                    renderables.insert(
+                        entity,
+                        Renderable {
+                            buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
+                        },
                     );
                 }
                 scene::Event::Modified(entity) => {
+                    let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
                     Self::renderer_comp_modified(
-                        renderer_comps.get_mut_unchecked(entity).unwrap(),
-                        &mut depth_per_object_pool,
-                        &mut model_inputs_pool,
+                        renderer_comp,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
+                        &mut *buffer_updates,
                     );
+                    renderables.get_mut(&entity).unwrap().buffers =
+                        smallvec![Arc::clone(&renderer_comp.uniform_buffer)];
                 }
-                Event::Removed(_, mut renderer) => {
+                Event::Removed(entity, mut renderer) => {
                     Self::renderer_comp_removed(
                         &mut renderer,
-                        &mut depth_per_object_pool,
-                        &mut model_inputs_pool,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
                     );
+                    renderables.remove(&entity);
                 }
             }
         }
@@ -104,23 +150,26 @@ impl RendererCompEventsSystem {
 
 pub(super) struct VertexMeshCompEventsSystem {
     pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
-    pub device: Arc<vkw::Device>,
-    pub staging_cl: Arc<Mutex<vkw::CmdList>>,
-    pub staging_submit: Arc<Mutex<SubmitPacket>>,
+    pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
 }
 
 impl VertexMeshCompEventsSystem {
-    fn vertex_mesh_comp_modified(vertex_mesh_comp: &component::VertexMesh, cl: &mut vkw::CmdList) {
+    fn vertex_mesh_comp_modified(
+        vertex_mesh_comp: &component::VertexMesh,
+        buffer_updates: &mut Vec<BufferUpdate>,
+    ) {
         let vertex_mesh = &vertex_mesh_comp.0;
 
         if vertex_mesh.changed.swap(false, atomic::Ordering::Relaxed) {
-            cl.copy_buffer_to_device(
-                vertex_mesh.staging_buffer.as_ref().unwrap(),
-                0,
-                vertex_mesh.buffer.as_ref().unwrap(),
-                0,
-                vertex_mesh.staging_buffer.as_ref().unwrap().size(),
-            );
+            let staging_buffer = vertex_mesh.staging_buffer.as_ref().unwrap();
+
+            buffer_updates.push(BufferUpdate::Type2(BufferUpdate2 {
+                src_buffer: staging_buffer.raw(),
+                src_offset: 0,
+                dst_buffer: Arc::clone(vertex_mesh.buffer.as_ref().unwrap()),
+                dst_offset: 0,
+                size: staging_buffer.size(),
+            }));
         }
     }
 
@@ -128,33 +177,20 @@ impl VertexMeshCompEventsSystem {
         let events = self.vertex_mesh_comps.write().unwrap().events();
 
         let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
-        let mut submit = self.staging_submit.lock().unwrap();
-        submit.wait().unwrap();
+        let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
         // Update device buffers of vertex meshes
         // ------------------------------------------------------------------------------------
-        {
-            let mut cl = self.staging_cl.lock().unwrap();
-            cl.begin(true).unwrap();
-
-            for event in &events {
-                match event {
-                    scene::Event::Created(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
-                    }
-                    scene::Event::Modified(i) => {
-                        Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *cl);
-                    }
-                    _ => {}
+        for event in &events {
+            match event {
+                scene::Event::Created(i) => {
+                    Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *buffer_updates);
                 }
+                scene::Event::Modified(i) => {
+                    Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *buffer_updates);
+                }
+                _ => {}
             }
-
-            cl.end().unwrap();
-        }
-
-        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
-        unsafe {
-            graphics_queue.submit(&mut submit).unwrap();
         }
     }
 }
@@ -225,11 +261,11 @@ impl WorldTransformEventsSystem {
                 .to_vec()
             };
 
-            buffer_updates.push(BufferUpdate {
+            buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
                 buffer: Arc::clone(&renderer.uniform_buffer),
                 offset: renderer.mat_pipeline.uniform_buffer_offset_model() as u64,
                 data: matrix_bytes,
-            });
+            }));
         }
     }
 

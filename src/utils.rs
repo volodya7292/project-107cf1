@@ -19,16 +19,6 @@ pub fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
-pub fn next_power_of_two(mut n: u32) -> u32 {
-    n -= 1;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n + 1
-}
-
 pub fn make_mul_of(n: u32, m: u32) -> u32 {
     ((n + m - 1) / m) * m
 }
@@ -87,6 +77,6 @@ where
     }
 
     for (i, v) in vertices.iter_mut().enumerate() {
-        *v.normal_mut() /= vertex_triangle_counts[i] as f32;
+        *v.normal_mut() = (v.normal() / vertex_triangle_counts[i] as f32).normalize();
     }
 }

@@ -8,23 +8,25 @@
 #define FLT_MAX 3.402823466e+38f
 
 struct Material {
-    uvec4 texture_ids;// .x - diffuse, .y - specular, .z - normal
-// if texture_id == -1 then the parameters below are used
-    vec4 diffuse;// .a - opacity/translucency
-    vec4 specular;// .a - roughness
+    uint diffuse_tex_id;
+    uint specular_tex_id;
+    uint normal_tex_id;
+    // if texture_id == -1 then the parameters below are used
+    vec4 diffuse; // .a - opacity/translucency
+    vec4 specular; // .a - roughness
     vec4 emission;
 };
 
 struct SampledMaterial {
-    vec4 diffuse;// .a - opacity/translucency
-    vec4 specular;// .a - roughtness
+    vec4 diffuse; // .a - opacity/translucency
+    vec4 specular; // .a - roughtness
     vec3 emission;
     vec3 normal;
 };
 
 struct Vertex {
     vec3 pos;
-    vec3 tex_coord;// .z - material id
+    vec3 tex_coord; // .z - material id
     vec3 normal;
     vec3 tangent;
 };

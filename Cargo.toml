@@ -18,7 +18,9 @@ rayon = "1.5.0"
 num_cpus = "1.13.0"
 simdnoise = "3.1.6"
 bit-set = "0.5.2"
+smallvec = "1.6.1"
 ahash = "0.6.2"
+lazy_static = "1.4.0"
 vk-wrapper = { path = "vk-wrapper" }
 dual-contouring = { path = "dual-contouring" }
 

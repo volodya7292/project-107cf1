@@ -30,19 +30,14 @@ impl<T> Node<T> {
     }
 }
 
-#[repr(C)]
-union EncodedNodeData<T: Copy> {
-    children: [u32; 8],
-    leaf: T,
-}
-
 pub const ENCODED_TYPE_INTERNAL: u8 = 0;
 pub const ENCODED_TYPE_LEAF: u8 = 1;
 
 #[repr(C)]
-pub struct EncodedNode<T: Copy> {
+pub struct EncodedNode<T: Copy + Default> {
     ty: u8,
-    data: EncodedNodeData<T>,
+    children: [u32; 8],
+    leaf: T,
 }
 
 #[derive(Clone, Debug)]
@@ -187,7 +182,7 @@ impl<T> Octree<T> {
     fn encode_node<F, M>(&self, map: &F, node_id: u32, buffer: &mut Vec<EncodedNode<M>>) -> u32
     where
         F: Fn(&T) -> M,
-        M: Copy,
+        M: Copy + Default,
     {
         if let Some(node) = &self.nodes[node_id as usize] {
             match &node.ty {
@@ -202,14 +197,16 @@ impl<T> Octree<T> {
 
                     buffer.push(EncodedNode {
                         ty: ENCODED_TYPE_INTERNAL,
-                        data: EncodedNodeData { children },
+                        children,
+                        leaf: Default::default(),
                     });
                     buffer.len() as u32 - 1
                 }
                 NodeType::Leaf(data) => {
                     buffer.push(EncodedNode {
                         ty: ENCODED_TYPE_LEAF,
-                        data: EncodedNodeData { leaf: map(data) },
+                        children: Default::default(),
+                        leaf: map(data),
                     });
                     buffer.len() as u32 - 1
                 }
@@ -224,7 +221,7 @@ impl<T> Octree<T> {
     pub fn encode_into_buffer<F, M>(&self, map: F) -> Vec<EncodedNode<M>>
     where
         F: Fn(&T) -> M,
-        M: Copy,
+        M: Copy + Default,
     {
         let mut buffer = Vec::<EncodedNode<M>>::with_capacity(self.nodes.len());
         self.encode_node(&map, 0, &mut buffer);
