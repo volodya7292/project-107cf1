@@ -52,9 +52,8 @@ pub struct DensityPoint {
 pub struct Vertex {
     position: na::Vector3<f32>,
     normal: na::Vector3<f32>,
-    density: u32,
 }
-vertex_impl!(Vertex, position, normal, density);
+vertex_impl!(Vertex, position, normal);
 
 struct Sector {
     indices: Box<[[[u32; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
@@ -267,6 +266,7 @@ impl Seam {
         let bound = ((SIZE as u32) * self.node_size) as i32;
 
         let mut densities = [[[0.0_f32; 3]; 3]; 3];
+        let mut mat_data = [[[PointData::default(); 3]; 3]; 3];
 
         for (i, nodes) in cluster_seam_nodes {
             let self_nodes = self.nodes.entry(*i).or_insert(SeamLayer {
@@ -302,6 +302,7 @@ impl Seam {
                                     &data.densities,
                                     na::Vector3::new(x as f32, y as f32, z as f32) * 0.5,
                                 );
+                                mat_data[x][y][z] = data.data[x / 2 * 4 + y / 2 * 2 + z / 2];
                             }
                         }
                     }
@@ -319,6 +320,16 @@ impl Seam {
                                     densities[x + 1][y + 1][z + 0],
                                     densities[x + 1][y + 1][z + 1],
                                 ];
+                                let mats = [
+                                    mat_data[x + 0][y + 0][z + 0],
+                                    mat_data[x + 0][y + 0][z + 1],
+                                    mat_data[x + 0][y + 1][z + 0],
+                                    mat_data[x + 0][y + 1][z + 1],
+                                    mat_data[x + 1][y + 0][z + 0],
+                                    mat_data[x + 1][y + 0][z + 1],
+                                    mat_data[x + 1][y + 1][z + 0],
+                                    mat_data[x + 1][y + 1][z + 1],
+                                ];
 
                                 let new_pos = pos
                                     + na::Vector3::new(x as i32, y as i32, z as i32)
@@ -328,7 +339,7 @@ impl Seam {
                                     continue;
                                 }
 
-                                let data = dc::contour::NodeDataDiscrete::new(d, ISO_VALUE_NORM, data.data);
+                                let data = dc::contour::NodeDataDiscrete::new(d, ISO_VALUE_NORM, mats);
 
                                 self_nodes.normalized_nodes.push(dc::octree::LeafNode::new(
                                     na::try_convert(new_pos).unwrap(),
@@ -741,7 +752,7 @@ impl Cluster {
                                     pos: [xyz.x as u8, xyz.y as u8, xyz.z as u8, *level],
                                     point: DensityPoint {
                                         density: (data.densities[index] * 255.0) as u8,
-                                        material: 0,
+                                        material: data.data[index].material,
                                     },
                                 });
                             }
@@ -875,7 +886,6 @@ impl Cluster {
             vertices.push(Vertex {
                 position: pos,
                 normal: Default::default(),
-                density: 0, // TODO: use nodes buffer index
             });
         }
 
@@ -888,7 +898,7 @@ impl Cluster {
         let raw_node_data = &mut sector.node_data_cache;
 
         raw_node_data.clear();
-        raw_node_data.extend((SECTOR_SIZE as u32 * self.node_size).to_ne_bytes().iter());
+        raw_node_data.extend(octree.size().to_ne_bytes().iter());
         raw_node_data.extend(unsafe {
             slice::from_raw_parts(
                 encoded_nodes.as_ptr() as *const u8,

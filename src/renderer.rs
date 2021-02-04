@@ -190,12 +190,12 @@ struct PerFrameInfo {
 
 #[repr(C)]
 pub struct MaterialInfo {
-    diffuse_tex_id: u32,
-    specular_tex_id: u32,
-    normal_tex_id: u32,
-    diffuse: na::Vector4<f32>,
-    specular: na::Vector4<f32>,
-    emission: na::Vector4<f32>,
+    pub(crate) diffuse_tex_id: u32,
+    pub(crate) specular_tex_id: u32,
+    pub(crate) normal_tex_id: u32,
+    pub(crate) diffuse: na::Vector4<f32>,
+    pub(crate) specular: na::Vector4<f32>,
+    pub(crate) emission: na::Vector4<f32>,
 }
 
 #[repr(C)]

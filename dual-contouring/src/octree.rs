@@ -187,6 +187,13 @@ impl<T> Octree<T> {
         if let Some(node) = &self.nodes[node_id as usize] {
             match &node.ty {
                 NodeType::Internal(children) => {
+                    let index = buffer.len() as u32;
+                    buffer.push(EncodedNode {
+                        ty: ENCODED_TYPE_INTERNAL,
+                        children: Default::default(),
+                        leaf: Default::default(),
+                    });
+
                     let mut children = *children;
 
                     for child in &mut children {
@@ -194,13 +201,9 @@ impl<T> Octree<T> {
                             *child = self.encode_node(map, *child, buffer);
                         }
                     }
+                    buffer[index as usize].children = children;
 
-                    buffer.push(EncodedNode {
-                        ty: ENCODED_TYPE_INTERNAL,
-                        children,
-                        leaf: Default::default(),
-                    });
-                    buffer.len() as u32 - 1
+                    index
                 }
                 NodeType::Leaf(data) => {
                     buffer.push(EncodedNode {

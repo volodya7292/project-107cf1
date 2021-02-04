@@ -1,4 +1,5 @@
 use crate::object::cluster;
+use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use crate::world;
@@ -138,6 +139,40 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
     };
+
+    renderer.lock().unwrap().set_material(
+        0,
+        renderer::MaterialInfo {
+            diffuse_tex_id: u32::MAX,
+            specular_tex_id: u32::MAX,
+            normal_tex_id: u32::MAX,
+            diffuse: na::Vector4::new(0.7, 0.3, 0.5, 1.0),
+            specular: Default::default(),
+            emission: Default::default(),
+        },
+    );
+    renderer.lock().unwrap().set_material(
+        1,
+        renderer::MaterialInfo {
+            diffuse_tex_id: u32::MAX,
+            specular_tex_id: u32::MAX,
+            normal_tex_id: u32::MAX,
+            diffuse: na::Vector4::new(0.3, 0.5, 0.9, 1.0),
+            specular: Default::default(),
+            emission: Default::default(),
+        },
+    );
+    renderer.lock().unwrap().set_material(
+        2,
+        renderer::MaterialInfo {
+            diffuse_tex_id: u32::MAX,
+            specular_tex_id: u32::MAX,
+            normal_tex_id: u32::MAX,
+            diffuse: na::Vector4::new(0.0, 0.0, 0.0, 1.0),
+            specular: Default::default(),
+            emission: Default::default(),
+        },
+    );
 
     let mut world_streamer = world::streamer::new(renderer, &mat_pipelines.cluster());
     world_streamer.set_render_distance(128);

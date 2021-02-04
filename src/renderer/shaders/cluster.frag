@@ -35,7 +35,7 @@ layout(set = 0, binding = 4, std430) readonly buffer Materials {
 };
 
 layout(set = 1, binding = 1, std430) readonly buffer PerSectorData {
-    uint size;
+    uint octree_size;
     EncodedNode nodes[];
 } sector;
 
@@ -109,8 +109,17 @@ void sample_material(uint id, out SampledMaterial sampled_mat) {
 
 void sample_node(vec3 local_pos, out uint mats[8], out vec3 norm_pos_in_node) {
     uint curr_node_id = 0;
-    uint curr_size = sector.size + 2;
+    uint curr_size = sector.octree_size;
     vec3 curr_pos = local_pos / curr_size;
+
+    mats[0] = 2;
+    mats[1] = 2;
+    mats[2] = 2;
+    mats[3] = 2;
+    mats[4] = 2;
+    mats[5] = 2;
+    mats[6] = 2;
+    mats[7] = 2;
 
     while (curr_size >= 1) {
         EncodedNode curr_node = sector.nodes[curr_node_id];
@@ -138,13 +147,22 @@ void calc_trilinear_unit_coeffs(vec3 p, out float v[8]) {
     vec4 xyz0 = xy * np.z;
     vec4 xyz1 = xy * p.z;
 
+    // v[0] = xyz0[0];
+    // v[1] = xyz0[1];
+    // v[2] = xyz0[2];
+    // v[3] = xyz0[3];
+    // v[4] = xyz1[0];
+    // v[5] = xyz1[1];
+    // v[6] = xyz1[2];
+    // v[7] = xyz1[3];
+
     v[0] = xyz0[0];
-    v[1] = xyz0[1];
+    v[1] = xyz1[0];
     v[2] = xyz0[2];
-    v[3] = xyz0[3];
-    v[4] = xyz1[0];
+    v[3] = xyz1[2];
+    v[4] = xyz0[1];
     v[5] = xyz1[1];
-    v[6] = xyz1[2];
+    v[6] = xyz0[3];
     v[7] = xyz1[3];
 }
 

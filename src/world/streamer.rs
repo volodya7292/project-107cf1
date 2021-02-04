@@ -304,6 +304,8 @@ impl WorldStreamer {
                         cluster::SIZE * cluster::SIZE * cluster::SIZE,
                     );
 
+                    let mat = if pos.x > 0 { 0 } else { 1 };
+
                     for x in 0..(cluster::SIZE) {
                         for y in 0..(cluster::SIZE) {
                             for z in 0..(cluster::SIZE) {
@@ -315,11 +317,13 @@ impl WorldStreamer {
                                     .max(0.0)
                                     .min(1.0);
 
+                                let a = (pos.x > 0) as u8;
+
                                 points.push(cluster::DensityPointInfo {
                                     pos: [x as u8, y as u8, z as u8, 0],
                                     point: cluster::DensityPoint {
                                         density: (n_v * 255.0) as u8,
-                                        material: 0,
+                                        material: mat,
                                     },
                                 });
                             }
