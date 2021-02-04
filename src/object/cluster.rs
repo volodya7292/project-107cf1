@@ -1017,30 +1017,6 @@ impl Cluster {
             );
         }
 
-        // let mut changed = false;
-        //
-        // let mut prev_vertex_count = 0;
-        // let mut prev_index_count = 0;
-        //
-        // for x in 0..SIZE_IN_SECTORS {
-        //     for y in 0..SIZE_IN_SECTORS {
-        //         for z in 0..SIZE_IN_SECTORS {
-        //             let sector = &self.sectors[x][y][z];
-        //             prev_vertex_count += sector.vertex_count;
-        //             prev_index_count += sector.index_count;
-        //
-        //             if sector.changed {
-        //                 changed = true;
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // }
-        //
-        // if !changed {
-        //     return;
-        // }
-
         // Collect vertices & indices
         for x in 0..SIZE_IN_SECTORS {
             for y in 0..SIZE_IN_SECTORS {
@@ -1066,8 +1042,8 @@ impl Cluster {
                                     0.125,
                                     10,
                                     (512 as f32 * (1.0 - simplification_factor)) as usize,
-                                    4.0,
-                                    5.0,
+                                    4.0 * self.node_size as f32,
+                                    1.0,
                                     0.8,
                                 );
 

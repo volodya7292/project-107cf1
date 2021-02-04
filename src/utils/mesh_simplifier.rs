@@ -2,7 +2,7 @@ use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
 use crate::utils::qef;
 use nalgebra as na;
 
-const COLLAPSE_MAX_DEGREE: u32 = 16;
+const COLLAPSE_MAX_DEGREE: u32 = 10;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -167,8 +167,8 @@ where
             }
 
             // avoid vertices becoming a 'hub' for lots of edges by penalising collapses
-            // which will lead to a vertex with degree > 10
-            let penalty = 0.max(degree as i32 - 10) as f32;
+            // which will lead to a vertex with degree > 8
+            let penalty = 0.max(degree as i32 - 8) as f32;
             error += penalty * (options.max_error * 0.1);
 
             if error > options.max_error {
