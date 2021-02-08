@@ -81,16 +81,12 @@ impl MaterialPipeline {
 impl Renderer {
     pub fn create_material_pipeline<T: UniformStruct>(
         &mut self,
-        vertex_shader: &Arc<vkw::Shader>,
-        g_pixel_shader: &Arc<vkw::Shader>,
+        shaders: &[Arc<vkw::Shader>],
     ) -> Arc<MaterialPipeline> {
         let device = Arc::clone(&self.device);
 
         let signature = device
-            .create_pipeline_signature(
-                &[Arc::clone(vertex_shader), Arc::clone(g_pixel_shader)],
-                &*renderer::ADDITIONAL_PIPELINE_BINDINGS,
-            )
+            .create_pipeline_signature(shaders, &*renderer::ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
 
         let mut mat_pipeline = MaterialPipeline {

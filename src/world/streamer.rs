@@ -64,7 +64,7 @@ impl WorldStreamer {
 
         // Lower level
         if level > 0 {
-            let cluster_size0 = Self::cluster_size(level.saturating_sub(1) as u32) as i32;
+            let cluster_size0 = Self::cluster_size(level as u32 - 1) as i32;
 
             for x in 0..3 {
                 for y in 0..3 {

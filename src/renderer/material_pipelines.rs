@@ -42,21 +42,28 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             )
             .unwrap();
 
-        renderer.create_material_pipeline::<BasicUniformInfo>(&triag_vertex, &triag_g_pixel)
+        renderer.create_material_pipeline::<BasicUniformInfo>(&[triag_vertex, triag_g_pixel])
     };
     let cluster = {
-        let triag_vertex = device
+        let vertex = device
             .create_shader(
                 &resources.get("shaders/cluster.vert.spv").unwrap().read().unwrap(),
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
                     ("inNormal", vkw::Format::RGB32_FLOAT),
-                    ("inDensityMatIndex", vkw::Format::R32_UINT),
+                    ("inMaterialId", vkw::Format::R32_UINT),
                 ],
                 &[],
             )
             .unwrap();
-        let triag_g_pixel = device
+        let geom = device
+            .create_shader(
+                &resources.get("shaders/cluster.geom.spv").unwrap().read().unwrap(),
+                &[],
+                &[],
+            )
+            .unwrap();
+        let pixel = device
             .create_shader(
                 &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
                 &[],
@@ -64,7 +71,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             )
             .unwrap();
 
-        renderer.create_material_pipeline::<BasicUniformInfo>(&triag_vertex, &triag_g_pixel)
+        renderer.create_material_pipeline::<BasicUniformInfo>(&[vertex, geom, pixel])
     };
 
     MaterialPipelines { triag, cluster }

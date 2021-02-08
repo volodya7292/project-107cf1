@@ -168,7 +168,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
             diffuse_tex_id: u32::MAX,
             specular_tex_id: u32::MAX,
             normal_tex_id: u32::MAX,
-            diffuse: na::Vector4::new(0.0, 0.0, 0.0, 1.0),
+            diffuse: na::Vector4::new(1.0, 1.0, 0.0, 1.0),
             specular: Default::default(),
             emission: Default::default(),
         },
