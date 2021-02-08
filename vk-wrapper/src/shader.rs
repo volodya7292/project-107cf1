@@ -14,9 +14,6 @@ impl ShaderStage {
     pub const GEOMETRY: Self = Self(vk::ShaderStageFlags::GEOMETRY);
     pub const COMPUTE: Self = Self(vk::ShaderStageFlags::COMPUTE);
 }
-
-//#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//pub struct AccessFlags(pub(crate) vk::AccessFlags);
 vk_bitflags_impl!(ShaderStage, vk::ShaderStageFlags);
 
 #[derive(Copy, Clone, PartialEq)]
@@ -24,8 +21,7 @@ pub struct ShaderBindingMod(u32);
 
 impl ShaderBindingMod {
     pub const DEFAULT: Self = Self(0);
-    pub const DYNAMIC_OFFSET: Self = Self(1);
-    pub const DYNAMIC_UPDATE: Self = Self(2);
+    pub const DYNAMIC_UPDATE: Self = Self(1);
 }
 
 pub struct BindingType(pub(crate) vk::DescriptorType);

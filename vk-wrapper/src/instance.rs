@@ -273,7 +273,7 @@ impl Instance {
                 Some(Arc::new(Adapter {
                     instance: Arc::clone(self),
                     native: p_device,
-                    props,
+                    _props: props,
                     enabled_extensions,
                     _props12: props12.build(),
                     features: enabled_features,

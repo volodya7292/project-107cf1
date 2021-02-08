@@ -9,8 +9,6 @@ use std::sync::Arc;
 
 pub enum BindingRes {
     Buffer(Arc<DeviceBuffer>),
-    /// [buffer, offset, range]
-    BufferRange(Arc<DeviceBuffer>, u64, u64),
     Image(Arc<Image>, ImageLayout),
     ImageView(Arc<ImageView>, ImageLayout),
     ImageViewSampler(Arc<ImageView>, Arc<Sampler>, ImageLayout),
@@ -127,16 +125,6 @@ impl DescriptorPool {
                         buffer: buffer.buffer.native,
                         offset: 0,
                         range: vk::WHOLE_SIZE,
-                    });
-                    write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
-
-                    self.used_buffers.insert(mapping, Arc::clone(buffer));
-                }
-                BindingRes::BufferRange(buffer, offset, range) => {
-                    native_buffer_infos.push(vk::DescriptorBufferInfo {
-                        buffer: buffer.buffer.native,
-                        offset: *offset,
-                        range: *range,
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
 

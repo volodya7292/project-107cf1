@@ -132,19 +132,7 @@ impl Device {
             return Err(DeviceError::ZeroBufferSize);
         }
 
-        let mut elem_align = 1;
-
-        if usage.intersects(BufferUsageFlags::UNIFORM)
-            && (elem_align % self.adapter.props.limits.min_uniform_buffer_offset_alignment != 0)
-        {
-            elem_align *= self.adapter.props.limits.min_uniform_buffer_offset_alignment;
-        }
-        if usage.intersects(BufferUsageFlags::STORAGE)
-            && (elem_align % self.adapter.props.limits.min_storage_buffer_offset_alignment != 0)
-        {
-            elem_align *= self.adapter.props.limits.min_storage_buffer_offset_alignment;
-        }
-
+        let elem_align = 1;
         let aligned_elem_size = utils::make_mul_of_u64(elem_size, elem_align as u64);
         let bytesize = aligned_elem_size as u64 * size;
 

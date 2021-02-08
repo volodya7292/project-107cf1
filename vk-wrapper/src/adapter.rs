@@ -16,7 +16,7 @@ pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 pub struct Adapter {
     pub(crate) instance: Arc<Instance>,
     pub(crate) native: vk::PhysicalDevice,
-    pub(crate) props: vk::PhysicalDeviceProperties,
+    pub(crate) _props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
     pub(crate) _props12: vk::PhysicalDeviceVulkan12Properties,
     pub(crate) features: vk::PhysicalDeviceFeatures,
