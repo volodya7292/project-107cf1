@@ -1,3 +1,6 @@
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+
 #define THREAD_GROUP_WIDTH 8
 #define THREAD_GROUP_HEIGHT 8
 #define THREAD_GROUP_1D_WIDTH (THREAD_GROUP_WIDTH * THREAD_GROUP_HEIGHT)
@@ -11,6 +14,7 @@ struct Material {
     uint diffuse_tex_id;
     uint specular_tex_id;
     uint normal_tex_id;
+    uint _pad;
     // if texture_id == -1 then the parameters below are used
     vec4 diffuse; // .a - opacity/translucency
     vec4 specular; // .a - roughness
@@ -94,3 +98,27 @@ vec3 r2_noise_3d(uint n) {
 }
 // ----------------------------------------------------------------------------------------
 
+void calc_trilinear_unit_coeffs(vec3 p, out float v[8]) {
+    vec3 np = 1.0 - p;
+    vec4 xy = vec4(np.x, p.x, np.x, p.x) * vec4(np.y, np.y, p.y, p.y);
+    vec4 xyz0 = xy * np.z;
+    vec4 xyz1 = xy * p.z;
+
+    // v[0] = xyz0[0];
+    // v[1] = xyz0[1];
+    // v[2] = xyz0[2];
+    // v[3] = xyz0[3];
+    // v[4] = xyz1[0];
+    // v[5] = xyz1[1];
+    // v[6] = xyz1[2];
+    // v[7] = xyz1[3];
+
+    v[0] = xyz0[0];
+    v[1] = xyz1[0];
+    v[2] = xyz0[2];
+    v[3] = xyz1[2];
+    v[4] = xyz0[1];
+    v[5] = xyz1[1];
+    v[6] = xyz0[3];
+    v[7] = xyz1[3];
+}

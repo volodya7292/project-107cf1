@@ -49,12 +49,13 @@ pub struct DensityPoint {
 }
 
 #[derive(Copy, Clone, Default)]
+#[repr(C)]
 pub struct Vertex {
     position: na::Vector3<f32>,
     normal: na::Vector3<f32>,
-    material_id: u32,
+    material_ids: na::Vector4<u32>,
 }
-vertex_impl!(Vertex, position, normal, material_id);
+vertex_impl!(Vertex, position, normal, material_ids);
 
 struct Sector {
     indices: Box<[[[u32; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
@@ -881,11 +882,19 @@ impl Cluster {
             let node_pos = na::Vector3::new(node_pos.x as f32, node_pos.y as f32, node_pos.z as f32);
 
             let pos = node_pos + node.data().vertex_pos * (node.size() as f32);
+            let data = &node.data().data;
+
+            let material_ids = na::Vector4::new(
+                data[0].material as u32 | ((data[1].material as u32) << 16),
+                data[2].material as u32 | ((data[3].material as u32) << 16),
+                data[4].material as u32 | ((data[5].material as u32) << 16),
+                data[6].material as u32 | ((data[7].material as u32) << 16),
+            );
 
             vertices.push(Vertex {
                 position: pos,
                 normal: Default::default(),
-                material_id: node.data().data[0].material as u32,
+                material_ids,
             });
         }
 

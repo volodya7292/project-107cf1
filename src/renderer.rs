@@ -193,6 +193,7 @@ pub struct MaterialInfo {
     pub(crate) diffuse_tex_id: u32,
     pub(crate) specular_tex_id: u32,
     pub(crate) normal_tex_id: u32,
+    pub _pad: u32,
     pub(crate) diffuse: na::Vector4<f32>,
     pub(crate) specular: na::Vector4<f32>,
     pub(crate) emission: na::Vector4<f32>,

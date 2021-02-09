@@ -1,7 +1,5 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#extension GL_EXT_shader_8bit_storage : require
-#extension GL_EXT_shader_explicit_arithmetic_types : require
 
 #define FN_TEXTURE_ATLAS
 #include "common.glsl"
@@ -38,8 +36,8 @@ layout(location = 0) in Output {
     vec3 local_pos;
     vec3 world_pos;
     vec3 surface_normal;
-    flat uint material_id[3];
     vec3 barycentrics;
+    flat uint16_t material_ids[3][8];
 } vs_in;
 
 vec2 triplan_coord[3];
@@ -103,31 +101,6 @@ void sample_material(uint id, out SampledMaterial sampled_mat) {
     }
 }
 
-void calc_trilinear_unit_coeffs(vec3 p, out float v[8]) {
-    vec3 np = 1.0 - p;
-    vec4 xy = vec4(np.x, p.x, np.x, p.x) * vec4(np.y, np.y, p.y, p.y);
-    vec4 xyz0 = xy * np.z;
-    vec4 xyz1 = xy * p.z;
-
-    // v[0] = xyz0[0];
-    // v[1] = xyz0[1];
-    // v[2] = xyz0[2];
-    // v[3] = xyz0[3];
-    // v[4] = xyz1[0];
-    // v[5] = xyz1[1];
-    // v[6] = xyz1[2];
-    // v[7] = xyz1[3];
-
-    v[0] = xyz0[0];
-    v[1] = xyz1[0];
-    v[2] = xyz0[2];
-    v[3] = xyz1[2];
-    v[4] = xyz0[1];
-    v[5] = xyz1[1];
-    v[6] = xyz0[3];
-    v[7] = xyz1[3];
-}
-
 void main() {
     vec3 color = clamp((vs_in.world_pos.xyz + 128) / 256.0, 0, 1);
     color = vec3(pow(color.r * color.g * color.b, 1. / 3.), 1, 1);
@@ -152,36 +125,23 @@ void main() {
     normal_coord[2] = vs_in.surface_normal.xy;
     // -------------------------------------------------------
 
-    SampledMaterial sampled_material[3];
-    sample_material(vs_in.material_id[0], sampled_material[0]);
-    sample_material(vs_in.material_id[1], sampled_material[1]);
-    sample_material(vs_in.material_id[2], sampled_material[2]);
+    SampledMaterial samples[3][1];
+    vec3 diffuse_s[3];
 
-    vec3 diffuse = (sampled_material[0].diffuse * vs_in.barycentrics[0]
-        + sampled_material[1].diffuse * vs_in.barycentrics[1]
-        + sampled_material[2].diffuse * vs_in.barycentrics[2]).xyz;
-
-    // uint mats[8];
-    // vec3 norm_pos_in_node;
-    // sample_node(vs_in.local_pos, mats, norm_pos_in_node);
-
-    // float coeffs[8];
-    // calc_trilinear_unit_coeffs(norm_pos_in_node, coeffs);
-
-    // vec4 diffuse = vec4(0);
-
-    // for (uint i = 0; i < 8; i++) {
-    //     SampledMaterial sampled_material;
-    //     sample_material(mats[i], sampled_material);
-
-    //     diffuse += sampled_material.diffuse * coeffs[i];
-    //     // diffuse += vec4(color, 1) * coeffs[i];
-    // }
+    for (uint i = 0; i < 3; i++) {
+        diffuse_s[i] = vec3(0);
+        for (uint j = 0; j < 1; j++) {
+            sample_material(vs_in.material_ids[i][j], samples[i][j]);
+            diffuse_s[i] += samples[i][j].diffuse.rgb / 1.0;
+        }
+    }
     
+    vec3 diffuse = (diffuse_s[0] * vs_in.barycentrics[0]
+        + diffuse_s[1] * vs_in.barycentrics[1]
+        + diffuse_s[2] * vs_in.barycentrics[2]).rgb;
 
-    // outDiffuse = textureAtlas(albedoAtlas, info.tex_atlas_info.x, vs_out.tex_coord, 0);
     // outDiffuse = vec4(color, 1);
-    outDiffuse = vec4(diffuse.xyz, 1);
+    outDiffuse = vec4(diffuse.rgb, 1);
     outSpecular = vec4(0.0);
     outEmission = vec4(0.0);
     outNormal = vec4(0.0);

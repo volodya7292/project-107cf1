@@ -51,7 +51,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
                     ("inNormal", vkw::Format::RGB32_FLOAT),
-                    ("inMaterialId", vkw::Format::R32_UINT),
+                    ("inMaterialIds", vkw::Format::RGBA32_UINT),
                 ],
                 &[],
             )

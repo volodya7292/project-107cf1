@@ -140,23 +140,25 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         cursor_rel: (0, 0),
     };
 
-    renderer.lock().unwrap().set_material(
-        0,
-        renderer::MaterialInfo {
-            diffuse_tex_id: u32::MAX,
-            specular_tex_id: u32::MAX,
-            normal_tex_id: u32::MAX,
-            diffuse: na::Vector4::new(0.7, 0.3, 0.5, 1.0),
-            specular: Default::default(),
-            emission: Default::default(),
-        },
-    );
+    // renderer.lock().unwrap().set_material(
+    //     0,
+    //     renderer::MaterialInfo {
+    //         diffuse_tex_id: u32::MAX,
+    //         specular_tex_id: u32::MAX,
+    //         normal_tex_id: u32::MAX,
+    //         _pad: 0,
+    //         diffuse: na::Vector4::new(0.7, 0.3, 0.5, 1.0),
+    //         specular: Default::default(),
+    //         emission: Default::default(),
+    //     },
+    // );
     renderer.lock().unwrap().set_material(
         1,
         renderer::MaterialInfo {
             diffuse_tex_id: u32::MAX,
             specular_tex_id: u32::MAX,
             normal_tex_id: u32::MAX,
+            _pad: 0,
             diffuse: na::Vector4::new(0.3, 0.5, 0.9, 1.0),
             specular: Default::default(),
             emission: Default::default(),
@@ -168,6 +170,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
             diffuse_tex_id: u32::MAX,
             specular_tex_id: u32::MAX,
             normal_tex_id: u32::MAX,
+            _pad: 0,
             diffuse: na::Vector4::new(1.0, 1.0, 0.0, 1.0),
             specular: Default::default(),
             emission: Default::default(),
