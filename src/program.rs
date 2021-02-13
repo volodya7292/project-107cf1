@@ -2,11 +2,11 @@ use crate::object::cluster;
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
+use crate::utils::HashSet;
 use crate::world;
 use dual_contouring as dc;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 

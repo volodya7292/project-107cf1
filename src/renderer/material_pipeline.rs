@@ -1,6 +1,6 @@
 use crate::renderer;
 use crate::renderer::Renderer;
-use ahash::AHashMap;
+use crate::utils::HashMap;
 use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub struct PipelineMapping {
 pub struct MaterialPipeline {
     device: Arc<vkw::Device>,
     signature: Arc<vkw::PipelineSignature>,
-    pipelines: AHashMap<PipelineMapping, Arc<vkw::Pipeline>>,
+    pipelines: HashMap<PipelineMapping, Arc<vkw::Pipeline>>,
     uniform_buffer_size: u32,
     uniform_buffer_model_offset: u32,
 }

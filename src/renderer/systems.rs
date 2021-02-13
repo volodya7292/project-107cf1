@@ -1,6 +1,6 @@
 use crate::renderer::scene::Event;
 use crate::renderer::{component, scene, BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable};
-use ahash::AHashMap;
+use crate::utils::HashMap;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
 use std::sync::{atomic, Arc, Mutex};
@@ -10,8 +10,8 @@ use vk_wrapper as vkw;
 pub(super) struct RendererCompEventsSystem {
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
     pub depth_per_object_pool: vkw::DescriptorPool,
-    pub g_per_pipeline_pools: AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
-    pub renderables: Arc<Mutex<AHashMap<u32, Renderable>>>,
+    pub g_per_pipeline_pools: HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+    pub renderables: Arc<Mutex<HashMap<u32, Renderable>>>,
     pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
 }
 
@@ -19,7 +19,7 @@ impl RendererCompEventsSystem {
     fn renderer_comp_created(
         renderer: &mut component::Renderer,
         depth_per_object_pool: &mut vkw::DescriptorPool,
-        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
         renderer.descriptor_sets = vec![
             depth_per_object_pool.alloc().unwrap(),
@@ -34,7 +34,7 @@ impl RendererCompEventsSystem {
     fn renderer_comp_modified(
         renderer: &mut component::Renderer,
         depth_per_object_pool: &mut vkw::DescriptorPool,
-        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
         buffer_updates: &mut Vec<BufferUpdate>,
     ) {
         // Update pipeline inputs
@@ -86,7 +86,7 @@ impl RendererCompEventsSystem {
     fn renderer_comp_removed(
         renderer: &mut component::Renderer,
         depth_per_object_pool: &mut vkw::DescriptorPool,
-        g_per_pipeline_pools: &mut AHashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
         depth_per_object_pool.free(renderer.descriptor_sets[0]);
         g_per_pipeline_pools

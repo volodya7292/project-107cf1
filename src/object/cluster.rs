@@ -1,12 +1,12 @@
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
-use crate::utils::mesh_simplifier;
+use crate::utils::{mesh_simplifier, HashMap};
 use crate::{renderer, utils};
 use dual_contouring as dc;
 use nalgebra as na;
 use smallvec::smallvec;
-use std::collections::{hash_map, HashMap};
+use std::collections::hash_map;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::{mem, slice};

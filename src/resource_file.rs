@@ -1,5 +1,4 @@
 use io::{Seek, SeekFrom};
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Formatter;
 use std::fs::File;
@@ -7,6 +6,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::{fmt, io};
 
+use crate::utils::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::sync::{Arc, Mutex};
 

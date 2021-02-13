@@ -1,4 +1,4 @@
-use ahash::AHashMap;
+use crate::utils::HashMap;
 use bit_set::BitSet;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
@@ -57,7 +57,7 @@ pub struct RawComponentStorage {
     available: BitSet,
     created: BitSet,
     modified: BitSet,
-    removed: AHashMap<u32, u32>,
+    removed: HashMap<u32, u32>,
     removed_values: Box<dyn Storage>,
 }
 
@@ -316,7 +316,7 @@ impl Entities {
 }
 
 #[derive(Default)]
-pub struct Resources(AHashMap<TypeId, Box<dyn Any + Send + Sync>>);
+pub struct Resources(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
 impl Resources {
     pub fn get<T: 'static>(&self) -> Option<&T> {
@@ -330,7 +330,7 @@ pub struct Scene {
     entities: Arc<Mutex<Entities>>,
     entity_allocated_count: Arc<AtomicU32>,
     resources: Arc<RwLock<Resources>>,
-    comp_storages: Mutex<AHashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
+    comp_storages: Mutex<HashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
 }
 
 impl Scene {

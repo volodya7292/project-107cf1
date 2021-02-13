@@ -4,7 +4,10 @@ mod qef;
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
 use nalgebra as na;
-use std::mem;
+use std::{collections, mem};
+
+pub type HashSet<T> = ahash::AHashSet<T>;
+pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 
 pub fn is_pow_of_2(n: u64) -> bool {
     (n & (n - 1)) == 0

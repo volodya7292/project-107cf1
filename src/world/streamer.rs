@@ -2,11 +2,12 @@ use crate::object::cluster;
 use crate::object::cluster::Cluster;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
+use crate::utils::{HashMap, HashSet};
 use nalgebra as na;
 use nalgebra_glm as glm;
 use rayon::prelude::*;
 use simdnoise::NoiseBuilder;
-use std::collections::{hash_map, HashMap, HashSet};
+use std::collections::hash_map;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -139,83 +140,89 @@ impl WorldStreamer {
         seam
     }
 
-    pub fn on_update(&mut self) {
-        // Add/remove clusters
-        {
-            const R: i32 = (LOD0_RANGE / cluster::SIZE) as i32;
-            const D: i32 = R * 2 + 1;
+    pub fn calc_cluster_layout(&self) -> Vec<HashSet<na::Vector3<i32>>> {
+        const R: i32 = (LOD0_RANGE / cluster::SIZE) as i32;
+        const D: i32 = R * 2 + 1;
 
-            let mut cluster_layout = vec![HashSet::with_capacity(512); MAX_LOD + 1];
-            let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; MAX_LOD + 2];
+        let mut cluster_layout = vec![HashSet::with_capacity(512); MAX_LOD + 1];
+        let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; MAX_LOD + 2];
 
-            for i in 0..(MAX_LOD + 1) {
-                let cluster_size = Self::cluster_size(i as u32) as i32;
-                let stream_pos_i = Self::cluster_aligned_pos(self.stream_pos, i as u32);
-                let r = (R * cluster_size) as f64;
+        for i in 0..(MAX_LOD + 1) {
+            let cluster_size = Self::cluster_size(i as u32) as i32;
+            let stream_pos_i = Self::cluster_aligned_pos(self.stream_pos, i as u32);
+            let r = (R * cluster_size) as f64;
 
-                // Fill mask of used clusters
-                for x in 0..D {
-                    for y in 0..D {
-                        for z in 0..D {
-                            let pos = stream_pos_i + na::Vector3::new(x, y, z).add_scalar(-R);
-                            let center = (pos * cluster_size).add_scalar(cluster_size / 2);
+            // Fill mask of used clusters
+            for x in 0..D {
+                for y in 0..D {
+                    for z in 0..D {
+                        let pos = stream_pos_i + na::Vector3::new(x, y, z).add_scalar(-R);
+                        let center = (pos * cluster_size).add_scalar(cluster_size / 2);
 
-                            let dist = glm::distance(&self.stream_pos, &na::convert(center));
+                        let dist = glm::distance(&self.stream_pos, &na::convert(center));
 
-                            if dist <= r && dist <= (self.render_distance as f64) {
-                                let p = [(R + x) as usize / 2, (R + y) as usize / 2, (R + z) as usize / 2];
-                                masks[i + 1][p[0]][p[1]][p[2]] = true;
-                            }
+                        if dist <= r && dist <= (self.render_distance as f64) {
+                            let p = [(R + x) as usize / 2, (R + y) as usize / 2, (R + z) as usize / 2];
+                            masks[i + 1][p[0]][p[1]][p[2]] = true;
                         }
                     }
                 }
+            }
 
-                let mask0 = &masks[i];
-                let mask1 = &masks[i + 1];
+            let mask0 = &masks[i];
+            let mask1 = &masks[i + 1];
 
-                // Calculate new cluster positions
-                for x in 0..D {
-                    for y in 0..D {
-                        for z in 0..D {
-                            if !mask1[x as usize][y as usize][z as usize] {
-                                continue;
-                            }
+            // Calculate new cluster positions
+            for x in 0..D {
+                for y in 0..D {
+                    for z in 0..D {
+                        if !mask1[x as usize][y as usize][z as usize] {
+                            continue;
+                        }
 
-                            let pos = stream_pos_i + na::Vector3::new(x, y, z).add_scalar(-R) * 2;
-                            let in_p = [x * 2 - R, y * 2 - R, z * 2 - R];
+                        let pos = stream_pos_i + na::Vector3::new(x, y, z).add_scalar(-R) * 2;
+                        let in_p = [x * 2 - R, y * 2 - R, z * 2 - R];
 
-                            if (in_p[0] < 0 || in_p[0] >= D)
-                                || (in_p[1] < 0 || in_p[1] >= D)
-                                || (in_p[2] < 0 || in_p[2] >= D)
-                            {
-                                continue;
-                            }
+                        if (in_p[0] < 0 || in_p[0] >= D)
+                            || (in_p[1] < 0 || in_p[1] >= D)
+                            || (in_p[2] < 0 || in_p[2] >= D)
+                        {
+                            continue;
+                        }
 
-                            for x2 in 0..2_usize {
-                                for y2 in 0..2_usize {
-                                    for z2 in 0..2_usize {
-                                        let p = [
-                                            in_p[0] as usize + x2,
-                                            in_p[1] as usize + y2,
-                                            in_p[2] as usize + z2,
-                                        ];
-                                        if p[0] < D as usize
-                                            && p[1] < D as usize
-                                            && p[2] < D as usize
-                                            && mask0[p[0]][p[1]][p[2]]
-                                        {
-                                            continue;
-                                        }
-
-                                        let pos = pos + na::Vector3::new(x2 as i32, y2 as i32, z2 as i32);
-                                        cluster_layout[i].insert(pos);
+                        for x2 in 0..2_usize {
+                            for y2 in 0..2_usize {
+                                for z2 in 0..2_usize {
+                                    let p = [
+                                        in_p[0] as usize + x2,
+                                        in_p[1] as usize + y2,
+                                        in_p[2] as usize + z2,
+                                    ];
+                                    if p[0] < D as usize
+                                        && p[1] < D as usize
+                                        && p[2] < D as usize
+                                        && mask0[p[0]][p[1]][p[2]]
+                                    {
+                                        continue;
                                     }
+
+                                    let pos = pos + na::Vector3::new(x2 as i32, y2 as i32, z2 as i32);
+                                    cluster_layout[i].insert(pos);
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+
+        cluster_layout
+    }
+
+    pub fn on_update(&mut self) {
+        // Add/remove clusters
+        {
+            let cluster_layout = self.calc_cluster_layout();
 
             let renderer = self.renderer.lock().unwrap();
             let device = renderer.device().clone();

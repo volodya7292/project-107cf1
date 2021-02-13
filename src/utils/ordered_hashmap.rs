@@ -1,4 +1,5 @@
-use std::collections::{hash_map, HashMap};
+use crate::utils::HashMap;
+use std::collections::hash_map;
 use std::hash::{BuildHasher, Hash};
 use std::iter::FusedIterator;
 use std::ops::Range;
@@ -11,17 +12,16 @@ struct Element<K, V> {
 }
 
 #[derive(Clone)]
-pub struct OrderedHashMap<K, V, S = hash_map::RandomState> {
+pub struct OrderedHashMap<K, V> {
     vec: Vec<Element<K, V>>,
-    map: HashMap<K, usize, S>,
+    map: HashMap<K, usize>,
 }
 
-impl<K, V, S> OrderedHashMap<K, V, S>
+impl<K, V> OrderedHashMap<K, V>
 where
     K: Clone + Eq + Hash,
-    S: BuildHasher + Default,
 {
-    pub fn new() -> OrderedHashMap<K, V, S> {
+    pub fn new() -> OrderedHashMap<K, V> {
         Default::default()
     }
 
@@ -97,11 +97,8 @@ where
     }
 }
 
-impl<K, V, S> Default for OrderedHashMap<K, V, S>
-where
-    S: Default,
-{
-    fn default() -> OrderedHashMap<K, V, S> {
+impl<K, V> Default for OrderedHashMap<K, V> {
+    fn default() -> OrderedHashMap<K, V> {
         OrderedHashMap {
             vec: vec![],
             map: HashMap::with_hasher(Default::default()),

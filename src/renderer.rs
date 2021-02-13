@@ -13,7 +13,7 @@ pub use vertex_mesh::VertexMesh;
 
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
-use ahash::AHashMap;
+use crate::utils::HashMap;
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
@@ -94,7 +94,7 @@ pub struct Renderer {
     g_framebuffer: Option<Arc<Framebuffer>>,
     _g_per_frame_pool: DescriptorPool,
     g_per_frame_desc: DescriptorSet,
-    g_per_pipeline_pools: Option<AHashMap<Arc<PipelineSignature>, DescriptorPool>>,
+    g_per_pipeline_pools: Option<HashMap<Arc<PipelineSignature>, DescriptorPool>>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
@@ -102,9 +102,9 @@ pub struct Renderer {
     active_camera_desc: u32,
     per_frame_ub: Arc<DeviceBuffer>,
     material_buffer: Arc<DeviceBuffer>,
-    material_updates: AHashMap<u32, MaterialInfo>,
+    material_updates: HashMap<u32, MaterialInfo>,
 
-    renderables: Arc<Mutex<AHashMap<u32, Renderable>>>,
+    renderables: Arc<Mutex<HashMap<u32, Renderable>>>,
 }
 
 #[derive(Copy, Clone)]
