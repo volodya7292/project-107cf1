@@ -1,6 +1,6 @@
 use crate::utils::HashMap;
 use std::collections::hash_map;
-use std::hash::{BuildHasher, Hash};
+use std::hash::Hash;
 use std::iter::FusedIterator;
 use std::ops::Range;
 use std::slice;

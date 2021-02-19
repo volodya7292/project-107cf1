@@ -3,6 +3,7 @@ use crate::object::cluster::Cluster;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
+use crate::world::generator;
 use nalgebra as na;
 use nalgebra_glm as glm;
 use rayon::prelude::*;
@@ -289,57 +290,13 @@ impl WorldStreamer {
                     if pos.y != 0 {
                         return;
                     }
+
                     let node_size = 2_u32.pow(i as u32);
-
-                    let noise = NoiseBuilder::gradient_3d_offset(
-                        pos.x as f32 / (node_size as f32),
-                        cluster::SIZE,
-                        pos.y as f32 / (node_size as f32),
-                        cluster::SIZE,
-                        pos.z as f32 / (node_size as f32),
-                        cluster::SIZE,
-                    )
-                    .with_seed(0)
-                    .with_freq(1.0 / 50.0 * node_size as f32)
-                    .generate();
-
-                    let sample_noise = |x, y, z| -> f32 {
-                        noise.0[z * (cluster::SIZE) * (cluster::SIZE) + y * (cluster::SIZE) + x] * 35.0
-                    };
-
-                    let mut points = Vec::<cluster::DensityPointInfo>::with_capacity(
-                        cluster::SIZE * cluster::SIZE * cluster::SIZE,
-                    );
-
-                    let mat = if pos.x > 0 { 0 } else { 1 };
-
-                    for x in 0..(cluster::SIZE) {
-                        for y in 0..(cluster::SIZE) {
-                            for z in 0..(cluster::SIZE) {
-                                let n_v = sample_noise(x, y, z);
-
-                                let n_v = ((n_v as f32
-                                    + (64 - (pos.y + y as i32) * (node_size as i32)) as f32 / 10.0)
-                                    / 2.0)
-                                    .max(0.0)
-                                    .min(1.0);
-
-                                let a = (pos.x > 0) as u8;
-
-                                points.push(cluster::DensityPointInfo {
-                                    pos: [x as u8, y as u8, z as u8, 0],
-                                    point: cluster::DensityPoint {
-                                        density: (n_v * 255.0) as u8,
-                                        material: mat,
-                                    },
-                                });
-                            }
-                        }
-                    }
+                    let points = generator::generate_cluster(*pos, node_size);
 
                     let mut cluster = world_cluster.cluster.lock().unwrap();
-
                     cluster.set_densities(&points);
+
                     world_cluster.interior_changed = true;
                 });
             }

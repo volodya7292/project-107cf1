@@ -16,12 +16,13 @@ const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 2;
 const SIZE_IN_SECTORS: usize = 4;
 pub const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
+pub const VOLUME: usize = SIZE * SIZE * SIZE;
 const ALIGNED_SIZE: usize = SIZE + 2;
 pub const MAX_CELL_LAYERS: usize = 4; // MAX: 255
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
 const ALIGNED_SECTOR_MAX_CELLS: usize = ALIGNED_SECTOR_VOLUME * MAX_CELL_LAYERS;
-const ISO_VALUE_NORM: f32 = 0.5;
+pub const ISO_VALUE_NORM: f32 = 0.5;
 const ISO_VALUE_INT: i16 = (ISO_VALUE_NORM * 255.0) as i16;
 
 fn index_3d_to_1d(p: [u8; 3], ds: u32) -> u32 {

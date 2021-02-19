@@ -4,7 +4,7 @@ mod qef;
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
 use nalgebra as na;
-use std::{collections, mem};
+use std::mem;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
