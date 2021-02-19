@@ -6,10 +6,12 @@
       <sourceFolder url="file://$MODULE_DIR$/res-encoder/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/vk-wrapper/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/dual-contouring/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/marching-cubes/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/dual-contouring/target" />
       <excludeFolder url="file://$MODULE_DIR$/res-encoder/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/vk-wrapper/target" />
+      <excludeFolder url="file://$MODULE_DIR$/marching-cubes/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

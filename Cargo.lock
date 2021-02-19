@@ -317,7 +317,7 @@ checksum = "88d7ed2934d741c6b37e33e3832298e8850b53fd2d2bea03873375596c7cea4e"
 name = "dual-contouring"
 version = "0.1.0"
 dependencies = [
- "nalgebra",
+ "nalgebra 0.23.2",
 ]
 
 [[package]]
@@ -540,6 +540,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "marching-cubes"
+version = "0.1.0"
+dependencies = [
+ "lazy_static",
+ "nalgebra 0.24.1",
+ "smallvec",
+]
+
+[[package]]
 name = "matrixmultiply"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -601,13 +610,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "nalgebra"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a9002895a0de45e3cde58b36d0cf2f83249e7dba4a43ee64dafbf01bfd464ff"
+dependencies = [
+ "approx",
+ "generic-array",
+ "matrixmultiply",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "rand",
+ "rand_distr",
+ "simba",
+ "typenum",
+]
+
+[[package]]
 name = "nalgebra-glm"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6eb8dc415da7b28069a4c775a0529d310b0ecc5c91b4b2b804e6464854d0bab2"
 dependencies = [
  "approx",
- "nalgebra",
+ "nalgebra 0.23.2",
  "num-traits",
  "simba",
 ]
@@ -758,7 +785,8 @@ dependencies = [
  "image",
  "ktx",
  "lazy_static",
- "nalgebra",
+ "marching-cubes",
+ "nalgebra 0.23.2",
  "nalgebra-glm",
  "num_cpus",
  "rayon",

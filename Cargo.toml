@@ -23,6 +23,7 @@ ahash = "0.6.2"
 lazy_static = "1.4.0"
 vk-wrapper = { path = "vk-wrapper" }
 dual-contouring = { path = "dual-contouring" }
+marching-cubes = { path = "marching-cubes" }
 
 [build-dependencies]
 serde = { version = "1.0.118", features = ["derive"] }
