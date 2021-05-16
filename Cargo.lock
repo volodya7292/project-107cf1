@@ -14,9 +14,9 @@ checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
 
 [[package]]
 name = "ahash"
-version = "0.6.3"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796540673305a66d127804eef19ad696f1f204b8c1025aaca4958c17eab32877"
+checksum = "7f200cbb1e856866d9eade941cf3aa0c5d7dd36f74311c4273b494f4ef036957"
 dependencies = [
  "getrandom 0.2.1",
  "once_cell",
@@ -336,6 +336,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "entity_data"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05e7612c9c01140958f7edd75f899c789fda58ec5b41d7aadf8d9d2be5c9db71"
+dependencies = [
+ "ahash",
+ "bit-set",
+ "unchecked_unwrap",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -540,19 +551,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "marching-cubes"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "nalgebra 0.24.1",
- "smallvec",
-]
-
-[[package]]
 name = "matrixmultiply"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "916806ba0031cd542105d916a97c8572e1fa6dd79c9c51e7eb43a09ec2dd84c1"
+dependencies = [
+ "rawpointer",
+]
+
+[[package]]
+name = "matrixmultiply"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a8a15b776d9dfaecd44b03c5828c2199cddff5247215858aac14624f8d6b741"
 dependencies = [
  "rawpointer",
 ]
@@ -599,44 +610,41 @@ checksum = "c9bd52e9c9922d5702d5c2a105ceacc3c1206e781d3d130f4d2b7ad5f43c144b"
 dependencies = [
  "approx",
  "generic-array",
- "matrixmultiply",
+ "matrixmultiply 0.2.4",
  "num-complex",
  "num-rational",
  "num-traits",
  "rand",
  "rand_distr",
- "simba",
+ "simba 0.3.1",
  "typenum",
 ]
 
 [[package]]
 name = "nalgebra"
-version = "0.24.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a9002895a0de45e3cde58b36d0cf2f83249e7dba4a43ee64dafbf01bfd464ff"
+checksum = "476d1d59fe02fe54c86356e91650cd892f392782a1cb9fc524ec84f7aa9e1d06"
 dependencies = [
  "approx",
- "generic-array",
- "matrixmultiply",
+ "matrixmultiply 0.3.1",
  "num-complex",
  "num-rational",
  "num-traits",
- "rand",
- "rand_distr",
- "simba",
+ "simba 0.4.0",
  "typenum",
 ]
 
 [[package]]
 name = "nalgebra-glm"
-version = "0.9.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eb8dc415da7b28069a4c775a0529d310b0ecc5c91b4b2b804e6464854d0bab2"
+checksum = "eb2e88a888ba4c1e4f3b78acd5136d5548046176831d99f3ac94ef9a596c2ed0"
 dependencies = [
  "approx",
- "nalgebra 0.23.2",
+ "nalgebra 0.26.2",
  "num-traits",
- "simba",
+ "simba 0.4.0",
 ]
 
 [[package]]
@@ -778,15 +786,16 @@ name = "project-107cf1"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "approx",
  "bit-set",
  "byteorder",
  "dual-contouring",
+ "entity_data",
  "glob",
  "image",
  "ktx",
  "lazy_static",
- "marching-cubes",
- "nalgebra 0.23.2",
+ "nalgebra 0.26.2",
  "nalgebra-glm",
  "num_cpus",
  "rayon",
@@ -1029,6 +1038,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "simba"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5132a955559188f3d13c9ba831e77c802ddc8782783f050ed0c52f5988b95f4c"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-traits",
+ "paste 1.0.4",
+]
+
+[[package]]
 name = "simdeez"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1068,9 +1089,9 @@ checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
 
 [[package]]
 name = "spirv_cross"
-version = "0.22.2"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ebd49af36be83ecd6290b57147e2a0e26145b832634b17146d934b197ca3713"
+checksum = "60647fadbf83c4a72f0d7ea67a7ca3a81835cf442b8deae5c134c3e0055b2e14"
 dependencies = [
  "cc",
  "js-sys",
@@ -1136,6 +1157,12 @@ name = "typenum"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
+
+[[package]]
+name = "unchecked_unwrap"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c24f3a206e040c2d1f2bc5987864f777cb807ad4f50bed46dbfa2af917be2d8"
 
 [[package]]
 name = "unicode-xid"

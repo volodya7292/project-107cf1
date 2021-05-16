@@ -1,10 +1,12 @@
-use crate::object::cluster;
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use crate::utils::HashSet;
 use crate::world;
+use crate::world::block_registry::BlockRegistry;
+use crate::world::cluster;
 use dual_contouring as dc;
+use entity_data::EntityStorageLayout;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
 use std::sync::{Arc, Mutex};
@@ -177,7 +179,12 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         },
     );
 
-    let mut world_streamer = world::streamer::new(renderer, &mat_pipelines.cluster());
+    let block_registry = {
+        let mut reg = BlockRegistry::predefined();
+        Arc::new(reg)
+    };
+
+    let mut world_streamer = world::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());
     world_streamer.set_render_distance(128);
     world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
     world_streamer.on_update();

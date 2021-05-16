@@ -1,10 +1,21 @@
-use crate::object::cluster;
+use crate::world::block::BlockProps;
+use crate::world::cluster;
+use crate::world::cluster::Cluster;
 use nalgebra as na;
 use nalgebra_glm as glm;
+use nalgebra_glm::U32Vec3;
 use simdnoise::NoiseBuilder;
 
-pub fn generate_cluster(pos: na::Vector3<i32>, node_size: u32) {
-    unimplemented!()
+pub fn generate_cluster(cluster: &mut Cluster, pos: na::Vector3<i32>, node_size: u32) {
+    for x in 0..cluster::SIZE {
+        for y in 0..cluster::SIZE {
+            for z in 0..cluster::SIZE {
+                let pos = U32Vec3::new(x as u32, y as u32, z as u32);
+                cluster.set_block(pos, 0).props(BlockProps::default()).build();
+            }
+        }
+    }
+
     // let noise = NoiseBuilder::gradient_3d_offset(
     //     pos.x as f32 / (node_size as f32),
     //     cluster::SIZE,

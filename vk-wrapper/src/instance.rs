@@ -187,7 +187,6 @@ impl Instance {
                 require_feature!(shader_storage_buffer_array_dynamic_indexing);
                 require_feature!(shader_storage_image_array_dynamic_indexing);
                 require_feature!(texture_compression_bc);
-                require_feature!(geometry_shader);
 
                 require_feature12!(descriptor_indexing);
                 require_feature12!(descriptor_binding_partially_bound);

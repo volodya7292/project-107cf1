@@ -10,11 +10,11 @@ edition = "2018"
 lazy_static = "1.4.0"
 bitflags = "1.2.1"
 log = "0.4.11"
-ahash = "0.6.3"
+ahash = "0.7.0"
 bit-set = "0.5.2"
 smallvec = "1.6.1"
 ash = "0.31.0"
 ash-window = "0.5.0"
 raw-window-handle = "0.3.3"
 vk-mem = "0.2.2"
-spirv_cross = { version = "0.22.1", features = ["glsl"] }
+spirv_cross = { version = "0.23.0", features = ["glsl"] }

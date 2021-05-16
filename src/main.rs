@@ -1,10 +1,12 @@
 mod utils;
-mod world;
+
 #[macro_use]
 pub(crate) mod renderer;
 mod object;
 mod program;
 mod resource_file;
+mod world;
+
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +20,7 @@ use nalgebra as na;
 use sdl2::keyboard::Keycode;
 use std::path::Path;
 use std::time::Instant;
+use vk_wrapper::PrimitiveTopology;
 
 #[derive(Copy, Clone, Default)]
 pub struct BasicVertex {

@@ -2,18 +2,18 @@ pub mod mesh_simplifier;
 pub mod ordered_hashmap;
 mod qef;
 
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
+use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra as na;
 use std::mem;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 
-pub fn is_pow_of_2(n: u64) -> bool {
-    (n & (n - 1)) == 0
+pub const fn is_pow_of_2(n: u64) -> bool {
+    n != 0 && ((n & (n - 1)) == 0)
 }
 
-pub fn prev_power_of_two(mut n: u32) -> u32 {
+pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n = n | (n >> 1);
     n = n | (n >> 2);
     n = n | (n >> 4);
@@ -22,12 +22,49 @@ pub fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
-pub fn make_mul_of(n: u32, m: u32) -> u32 {
+pub const fn make_mul_of(n: u32, m: u32) -> u32 {
     ((n + m - 1) / m) * m
 }
 
-pub fn log2(n: u32) -> u32 {
+pub const fn log2(n: u32) -> u32 {
+    // TODO: use u32::BITS when stabilized
     (mem::size_of::<u32>() * 8) as u32 - n.leading_zeros() - 1
+}
+
+pub trait AllSame {
+    fn all_same(&mut self) -> bool;
+}
+
+pub trait AllSameBy<I: Iterator> {
+    fn all_same_by<F>(&mut self, f: F) -> bool
+    where
+        F: FnMut(&I::Item, &I::Item) -> bool;
+}
+
+impl<I: Iterator> AllSame for I
+where
+    I::Item: PartialEq,
+{
+    fn all_same(&mut self) -> bool {
+        if let Some(first) = self.next() {
+            self.all(|v| v == first)
+        } else {
+            true
+        }
+    }
+}
+
+impl<I: Iterator> AllSameBy<I> for I {
+    fn all_same_by<F>(&mut self, mut f: F) -> bool
+    where
+        F: FnMut(&I::Item, &I::Item) -> bool,
+    {
+        if let Some(first) = self.next() {
+            self.all(|v| f(&first, &v))
+        } else {
+            true
+        }
+    }
 }
 
 pub fn calc_triangle_normal(
@@ -43,7 +80,7 @@ pub fn calc_triangle_normal(
 /// Calculate interpolated normals using neighbour triangles.
 pub fn calc_smooth_mesh_normals<T>(vertices: &mut [T], indices: &[u32])
 where
-    T: VertexImpl + VertexNormalImpl,
+    T: VertexImpl + VertexPositionImpl + VertexNormalImpl,
 {
     let mut vertex_triangle_counts = vec![0_u32; vertices.len()];
     let mut triangle_normals = Vec::<na::Vector3<f32>>::with_capacity(indices.len() / 3);

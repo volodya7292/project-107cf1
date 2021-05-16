@@ -3,6 +3,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
 use vk_wrapper as vkw;
+use vk_wrapper::PrimitiveTopology;
 
 pub struct BufferResource {
     pub(in crate::renderer) buffer: Vec<u8>,
@@ -69,7 +70,7 @@ impl Renderer {
         mat_pipeline: &Arc<MaterialPipeline>,
         translucent: bool,
     ) -> Renderer {
-        Self {
+        Renderer {
             mat_pipeline: Arc::clone(&mat_pipeline),
             descriptor_sets: vec![],
             uniform_buffer: device

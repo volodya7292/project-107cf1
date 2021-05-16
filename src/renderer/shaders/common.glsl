@@ -52,31 +52,28 @@ struct PerFrameInfo {
 };
 
 #ifdef FN_TEXTURE_ATLAS
-/// tile_width: single tile width in pixels
+/// tile_width: with of single tile in pixels
 /// tex_coord: regular texture coordinates
 vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile_index) {
     ivec2 atlas_size = textureSize(atlas, 0);
     uint size_in_tiles = atlas_size.x / tile_width;
+    float tile_width_norm = 1.0 / size_in_tiles;
+    float pixel_size = 1.0 / tile_width;
+    vec2 tile_offset = vec2(tile_index % size_in_tiles, tile_index / size_in_tiles);
 
     // Calculate LOD
-    vec2 dx = dFdx(tex_coord * tile_width);
-    vec2 dy = dFdy(tex_coord * tile_width);
+    vec2 tex_coord_pixels = tex_coord * tile_width;
+    vec2 dx = dFdx(tex_coord_pixels);
+    vec2 dy = dFdy(tex_coord_pixels);
     float d = max(dot(dx, dx), dot(dy, dy));
     float lod = 0.5 * log2(d);
     
-    // Calculate texture coordinates
-    float tile_width_norm = 1.0 / size_in_tiles;
-    float pixel_size = 1.0 / tile_width;
-
-    vec2 tile_offset = vec2(
-        (tile_index % size_in_tiles) * tile_width_norm,
-        (tile_index / size_in_tiles) * tile_width_norm
-    );
-    float pixel_offset = pixel_size * (0.5 * pow(2.0, lod));
+    // Calculate texture coordinates | sqrt(lod) = pow(2.0, lod) = pow(2.0, 0.5 * log2(d))
+    float pixel_offset = pixel_size * (0.5 * sqrt(lod));
 
     tex_coord -= floor(tex_coord); // repeat pattern
     tex_coord = clamp(tex_coord, pixel_offset, 1.0 - pixel_offset); // remove bleeding
-    tex_coord = tile_offset + tex_coord * tile_width_norm; // adjust to proper tile
+    tex_coord = (tile_offset + tex_coord) * tile_width_norm;  // adjust to proper tile position
 
     return textureLod(atlas, tex_coord, lod);
 }

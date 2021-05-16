@@ -1,8 +1,9 @@
-use crate::object::cluster;
-use crate::object::cluster::Cluster;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
+use crate::world::block_registry::BlockRegistry;
+use crate::world::cluster;
+use crate::world::cluster::Cluster;
 use crate::world::generator;
 use nalgebra as na;
 use nalgebra_glm as glm;
@@ -24,6 +25,7 @@ struct WorldCluster {
 }
 
 pub struct WorldStreamer {
+    block_registry: Arc<BlockRegistry>,
     renderer: Arc<Mutex<Renderer>>,
     cluster_mat_pipeline: Arc<MaterialPipeline>,
     // in meters
@@ -258,7 +260,7 @@ impl WorldStreamer {
                     let pos = pos * (cluster::SIZE as i32) * (node_size as i32);
 
                     if let hash_map::Entry::Vacant(entry) = self.clusters[i].entry(pos) {
-                        let cluster = cluster::new(&device, node_size);
+                        let cluster = cluster::new(&self.block_registry, &device, node_size);
 
                         let transform_comp = component::Transform::new(
                             na::Vector3::new(pos.x as f32, pos.y as f32, pos.z as f32),
@@ -290,9 +292,9 @@ impl WorldStreamer {
                     }
 
                     let node_size = 2_u32.pow(i as u32);
-                    let points = generator::generate_cluster(*pos, node_size);
 
                     let mut cluster = world_cluster.cluster.lock().unwrap();
+                    generator::generate_cluster(&mut cluster, *pos, node_size);
                     // cluster.set_densities(&points);
 
                     world_cluster.interior_changed = true;
@@ -333,7 +335,7 @@ impl WorldStreamer {
                     // let seam = self.create_seam_for_cluster(i, pos);
                     // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                     // cluster.fill_seam_densities(seam);
-                    // cluster.update_mesh(seam, 0.75);
+                    cluster.update_mesh(0.75);
                     // let seam = world_cluster.seam.as_ref().unwrap_or(&fake_seam);
                 });
                 level.iter().for_each(|(_, world_cluster)| {
@@ -347,6 +349,8 @@ impl WorldStreamer {
                         .update_renderable(world_cluster.entity, &mut d);
                     // *vertex_mesh_comps.get_mut(world_cluster.entity).unwrap() = raw_vertex_mesh;
                 });
+
+                println!("{}", level.len());
             }
             /*for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {
@@ -360,8 +364,13 @@ impl WorldStreamer {
     }
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>, cluster_mat_pipeline: &Arc<MaterialPipeline>) -> WorldStreamer {
+pub fn new(
+    block_registry: &Arc<BlockRegistry>,
+    renderer: &Arc<Mutex<Renderer>>,
+    cluster_mat_pipeline: &Arc<MaterialPipeline>,
+) -> WorldStreamer {
     WorldStreamer {
+        block_registry: Arc::clone(block_registry),
         renderer: Arc::clone(renderer),
         cluster_mat_pipeline: Arc::clone(cluster_mat_pipeline),
         render_distance: 0,
