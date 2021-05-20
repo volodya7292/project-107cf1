@@ -1,10 +1,14 @@
 pub mod mesh_simplifier;
 pub mod ordered_hashmap;
 mod qef;
+pub mod slice_split;
 
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra as na;
 use std::mem;
+use std::ops::{Index, IndexMut, Sub};
+
+use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+pub use slice_split::SliceSplitImpl;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;

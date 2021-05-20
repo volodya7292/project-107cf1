@@ -1,23 +1,26 @@
+use std::collections::hash_map;
+use std::convert::TryInto;
+use std::sync::Arc;
+use std::{iter, mem, slice};
+
+use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
+use nalgebra as na;
+use nalgebra_glm::{I32Vec3, U32Vec3, Vec3};
+use smallvec::smallvec;
+
+use dual_contouring as dc;
+use vk_wrapper as vkw;
+use vk_wrapper::PrimitiveTopology;
+
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
-use crate::utils::{mesh_simplifier, HashMap};
+use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
 use crate::world::block::BlockProps;
 use crate::world::block_component::Facing;
 use crate::world::block_model::{Quad, Vertex};
 use crate::world::block_registry::BlockRegistry;
 use crate::{renderer, utils};
-use dual_contouring as dc;
-use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
-use nalgebra as na;
-use nalgebra_glm::{I32Vec3, U32Vec3, Vec3};
-use smallvec::smallvec;
-use std::collections::hash_map;
-use std::convert::TryInto;
-use std::sync::Arc;
-use std::{iter, mem, slice};
-use vk_wrapper as vkw;
-use vk_wrapper::PrimitiveTopology;
 
 const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 2;
@@ -27,14 +30,6 @@ pub const SIZE: usize = SECTOR_SIZE * SIZE_IN_SECTORS;
 pub const VOLUME: usize = SIZE * SIZE * SIZE;
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
-const DIRECTIONS: [I32Vec3; 6] = [
-    I32Vec3::new(-1, 0, 0),
-    I32Vec3::new(1, 0, 0),
-    I32Vec3::new(0, -1, 0),
-    I32Vec3::new(0, 1, 0),
-    I32Vec3::new(0, 0, -1),
-    I32Vec3::new(0, 0, 1),
-];
 
 fn index_1d_to_3d(i: usize, ds: usize) -> [usize; 3] {
     let ds_sqr = ds * ds;
@@ -86,8 +81,7 @@ struct Sector {
     block_props: Box<[[[BlockProps; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
     occluders: Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     changed: bool,
-    seam_influence_changed: bool,
-    seam_changed: bool,
+    side_changed: [bool; 6],
     vertex_mesh: renderer::VertexMesh<Vertex, ()>,
 }
 
@@ -99,14 +93,41 @@ impl Sector {
             block_props: Default::default(),
             occluders: Default::default(),
             changed: false,
-            seam_influence_changed: false,
-            seam_changed: false,
+            side_changed: [false; 6],
             vertex_mesh: Default::default(),
         }
     }
 
     const fn entry_index(x: u32, y: u32, z: u32) -> usize {
         SECTOR_SIZE * SECTOR_SIZE * x as usize + SECTOR_SIZE * y as usize + z as usize
+    }
+
+    fn set_block(&mut self, pos: U32Vec3, archetype_id: u32) -> BlockDataBuilder {
+        let pos: na::Vector3<usize> = na::convert(pos);
+        let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
+        if *entity_id != EntityId::NULL {
+            self.block_storage.remove(entity_id);
+        }
+        let entity_builder = self.block_storage.add_entity(archetype_id);
+
+        self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = Occluder::new(true, true, true, true, true, true); // TODO
+
+        let mut side_changed = self.side_changed;
+        side_changed[0] |= pos.x == 0;
+        side_changed[1] |= pos.x == 15;
+        side_changed[2] |= pos.y == 0;
+        side_changed[3] |= pos.y == 15;
+        side_changed[4] |= pos.z == 0;
+        side_changed[5] |= pos.z == 15;
+
+        self.side_changed = side_changed;
+        self.changed = true;
+
+        BlockDataBuilder {
+            entity_builder,
+            entity_id,
+            block_props: Default::default(),
+        }
     }
 }
 
@@ -170,6 +191,14 @@ impl Cluster {
         SIZE_IN_SECTORS * SIZE_IN_SECTORS * pos.x as usize + SIZE_IN_SECTORS * pos.y as usize + pos.z as usize
     }
 
+    const fn sector_pos(index: usize) -> U32Vec3 {
+        U32Vec3::new(
+            (index / (SIZE_IN_SECTORS * SIZE_IN_SECTORS)) as u32,
+            (index % (SIZE_IN_SECTORS * SIZE_IN_SECTORS) / SIZE_IN_SECTORS) as u32,
+            (index % SIZE_IN_SECTORS) as u32,
+        )
+    }
+
     pub fn block_pos_to_sector_index(cell_pos: U32Vec3) -> usize {
         Self::sector_index(cell_pos / (SECTOR_SIZE as u32))
     }
@@ -202,31 +231,68 @@ impl Cluster {
             .unwrap();
         let pos = pos.map(|v| v % (SECTOR_SIZE as u32));
 
-        let entity_id = &mut sector.block_map[pos.x as usize][pos.y as usize][pos.z as usize];
-        if *entity_id != EntityId::NULL {
-            sector.block_storage.remove(entity_id);
+        sector.set_block(pos, archetype_id)
+    }
+
+    fn update_side_occluders(&mut self) {
+        fn map_dst_pos(facing: Facing, k: usize, l: usize) -> (usize, usize, usize) {
+            let d = facing.direction();
+            let dx = (d.x != 0) as usize;
+            let dy = (d.y != 0) as usize;
+            let dz = (d.z != 0) as usize;
+
+            let (k, l) = (k + 1, l + 1);
+            let x = k * dy + k * dz + (ALIGNED_SECTOR_SIZE - 1) * (d.x > 0) as usize;
+            let y = k * dx + l * dz + (ALIGNED_SECTOR_SIZE - 1) * (d.y > 0) as usize;
+            let z = l * dx + l * dy + (ALIGNED_SECTOR_SIZE - 1) * (d.z > 0) as usize;
+
+            (x, y, z)
         }
 
-        let entity_builder = sector.block_storage.add_entity(archetype_id);
+        macro_rules! side_loop {
+            ($sector: ident, $sectors: ident, $pos: ident, $facing: expr) => {
+                let j = $facing as usize;
+                let rel = ($pos + $facing.direction());
 
-        sector.occluders[(pos.x + 1) as usize][(pos.y + 1) as usize][(pos.z + 1) as usize] =
-            Occluder::new(true, true, true, true, true, true); // TODO
-        sector.changed = true;
+                if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32) {
+                    let side_sector = &mut $sectors[Self::sector_index(na::try_convert(rel).unwrap())];
+                    let facing_m = $facing.mirror();
 
-        BlockDataBuilder {
-            entity_builder,
-            entity_id,
-            block_props: Default::default(),
+                    for k in 0..SECTOR_SIZE {
+                        for l in 0..SECTOR_SIZE {
+                            let p = map_dst_pos(facing_m, k, l);
+                            side_sector.occluders[p.0][p.1][p.2] =
+                                Occluder::new(true, true, true, true, true, true);
+                        }
+                    }
+
+                    $sector.side_changed[j] = false;
+                }
+            };
+        }
+
+        for i in 0..VOLUME_IN_SECTORS {
+            let (sector, mut sectors) = self.sectors.split_mid_mut(i).unwrap();
+            let pos: I32Vec3 = na::convert(Self::sector_pos(i));
+
+            side_loop!(sector, sectors, pos, Facing::NegativeX);
+            side_loop!(sector, sectors, pos, Facing::PositiveX);
+            side_loop!(sector, sectors, pos, Facing::NegativeY);
+            side_loop!(sector, sectors, pos, Facing::PositiveY);
+            side_loop!(sector, sectors, pos, Facing::NegativeZ);
+            side_loop!(sector, sectors, pos, Facing::PositiveZ);
         }
     }
 
     fn triangulate(&mut self, sector_pos: U32Vec3) -> (Vec<Vertex>, Vec<u32>) {
         let sector = &mut self.sectors[Self::sector_index(sector_pos)];
+        let scale = self.entry_size as f32;
         let mut vertices = Vec::<Vertex>::with_capacity(SECTOR_VOLUME * 8);
 
-        fn add_vertices(out: &mut Vec<Vertex>, pos: Vec3, vertices: &[Vertex]) {
+        fn add_vertices(out: &mut Vec<Vertex>, pos: Vec3, scale: f32, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
                 v.position += pos;
+                v.position *= scale;
                 v
             }));
         }
@@ -242,17 +308,17 @@ impl Cluster {
                         .get_textured_block_model(props.textured_model_id())
                         .unwrap();
 
-                    add_vertices(&mut vertices, posf, model.get_inner_quads());
+                    add_vertices(&mut vertices, posf, scale, model.get_inner_quads());
 
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
-                        let rel = (pos + DIRECTIONS[i]).add_scalar(1);
+                        let rel = (pos + facing.direction()).add_scalar(1);
 
                         let occludes = sector.occluders[rel.x as usize][rel.y as usize][rel.z as usize]
-                            .occludes_side(facing);
+                            .occludes_side(facing.mirror());
 
                         if !occludes {
-                            add_vertices(&mut vertices, posf, model.get_quads_by_facing(facing));
+                            add_vertices(&mut vertices, posf, scale, model.get_quads_by_facing(facing));
                             // TODO: Ambient occlusion
                         }
                     }
@@ -276,6 +342,8 @@ impl Cluster {
     }
 
     pub fn update_mesh(&mut self, simplification_factor: f32) {
+        self.update_side_occluders();
+
         for x in 0..SIZE_IN_SECTORS {
             for y in 0..SIZE_IN_SECTORS {
                 for z in 0..SIZE_IN_SECTORS {

@@ -349,8 +349,6 @@ impl WorldStreamer {
                         .update_renderable(world_cluster.entity, &mut d);
                     // *vertex_mesh_comps.get_mut(world_cluster.entity).unwrap() = raw_vertex_mesh;
                 });
-
-                println!("{}", level.len());
             }
             /*for (i, level) in self.clusters.iter().enumerate() {
                 level.par_iter().for_each(|(pos, world_cluster)| {

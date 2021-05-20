@@ -1,5 +1,5 @@
 pub mod block;
-mod block_component;
+pub mod block_component;
 mod block_model;
 pub mod block_registry;
 pub mod cluster;
