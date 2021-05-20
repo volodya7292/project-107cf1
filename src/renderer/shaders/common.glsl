@@ -68,10 +68,10 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     float d = max(dot(dx, dx), dot(dy, dy));
     float lod = 0.5 * log2(d);
     
-    // Calculate texture coordinates | sqrt(lod) = pow(2.0, lod) = pow(2.0, 0.5 * log2(d))
-    float pixel_offset = pixel_size * (0.5 * sqrt(lod));
+    // Calculate texture coordinates | sqrt(d) = pow(2.0, lod) = pow(2.0, 0.5 * log2(d))
+    float pixel_offset = pixel_size * (0.5 * sqrt(d));
 
-    tex_coord -= floor(tex_coord); // repeat pattern
+    tex_coord = fract(tex_coord); // repeat pattern
     tex_coord = clamp(tex_coord, pixel_offset, 1.0 - pixel_offset); // remove bleeding
     tex_coord = (tile_offset + tex_coord) * tile_width_norm;  // adjust to proper tile position
 

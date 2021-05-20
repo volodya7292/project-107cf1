@@ -37,23 +37,23 @@ fn index_1d_to_3d(i: usize, ds: usize) -> [usize; 3] {
     [i / ds_sqr, i_2d / ds, i_2d % ds]
 }
 
-pub struct Entry {
-    content_id: u16,
-    secondary_content_id: u16,
-    data_id: u16,
-    orientation: [u8; 2],
-}
-
-impl Default for Entry {
-    fn default() -> Self {
-        Self {
-            content_id: 0,
-            secondary_content_id: 0,
-            data_id: 0,
-            orientation: [0, 0],
-        }
-    }
-}
+// pub struct Entry {
+//     content_id: u16,
+//     secondary_content_id: u16,
+//     data_id: u16,
+//     orientation: [u8; 2],
+// }
+//
+// impl Default for Entry {
+//     fn default() -> Self {
+//         Self {
+//             content_id: 0,
+//             secondary_content_id: 0,
+//             data_id: 0,
+//             orientation: [0, 0],
+//         }
+//     }
+// }
 
 #[derive(Default)]
 pub struct Occluder(u8);
@@ -254,7 +254,10 @@ impl Cluster {
                 let j = $facing as usize;
                 let rel = ($pos + $facing.direction());
 
-                if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32) {
+                if $sector.side_changed[j]
+                    && rel >= I32Vec3::from_element(0)
+                    && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
+                {
                     let side_sector = &mut $sectors[Self::sector_index(na::try_convert(rel).unwrap())];
                     let facing_m = $facing.mirror();
 

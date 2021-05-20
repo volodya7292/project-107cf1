@@ -5,7 +5,6 @@ pub mod slice_split;
 
 use nalgebra as na;
 use std::mem;
-use std::ops::{Index, IndexMut, Sub};
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 pub use slice_split::SliceSplitImpl;
