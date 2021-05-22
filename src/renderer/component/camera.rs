@@ -1,4 +1,3 @@
-use nalgebra as na;
 use nalgebra::{Isometry3, Matrix4, Rotation3, Translation3, Vector3, Vector4};
 use nalgebra_glm as glm;
 
