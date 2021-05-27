@@ -6,13 +6,15 @@ use crate::world::block_registry::BlockRegistry;
 use crate::world::cluster;
 use crate::world::cluster::Cluster;
 use crate::world::generator;
+use crossbeam_channel as cb;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, Vec3};
 use rayon::prelude::*;
 use simdnoise::NoiseBuilder;
 use smallvec::SmallVec;
 use std::collections::hash_map;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU32;
+use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
 
 pub const MAX_LOD: usize = 4;
@@ -25,6 +27,26 @@ struct WorldCluster {
     generated: bool,
 }
 
+#[derive(Copy, Clone)]
+struct ClusterPos {
+    level: usize,
+    pos: I32Vec3,
+}
+
+impl ClusterPos {
+    pub fn new(level: usize, pos: I32Vec3) -> ClusterPos {
+        ClusterPos { level, pos }
+    }
+}
+
+struct ClusterSidePair(ClusterPos, ClusterPos);
+
+struct SideOcclusionWorkSync {
+    sender: cb::Sender<ClusterSidePair>,
+    receiver: cb::Receiver<ClusterSidePair>,
+    process_count: AtomicU32,
+}
+
 pub struct WorldStreamer {
     block_registry: Arc<BlockRegistry>,
     renderer: Arc<Mutex<Renderer>>,
@@ -33,6 +55,7 @@ pub struct WorldStreamer {
     render_distance: u32,
     stream_pos: DVec3,
     clusters: [HashMap<I32Vec3, WorldCluster>; MAX_LOD + 1], // [LOD] -> clusters
+    side_occlusion_work: SideOcclusionWorkSync,
 }
 
 pub trait ClusterProvider {}
@@ -60,8 +83,10 @@ impl WorldStreamer {
         glm::try_convert(glm::floor(&(pos / cluster_step_size))).unwrap()
     }
 
-    fn handle_cluster_side_updates(&self, level: usize, pos: &I32Vec3) {
-        let mut neighbours = SmallVec::<[(usize, I32Vec3); 24]>::new();
+    fn find_cluster_side_pairs(&self, cluster_pos: ClusterPos) -> SmallVec<[ClusterSidePair; 24]> {
+        let level = cluster_pos.level;
+        let pos = cluster_pos.pos;
+        let mut neighbours = SmallVec::<[ClusterSidePair; 24]>::new();
 
         let cluster_size1 = Self::cluster_size(level as u32) as i32;
         let cluster_size2 = Self::cluster_size(level as u32 + 1) as i32;
@@ -89,7 +114,7 @@ impl WorldStreamer {
                         let pos2 = pos + map_dst_pos(d, k, l) * cluster_size0;
 
                         if self.clusters[level - 1].contains_key(&pos2) {
-                            neighbours.push((level - 1, pos2));
+                            neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level - 1, pos2)));
                         }
                     }
                 }
@@ -102,48 +127,57 @@ impl WorldStreamer {
                 let pos2 = pos + d * cluster_size1;
 
                 if self.clusters[level].contains_key(&pos2) {
-                    neighbours.push((level, pos2));
+                    neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level, pos2)));
                 }
             }
         }
-
-        dbg!(pos);
 
         // Higher level
         if level < MAX_LOD {
             for d in &Facing::DIRECTIONS {
                 let pos2 = pos
                     + d * cluster_size2
-                    + d.zip_map(pos, |d, p| {
+                    + d.zip_map(&pos, |d, p| {
                         (-cluster_size1 * (d > 0) as i32) - (p % cluster_size2 * (d == 0) as i32).abs()
                     });
-
-                // 192 0 -128
-
-                if *pos == I32Vec3::new(64 * 3, 0, 0) {
-                    // dbg!(d, pos2 - pos);
-                }
 
                 if glm::all(&pos2.map(|v| v % cluster_size2 != 0)) {
                     continue;
                 }
 
                 if self.clusters[level + 1].contains_key(&pos2) {
-                    dbg!(d, pos2);
-                    neighbours.push((level + 1, pos2));
+                    neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level + 1, pos2)));
                 }
             }
         }
 
-        let cluster = &self.clusters[level][pos];
-        let mut cluster = cluster.cluster.lock().unwrap();
+        neighbours
+    }
 
-        for (side_level, side_pos) in neighbours {
-            let side_cluster = &self.clusters[side_level][&side_pos];
-            let mut side_cluster = side_cluster.cluster.lock().unwrap();
-            let offset = side_pos - pos;
+    fn cluster_update_worker(&self) {
+        let sync = &self.side_occlusion_work;
 
-            cluster.paste_outer_side_occlusion(&mut side_cluster, offset);
+        while sync.process_count.load(atomic::Ordering::Relaxed) > 0 {
+            if let Ok(pair) = sync.receiver.try_recv() {
+                let cluster0 = &self.clusters[pair.0.level][&pair.0.pos];
+                let cluster1 = &self.clusters[pair.1.level][&pair.1.pos];
+                let lock0 = cluster0.cluster.try_lock();
+                let lock1 = cluster1.cluster.try_lock();
+
+                if lock0.is_ok() && lock1.is_ok() {
+                    let mut cluster = lock0.unwrap();
+                    let mut side_cluster = lock1.unwrap();
+
+                    let offset = pair.1.pos - pair.0.pos;
+                    cluster.paste_outer_side_occlusion(&mut side_cluster, offset);
+
+                    sync.process_count.fetch_sub(1, atomic::Ordering::Relaxed);
+                } else {
+                    drop(lock0);
+                    drop(lock1);
+                    sync.sender.send(pair).unwrap();
+                }
+            }
         }
     }
 
@@ -332,8 +366,24 @@ impl WorldStreamer {
 
             for (i, level) in self.clusters.iter().enumerate() {
                 level.iter().for_each(|(pos, world_cluster)| {
-                    self.handle_cluster_side_updates(i, pos);
+                    let pairs = self.find_cluster_side_pairs(ClusterPos::new(i, *pos));
+                    pairs
+                        .into_iter()
+                        .for_each(|v| self.side_occlusion_work.sender.send(v).unwrap());
                 });
+                let side_pair_count = self.side_occlusion_work.sender.len();
+
+                // Parallelize avoiding deadlocks between side clusters
+                self.side_occlusion_work
+                    .process_count
+                    .store(side_pair_count as u32, atomic::Ordering::Relaxed);
+                (0..num_cpus::get()).into_par_iter().for_each(|k| {
+                    self.cluster_update_worker();
+                });
+
+                // level.iter().for_each(|(pos, world_cluster)| {
+                // self.handle_side_occlusion_updates(ClusterPos::new(i, *pos));
+                // });
                 level.par_iter().for_each(|(pos, world_cluster)| {
                     let mut cluster = world_cluster.cluster.lock().unwrap();
                     // let fake_seam = cluster::Seam::new(cluster.node_size());
@@ -372,6 +422,8 @@ pub fn new(
     renderer: &Arc<Mutex<Renderer>>,
     cluster_mat_pipeline: &Arc<MaterialPipeline>,
 ) -> WorldStreamer {
+    let (occ_s, occ_r) = cb::unbounded();
+
     WorldStreamer {
         block_registry: Arc::clone(block_registry),
         renderer: Arc::clone(renderer),
@@ -379,5 +431,10 @@ pub fn new(
         render_distance: 0,
         stream_pos: DVec3::new(0.0, 0.0, 0.0),
         clusters: Default::default(),
+        side_occlusion_work: SideOcclusionWorkSync {
+            sender: occ_s,
+            receiver: occ_r,
+            process_count: Default::default(),
+        },
     }
 }
