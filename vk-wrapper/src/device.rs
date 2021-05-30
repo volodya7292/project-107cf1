@@ -415,6 +415,7 @@ impl Device {
         surface: &Arc<Surface>,
         size: (u32, u32),
         vsync: bool,
+        old_swapchain: Option<&Arc<Swapchain>>,
     ) -> Result<Arc<Swapchain>, DeviceError> {
         let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
@@ -473,7 +474,7 @@ impl Device {
             }
         };
 
-        let create_info = vk::SwapchainCreateInfoKHR::builder()
+        let mut create_info = vk::SwapchainCreateInfoKHR::builder()
             .surface(surface.native)
             .min_image_count(cmp::min(
                 surface_capabs.max_image_count,
@@ -492,6 +493,10 @@ impl Device {
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
             .clipped(true);
+
+        if let Some(old_swapchain) = old_swapchain {
+            create_info = create_info.old_swapchain(*old_swapchain.wrapper.native.lock().unwrap());
+        }
 
         let swapchain_wrapper = Arc::new(SwapchainWrapper {
             device: Arc::clone(self),

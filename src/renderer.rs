@@ -1135,7 +1135,12 @@ impl Renderer {
 
                 self.swapchain = Some(
                     device
-                        .create_swapchain(&self.surface, self.surface_size, self.settings.vsync)
+                        .create_swapchain(
+                            &self.surface,
+                            self.surface_size,
+                            self.settings.vsync,
+                            self.swapchain.as_ref(),
+                        )
                         .unwrap(),
                 );
 
