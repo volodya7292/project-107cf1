@@ -29,6 +29,8 @@ pub const fn make_mul_of(n: u32, m: u32) -> u32 {
     ((n + m - 1) / m) * m
 }
 
+/// log2(8) = 3  
+/// log2(5) = 2
 pub const fn log2(n: u32) -> u32 {
     // TODO: use u32::BITS when stabilized
     (mem::size_of::<u32>() * 8) as u32 - n.leading_zeros() - 1

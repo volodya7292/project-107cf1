@@ -56,6 +56,7 @@ struct PerFrameInfo {
 /// tex_coord: regular texture coordinates
 vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile_index) {
     ivec2 atlas_size = textureSize(atlas, 0);
+    float mip_levels = max(log2(float(tile_width)), 3) - 2; // account for BC block size (4x4)
     uint size_in_tiles = atlas_size.x / tile_width;
     float tile_width_norm = 1.0 / size_in_tiles;
     float pixel_size = 1.0 / tile_width;
@@ -66,10 +67,10 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     vec2 dx = dFdx(tex_coord_pixels);
     vec2 dy = dFdy(tex_coord_pixels);
     float d = max(dot(dx, dx), dot(dy, dy));
-    float lod = 0.5 * log2(d);
+    float lod = min(0.5 * log2(d), mip_levels - 1);
     
-    // Calculate texture coordinates | sqrt(d) = pow(2.0, lod) = pow(2.0, 0.5 * log2(d))
-    float pixel_offset = pixel_size * (0.5 * sqrt(d));
+    // Calculate texture coordinates
+    float pixel_offset = pixel_size * (0.5 * pow(2.0, lod));
 
     tex_coord = fract(tex_coord); // repeat pattern
     tex_coord = clamp(tex_coord, pixel_offset, 1.0 - pixel_offset); // remove bleeding
