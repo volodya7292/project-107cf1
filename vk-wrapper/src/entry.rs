@@ -6,6 +6,7 @@ use std::os::raw::{c_char, c_void};
 
 use crate::utils;
 use crate::Instance;
+use raw_window_handle::HasRawWindowHandle;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -56,6 +57,16 @@ unsafe extern "system" fn vk_debug_callback(
     0
 }
 
+pub fn enumerate_required_window_extensions(
+    window_handle: &impl raw_window_handle::HasRawWindowHandle,
+) -> Result<Vec<String>, vk::Result> {
+    let names = ash_window::enumerate_required_extensions(window_handle)?;
+    Ok(names
+        .iter()
+        .map(|&name| unsafe { utils::c_ptr_to_string(name.as_ptr()) })
+        .collect())
+}
+
 impl Entry {
     pub fn new() -> Result<Arc<Entry>, ash::LoadingError> {
         Ok(Arc::new(Entry {
@@ -84,7 +95,7 @@ impl Entry {
     pub fn create_instance(
         self: &Arc<Self>,
         app_name: &str,
-        required_extensions: &[&str],
+        window: &impl HasRawWindowHandle,
     ) -> Result<Arc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();
@@ -93,11 +104,12 @@ impl Entry {
             .engine_name(c_engine_name.as_c_str())
             .api_version(vk::make_version(1, 2, 0));
 
+        let required_extensions = enumerate_required_window_extensions(window)?;
         let available_layers = self.enumerate_instance_layer_names()?;
         let available_extensions = self.enumerate_instance_extension_names()?;
 
         let mut required_layers: Vec<&str> = vec![];
-        let mut required_extensions: Vec<&str> = required_extensions.to_vec();
+        let mut required_extensions: Vec<&str> = required_extensions.iter().map(|a| a.as_ref()).collect();
         let mut preferred_extensions: Vec<&str> = vec![];
 
         if cfg!(debug_assertions) {

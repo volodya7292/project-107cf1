@@ -3,11 +3,13 @@
     <option name="command" value="run --package project-107cf1 --bin project-107cf1" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$/work_dir" />
     <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
     <option name="allFeatures" value="false" />
     <option name="emulateTerminal" value="false" />
     <option name="backtrace" value="SHORT" />
     <envs>
       <env name="_NO_DEBUG_HEAP" value="1" />
+      <env name="RUSTC_FORCE_INCREMENTAL" value="1" />
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />

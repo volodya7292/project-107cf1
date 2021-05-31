@@ -14,16 +14,6 @@ pub struct Instance {
     pub(crate) surface_khr: ash::extensions::khr::Surface,
 }
 
-pub fn enumerate_required_window_extensions(
-    window_handle: &impl raw_window_handle::HasRawWindowHandle,
-) -> Result<Vec<String>, vk::Result> {
-    let names = ash_window::enumerate_required_extensions(window_handle)?;
-    Ok(names
-        .iter()
-        .map(|&name| unsafe { utils::c_ptr_to_string(name.as_ptr()) })
-        .collect())
-}
-
 impl Instance {
     pub fn create_surface(
         self: &Arc<Self>,
