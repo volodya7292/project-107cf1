@@ -30,8 +30,8 @@ use texture_atlas::TextureAtlas;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::{
     swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
-    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, ShaderBinding,
-    ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
+    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, Shader,
+    ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
@@ -89,6 +89,12 @@ pub struct Renderer {
     cull_host_buffer: HostBuffer<CullObject>,
     visibility_buffer: Arc<DeviceBuffer>,
     visibility_host_buffer: HostBuffer<u32>,
+
+    sw_render_pass: Option<Arc<RenderPass>>,
+    compose_pipeline: Option<Arc<Pipeline>>,
+    compose_signature: Arc<PipelineSignature>,
+    compose_pool: DescriptorPool,
+    compose_desc: DescriptorSet,
 
     g_render_pass: Arc<RenderPass>,
     g_framebuffer: Option<Arc<Framebuffer>>,
@@ -973,6 +979,17 @@ impl Renderer {
 
         self.record_g_cmd_lists(&renderables, &renderer_comps, &vertex_mesh_comps);
 
+        let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
+        self.compose_pool.update(
+            self.compose_desc,
+            &[Binding {
+                id: 0,
+                array_index: 0,
+                res: BindingRes::Image(Arc::clone(albedo), ImageLayout::SHADER_READ),
+            }],
+        );
+        let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
@@ -1018,68 +1035,91 @@ impl Renderer {
             cl.execute_secondary(&self.g_secondary_cls);
             cl.end_render_pass();
 
-            let sw_image = sw_image.get_image();
-            let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
+            cl.begin_render_pass(
+                self.sw_render_pass.as_ref().unwrap(),
+                &self.sw_framebuffers[sw_image.get_index() as usize],
+                &[],
+                false,
+            );
+            cl.bind_pipeline(self.compose_pipeline.as_ref().unwrap());
+            cl.bind_graphics_input(&self.compose_signature, 0, self.compose_desc);
+            cl.draw(3, 0);
+            cl.end_render_pass();
 
-            cl.barrier_image(
-                PipelineStageFlags::ALL_GRAPHICS,
-                PipelineStageFlags::TRANSFER,
-                &[
-                    albedo
+            // let sw_image = sw_image.get_image();
+            //
+            // cl.barrier_image(
+            //     PipelineStageFlags::ALL_GRAPHICS,
+            //     PipelineStageFlags::TRANSFER,
+            //     &[
+            //         albedo
+            //             .barrier()
+            //             .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+            //             .dst_access_mask(AccessFlags::TRANSFER_READ)
+            //             .old_layout(ImageLayout::SHADER_READ)
+            //             .new_layout(ImageLayout::TRANSFER_SRC),
+            //         sw_image
+            //             .barrier()
+            //             .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+            //             .old_layout(ImageLayout::UNDEFINED)
+            //             .new_layout(ImageLayout::TRANSFER_DST),
+            //     ],
+            // );
+            // cl.blit_image_2d(
+            //     &albedo,
+            //     ImageLayout::TRANSFER_SRC,
+            //     (0, 0),
+            //     albedo.size_2d(),
+            //     0,
+            //     sw_image,
+            //     ImageLayout::TRANSFER_DST,
+            //     (0, 0),
+            //     sw_image.size_2d(),
+            //     0,
+            // );
+            //
+            // let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+            //
+            // cl.barrier_image(
+            //     PipelineStageFlags::TRANSFER,
+            //     PipelineStageFlags::BOTTOM_OF_PIPE,
+            //     &[
+            //         albedo
+            //             .barrier()
+            //             .src_access_mask(AccessFlags::TRANSFER_READ)
+            //             .old_layout(ImageLayout::TRANSFER_SRC)
+            //             .new_layout(ImageLayout::SHADER_READ),
+            //         sw_image
+            //             .barrier()
+            //             .src_access_mask(AccessFlags::TRANSFER_WRITE)
+            //             .old_layout(ImageLayout::TRANSFER_DST)
+            //             .new_layout(ImageLayout::PRESENT)
+            //             .src_queue(graphics_queue)
+            //             .dst_queue(if graphics_queue == present_queue {
+            //                 graphics_queue
+            //             } else {
+            //                 present_queue
+            //             }),
+            //     ],
+            // );
+
+            if graphics_queue != present_queue {
+                cl.barrier_image(
+                    PipelineStageFlags::ALL_GRAPHICS,
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
+                    &[sw_image
+                        .get_image()
                         .barrier()
                         .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
-                        .dst_access_mask(AccessFlags::TRANSFER_READ)
-                        .old_layout(ImageLayout::SHADER_READ)
-                        .new_layout(ImageLayout::TRANSFER_SRC),
-                    sw_image
-                        .barrier()
-                        .dst_access_mask(AccessFlags::TRANSFER_WRITE)
-                        .old_layout(ImageLayout::UNDEFINED)
-                        .new_layout(ImageLayout::TRANSFER_DST),
-                ],
-            );
-            cl.blit_image_2d(
-                &albedo,
-                ImageLayout::TRANSFER_SRC,
-                (0, 0),
-                albedo.size_2d(),
-                0,
-                sw_image,
-                ImageLayout::TRANSFER_DST,
-                (0, 0),
-                sw_image.size_2d(),
-                0,
-            );
-
-            let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-
-            cl.barrier_image(
-                PipelineStageFlags::TRANSFER,
-                PipelineStageFlags::BOTTOM_OF_PIPE,
-                &[
-                    albedo
-                        .barrier()
-                        .src_access_mask(AccessFlags::TRANSFER_READ)
-                        .old_layout(ImageLayout::TRANSFER_SRC)
-                        .new_layout(ImageLayout::SHADER_READ),
-                    sw_image
-                        .barrier()
-                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                        .old_layout(ImageLayout::TRANSFER_DST)
+                        .old_layout(ImageLayout::PRESENT)
                         .new_layout(ImageLayout::PRESENT)
                         .src_queue(graphics_queue)
-                        .dst_queue(if graphics_queue == present_queue {
-                            graphics_queue
-                        } else {
-                            present_queue
-                        }),
-                ],
-            );
+                        .dst_queue(present_queue)],
+                );
+            }
 
             cl.end().unwrap();
         }
-
-        let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
         unsafe {
             graphics_queue.submit(&mut self.final_submit[0]).unwrap();
@@ -1094,7 +1134,7 @@ impl Renderer {
                         &[sw_image
                             .get_image()
                             .barrier()
-                            .old_layout(ImageLayout::TRANSFER_DST)
+                            .old_layout(ImageLayout::PRESENT)
                             .new_layout(ImageLayout::PRESENT)
                             .src_queue(graphics_queue)
                             .dst_queue(present_queue)],
@@ -1357,7 +1397,7 @@ impl Renderer {
                         (
                             0,
                             ImageMod::AdditionalUsage(
-                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::TRANSFER_SRC,
+                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
                             ),
                         ),
                         (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
@@ -1409,29 +1449,32 @@ impl Renderer {
 
         let images = self.swapchain.as_ref().unwrap().get_images();
 
-        let sw_render_pass = self
-            .device
-            .create_render_pass(
-                &[Attachment {
-                    format: images[0].format(),
-                    init_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::PRESENT,
-                    load_store: LoadStore::InitClearFinalSave,
-                }],
-                &[Subpass {
-                    color: vec![AttachmentRef {
-                        index: 0,
-                        layout: ImageLayout::COLOR_ATTACHMENT,
+        self.sw_render_pass = Some(
+            self.device
+                .create_render_pass(
+                    &[Attachment {
+                        format: images[0].format(),
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::PRESENT,
+                        load_store: LoadStore::FinalSave,
                     }],
-                    depth: None,
-                }],
-                &[],
-            )
-            .unwrap();
+                    &[Subpass {
+                        color: vec![AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        }],
+                        depth: None,
+                    }],
+                    &[],
+                )
+                .unwrap(),
+        );
 
         for img in images {
             self.sw_framebuffers.push(
-                sw_render_pass
+                self.sw_render_pass
+                    .as_ref()
+                    .unwrap()
                     .create_framebuffer(
                         images[0].size_2d(),
                         &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
@@ -1439,6 +1482,19 @@ impl Renderer {
                     .unwrap(),
             );
         }
+
+        self.compose_pipeline = Some(
+            self.device
+                .create_graphics_pipeline(
+                    self.sw_render_pass.as_ref().unwrap(),
+                    0,
+                    PrimitiveTopology::TRIANGLE_LIST,
+                    Default::default(),
+                    Default::default(),
+                    &self.compose_signature,
+                )
+                .unwrap(),
+        );
     }
 }
 
@@ -1578,6 +1634,28 @@ pub fn new(
     let visibility_host_buffer = device
         .create_host_buffer(BufferUsageFlags::TRANSFER_DST, MAX_OBJECT_COUNT as u64)
         .unwrap();
+
+    // Compose pipeline
+    // -----------------------------------------------------------------------------------------------------------------
+    let quad_vert_shader = device
+        .create_shader(
+            &resources.get("shaders/quad.vert.spv").unwrap().read().unwrap(),
+            &[],
+            &[],
+        )
+        .unwrap();
+    let compose_pixel_shader = device
+        .create_shader(
+            &resources.get("shaders/compose.frag.spv").unwrap().read().unwrap(),
+            &[("", Format::RGBA8_UNORM)],
+            &[],
+        )
+        .unwrap();
+    let compose_signature = device
+        .create_pipeline_signature(&[quad_vert_shader, compose_pixel_shader], &[])
+        .unwrap();
+    let mut compose_pool = compose_signature.create_pool(0, 1).unwrap();
+    let compose_desc = compose_pool.alloc().unwrap();
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
@@ -1813,10 +1891,15 @@ pub fn new(
         active_camera_desc: active_camera,
         per_frame_ub: per_frame_uniform_buffer,
         visibility_host_buffer,
+        sw_render_pass: None,
+        compose_pipeline: None,
+        compose_signature,
+        compose_pool,
         cull_host_buffer,
         renderables: Default::default(),
         material_buffer,
         material_updates: Default::default(),
+        compose_desc,
     };
     renderer.on_resize(size);
 

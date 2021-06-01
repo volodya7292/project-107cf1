@@ -195,7 +195,7 @@ fn main() {
     let mut start_t = Instant::now();
     let mut delta_time = 0.0;
 
-    window.set_cursor_grab(true);
+    window.set_cursor_grab(true).unwrap();
     window.set_cursor_visible(false);
 
     event_loop.run_return(|event, _, control_flow| {
