@@ -1035,6 +1035,17 @@ impl Renderer {
             cl.execute_secondary(&self.g_secondary_cls);
             cl.end_render_pass();
 
+            cl.barrier_image(
+                PipelineStageFlags::ALL_GRAPHICS,
+                PipelineStageFlags::ALL_GRAPHICS,
+                &[albedo
+                    .barrier()
+                    .src_access_mask(AccessFlags::MEMORY_WRITE)
+                    .dst_access_mask(AccessFlags::MEMORY_READ)
+                    .old_layout(ImageLayout::SHADER_READ)
+                    .new_layout(ImageLayout::SHADER_READ)],
+            );
+
             cl.begin_render_pass(
                 self.sw_render_pass.as_ref().unwrap(),
                 &self.sw_framebuffers[sw_image.get_index() as usize],
@@ -1045,63 +1056,6 @@ impl Renderer {
             cl.bind_graphics_input(&self.compose_signature, 0, self.compose_desc);
             cl.draw(3, 0);
             cl.end_render_pass();
-
-            // let sw_image = sw_image.get_image();
-            //
-            // cl.barrier_image(
-            //     PipelineStageFlags::ALL_GRAPHICS,
-            //     PipelineStageFlags::TRANSFER,
-            //     &[
-            //         albedo
-            //             .barrier()
-            //             .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
-            //             .dst_access_mask(AccessFlags::TRANSFER_READ)
-            //             .old_layout(ImageLayout::SHADER_READ)
-            //             .new_layout(ImageLayout::TRANSFER_SRC),
-            //         sw_image
-            //             .barrier()
-            //             .dst_access_mask(AccessFlags::TRANSFER_WRITE)
-            //             .old_layout(ImageLayout::UNDEFINED)
-            //             .new_layout(ImageLayout::TRANSFER_DST),
-            //     ],
-            // );
-            // cl.blit_image_2d(
-            //     &albedo,
-            //     ImageLayout::TRANSFER_SRC,
-            //     (0, 0),
-            //     albedo.size_2d(),
-            //     0,
-            //     sw_image,
-            //     ImageLayout::TRANSFER_DST,
-            //     (0, 0),
-            //     sw_image.size_2d(),
-            //     0,
-            // );
-            //
-            // let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-            //
-            // cl.barrier_image(
-            //     PipelineStageFlags::TRANSFER,
-            //     PipelineStageFlags::BOTTOM_OF_PIPE,
-            //     &[
-            //         albedo
-            //             .barrier()
-            //             .src_access_mask(AccessFlags::TRANSFER_READ)
-            //             .old_layout(ImageLayout::TRANSFER_SRC)
-            //             .new_layout(ImageLayout::SHADER_READ),
-            //         sw_image
-            //             .barrier()
-            //             .src_access_mask(AccessFlags::TRANSFER_WRITE)
-            //             .old_layout(ImageLayout::TRANSFER_DST)
-            //             .new_layout(ImageLayout::PRESENT)
-            //             .src_queue(graphics_queue)
-            //             .dst_queue(if graphics_queue == present_queue {
-            //                 graphics_queue
-            //             } else {
-            //                 present_queue
-            //             }),
-            //     ],
-            // );
 
             if graphics_queue != present_queue {
                 cl.barrier_image(
