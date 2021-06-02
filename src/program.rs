@@ -5,7 +5,6 @@ use crate::utils::HashSet;
 use crate::world;
 use crate::world::block_registry::BlockRegistry;
 use crate::world::cluster;
-use dual_contouring as dc;
 use entity_data::EntityStorageLayout;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;

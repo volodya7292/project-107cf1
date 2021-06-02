@@ -70,7 +70,7 @@ pub fn enumerate_required_window_extensions(
 impl Entry {
     pub fn new() -> Result<Arc<Entry>, ash::LoadingError> {
         Ok(Arc::new(Entry {
-            ash_entry: ash::Entry::new()?,
+            ash_entry: unsafe { ash::Entry::new()? },
         }))
     }
 

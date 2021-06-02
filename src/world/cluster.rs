@@ -8,7 +8,6 @@ use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
 use nalgebra_glm as glm;
 use smallvec::smallvec;
 
-use dual_contouring as dc;
 use vk_wrapper as vkw;
 use vk_wrapper::PrimitiveTopology;
 
