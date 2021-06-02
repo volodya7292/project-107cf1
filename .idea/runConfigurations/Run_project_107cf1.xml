@@ -9,7 +9,6 @@
     <option name="backtrace" value="SHORT" />
     <envs>
       <env name="_NO_DEBUG_HEAP" value="1" />
-      <env name="RUSTC_FORCE_INCREMENTAL" value="1" />
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />
