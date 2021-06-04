@@ -1,13 +1,11 @@
 use nalgebra as na;
-use nalgebra::Vector3;
 use nalgebra_glm::Vec3;
-use std::hint::unreachable_unchecked;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::{Format, PrimitiveTopology};
+use vk_wrapper::Format;
 
 #[derive(Debug)]
 pub enum Error {

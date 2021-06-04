@@ -1,11 +1,11 @@
+use crate::game::registry::GameRegistry;
+use crate::game::world::block_component::Facing;
+use crate::game::world::cluster;
+use crate::game::world::cluster::Cluster;
+use crate::game::world::generator;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
-use crate::world::block_component::Facing;
-use crate::world::block_registry::BlockRegistry;
-use crate::world::cluster;
-use crate::world::cluster::Cluster;
-use crate::world::generator;
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, Vec3};
@@ -48,7 +48,7 @@ struct SideOcclusionWorkSync {
 }
 
 pub struct WorldStreamer {
-    block_registry: Arc<BlockRegistry>,
+    block_registry: Arc<GameRegistry>,
     renderer: Arc<Mutex<Renderer>>,
     cluster_mat_pipeline: Arc<MaterialPipeline>,
     // in meters
@@ -418,7 +418,7 @@ impl WorldStreamer {
 }
 
 pub fn new(
-    block_registry: &Arc<BlockRegistry>,
+    block_registry: &Arc<GameRegistry>,
     renderer: &Arc<Mutex<Renderer>>,
     cluster_mat_pipeline: &Arc<MaterialPipeline>,
 ) -> WorldStreamer {

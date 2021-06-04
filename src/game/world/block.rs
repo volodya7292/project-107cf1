@@ -4,8 +4,8 @@ use approx::AbsDiffEq;
 use nalgebra_glm as glm;
 use nalgebra_glm::{BVec3, Vec2, Vec3};
 
+use crate::game::world::block_component::Facing;
 use crate::utils::{AllSame, AllSameBy};
-use crate::world::block_component::Facing;
 
 #[derive(Default)]
 pub struct BlockProps {

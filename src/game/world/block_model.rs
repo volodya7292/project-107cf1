@@ -1,4 +1,4 @@
-use crate::world::block_component::Facing;
+use crate::game::world::block_component::Facing;
 use approx::AbsDiffEq;
 use glm::BVec3;
 use nalgebra_glm as glm;
@@ -65,10 +65,10 @@ impl ContentType {
 
 pub struct BlockModel {
     content_type: ContentType,
-    pub(super) quads: Vec<Quad>,
-    pub(super) side_quads: [Range<usize>; 6],
-    pub(super) inner_quads: Range<usize>,
-    pub(super) occluded_sides: [bool; 6],
+    pub(crate) quads: Vec<Quad>,
+    pub(crate) side_quads: [Range<usize>; 6],
+    pub(crate) inner_quads: Range<usize>,
+    pub(crate) occluded_sides: [bool; 6],
 }
 
 fn determine_quad_side(quad: &Quad) -> Option<Facing> {

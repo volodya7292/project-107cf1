@@ -3,7 +3,6 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::PrimitiveTopology;
 
 pub struct BufferResource {
     pub(in crate::renderer) buffer: Vec<u8>,

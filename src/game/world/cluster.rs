@@ -11,14 +11,14 @@ use smallvec::smallvec;
 use vk_wrapper as vkw;
 use vk_wrapper::PrimitiveTopology;
 
+use crate::game::registry::GameRegistry;
+use crate::game::world::block::BlockProps;
+use crate::game::world::block_component::Facing;
+use crate::game::world::block_model::{Quad, Vertex};
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
 use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
-use crate::world::block::BlockProps;
-use crate::world::block_component::Facing;
-use crate::world::block_model::{Quad, Vertex};
-use crate::world::block_registry::BlockRegistry;
 use crate::{renderer, utils};
 use nalgebra::Vector3;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
@@ -155,10 +155,12 @@ impl Sector {
         self.side_changed = side_changed;
         self.changed = true;
 
+        let block_props = &mut self.block_props[pos.x][pos.y][pos.z];
+
         BlockDataBuilder {
             entity_builder,
             entity_id,
-            block_props: Default::default(),
+            block_props,
         }
     }
 }
@@ -192,12 +194,12 @@ impl BlockDataMut<'_> {
 pub struct BlockDataBuilder<'a> {
     entity_builder: EntityBuilder<'a>,
     entity_id: &'a mut EntityId,
-    block_props: BlockProps,
+    block_props: &'a mut BlockProps,
 }
 
 impl BlockDataBuilder<'_> {
     pub fn props(mut self, props: BlockProps) -> Self {
-        self.block_props = props;
+        *self.block_props = props;
         self
     }
 
@@ -212,7 +214,7 @@ impl BlockDataBuilder<'_> {
 }
 
 pub struct Cluster {
-    block_registry: Arc<BlockRegistry>,
+    block_registry: Arc<GameRegistry>,
     sectors: [Sector; VOLUME_IN_SECTORS],
     entry_size: u32,
     sides_changed: bool,
@@ -605,7 +607,7 @@ impl Cluster {
     }
 }
 
-pub fn new(block_registry: &Arc<BlockRegistry>, device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
+pub fn new(block_registry: &Arc<GameRegistry>, device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
     let layout = block_registry.cluster_layout();
     let sectors: Vec<Sector> = (0..VOLUME_IN_SECTORS).map(|_| Sector::new(&layout)).collect();
 

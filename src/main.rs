@@ -1,32 +1,29 @@
-mod utils;
+use std::path::Path;
+use std::time::Instant;
 
-#[macro_use]
-pub(crate) mod renderer;
-mod object;
-mod program;
-mod resource_file;
-mod world;
-
-#[cfg(test)]
-mod tests;
+use na::Vector2;
+use na::Vector3;
+use nalgebra as na;
+use winit::dpi::PhysicalPosition;
+use winit::event::{VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::{Fullscreen, WindowBuilder};
 
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
-use na::Vector2;
-use na::Vector3;
-use nalgebra as na;
-use raw_window_handle::HasRawWindowHandle;
-use std::path::Path;
-use std::time::Instant;
-use vk_wrapper::PrimitiveTopology;
-use winit::dpi::PhysicalPosition;
-use winit::event::{VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::monitor::VideoMode;
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::{Fullscreen, Window, WindowBuilder};
+
+mod utils;
+
+#[macro_use]
+pub(crate) mod renderer;
+mod game;
+mod resource_file;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Copy, Clone, Default)]
 pub struct BasicVertex {
@@ -75,7 +72,7 @@ fn main() {
     let adapter = adapters.first().unwrap();
     let device = adapter.create_device().unwrap();
 
-    let mut window_size = window.inner_size();
+    let window_size = window.inner_size();
 
     let renderer_settings = renderer::Settings {
         vsync: true,
@@ -107,7 +104,7 @@ fn main() {
         mat_pipelines = material_pipelines::create(&resources, &mut renderer);
     }
 
-    let mut program = program::new(&renderer, &mat_pipelines);
+    let mut program = game::new(&renderer, &mat_pipelines);
 
     let triangle_mesh = device
         .create_vertex_mesh::<BasicVertex>(

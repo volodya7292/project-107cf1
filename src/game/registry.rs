@@ -1,20 +1,20 @@
-use crate::world::block_component::Facing;
-use crate::world::block_model;
-use crate::world::block_model::BlockModel;
-use crate::world::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::game::world::block_component::Facing;
+use crate::game::world::block_model;
+use crate::game::world::block_model::BlockModel;
+use crate::game::world::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use entity_data::EntityStorageLayout;
 use glm::Vec3;
 use nalgebra_glm as glm;
 
-pub struct BlockRegistry {
+pub struct GameRegistry {
     cluster_layout: EntityStorageLayout,
     models: Vec<BlockModel>,
     textured_models: Vec<TexturedBlockModel>,
 }
 
-impl BlockRegistry {
+impl GameRegistry {
     pub fn new() -> Self {
-        BlockRegistry {
+        GameRegistry {
             cluster_layout: Default::default(),
             models: vec![],
             textured_models: vec![],

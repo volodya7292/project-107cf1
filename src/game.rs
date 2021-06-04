@@ -1,16 +1,25 @@
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::AtomicBool;
+use std::sync::{atomic, Arc, Mutex};
+use std::thread;
+use std::time::Instant;
+
+use entity_data::EntityStorageLayout;
+use futures::FutureExt;
+use nalgebra as na;
+use simdnoise::NoiseBuilder;
+use winit::event::VirtualKeyCode;
+
+use registry::GameRegistry;
+
+use crate::game::world::World;
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
-use crate::utils::HashSet;
-use crate::world;
-use crate::world::block_registry::BlockRegistry;
-use crate::world::cluster;
-use entity_data::EntityStorageLayout;
-use nalgebra as na;
-use simdnoise::NoiseBuilder;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use winit::event::VirtualKeyCode;
+use crate::utils::{HashMap, HashSet};
+
+pub mod registry;
+mod world;
 
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
@@ -18,6 +27,9 @@ pub struct Program {
     pressed_keys: HashSet<VirtualKeyCode>,
 
     cursor_rel: (i32, i32),
+    game_tick_finished: Arc<AtomicBool>,
+
+    loaded_worlds: HashMap<u32, World>,
 }
 
 impl Program {
@@ -107,11 +119,7 @@ impl Program {
             self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
         );
 
-        rotation.x = na::clamp(
-            rotation.x + cursor_offset.1,
-            -std::f32::consts::FRAC_PI_2,
-            std::f32::consts::FRAC_PI_2,
-        );
+        rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
         rotation.y += cursor_offset.0;
 
         camera.set_rotation(rotation);
@@ -119,14 +127,29 @@ impl Program {
         self.cursor_rel = (0, 0);
 
         // dbg!(camera.position());
+
+        if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
+            let game_tick_finished = Arc::clone(&self.game_tick_finished);
+            rayon::spawn(|| game_tick(game_tick_finished));
+        }
     }
 }
 
+pub fn game_tick(finished: Arc<AtomicBool>) {
+    // todo
+
+    finished.store(true, atomic::Ordering::Relaxed);
+}
+
 pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Program {
+    let game_tick_finished = Arc::new(AtomicBool::new(true));
+
     let program = Program {
         renderer: Arc::clone(renderer),
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
+        game_tick_finished: Arc::clone(&game_tick_finished),
+        loaded_worlds: Default::default(),
     };
 
     // renderer.lock().unwrap().set_material(
@@ -167,7 +190,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     );
 
     let block_registry = {
-        let mut reg = BlockRegistry::predefined();
+        let mut reg = GameRegistry::predefined();
         Arc::new(reg)
     };
 
