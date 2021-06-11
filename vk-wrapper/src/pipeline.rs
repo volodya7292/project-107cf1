@@ -56,11 +56,7 @@ pub struct PipelineDepthStencil {
 
 impl PipelineDepthStencil {
     pub fn new() -> PipelineDepthStencil {
-        PipelineDepthStencil {
-            depth_test: false,
-            depth_write: false,
-            stencil_test: false,
-        }
+        Default::default()
     }
 
     pub fn depth_test(mut self, enabled: bool) -> PipelineDepthStencil {
@@ -79,20 +75,36 @@ impl PipelineDepthStencil {
     }
 }
 
+impl Default for PipelineDepthStencil {
+    fn default() -> Self {
+        PipelineDepthStencil {
+            depth_test: false,
+            depth_write: false,
+            stencil_test: false,
+        }
+    }
+}
+
 pub struct PipelineRasterization {
     pub cull_back_faces: bool,
 }
 
 impl PipelineRasterization {
     pub fn new() -> PipelineRasterization {
-        PipelineRasterization {
-            cull_back_faces: false,
-        }
+        Default::default()
     }
 
     pub fn cull_back_faces(mut self, enabled: bool) -> PipelineRasterization {
         self.cull_back_faces = enabled;
         self
+    }
+}
+
+impl Default for PipelineRasterization {
+    fn default() -> Self {
+        PipelineRasterization {
+            cull_back_faces: false,
+        }
     }
 }
 

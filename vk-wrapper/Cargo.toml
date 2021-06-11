@@ -1,7 +1,7 @@
 [package]
 name = "vk-wrapper"
 version = "0.1.0"
-authors = ["MotanGish <motangish@gmail.com>"]
+authors = ["a7292969 <motangish@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,12 +9,12 @@ edition = "2018"
 [dependencies]
 lazy_static = "1.4.0"
 bitflags = "1.2.1"
-log = "0.4.11"
-ahash = "0.6.3"
+log = "0.4.14"
+ahash = "0.7.4"
 bit-set = "0.5.2"
 smallvec = "1.6.1"
-ash = "0.31.0"
-ash-window = "0.5.0"
+ash = "0.32.1"
+ash-window = "0.6.0"
 raw-window-handle = "0.3.3"
 vk-mem = "0.2.2"
-spirv_cross = { version = "0.22.1", features = ["glsl"] }
+spirv_cross = { version = "0.23.1", features = ["glsl"] }

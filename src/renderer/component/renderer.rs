@@ -69,7 +69,7 @@ impl Renderer {
         mat_pipeline: &Arc<MaterialPipeline>,
         translucent: bool,
     ) -> Renderer {
-        Self {
+        Renderer {
             mat_pipeline: Arc::clone(&mat_pipeline),
             descriptor_sets: vec![],
             uniform_buffer: device

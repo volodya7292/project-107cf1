@@ -1,23 +1,29 @@
-mod utils;
-mod world;
-#[macro_use]
-pub(crate) mod renderer;
-mod object;
-mod program;
-mod resource_file;
-#[cfg(test)]
-mod tests;
+use std::path::Path;
+use std::time::Instant;
+
+use na::Vector2;
+use na::Vector3;
+use nalgebra as na;
+use winit::dpi::PhysicalPosition;
+use winit::event::{VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::{Fullscreen, WindowBuilder};
 
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
-use na::Vector2;
-use na::Vector3;
-use nalgebra as na;
-use sdl2::keyboard::Keycode;
-use std::path::Path;
-use std::time::Instant;
+
+mod utils;
+
+#[macro_use]
+pub(crate) mod renderer;
+mod game;
+mod resource_file;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Copy, Clone, Default)]
 pub struct BasicVertex {
@@ -27,6 +33,7 @@ pub struct BasicVertex {
 
 vertex_impl!(BasicVertex, position, tex_coord);
 
+const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 fn main() {
@@ -34,23 +41,30 @@ fn main() {
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
-    let sdl_context = sdl2::init().unwrap();
-
-    let mut window = sdl_context
-        .video()
-        .unwrap()
-        .window("project-107cf1", 1280, 720)
-        .resizable()
-        .position_centered()
-        .vulkan()
-        .build()
+    let mut event_loop = EventLoop::new();
+    let window = WindowBuilder::new()
+        .with_title(PROGRAM_NAME)
+        .with_inner_size(winit::dpi::PhysicalSize::new(
+            DEF_WINDOW_SIZE.0,
+            DEF_WINDOW_SIZE.1,
+        ))
+        .with_resizable(true)
+        .build(&event_loop)
         .unwrap();
-    sdl_context.mouse().set_relative_mouse_mode(true); // enable relative-pos events
-    sdl_context.mouse().show_cursor(false);
 
-    let windows_extensions = window.vulkan_instance_extensions().unwrap();
+    // Center the window
+    {
+        let win_size = window.outer_size();
+        let mode = window.current_monitor().unwrap().video_modes().next().unwrap();
+        let mon_size = mode.size();
+        window.set_outer_position(PhysicalPosition {
+            x: (mon_size.width - win_size.width) / 2,
+            y: (mon_size.height - win_size.height) / 2,
+        });
+    }
+
     let vke = vk_wrapper::Entry::new().unwrap();
-    let instance = vke.create_instance("GOVNO!", &windows_extensions).unwrap();
+    let instance = vke.create_instance(PROGRAM_NAME, &window).unwrap();
 
     let surface = instance.create_surface(&window).unwrap();
 
@@ -58,7 +72,7 @@ fn main() {
     let adapter = adapters.first().unwrap();
     let device = adapter.create_device().unwrap();
 
-    let mut window_size = window.vulkan_drawable_size();
+    let window_size = window.inner_size();
 
     let renderer_settings = renderer::Settings {
         vsync: true,
@@ -69,7 +83,7 @@ fn main() {
     };
     let renderer = renderer::new(
         &surface,
-        window_size,
+        (window_size.width, window_size.height),
         renderer_settings,
         &device,
         &mut resources,
@@ -90,7 +104,7 @@ fn main() {
         mat_pipelines = material_pipelines::create(&resources, &mut renderer);
     }
 
-    let mut program = program::new(&renderer, &mat_pipelines);
+    let mut program = game::new(&renderer, &mat_pipelines);
 
     let triangle_mesh = device
         .create_vertex_mesh::<BasicVertex>(
@@ -175,64 +189,70 @@ fn main() {
     // }
     //println!("ITE {:?}", &buf[0..5]);
 
+    let mut start_t = Instant::now();
     let mut delta_time = 0.0;
 
-    let mut running = true;
-    while running {
-        let start_t = Instant::now();
+    window.set_cursor_grab(true).unwrap();
+    window.set_cursor_visible(false);
 
-        for event in sdl_context.event_pump().unwrap().poll_iter() {
-            use sdl2::event::Event;
-            use sdl2::event::WindowEvent;
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => {
-                    running = false;
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::F11),
-                    ..
-                } => {
-                    if window.fullscreen_state() == sdl2::video::FullscreenType::True {
-                        window.set_fullscreen(sdl2::video::FullscreenType::Off).unwrap();
-                        window.set_size(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1).unwrap();
-                        window
-                            .set_position(sdl2::video::WindowPos::Centered, sdl2::video::WindowPos::Centered);
-                    } else {
-                        let curr_mode = sdl_context
-                            .video()
-                            .unwrap()
-                            .current_display_mode(window.display_index().unwrap())
-                            .unwrap();
-                        window.set_size(curr_mode.w as u32, curr_mode.h as u32).unwrap();
-                        window.set_fullscreen(sdl2::video::FullscreenType::True).unwrap();
-                    }
-                }
-                Event::Window {
-                    timestamp: _,
-                    window_id: _,
-                    win_event,
-                } => match win_event {
-                    WindowEvent::SizeChanged(width, height) => {
-                        window_size = (width as u32, height as u32);
-                        renderer.lock().unwrap().on_resize(window_size);
-                    }
-                    _ => {}
-                },
-                _ => {}
+    event_loop.run_return(|event, _, control_flow| {
+        use winit::event::ElementState;
+        use winit::event::Event;
+
+        *control_flow = ControlFlow::Poll;
+
+        match event {
+            Event::NewEvents(_) => {
+                start_t = Instant::now();
             }
-
-            program.on_event(event);
+            Event::WindowEvent { window_id, ref event } => match event {
+                WindowEvent::Resized(size) => {
+                    if size.width != 0 && size.height != 0 {
+                        renderer.lock().unwrap().on_resize((size.width, size.height));
+                    }
+                }
+                WindowEvent::KeyboardInput {
+                    device_id: _,
+                    input,
+                    is_synthetic: _,
+                } => {
+                    if let Some(keycode) = input.virtual_keycode {
+                        match keycode {
+                            VirtualKeyCode::Escape => {
+                                *control_flow = ControlFlow::Exit;
+                            }
+                            VirtualKeyCode::F11 => {
+                                if input.state == ElementState::Released {
+                                    if let Some(_) = window.fullscreen() {
+                                        window.set_fullscreen(None);
+                                    } else {
+                                        let mode =
+                                            window.current_monitor().unwrap().video_modes().next().unwrap();
+                                        window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                WindowEvent::CloseRequested if window_id == window.id() => *control_flow = ControlFlow::Exit,
+                _ => {}
+            },
+            Event::MainEventsCleared => {
+                program.on_update(delta_time);
+                window.request_redraw();
+            }
+            Event::RedrawRequested(_) => {
+                renderer.lock().unwrap().on_draw();
+            }
+            Event::RedrawEventsCleared => {
+                let end_t = Instant::now();
+                delta_time = (end_t - start_t).as_secs_f64();
+            }
+            _ => {}
         }
 
-        program.on_update(delta_time);
-        renderer.lock().unwrap().on_draw();
-
-        let end_t = Instant::now();
-        delta_time = (end_t - start_t).as_secs_f64();
-        // println!("{}", delta_time);
-    }
+        program.on_event(event);
+    });
 }

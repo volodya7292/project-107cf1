@@ -1,4 +1,3 @@
-use nalgebra as na;
 use nalgebra::{Isometry3, Matrix4, Rotation3, Translation3, Vector3, Vector4};
 use nalgebra_glm as glm;
 
@@ -24,7 +23,7 @@ impl Camera {
                 plane[j] = proj_view_mat.column(j)[3] + (proj_view_mat.column(j)[i / 2] * sign);
             }
 
-            *plane /= (*plane).fixed_rows::<na::U3>(0).magnitude();
+            *plane /= (*plane).fixed_rows::<3>(0).magnitude();
         }
 
         frustum
@@ -99,7 +98,7 @@ impl Camera {
         let view = self.view();
         let identity = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
         let dir = view * identity;
-        Vector3::from(dir.fixed_rows::<na::U3>(0))
+        Vector3::from(dir.fixed_rows::<3>(0))
     }
 
     pub fn fovy(&self) -> f32 {

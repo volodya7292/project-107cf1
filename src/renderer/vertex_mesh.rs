@@ -1,4 +1,5 @@
 use nalgebra as na;
+use nalgebra_glm::Vec3;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -19,6 +20,9 @@ pub trait VertexMember {
 pub trait VertexImpl {
     fn attributes() -> Vec<(u32, vkw::Format)>;
     fn member_info(name: &str) -> Option<(u32, vkw::Format)>;
+}
+
+pub trait VertexPositionImpl {
     fn position(&self) -> &na::Vector3<f32>;
     fn position_mut(&mut self) -> &mut na::Vector3<f32>;
 }
@@ -28,14 +32,29 @@ pub trait VertexNormalImpl {
     fn normal_mut(&mut self) -> &mut na::Vector3<f32>;
 }
 
+macro_rules! __impl_position_methods {
+    ($vertex: ty, position) => {
+        impl $crate::renderer::vertex_mesh::VertexPositionImpl for $vertex {
+            fn position(&self) -> &nalgebra::Vector3<f32> {
+                &self.position
+            }
+
+            fn position_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
+                &mut self.position
+            }
+        }
+    };
+    ($vertex: ty, $i:ident) => {};
+}
+
 macro_rules! __impl_normal_methods {
     ($vertex: ty, normal) => {
         impl $crate::renderer::vertex_mesh::VertexNormalImpl for $vertex {
-            fn normal(&self) -> &na::Vector3<f32> {
+            fn normal(&self) -> &nalgebra::Vector3<f32> {
                 &self.normal
             }
 
-            fn normal_mut(&mut self) -> &mut na::Vector3<f32> {
+            fn normal_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
                 &mut self.normal
             }
         }
@@ -87,19 +106,10 @@ macro_rules! vertex_impl {
 
                 return None;
             }
-
-            fn position(&self) -> &nalgebra::Vector3<f32> {
-                &self.position
-            }
-
-            fn position_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
-                &mut self.position
-            }
-
-
         }
 
         $(
+            __impl_position_methods!($vertex, $member_name);
             __impl_normal_methods!($vertex, $member_name);
         )*
     )
@@ -108,6 +118,12 @@ macro_rules! vertex_impl {
 impl VertexMember for u32 {
     fn vk_format() -> Format {
         vkw::Format::R32_UINT
+    }
+}
+
+impl VertexMember for f32 {
+    fn vk_format() -> Format {
+        vkw::Format::R32_FLOAT
     }
 }
 
@@ -126,6 +142,28 @@ impl VertexMember for na::Vector3<f32> {
 impl VertexMember for na::Vector4<u32> {
     fn vk_format() -> Format {
         vkw::Format::RGBA32_UINT
+    }
+}
+
+pub trait InstanceImpl: VertexImpl {
+    fn has_aabb() -> bool {
+        false
+    }
+
+    fn aabb(&self) -> (Vec3, Vec3) {
+        (Vec3::default(), Vec3::default())
+    }
+}
+
+impl<T: VertexImpl> InstanceImpl for T {}
+
+impl VertexImpl for () {
+    fn attributes() -> Vec<(u32, Format)> {
+        vec![]
+    }
+
+    fn member_info(_: &str) -> Option<(u32, Format)> {
+        None
     }
 }
 
@@ -171,14 +209,16 @@ impl RawVertexMesh {
 }
 
 #[derive(Default)]
-pub struct VertexMesh<VertexT: VertexImpl> {
+pub struct VertexMesh<VertexT: VertexImpl, InstanceT: InstanceImpl> {
     _type_marker: PhantomData<VertexT>,
+    _type_marker2: PhantomData<InstanceT>,
     raw: Arc<RawVertexMesh>,
 }
 
-impl<VertexT> VertexMesh<VertexT>
+impl<VertexT, InstanceT> VertexMesh<VertexT, InstanceT>
 where
     VertexT: VertexImpl + Clone + Default,
+    InstanceT: InstanceImpl,
 {
     pub fn raw(&self) -> Arc<RawVertexMesh> {
         Arc::clone(&self.raw)
@@ -251,19 +291,37 @@ where
 }
 
 pub trait VertexMeshCreate {
-    fn create_vertex_mesh<VertexT: VertexImpl>(
+    fn create_instanced_vertex_mesh<VertexT, InstanceT: VertexImpl>(
+        self: &Arc<Self>,
+        vertices: &[VertexT],
+        instances: &[InstanceT],
+        indices: Option<&[u32]>,
+    ) -> Result<VertexMesh<VertexT, InstanceT>, Error>
+    where
+        VertexT: VertexImpl + VertexPositionImpl;
+
+    fn create_vertex_mesh<VertexT>(
         self: &Arc<Self>,
         vertices: &[VertexT],
         indices: Option<&[u32]>,
-    ) -> Result<VertexMesh<VertexT>, Error>;
+    ) -> Result<VertexMesh<VertexT, ()>, Error>
+    where
+        VertexT: VertexImpl + VertexPositionImpl,
+    {
+        self.create_instanced_vertex_mesh::<VertexT, ()>(vertices, &[], indices)
+    }
 }
 
 impl VertexMeshCreate for vkw::Device {
-    fn create_vertex_mesh<VertexT: VertexImpl>(
+    fn create_instanced_vertex_mesh<VertexT, InstanceT: VertexImpl>(
         self: &Arc<Self>,
         vertices: &[VertexT],
+        instances: &[InstanceT],
         indices: Option<&[u32]>,
-    ) -> Result<VertexMesh<VertexT>, Error> {
+    ) -> Result<VertexMesh<VertexT, InstanceT>, Error>
+    where
+        VertexT: VertexImpl + VertexPositionImpl,
+    {
         const POS_FORMAT: vkw::Format = vkw::Format::RGB32_FLOAT;
 
         let pos_info =
@@ -275,17 +333,20 @@ impl VertexMeshCreate for vkw::Device {
             )));
         }
 
-        let raw = if vertices.is_empty() {
+        let indexed = indices.is_some();
+        let indices = indices.unwrap_or(&[]);
+
+        let raw = if vertices.is_empty() && instances.is_empty() && indices.is_empty() {
             Default::default()
         } else {
-            let indexed = indices.is_some();
-            let indices = indices.unwrap_or(&[]);
-
             let vertex_size = mem::size_of::<VertexT>();
+            let instance_size = mem::size_of::<InstanceT>();
             let index_size = mem::size_of::<u32>();
-            let buffer_size = vertices.len() * vertex_size + indices.len() * index_size;
+            let buffer_size =
+                vertices.len() * vertex_size + instances.len() * instance_size + indices.len() * index_size;
 
-            let indices_offset = vertex_size * vertices.len();
+            let instances_offset = vertices.len() * vertex_size;
+            let indices_offset = instances_offset + instances.len() * instance_size;
 
             // Create host buffer
             let mut staging_buffer = self
@@ -326,6 +387,28 @@ impl VertexMeshCreate for vkw::Device {
                 bindings.push((Arc::clone(&buffer), buffer_offset as u64));
             }
 
+            // Copy instances
+            let attribs = InstanceT::attributes();
+
+            for (offset, format) in attribs {
+                let offset = offset as usize;
+                let buffer_offset = instances_offset + offset * instances.len();
+                let format_size = vkw::FORMAT_SIZES[&format] as usize;
+
+                for (i, instance) in instances.iter().enumerate() {
+                    unsafe {
+                        ptr::copy_nonoverlapping(
+                            (instance as *const InstanceT as *const u8).add(offset),
+                            staging_buffer.as_mut_ptr().add(buffer_offset + format_size * i),
+                            format_size as usize,
+                        );
+                    }
+                }
+
+                // Set binging buffers
+                bindings.push((Arc::clone(&buffer), buffer_offset as u64));
+            }
+
             // Copy indices
             if indices.len() > 0 {
                 staging_buffer.write(indices_offset as u64, unsafe {
@@ -334,18 +417,40 @@ impl VertexMeshCreate for vkw::Device {
             }
 
             // Calculate bounds
-            let mut aabb = (*vertices[0].position(), *vertices[0].position());
+            let aabb = if InstanceT::has_aabb() && !instances.is_empty() {
+                let mut aabb = instances[0].aabb();
 
-            for vertex in &vertices[1..] {
-                aabb.0 = aabb.0.inf(vertex.position());
-                aabb.1 = aabb.1.sup(vertex.position());
-            }
+                for instance in &instances[1..] {
+                    let i_aabb = instance.aabb();
+                    aabb.0 = aabb.0.inf(&i_aabb.0);
+                    aabb.1 = aabb.1.sup(&i_aabb.1);
+                }
+                aabb
+            } else if !vertices.is_empty() {
+                let mut aabb = (*vertices[0].position(), *vertices[0].position());
+
+                for vertex in &vertices[1..] {
+                    aabb.0 = aabb.0.inf(vertex.position());
+                    aabb.1 = aabb.1.sup(vertex.position());
+                }
+                aabb
+            } else {
+                Default::default()
+            };
 
             let center = (aabb.0 + aabb.1) / 2.0;
             let mut radius = 0.0;
 
-            for vertex in &vertices[0..] {
-                radius = (center - vertex.position()).magnitude().max(radius);
+            if InstanceT::has_aabb() && !instances.is_empty() {
+                for instance in instances {
+                    let i_aabb = instance.aabb();
+                    radius = (center - i_aabb.0).magnitude().max(radius);
+                    radius = (center - i_aabb.1).magnitude().max(radius);
+                }
+            } else if !vertices.is_empty() {
+                for vertex in vertices {
+                    radius = (center - vertex.position()).magnitude().max(radius);
+                }
             }
 
             RawVertexMesh {
@@ -365,6 +470,7 @@ impl VertexMeshCreate for vkw::Device {
 
         Ok(VertexMesh {
             _type_marker: PhantomData,
+            _type_marker2: PhantomData,
             raw: Arc::new(raw),
         })
     }

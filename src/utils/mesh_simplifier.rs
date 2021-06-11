@@ -1,4 +1,4 @@
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl};
+use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use crate::utils::qef;
 use nalgebra as na;
 
@@ -119,7 +119,7 @@ fn find_valid_collapses<T>(
     collapse_normals: &mut [na::Vector3<f32>],
 ) -> (Vec<u32>, Vec<u32>)
 where
-    T: VertexImpl + VertexNormalImpl,
+    T: VertexImpl + VertexPositionImpl + VertexNormalImpl,
 {
     let step = ((1.0 / options.edge_fraction).round() as usize).max(1);
     let target_valid_edges = (edges.len() as f64 * options.edge_fraction as f64) as usize;
@@ -207,7 +207,7 @@ fn collapse_edges<T>(
     vertices: &mut [T],
 ) -> Vec<u32>
 where
-    T: VertexImpl + VertexNormalImpl,
+    T: VertexImpl + VertexPositionImpl + VertexNormalImpl,
 {
     let mut collapse_target = vec![u32::MAX; vertices.len()];
 
@@ -312,7 +312,7 @@ where
 
 pub fn simplify<T>(vertices: &[T], indices: &[u32], options: &Options) -> (Vec<T>, Vec<u32>)
 where
-    T: VertexImpl + VertexNormalImpl + Clone,
+    T: VertexImpl + VertexPositionImpl + VertexNormalImpl + Clone,
 {
     // Remove zero-area triangles
     let mut new_indices: Vec<u32> = Vec::with_capacity(indices.len());

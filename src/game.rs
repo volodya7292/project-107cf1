@@ -1,143 +1,153 @@
-use crate::object::cluster;
+mod overworld;
+pub mod registry;
+
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::AtomicBool;
+use std::sync::{atomic, Arc, Mutex};
+use std::thread;
+use std::time::Instant;
+
+use entity_data::EntityStorageLayout;
+use futures::FutureExt;
+use nalgebra as na;
+use simdnoise::NoiseBuilder;
+
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
-use crate::utils::HashSet;
-use crate::world;
-use dual_contouring as dc;
-use nalgebra as na;
-use simdnoise::NoiseBuilder;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use crate::utils::{HashMap, HashSet};
+use overworld::Overworld;
+use registry::GameRegistry;
 
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
 
-    pressed_keys: HashSet<sdl2::keyboard::Scancode>,
+    pressed_keys: HashSet<winit::event::VirtualKeyCode>,
 
     cursor_rel: (i32, i32),
+    game_tick_finished: Arc<AtomicBool>,
+
+    loaded_overworld: Overworld,
 }
 
 impl Program {
     const MOVEMENT_SPEED: f32 = 32.0;
     const MOUSE_SENSITIVITY: f32 = 0.003;
 
-    pub fn on_event(&mut self, event: sdl2::event::Event) {
-        use sdl2::event::Event;
+    pub fn on_event(&mut self, event: winit::event::Event<()>) {
+        use winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
+
         match event {
-            Event::KeyDown {
-                timestamp: _,
-                window_id: _,
-                keycode: _,
-                scancode,
-                keymod: _,
-                repeat: _,
-            } => {
-                if let Some(scancode) = scancode {
-                    self.pressed_keys.insert(scancode);
+            Event::WindowEvent { window_id: _, event } => match event {
+                WindowEvent::KeyboardInput {
+                    device_id: _,
+                    input,
+                    is_synthetic: _,
+                } => {
+                    if input.state == ElementState::Pressed {
+                        if let Some(keycode) = input.virtual_keycode {
+                            self.pressed_keys.insert(keycode);
+                        }
+                    } else {
+                        if let Some(keycode) = input.virtual_keycode {
+                            self.pressed_keys.remove(&keycode);
+                        }
+                    }
                 }
-            }
-            Event::KeyUp {
-                timestamp: _,
-                window_id: _,
-                keycode: _,
-                scancode,
-                keymod: _,
-                repeat: _,
-            } => {
-                if let Some(scancode) = scancode {
-                    self.pressed_keys.remove(&scancode);
+                _ => {}
+            },
+            Event::DeviceEvent { device_id: _, event } => match event {
+                DeviceEvent::MouseMotion { delta } => {
+                    self.cursor_rel.0 += delta.0 as i32;
+                    self.cursor_rel.1 += delta.1 as i32;
                 }
-            }
-            Event::MouseMotion {
-                timestamp: _,
-                window_id: _,
-                which: _,
-                mousestate: _,
-                x: _,
-                y: _,
-                xrel,
-                yrel,
-            } => {
-                self.cursor_rel.0 += xrel;
-                self.cursor_rel.1 += yrel;
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
 
-    pub fn is_key_pressed(&self, scancode: sdl2::keyboard::Scancode) -> bool {
-        self.pressed_keys.contains(&scancode)
+    pub fn is_key_pressed(&self, keycode: winit::event::VirtualKeyCode) -> bool {
+        self.pressed_keys.contains(&keycode)
     }
 
     pub fn on_update(&mut self, delta_time: f64) {
-        {
-            use sdl2::keyboard::Scancode;
+        use winit::event::VirtualKeyCode;
 
-            let mut vel_front_back = 0;
-            let mut vel_left_right = 0;
-            let mut vel_up_down = 0;
+        let mut vel_front_back = 0;
+        let mut vel_left_right = 0;
+        let mut vel_up_down = 0;
 
-            if self.is_key_pressed(Scancode::W) {
-                vel_front_back += 1;
-            }
-            if self.is_key_pressed(Scancode::S) {
-                vel_front_back -= 1;
-            }
-            if self.is_key_pressed(Scancode::A) {
-                vel_left_right -= 1;
-            }
-            if self.is_key_pressed(Scancode::D) {
-                vel_left_right += 1;
-            }
-            if self.is_key_pressed(Scancode::Space) {
-                vel_up_down += 1;
-            }
-            if self.is_key_pressed(Scancode::LShift) {
-                vel_up_down -= 1;
-            }
+        if self.is_key_pressed(VirtualKeyCode::W) {
+            vel_front_back += 1;
+        }
+        if self.is_key_pressed(VirtualKeyCode::S) {
+            vel_front_back -= 1;
+        }
+        if self.is_key_pressed(VirtualKeyCode::A) {
+            vel_left_right -= 1;
+        }
+        if self.is_key_pressed(VirtualKeyCode::D) {
+            vel_left_right += 1;
+        }
+        if self.is_key_pressed(VirtualKeyCode::Space) {
+            vel_up_down += 1;
+        }
+        if self.is_key_pressed(VirtualKeyCode::LShift) {
+            vel_up_down -= 1;
+        }
 
-            let renderer = self.renderer.lock().unwrap();
-            let entity = renderer.get_active_camera();
-            let camera_comps = renderer.scene().storage::<component::Camera>();
-            let mut camera_comps = camera_comps.write().unwrap();
-            let camera = camera_comps.get_mut(entity).unwrap();
+        let renderer = self.renderer.lock().unwrap();
+        let entity = renderer.get_active_camera();
+        let camera_comps = renderer.scene().storage::<component::Camera>();
+        let mut camera_comps = camera_comps.write().unwrap();
+        let camera = camera_comps.get_mut(entity).unwrap();
 
-            let ms = Self::MOVEMENT_SPEED * delta_time as f32;
+        let ms = Self::MOVEMENT_SPEED * delta_time as f32;
 
-            let mut pos = camera.position();
-            pos.y += vel_up_down as f32 * ms;
+        let mut pos = camera.position();
+        pos.y += vel_up_down as f32 * ms;
 
-            camera.set_position(pos);
-            camera.move2(vel_front_back as f32 * ms, vel_left_right as f32 * ms);
+        camera.set_position(pos);
+        camera.move2(vel_front_back as f32 * ms, vel_left_right as f32 * ms);
 
-            let mut rotation = camera.rotation();
-            let cursor_offset = (
-                self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY,
-                self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
-            );
+        let mut rotation = camera.rotation();
+        let cursor_offset = (
+            self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY,
+            self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
+        );
 
-            rotation.x = na::clamp(
-                rotation.x + cursor_offset.1,
-                -std::f32::consts::FRAC_PI_2,
-                std::f32::consts::FRAC_PI_2,
-            );
-            rotation.y += cursor_offset.0;
+        rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
+        rotation.y += cursor_offset.0;
 
-            camera.set_rotation(rotation);
+        camera.set_rotation(rotation);
 
-            self.cursor_rel = (0, 0);
+        self.cursor_rel = (0, 0);
 
-            // dbg!(camera.position());
+        // dbg!(camera.position());
+
+        if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
+            let game_tick_finished = Arc::clone(&self.game_tick_finished);
+            rayon::spawn(|| game_tick(game_tick_finished));
         }
     }
 }
 
+pub fn game_tick(finished: Arc<AtomicBool>) {
+    // todo
+
+    finished.store(true, atomic::Ordering::Relaxed);
+}
+
 pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Program {
+    let game_tick_finished = Arc::new(AtomicBool::new(true));
+
     let program = Program {
         renderer: Arc::clone(renderer),
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
+        game_tick_finished: Arc::clone(&game_tick_finished),
+        loaded_overworld: Default::default(),
     };
 
     // renderer.lock().unwrap().set_material(
@@ -177,7 +187,12 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         },
     );
 
-    let mut world_streamer = world::streamer::new(renderer, &mat_pipelines.cluster());
+    let block_registry = {
+        let mut reg = GameRegistry::predefined();
+        Arc::new(reg)
+    };
+
+    let mut world_streamer = overworld::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());
     world_streamer.set_render_distance(128);
     world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
     world_streamer.on_update();

@@ -4,15 +4,6 @@
 #define FN_TEXTURE_ATLAS
 #include "common.glsl"
 
-#define NODE_TYPE_INTERNAL 0
-#define NODE_TYPE_LEAF 1
-
-struct EncodedNode {
-    uint8_t ty;
-    uint children[8];
-    uint16_t material[8];
-};
-
 layout(early_fragment_tests) in;
 
 layout(location = 0) out vec4 outDiffuse;
@@ -33,11 +24,11 @@ layout(set = 0, binding = 4, std430) readonly buffer Materials {
 };
 
 layout(location = 0) in Output {
+    vec2 tex_uv;
     vec3 local_pos;
     vec3 world_pos;
     vec3 surface_normal;
-    vec3 barycentrics;
-    flat uint16_t material_ids[3][8];
+    uint material_id;
 } vs_in;
 
 vec2 triplan_coord[3];
@@ -59,7 +50,7 @@ vec3 rnm_blend_unpacked(vec3 n1, vec3 n2) {
     return n1 * dot(n1, n2) / n1.z - n2;
 }
 
-void sample_material(uint id, out SampledMaterial sampled_mat) {
+void sample_material(uint id, vec2 coord, out SampledMaterial sampled_mat) {
     Material mat = materials[id];
 
     sampled_mat.diffuse = vec4(0);
@@ -67,37 +58,35 @@ void sample_material(uint id, out SampledMaterial sampled_mat) {
     sampled_mat.emission = mat.emission.rgb;
     sampled_mat.normal = vec3(0);
 
-    for (uint i = 0; i < 3; i++) {
-        // Diffuse
-        if (mat.diffuse_tex_id == -1) {
-            sampled_mat.diffuse = mat.diffuse;
-        } else {
-            sampled_mat.diffuse += textureAtlas(albedoAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.diffuse_tex_id) * triplan_weight[i];
-        }
+    // Diffuse
+    if (mat.diffuse_tex_id == -1) {
+        sampled_mat.diffuse = mat.diffuse;
+    } else {
+        sampled_mat.diffuse += textureAtlas(albedoAtlas, info.tex_atlas_info.x, coord, mat.diffuse_tex_id);
+    }
 
-        // Specular
-        if (mat.specular_tex_id == -1) {
-            sampled_mat.specular = mat.specular;
-        } else {
-            sampled_mat.specular += textureAtlas(specularAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.specular_tex_id) * triplan_weight[i];
-        }
+    // Specular
+    if (mat.specular_tex_id == -1) {
+        sampled_mat.specular = mat.specular;
+    } else {
+        sampled_mat.specular += textureAtlas(specularAtlas, info.tex_atlas_info.x, coord, mat.specular_tex_id);
+    }
 
-        // Normal
-        if (mat.normal_tex_id == -1) {
-            sampled_mat.normal = vs_in.surface_normal;
-        } else {
-            // Tangent space normal maps
-            vec3 normal = textureAtlas(normalAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.normal_tex_id).xyz * 2.0 - 1.0;
+    // Normal
+    if (mat.normal_tex_id == -1) {
+        sampled_mat.normal = vs_in.surface_normal;
+    } else {
+        // Tangent space normal maps
+        vec3 normal = textureAtlas(normalAtlas, info.tex_atlas_info.x, coord, mat.normal_tex_id).xyz * 2.0 - 1.0;
 
-            // Swizzle world normals to match tangent space and apply RNM blend
-            normal = rnm_blend_unpacked(vec3(normal_coord[i], abs(vs_in.surface_normal[i])), normal);
-            // Reapply sign to Z
-            normal.z *= sign(vs_in.surface_normal[i]);
+        // // Swizzle world normals to match tangent space and apply RNM blend
+        // normal = rnm_blend_unpacked(vec3(normal_coord[i], abs(vs_in.surface_normal[i])), normal);
+        // // Reapply sign to Z
+        // normal.z *= sign(vs_in.surface_normal[i]);
 
-            sampled_mat.normal += normal.xyz * triplan_weight[i];
-            if (i == 2)
-                sampled_mat.normal = normalize(sampled_mat.normal + vs_in.surface_normal);
-        }
+        // sampled_mat.normal += normal.xyz * triplan_weight[i];
+        // if (i == 2)
+        //     sampled_mat.normal = normalize(sampled_mat.normal + vs_in.surface_normal);
     }
 }
 
@@ -125,20 +114,27 @@ void main() {
     normal_coord[2] = vs_in.surface_normal.xy;
     // -------------------------------------------------------
 
-    SampledMaterial samples[3][1];
-    vec3 diffuse_s[3];
+    // SampledMaterial samples[3][1];
+    // vec3 diffuse_s[3];
 
-    for (uint i = 0; i < 3; i++) {
-        diffuse_s[i] = vec3(0);
-        for (uint j = 0; j < 1; j++) {
-            sample_material(vs_in.material_ids[i][j], samples[i][j]);
-            diffuse_s[i] += samples[i][j].diffuse.rgb / 1.0;
-        }
-    }
+    // for (uint i = 0; i < 3; i++) {
+    //     diffuse_s[i] = vec3(0);
+    //     for (uint j = 0; j < 1; j++) {
+    //         sample_material(vs_in.material_ids[i][j], samples[i][j]);
+    //         diffuse_s[i] += samples[i][j].diffuse.rgb / 1.0;
+    //     }
+    // }
     
-    vec3 diffuse = (diffuse_s[0] * vs_in.barycentrics[0]
-        + diffuse_s[1] * vs_in.barycentrics[1]
-        + diffuse_s[2] * vs_in.barycentrics[2]).rgb;
+    // vec3 diffuse = (diffuse_s[0] * vs_in.barycentrics[0]
+    //     + diffuse_s[1] * vs_in.barycentrics[1]
+    //     + diffuse_s[2] * vs_in.barycentrics[2]).rgb;
+
+    SampledMaterial mat;
+
+    uint material_id;
+    sample_material(vs_in.material_id, vs_in.tex_uv, mat);
+
+    vec3 diffuse = mat.diffuse.rgb;
 
     // outDiffuse = vec4(color, 1);
     outDiffuse = vec4(diffuse.rgb, 1);

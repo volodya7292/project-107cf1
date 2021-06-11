@@ -51,15 +51,10 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
                 &[
                     ("inPosition", vkw::Format::RGB32_FLOAT),
                     ("inNormal", vkw::Format::RGB32_FLOAT),
-                    ("inMaterialIds", vkw::Format::RGBA32_UINT),
+                    ("inTexUV", vkw::Format::RG32_FLOAT),
+                    ("inAO", vkw::Format::R32_FLOAT),
+                    ("inMaterialId", vkw::Format::R32_UINT),
                 ],
-                &[],
-            )
-            .unwrap();
-        let geom = device
-            .create_shader(
-                &resources.get("shaders/cluster.geom.spv").unwrap().read().unwrap(),
-                &[],
                 &[],
             )
             .unwrap();
@@ -71,7 +66,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             )
             .unwrap();
 
-        renderer.create_material_pipeline::<BasicUniformInfo>(&[vertex, geom, pixel])
+        renderer.create_material_pipeline::<BasicUniformInfo>(&[vertex, pixel])
     };
 
     MaterialPipelines { triag, cluster }
