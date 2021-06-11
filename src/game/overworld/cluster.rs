@@ -11,10 +11,10 @@ use smallvec::smallvec;
 use vk_wrapper as vkw;
 use vk_wrapper::PrimitiveTopology;
 
+use crate::game::overworld::block::BlockProps;
+use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::block_model::{Quad, Vertex};
 use crate::game::registry::GameRegistry;
-use crate::game::world::block::BlockProps;
-use crate::game::world::block_component::Facing;
-use crate::game::world::block_model::{Quad, Vertex};
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};

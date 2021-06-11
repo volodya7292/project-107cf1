@@ -27,6 +27,8 @@ ahash = "0.7.4"
 lazy_static = "1.4.0"
 entity_data = "0.2.0"
 approx = "0.4.0"
+rand = "0.8.3"
+rand_distr = "0.4.0"
 vk-wrapper = { path = "vk-wrapper" }
 
 [build-dependencies]

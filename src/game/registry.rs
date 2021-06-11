@@ -1,23 +1,26 @@
-use crate::game::world::block_component::Facing;
-use crate::game::world::block_model;
-use crate::game::world::block_model::BlockModel;
-use crate::game::world::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::block_model;
+use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::game::overworld::world_model::WorldModel;
 use entity_data::EntityStorageLayout;
 use glm::Vec3;
 use nalgebra_glm as glm;
 
 pub struct GameRegistry {
-    cluster_layout: EntityStorageLayout,
+    world_models: Vec<WorldModel>,
     models: Vec<BlockModel>,
     textured_models: Vec<TexturedBlockModel>,
+    cluster_layout: EntityStorageLayout,
 }
 
 impl GameRegistry {
     pub fn new() -> Self {
         GameRegistry {
-            cluster_layout: Default::default(),
+            world_models: vec![],
             models: vec![],
             textured_models: vec![],
+            cluster_layout: Default::default(),
         }
     }
 
@@ -35,12 +38,21 @@ impl GameRegistry {
         (self.textured_models.len() - 1) as u32
     }
 
+    pub fn register_world_model(&mut self, world_model: WorldModel) -> u32 {
+        self.world_models.push(world_model);
+        (self.world_models.len() - 1) as u32
+    }
+
     pub fn get_block_model(&self, id: u32) -> Option<&BlockModel> {
         self.models.get(id as usize)
     }
 
     pub fn get_textured_block_model(&self, id: u32) -> Option<&TexturedBlockModel> {
         self.textured_models.get(id as usize)
+    }
+
+    pub fn get_world_model(&self, id: u32) -> Option<&WorldModel> {
+        self.world_models.get(id as usize)
     }
 
     pub fn predefined() -> Self {

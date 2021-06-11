@@ -1,6 +1,6 @@
-use crate::game::world::block::BlockProps;
-use crate::game::world::cluster;
-use crate::game::world::cluster::Cluster;
+use crate::game::overworld::block::BlockProps;
+use crate::game::overworld::cluster;
+use crate::game::overworld::cluster::Cluster;
 use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::U32Vec3;

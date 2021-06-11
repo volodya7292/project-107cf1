@@ -1,3 +1,6 @@
+mod overworld;
+pub mod registry;
+
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Mutex};
@@ -8,28 +11,23 @@ use entity_data::EntityStorageLayout;
 use futures::FutureExt;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
-use winit::event::VirtualKeyCode;
 
-use registry::GameRegistry;
-
-use crate::game::world::World;
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
-
-pub mod registry;
-mod world;
+use overworld::Overworld;
+use registry::GameRegistry;
 
 pub struct Program {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
 
-    pressed_keys: HashSet<VirtualKeyCode>,
+    pressed_keys: HashSet<winit::event::VirtualKeyCode>,
 
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
 
-    loaded_worlds: HashMap<u32, World>,
+    loaded_overworld: Overworld,
 }
 
 impl Program {
@@ -69,7 +67,7 @@ impl Program {
         }
     }
 
-    pub fn is_key_pressed(&self, keycode: VirtualKeyCode) -> bool {
+    pub fn is_key_pressed(&self, keycode: winit::event::VirtualKeyCode) -> bool {
         self.pressed_keys.contains(&keycode)
     }
 
@@ -149,7 +147,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
         game_tick_finished: Arc::clone(&game_tick_finished),
-        loaded_worlds: Default::default(),
+        loaded_overworld: Default::default(),
     };
 
     // renderer.lock().unwrap().set_material(
@@ -194,7 +192,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         Arc::new(reg)
     };
 
-    let mut world_streamer = world::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());
+    let mut world_streamer = overworld::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());
     world_streamer.set_render_distance(128);
     world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
     world_streamer.on_update();

@@ -1,8 +1,8 @@
+use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster;
+use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::generator;
 use crate::game::registry::GameRegistry;
-use crate::game::world::block_component::Facing;
-use crate::game::world::cluster;
-use crate::game::world::cluster::Cluster;
-use crate::game::world::generator;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
