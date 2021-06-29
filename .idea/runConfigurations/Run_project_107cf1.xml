@@ -3,9 +3,10 @@
     <option name="command" value="run --package project-107cf1 --bin project-107cf1" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$/work_dir" />
     <option name="channel" value="DEFAULT" />
-    <option name="requiredFeatures" value="true" />
+    <option name="requiredFeatures" value="false" />
     <option name="allFeatures" value="false" />
     <option name="emulateTerminal" value="false" />
+    <option name="withSudo" value="false" />
     <option name="backtrace" value="SHORT" />
     <envs>
       <env name="_NO_DEBUG_HEAP" value="1" />

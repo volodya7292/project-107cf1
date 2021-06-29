@@ -1,5 +1,4 @@
 use std::ffi::{CStr, CString};
-use std::mem;
 use std::os::raw::c_char;
 
 pub(crate) unsafe fn c_ptr_to_string(ptr: *const c_char) -> String {
@@ -40,7 +39,7 @@ pub(crate) fn make_mul_of_u64(number: u64, multiplier: u64) -> u64 {
 }
 
 pub fn log2(n: u32) -> u32 {
-    (mem::size_of::<u32>() * 8) as u32 - n.leading_zeros() - 1
+    u32::BITS - n.leading_zeros() - 1
 }
 
 macro_rules! vk_bitflags_impl {

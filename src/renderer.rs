@@ -13,7 +13,7 @@ pub use vertex_mesh::VertexMesh;
 
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
-use crate::utils::HashMap;
+use crate::utils::{HashMap, UInteger};
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
@@ -351,8 +351,8 @@ impl Renderer {
 
             let mip_maps: Vec<Vec<u8>> = decoder.read_textures().collect();
 
-            let first_level = utils::log2(width / (self.settings.texture_quality as u32));
-            let last_level = utils::log2(width / 4); // BC block size = 4x4
+            let first_level = (width / (self.settings.texture_quality as u32)).log2();
+            let last_level = (width / 4).log2(); // BC block size = 4x4
 
             self.texture_atlases[*atlas_type as usize]
                 .set_texture(

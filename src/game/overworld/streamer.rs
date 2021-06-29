@@ -1,23 +1,24 @@
-use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::cluster;
-use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::generator;
-use crate::game::registry::GameRegistry;
-use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::{component, Renderer};
-use crate::utils::{HashMap, HashSet};
-use crossbeam_channel as cb;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, Vec3};
-use rayon::prelude::*;
-use simdnoise::NoiseBuilder;
-use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
 
-pub const MAX_LOD: usize = 4;
+use crossbeam_channel as cb;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, Vec3};
+use rayon::prelude::*;
+use simdnoise::NoiseBuilder;
+use smallvec::SmallVec;
+
+use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::generator;
+use crate::game::overworld::{cluster, MAX_LOD};
+use crate::game::registry::GameRegistry;
+use crate::renderer::material_pipeline::MaterialPipeline;
+use crate::renderer::{component, Renderer};
+use crate::utils::{HashMap, HashSet};
+
 pub const LOD0_RANGE: usize = 128;
 
 struct WorldCluster {
@@ -30,11 +31,11 @@ struct WorldCluster {
 #[derive(Copy, Clone)]
 struct ClusterPos {
     level: usize,
-    pos: I32Vec3,
+    pos: I64Vec3,
 }
 
 impl ClusterPos {
-    pub fn new(level: usize, pos: I32Vec3) -> ClusterPos {
+    pub fn new(level: usize, pos: I64Vec3) -> ClusterPos {
         ClusterPos { level, pos }
     }
 }
@@ -54,11 +55,20 @@ pub struct WorldStreamer {
     // in meters
     render_distance: u32,
     stream_pos: DVec3,
-    clusters: [HashMap<I32Vec3, WorldCluster>; MAX_LOD + 1], // [LOD] -> clusters
+    clusters: [HashMap<I64Vec3, WorldCluster>; MAX_LOD + 1], // [LOD] -> clusters
     side_occlusion_work: SideOcclusionWorkSync,
 }
 
 pub trait ClusterProvider {}
+
+pub fn cluster_size(level: u32) -> u64 {
+    2_u64.pow(6 + level)
+}
+
+fn cluster_aligned_pos(pos: DVec3, cluster_lod: u32) -> I64Vec3 {
+    let cluster_step_size = cluster_size(cluster_lod) as f64;
+    glm::try_convert(glm::floor(&(pos / cluster_step_size))).unwrap()
+}
 
 impl WorldStreamer {
     const MIN_RENDER_DISTANCE: u32 = 128;
@@ -74,44 +84,35 @@ impl WorldStreamer {
             .max(Self::MIN_RENDER_DISTANCE);
     }
 
-    fn cluster_size(level: u32) -> u32 {
-        2_u32.pow(6 + level)
-    }
-
-    fn cluster_aligned_pos(pos: DVec3, cluster_lod: u32) -> I32Vec3 {
-        let cluster_step_size = Self::cluster_size(cluster_lod) as f64;
-        glm::try_convert(glm::floor(&(pos / cluster_step_size))).unwrap()
-    }
-
     fn find_cluster_side_pairs(&self, cluster_pos: ClusterPos) -> SmallVec<[ClusterSidePair; 24]> {
         let level = cluster_pos.level;
         let pos = cluster_pos.pos;
         let mut neighbours = SmallVec::<[ClusterSidePair; 24]>::new();
 
-        let cluster_size1 = Self::cluster_size(level as u32) as i32;
-        let cluster_size2 = Self::cluster_size(level as u32 + 1) as i32;
+        let cluster_size1 = cluster_size(level as u32) as i64;
+        let cluster_size2 = cluster_size(level as u32 + 1) as i64;
 
         // Lower level
         if level > 0 {
-            fn map_dst_pos(d: &I32Vec3, k: i32, l: i32) -> I32Vec3 {
-                let dx = (d.x != 0) as i32;
-                let dy = (d.y != 0) as i32;
-                let dz = (d.z != 0) as i32;
+            fn map_dst_pos(d: &I64Vec3, k: i64, l: i64) -> I64Vec3 {
+                let dx = (d.x != 0) as i64;
+                let dy = (d.y != 0) as i64;
+                let dz = (d.z != 0) as i64;
 
                 let (k, l) = (k + 1, l + 1);
-                let x = -1 + k * dy + k * dz + 3 * (d.x > 0) as i32;
-                let y = -1 + k * dx + l * dz + 3 * (d.y > 0) as i32;
-                let z = -1 + l * dx + l * dy + 3 * (d.z > 0) as i32;
+                let x = -1 + k * dy + k * dz + 3 * (d.x > 0) as i64;
+                let y = -1 + k * dx + l * dz + 3 * (d.y > 0) as i64;
+                let z = -1 + l * dx + l * dy + 3 * (d.z > 0) as i64;
 
-                I32Vec3::new(x, y, z)
+                I64Vec3::new(x, y, z)
             }
 
-            let cluster_size0 = Self::cluster_size(level as u32 - 1) as i32;
+            let cluster_size0 = cluster_size(level as u32 - 1) as i64;
 
-            for d in &Facing::DIRECTIONS {
+            for &d in &Facing::DIRECTIONS {
                 for k in 0..2 {
                     for l in 0..2 {
-                        let pos2 = pos + map_dst_pos(d, k, l) * cluster_size0;
+                        let pos2 = pos + map_dst_pos(&glm::convert(d), k, l) * cluster_size0;
 
                         if self.clusters[level - 1].contains_key(&pos2) {
                             neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level - 1, pos2)));
@@ -123,8 +124,8 @@ impl WorldStreamer {
 
         // Current level
         {
-            for d in &Facing::DIRECTIONS {
-                let pos2 = pos + d * cluster_size1;
+            for &d in &Facing::DIRECTIONS {
+                let pos2 = pos + glm::convert::<I32Vec3, I64Vec3>(d) * cluster_size1;
 
                 if self.clusters[level].contains_key(&pos2) {
                     neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level, pos2)));
@@ -134,11 +135,12 @@ impl WorldStreamer {
 
         // Higher level
         if level < MAX_LOD {
-            for d in &Facing::DIRECTIONS {
+            for &d in &Facing::DIRECTIONS {
+                let d: I64Vec3 = glm::convert(d);
                 let pos2 = pos
                     + d * cluster_size2
                     + d.zip_map(&pos, |d, p| {
-                        (-cluster_size1 * (d > 0) as i32) - (p % cluster_size2 * (d == 0) as i32).abs()
+                        (-cluster_size1 * (d > 0) as i64) - (p % cluster_size2 * (d == 0) as i64).abs()
                     });
 
                 if glm::all(&pos2.map(|v| v % cluster_size2 != 0)) {
@@ -169,7 +171,7 @@ impl WorldStreamer {
                     let mut side_cluster = lock1.unwrap();
 
                     let offset = pair.1.pos - pair.0.pos;
-                    cluster.paste_outer_side_occlusion(&mut side_cluster, offset);
+                    cluster.paste_outer_side_occlusion(&mut side_cluster, glm::convert(offset));
 
                     sync.process_count.fetch_sub(1, atomic::Ordering::Relaxed);
                 } else {
@@ -181,23 +183,23 @@ impl WorldStreamer {
         }
     }
 
-    pub fn calc_cluster_layout(&self) -> Vec<HashSet<I32Vec3>> {
-        const R: i32 = (LOD0_RANGE / cluster::SIZE) as i32;
-        const D: i32 = R * 2 + 1;
+    pub fn calc_cluster_layout(&self) -> Vec<HashSet<I64Vec3>> {
+        const R: i64 = (LOD0_RANGE / cluster::SIZE) as i64;
+        const D: i64 = R * 2 + 1;
 
         let mut cluster_layout = vec![HashSet::with_capacity(512); MAX_LOD + 1];
         let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; MAX_LOD + 2];
 
         for i in 0..(MAX_LOD + 1) {
-            let cluster_size = Self::cluster_size(i as u32) as i32;
-            let stream_pos_i = Self::cluster_aligned_pos(self.stream_pos, i as u32);
+            let cluster_size = cluster_size(i as u32) as i64;
+            let stream_pos_i = cluster_aligned_pos(self.stream_pos, i as u32);
             let r = (R * cluster_size) as f64;
 
             // Fill mask of used clusters
             for x in 0..D {
                 for y in 0..D {
                     for z in 0..D {
-                        let pos = stream_pos_i + I32Vec3::new(x, y, z).add_scalar(-R);
+                        let pos = stream_pos_i + I64Vec3::new(x, y, z).add_scalar(-R);
                         let center = (pos * cluster_size).add_scalar(cluster_size / 2);
 
                         let dist = glm::distance(&self.stream_pos, &glm::convert(center));
@@ -221,7 +223,7 @@ impl WorldStreamer {
                             continue;
                         }
 
-                        let pos = stream_pos_i + I32Vec3::new(x, y, z).add_scalar(-R) * 2;
+                        let pos = stream_pos_i + I64Vec3::new(x, y, z).add_scalar(-R) * 2;
                         let in_p = [x * 2 - R, y * 2 - R, z * 2 - R];
 
                         if (in_p[0] < 0 || in_p[0] >= D)
@@ -247,7 +249,7 @@ impl WorldStreamer {
                                         continue;
                                     }
 
-                                    let pos = pos + I32Vec3::new(x2 as i32, y2 as i32, z2 as i32);
+                                    let pos = pos + I64Vec3::new(x2 as i64, y2 as i64, z2 as i64);
                                     cluster_layout[i].insert(pos);
                                 }
                             }
@@ -296,7 +298,7 @@ impl WorldStreamer {
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
                     let node_size = 2_u32.pow(i as u32);
-                    let pos = pos * (cluster::SIZE as i32) * (node_size as i32);
+                    let pos = pos * (cluster::SIZE as i64) * (node_size as i64);
 
                     if let hash_map::Entry::Vacant(entry) = self.clusters[i].entry(pos) {
                         let cluster = cluster::new(&self.block_registry, &device, node_size);

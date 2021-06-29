@@ -27,7 +27,7 @@ pub struct Program {
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
 
-    loaded_overworld: Overworld,
+    loaded_overworld: Option<Overworld>,
 }
 
 impl Program {
@@ -140,16 +140,6 @@ pub fn game_tick(finished: Arc<AtomicBool>) {
 }
 
 pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Program {
-    let game_tick_finished = Arc::new(AtomicBool::new(true));
-
-    let program = Program {
-        renderer: Arc::clone(renderer),
-        pressed_keys: Default::default(),
-        cursor_rel: (0, 0),
-        game_tick_finished: Arc::clone(&game_tick_finished),
-        loaded_overworld: Default::default(),
-    };
-
     // renderer.lock().unwrap().set_material(
     //     0,
     //     renderer::MaterialInfo {
@@ -190,6 +180,15 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     let block_registry = {
         let mut reg = GameRegistry::predefined();
         Arc::new(reg)
+    };
+
+    let game_tick_finished = Arc::new(AtomicBool::new(true));
+    let program = Program {
+        renderer: Arc::clone(renderer),
+        pressed_keys: Default::default(),
+        cursor_rel: (0, 0),
+        game_tick_finished: Arc::clone(&game_tick_finished),
+        loaded_overworld: None,
     };
 
     let mut world_streamer = overworld::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());

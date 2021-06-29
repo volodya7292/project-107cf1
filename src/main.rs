@@ -1,9 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use na::Vector2;
-use na::Vector3;
-use nalgebra as na;
+use nalgebra_glm as glm;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -14,6 +12,10 @@ use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::renderer::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
+use crate::utils::noise::ParamNoise;
+use nalgebra_glm::{DVec2, Vec2, Vec3};
+use noise::{NoiseFn, Seedable};
+use rand::Rng;
 
 mod utils;
 
@@ -27,8 +29,8 @@ mod tests;
 
 #[derive(Copy, Clone, Default)]
 pub struct BasicVertex {
-    position: na::Vector3<f32>,
-    tex_coord: na::Vector2<f32>,
+    position: Vec3,
+    tex_coord: Vec2,
 }
 
 vertex_impl!(BasicVertex, position, tex_coord);
@@ -36,8 +38,44 @@ vertex_impl!(BasicVertex, position, tex_coord);
 const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
+fn noise_test() {
+    let mut buf = vec![0_u8; 1024 * 1024 * 3];
+
+    let n = noise::SuperSimplex::new().set_seed(0);
+
+    let process = |p: DVec2| -> f64 {
+        let v = n.sample(p, 5.0, 1.0, 0.5);
+
+        let d = (glm::distance(&DVec2::new(0.5, 0.5), &p) * 2.0).min(1.0);
+        let s = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
+
+        // y = 0.4 - (0.1 - (x - 0.4)) / 0.1
+
+        v * s
+    };
+
+    for x in 0..1024 {
+        for y in 0..1024 {
+            let i = (y * 1024 + x) * 3;
+            let x = x as f64 / 1024.0;
+            let y = y as f64 / 1024.0;
+
+            let v = process(DVec2::new(x, y));
+
+            buf[i] = (v * 255.0) as u8;
+            buf[i + 1] = buf[i];
+            buf[i + 2] = buf[i];
+        }
+    }
+
+    image::save_buffer("D:/noise_test.png", &buf, 1024, 1024, image::ColorType::Rgb8).unwrap();
+    std::process::exit(0);
+}
+
 fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
+
+    // noise_test();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
@@ -110,16 +148,16 @@ fn main() {
         .create_vertex_mesh::<BasicVertex>(
             &[
                 BasicVertex {
-                    position: Vector3::new(0.0, -0.5, -3.0),
-                    tex_coord: Vector2::new(1.0, 2.0),
+                    position: Vec3::new(0.0, -0.5, -3.0),
+                    tex_coord: Vec2::new(1.0, 2.0),
                 },
                 BasicVertex {
-                    position: Vector3::new(-0.5, 0.5, -3.0),
-                    tex_coord: Vector2::new(0.0, 0.0),
+                    position: Vec3::new(-0.5, 0.5, -3.0),
+                    tex_coord: Vec2::new(0.0, 0.0),
                 },
                 BasicVertex {
-                    position: Vector3::new(0.5, 0.5, -3.0),
-                    tex_coord: Vector2::new(2.0, 0.0),
+                    position: Vec3::new(0.5, 0.5, -3.0),
+                    tex_coord: Vec2::new(2.0, 0.0),
                 },
             ],
             None,

@@ -1,14 +1,16 @@
+use crate::game::overworld;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
-use crate::game::overworld::world_model::WorldModel;
 use entity_data::EntityStorageLayout;
 use glm::Vec3;
 use nalgebra_glm as glm;
 
 pub struct GameRegistry {
-    world_models: Vec<WorldModel>,
+    structures: Vec<Structure>,
+    structured_by_level: [Vec<Structure>; overworld::MAX_LOD],
     models: Vec<BlockModel>,
     textured_models: Vec<TexturedBlockModel>,
     cluster_layout: EntityStorageLayout,
@@ -17,7 +19,8 @@ pub struct GameRegistry {
 impl GameRegistry {
     pub fn new() -> Self {
         GameRegistry {
-            world_models: vec![],
+            structures: vec![],
+            structured_by_level: Default::default(),
             models: vec![],
             textured_models: vec![],
             cluster_layout: Default::default(),
@@ -38,9 +41,9 @@ impl GameRegistry {
         (self.textured_models.len() - 1) as u32
     }
 
-    pub fn register_world_model(&mut self, world_model: WorldModel) -> u32 {
-        self.world_models.push(world_model);
-        (self.world_models.len() - 1) as u32
+    pub fn register_structure(&mut self, structure: Structure) -> u32 {
+        self.structures.push(structure);
+        (self.structures.len() - 1) as u32
     }
 
     pub fn get_block_model(&self, id: u32) -> Option<&BlockModel> {
@@ -51,8 +54,12 @@ impl GameRegistry {
         self.textured_models.get(id as usize)
     }
 
-    pub fn get_world_model(&self, id: u32) -> Option<&WorldModel> {
-        self.world_models.get(id as usize)
+    pub fn get_structure(&self, id: u32) -> Option<&Structure> {
+        self.structures.get(id as usize)
+    }
+
+    pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {
+        &self.structured_by_level[cluster_level as usize]
     }
 
     pub fn predefined() -> Self {

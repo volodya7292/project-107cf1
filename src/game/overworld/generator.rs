@@ -3,10 +3,10 @@ use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
 use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::U32Vec3;
+use nalgebra_glm::{I64Vec3, U32Vec3};
 use simdnoise::NoiseBuilder;
 
-pub fn generate_cluster(cluster: &mut Cluster, pos: na::Vector3<i32>, node_size: u32) {
+pub fn generate_cluster(cluster: &mut Cluster, pos: I64Vec3, node_size: u32) {
     for x in 0..cluster::SIZE {
         for y in 0..cluster::SIZE {
             for z in 0..cluster::SIZE {
