@@ -7,7 +7,7 @@ pub struct ValueNoise<T> {
     _ty: PhantomData<T>,
 }
 
-pub struct State(u64);
+pub struct State(pub u64);
 
 impl State {
     pub fn next(mut self, perm: u64) -> State {

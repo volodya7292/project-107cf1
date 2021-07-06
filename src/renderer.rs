@@ -21,6 +21,7 @@ use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use rayon::prelude::*;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use scene::ComponentStorage;
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
@@ -41,6 +42,7 @@ use vk_wrapper::{
 };
 
 pub struct Renderer {
+    thread_pool: ThreadPool,
     scene: Scene,
 
     surface: Arc<Surface>,
@@ -535,27 +537,19 @@ impl Renderer {
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
 
-        rayon::scope(|_| {
-            rayon::scope(|s| {
-                s.spawn(|_| {
-                    renderer_events_system.run();
-                });
-                s.spawn(|_| {
-                    vertex_mesh_system.run();
-                });
-                s.spawn(|_| {
-                    transform_events_system.run();
-                });
+        self.thread_pool.scope(|s| {
+            s.spawn(|_| {
+                renderer_events_system.run();
             });
-            rayon::scope(|_| {
-                hierarchy_propagation_system.run();
+            s.spawn(|_| {
+                vertex_mesh_system.run();
             });
-            rayon::scope(|s| {
-                s.spawn(|_| {
-                    world_transform_events_system.run();
-                });
+            s.spawn(|_| {
+                transform_events_system.run();
             });
         });
+        hierarchy_propagation_system.run();
+        world_transform_events_system.run();
 
         self.depth_per_object_pool = Some(renderer_events_system.depth_per_object_pool);
         self.g_per_pipeline_pools = Some(renderer_events_system.g_per_pipeline_pools);
@@ -658,78 +652,80 @@ impl Renderer {
 
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
-        self.depth_secondary_cls
-            .par_iter()
-            .enumerate()
-            .for_each(|(i, cmd_list)| {
-                let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
+        self.thread_pool.install(|| {
+            self.depth_secondary_cls
+                .par_iter()
+                .enumerate()
+                .for_each(|(i, cmd_list)| {
+                    let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
 
-                let mut cl = cmd_list.lock().unwrap();
+                    let mut cl = cmd_list.lock().unwrap();
 
-                cl.begin_secondary_graphics(
-                    true,
-                    &self.depth_render_pass,
-                    0,
-                    Some(self.depth_framebuffer.as_ref().unwrap()),
-                )
-                .unwrap();
+                    cl.begin_secondary_graphics(
+                        true,
+                        &self.depth_render_pass,
+                        0,
+                        Some(self.depth_framebuffer.as_ref().unwrap()),
+                    )
+                    .unwrap();
 
-                cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in);
+                    cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in);
 
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
+                    for j in 0..draw_count_step {
+                        let entity_index = i * draw_count_step + j;
+                        if entity_index >= object_count {
+                            break;
+                        }
+
+                        let renderable = renderables[entity_index];
+
+                        let transform = world_transform_comps.get(renderable);
+                        let renderer = renderer_comps.get(renderable);
+                        let vertex_mesh = vertex_mesh_comps.get(renderable);
+
+                        if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
+                            continue;
+                        }
+
+                        let transform = transform.unwrap();
+                        let renderer = renderer.unwrap();
+                        let vertex_mesh = vertex_mesh.unwrap();
+
+                        let vertex_mesh = &vertex_mesh.0;
+
+                        if vertex_mesh.vertex_count == 0 {
+                            continue;
+                        }
+
+                        let sphere = vertex_mesh.sphere();
+                        let center = sphere.center() + transform.position;
+                        let radius = sphere.radius() * glm::comp_max(&transform.scale);
+
+                        if !camera.is_sphere_visible(&center, radius) {
+                            continue;
+                        }
+
+                        curr_cull_objects.push(CullObject {
+                            sphere: na::Vector4::new(center.x, center.y, center.z, radius),
+                            id: entity_index as u32,
+                            _pad: [0; 3],
+                        });
+
+                        if renderer.translucent {
+                            cl.bind_pipeline(&self.depth_pipeline_r);
+                        } else {
+                            cl.bind_pipeline(&self.depth_pipeline_rw);
+                        }
+
+                        cl.bind_graphics_input(&self.depth_signature, 1, renderer.descriptor_sets[0]);
+                        cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
-                    let renderable = renderables[entity_index];
+                    cl.end().unwrap();
 
-                    let transform = world_transform_comps.get(renderable);
-                    let renderer = renderer_comps.get(renderable);
-                    let vertex_mesh = vertex_mesh_comps.get(renderable);
-
-                    if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
-                        continue;
-                    }
-
-                    let transform = transform.unwrap();
-                    let renderer = renderer.unwrap();
-                    let vertex_mesh = vertex_mesh.unwrap();
-
-                    let vertex_mesh = &vertex_mesh.0;
-
-                    if vertex_mesh.vertex_count == 0 {
-                        continue;
-                    }
-
-                    let sphere = vertex_mesh.sphere();
-                    let center = sphere.center() + transform.position;
-                    let radius = sphere.radius() * glm::comp_max(&transform.scale);
-
-                    if !camera.is_sphere_visible(&center, radius) {
-                        continue;
-                    }
-
-                    curr_cull_objects.push(CullObject {
-                        sphere: na::Vector4::new(center.x, center.y, center.z, radius),
-                        id: entity_index as u32,
-                        _pad: [0; 3],
-                    });
-
-                    if renderer.translucent {
-                        cl.bind_pipeline(&self.depth_pipeline_r);
-                    } else {
-                        cl.bind_pipeline(&self.depth_pipeline_rw);
-                    }
-
-                    cl.bind_graphics_input(&self.depth_signature, 1, renderer.descriptor_sets[0]);
-                    cl.bind_and_draw_vertex_mesh(&vertex_mesh);
-                }
-
-                cl.end().unwrap();
-
-                cull_objects.lock().unwrap().extend(curr_cull_objects);
-            });
+                    cull_objects.lock().unwrap().extend(curr_cull_objects);
+                });
+        });
 
         let cull_objects = cull_objects.into_inner().unwrap();
         let count = cull_objects.len() as u32;
@@ -756,57 +752,59 @@ impl Renderer {
             cull_back_faces: true,
         };
 
-        self.g_secondary_cls
-            .par_iter()
-            .enumerate()
-            .for_each(|(i, cmd_list)| {
-                let mut cl = cmd_list.lock().unwrap();
+        self.thread_pool.install(|| {
+            self.g_secondary_cls
+                .par_iter()
+                .enumerate()
+                .for_each(|(i, cmd_list)| {
+                    let mut cl = cmd_list.lock().unwrap();
 
-                cl.begin_secondary_graphics(
-                    true,
-                    &self.g_render_pass,
-                    0,
-                    Some(self.g_framebuffer.as_ref().unwrap()),
-                )
-                .unwrap();
+                    cl.begin_secondary_graphics(
+                        true,
+                        &self.g_render_pass,
+                        0,
+                        Some(self.g_framebuffer.as_ref().unwrap()),
+                    )
+                    .unwrap();
 
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
+                    for j in 0..draw_count_step {
+                        let entity_index = i * draw_count_step + j;
+                        if entity_index >= object_count {
+                            break;
+                        }
+
+                        let renderable = renderables[entity_index];
+
+                        let renderer = renderer_comps.get(renderable).unwrap();
+                        let vertex_mesh = vertex_mesh_comps.get(renderable);
+
+                        if vertex_mesh.is_none() {
+                            continue;
+                        }
+
+                        // Check query_pool occlusion results
+                        if self.visibility_host_buffer[entity_index] == 0 {
+                            continue;
+                        }
+
+                        let mesh = vertex_mesh.unwrap();
+                        let vertex_mesh = &mesh.0;
+
+                        let mat_pipeline = &renderer.mat_pipeline;
+                        let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
+                        let signature = pipeline.signature();
+
+                        let already_bound = cl.bind_pipeline(pipeline);
+                        if !already_bound {
+                            cl.bind_graphics_input(&signature, 0, self.g_per_frame_desc);
+                        }
+                        cl.bind_graphics_input(&signature, 1, renderer.descriptor_sets[1]);
+                        cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
-                    let renderable = renderables[entity_index];
-
-                    let renderer = renderer_comps.get(renderable).unwrap();
-                    let vertex_mesh = vertex_mesh_comps.get(renderable);
-
-                    if vertex_mesh.is_none() {
-                        continue;
-                    }
-
-                    // Check query_pool occlusion results
-                    if self.visibility_host_buffer[entity_index] == 0 {
-                        continue;
-                    }
-
-                    let mesh = vertex_mesh.unwrap();
-                    let vertex_mesh = &mesh.0;
-
-                    let mat_pipeline = &renderer.mat_pipeline;
-                    let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
-                    let signature = pipeline.signature();
-
-                    let already_bound = cl.bind_pipeline(pipeline);
-                    if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, self.g_per_frame_desc);
-                    }
-                    cl.bind_graphics_input(&signature, 1, renderer.descriptor_sets[1]);
-                    cl.bind_and_draw_vertex_mesh(&vertex_mesh);
-                }
-
-                cl.end().unwrap();
-            });
+                    cl.end().unwrap();
+                });
+        });
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) {
@@ -1460,6 +1458,11 @@ pub fn new(
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
 ) -> Result<Arc<Mutex<Renderer>>, DeviceError> {
+    let thread_pool = ThreadPoolBuilder::new()
+        .num_threads(num_cpus::get() / 2)
+        .build()
+        .unwrap();
+
     let scene = Scene::new();
 
     // TODO: pipeline cache management
@@ -1792,6 +1795,7 @@ pub fn new(
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
     let mut renderer = Renderer {
+        thread_pool,
         scene,
         surface: Arc::clone(surface),
         swapchain: None,

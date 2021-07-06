@@ -7,9 +7,18 @@ use nalgebra_glm::{BVec3, Vec2, Vec3};
 use crate::game::overworld::block_component::Facing;
 use crate::utils::{AllSame, AllSameBy};
 
-#[derive(Default)]
 pub struct BlockProps {
-    textured_model_id: u32,
+    pub textured_model_id: u32,
+    pub is_none: bool,
+}
+
+impl Default for BlockProps {
+    fn default() -> Self {
+        BlockProps {
+            textured_model_id: u32::MAX,
+            is_none: true,
+        }
+    }
 }
 
 impl BlockProps {

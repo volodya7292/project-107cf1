@@ -75,8 +75,6 @@ fn noise_test() {
 fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
 
-    // noise_test();
-
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
     let mut event_loop = EventLoop::new();

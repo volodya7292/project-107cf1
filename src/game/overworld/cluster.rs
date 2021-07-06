@@ -14,7 +14,7 @@ use vk_wrapper::PrimitiveTopology;
 use crate::game::overworld::block::BlockProps;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{Quad, Vertex};
-use crate::game::registry::GameRegistry;
+use crate::game::registry::Registry;
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
@@ -53,24 +53,6 @@ const fn sector_pos(index: usize) -> U32Vec3 {
 fn block_pos_to_sector_index(cell_pos: U32Vec3) -> usize {
     sector_index(cell_pos / (SECTOR_SIZE as u32))
 }
-
-// pub struct Entry {
-//     content_id: u16,
-//     secondary_content_id: u16,
-//     data_id: u16,
-//     orientation: [u8; 2],
-// }
-//
-// impl Default for Entry {
-//     fn default() -> Self {
-//         Self {
-//             content_id: 0,
-//             secondary_content_id: 0,
-//             data_id: 0,
-//             orientation: [0, 0],
-//         }
-//     }
-// }
 
 #[derive(Default, Copy, Clone)]
 pub struct Occluder(u8);
@@ -134,6 +116,11 @@ impl Sector {
         SECTOR_SIZE * SECTOR_SIZE * x as usize + SECTOR_SIZE * y as usize + z as usize
     }
 
+    /// Returns whether the sector has been changed since the previous `Cluster::update_mesh()` call.
+    pub fn changed(&self) -> bool {
+        self.changed
+    }
+
     fn set_block(&mut self, pos: U32Vec3, archetype_id: u32) -> BlockDataBuilder {
         let pos: Vector3<usize> = glm::convert(pos);
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
@@ -156,6 +143,7 @@ impl Sector {
         self.changed = true;
 
         let block_props = &mut self.block_props[pos.x][pos.y][pos.z];
+        block_props.is_none = false;
 
         BlockDataBuilder {
             entity_builder,
@@ -214,16 +202,21 @@ impl BlockDataBuilder<'_> {
 }
 
 pub struct Cluster {
-    block_registry: Arc<GameRegistry>,
+    registry: Arc<Registry>,
     sectors: [Sector; VOLUME_IN_SECTORS],
     entry_size: u32,
-    sides_changed: bool,
+    changed: bool,
     device: Arc<vkw::Device>,
 }
 
 impl Cluster {
     pub fn entry_size(&self) -> u32 {
         self.entry_size
+    }
+
+    /// Returns whether the cluster has been changed since the previous `Cluster::update_mesh()` call.
+    pub fn changed(&self) -> bool {
+        self.changed
     }
 
     pub fn get_block(&self, pos: U32Vec3) -> BlockData {
@@ -271,13 +264,14 @@ impl Cluster {
         let sector = self.sectors.get_mut(block_pos_to_sector_index(pos)).unwrap();
         let pos = pos.map(|v| v % (SECTOR_SIZE as u32));
 
-        self.sides_changed |=
-            glm::any(&pos.map(|v| v == 0)) || glm::any(&pos.map(|v| v == (SIZE as u32 - 1)));
+        self.changed = true;
+        // self.sides_changed |=
+        //     glm::any(&pos.map(|v| v == 0)) || glm::any(&pos.map(|v| v == (SIZE as u32 - 1)));
 
         sector.set_block(pos, archetype_id)
     }
 
-    pub fn paste_outer_side_occlusion(&mut self, side_cluster: &mut Cluster, side_offset: I32Vec3) {
+    pub fn paste_outer_side_occlusion(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         fn map_sector_pos(d: I32Vec3, k: u32, l: u32) -> U32Vec3 {
             let dx = (d.x != 0) as u32;
             let dy = (d.y != 0) as u32;
@@ -300,13 +294,18 @@ impl Cluster {
         let lb = -(SIZE as i32 * side_cluster.entry_size as i32);
         let rb = SIZE as i32 * self.entry_size as i32;
         let dir = side_offset.map(|v| (v == rb) as i32 - (v == lb) as i32);
+        // let side_changed_from_dir = {
+        //     let dir = -dir;
+        //     (((dir.x + 1) / 2) + dir.y.abs() * 2 + (dir.y + 1) / 2 + dir.z.abs() * 4 + (dir.z + 1) / 2)
+        //         as usize
+        // };
 
         if side_cluster.entry_size == self.entry_size {
             for i in 0..SIZE_IN_SECTORS {
                 for j in 0..SIZE_IN_SECTORS {
                     let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
                     let src_sector =
-                        &mut side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
+                        &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
 
                     for k in 0..SECTOR_SIZE {
                         for l in 0..SECTOR_SIZE {
@@ -317,6 +316,8 @@ impl Cluster {
                                 src_sector.occluders[src_p.x][src_p.y][src_p.z];
                         }
                     }
+
+                    dst_sector.changed = true;
                 }
             }
         } else if side_cluster.entry_size == (self.entry_size / 2) {
@@ -333,7 +334,7 @@ impl Cluster {
                     let dst_sector = &mut self.sectors
                         [sector_index(map_sector_pos(dir, is + i as u32 / 2, js + j as u32 / 2))];
                     let src_sector =
-                        &mut side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
+                        &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
 
                     let ks = (i % 2) * SECTOR_SIZE / 2;
                     let ls = (j % 2) * SECTOR_SIZE / 2;
@@ -353,6 +354,8 @@ impl Cluster {
                             dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] = occluder;
                         }
                     }
+
+                    dst_sector.changed = true;
                 }
             }
         } else if side_cluster.entry_size == (self.entry_size * 2) {
@@ -367,7 +370,7 @@ impl Cluster {
             for i in 0..SIZE_IN_SECTORS {
                 for j in 0..SIZE_IN_SECTORS {
                     let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
-                    let src_sector = &mut side_cluster.sectors
+                    let src_sector = &side_cluster.sectors
                         [sector_index(map_sector_pos(-dir, is + i as u32 / 2, js + j as u32 / 2))];
 
                     let ks = (i % 2) * SECTOR_SIZE / 2;
@@ -382,9 +385,13 @@ impl Cluster {
                                 src_sector.occluders[src_p.x][src_p.y][src_p.z];
                         }
                     }
+
+                    dst_sector.changed = true;
                 }
             }
         }
+
+        self.changed = true;
     }
 
     fn update_inner_side_occluders(&mut self) {
@@ -459,8 +466,13 @@ impl Cluster {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
                     let posf: Vec3 = glm::convert(pos);
                     let props = &sector.block_props[x][y][z];
+
+                    if props.is_none {
+                        continue;
+                    }
+
                     let model = self
-                        .block_registry
+                        .registry
                         .get_textured_block_model(props.textured_model_id())
                         .unwrap();
 
@@ -497,7 +509,13 @@ impl Cluster {
         (vertices, indices)
     }
 
-    pub fn update_mesh(&mut self, simplification_factor: f32) {
+    /// Note: sets `Cluster::changed` to `false` and `Sector::changed` to `false` for all the sectors in the cluster.
+    pub fn update_mesh(&mut self) {
+        if !self.changed {
+            return;
+        }
+        self.changed = false;
+
         self.update_inner_side_occluders();
 
         for x in 0..SIZE_IN_SECTORS {
@@ -507,33 +525,8 @@ impl Cluster {
                     let sector_changed = self.sectors[sector_index].changed;
 
                     if sector_changed {
-                        let sector = &self.sectors[sector_index];
-                        let mut sector_vertices = Vec::with_capacity(SECTOR_VOLUME);
-                        let mut sector_indices = Vec::with_capacity(SECTOR_VOLUME);
-
-                        let (mut temp_vertices, temp_indices) =
+                        let (sector_vertices, sector_indices) =
                             self.triangulate(U32Vec3::new(x as u32, y as u32, z as u32));
-
-                        let (temp_vertices, temp_indices) = {
-                            let options = mesh_simplifier::Options::new(
-                                0.125,
-                                10,
-                                (512 as f32 * (1.0 - simplification_factor)) as usize,
-                                4.0 * self.entry_size as f32,
-                                1.0,
-                                0.8,
-                            );
-
-                            // utils::calc_smooth_mesh_normals(&mut temp_vertices, &temp_indices);
-                            // let (mut vertices, indices) =
-                            //     mesh_simplifier::simplify(&temp_vertices, &temp_indices, &options);
-                            // utils::calc_smooth_mesh_normals(&mut vertices, &indices);
-                            // (vertices, indices)
-                            (temp_vertices, temp_indices)
-                        };
-
-                        sector_vertices.extend(temp_vertices);
-                        sector_indices.extend(temp_indices);
 
                         let sector = &mut self.sectors[sector_index];
 
@@ -607,15 +600,15 @@ impl Cluster {
     }
 }
 
-pub fn new(block_registry: &Arc<GameRegistry>, device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
-    let layout = block_registry.cluster_layout();
+pub fn new(registry: &Arc<Registry>, device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
+    let layout = registry.cluster_layout();
     let sectors: Vec<Sector> = (0..VOLUME_IN_SECTORS).map(|_| Sector::new(&layout)).collect();
 
     Cluster {
-        block_registry: Arc::clone(block_registry),
+        registry: Arc::clone(registry),
         sectors: sectors.try_into().ok().unwrap(),
         entry_size: node_size,
-        sides_changed: false,
+        changed: false,
         device: Arc::clone(device),
     }
 }

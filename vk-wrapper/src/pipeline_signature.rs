@@ -18,7 +18,7 @@ pub struct PipelineSignature {
 }
 
 impl PipelineSignature {
-    pub(in crate) fn create_native_pool(
+    pub(crate) fn create_native_pool(
         &self,
         set_layout_id: u32,
         max_sets: u32,

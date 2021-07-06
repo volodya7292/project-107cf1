@@ -93,7 +93,7 @@ impl ImageBarrier {
     }
 }
 
-pub(in crate) struct ImageWrapper {
+pub(crate) struct ImageWrapper {
     pub(crate) device: Arc<Device>,
     pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,

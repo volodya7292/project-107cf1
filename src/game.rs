@@ -1,6 +1,3 @@
-mod overworld;
-pub mod registry;
-
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Mutex};
@@ -12,14 +9,22 @@ use futures::FutureExt;
 use nalgebra as na;
 use simdnoise::NoiseBuilder;
 
+use overworld::Overworld;
+use registry::Registry;
+
+use crate::game::main_registry::MainRegistry;
+use crate::game::overworld_streamer::OverworldStreamer;
 use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
-use overworld::Overworld;
-use registry::GameRegistry;
 
-pub struct Program {
+mod main_registry;
+mod overworld;
+pub mod overworld_streamer;
+pub mod registry;
+
+pub struct Game {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
 
     pressed_keys: HashSet<winit::event::VirtualKeyCode>,
@@ -27,10 +32,11 @@ pub struct Program {
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
 
-    loaded_overworld: Option<Overworld>,
+    loaded_overworld: Option<Arc<Mutex<Overworld>>>,
+    overworld_streamer: Arc<Mutex<OverworldStreamer>>,
 }
 
-impl Program {
+impl Game {
     const MOVEMENT_SPEED: f32 = 32.0;
     const MOUSE_SENSITIVITY: f32 = 0.003;
 
@@ -97,49 +103,76 @@ impl Program {
             vel_up_down -= 1;
         }
 
-        let renderer = self.renderer.lock().unwrap();
-        let entity = renderer.get_active_camera();
-        let camera_comps = renderer.scene().storage::<component::Camera>();
-        let mut camera_comps = camera_comps.write().unwrap();
-        let camera = camera_comps.get_mut(entity).unwrap();
+        {
+            let renderer = self.renderer.lock().unwrap();
+            let entity = renderer.get_active_camera();
+            let camera_comps = renderer.scene().storage::<component::Camera>();
+            let mut camera_comps = camera_comps.write().unwrap();
+            let camera = camera_comps.get_mut(entity).unwrap();
 
-        let ms = Self::MOVEMENT_SPEED * delta_time as f32;
+            let ms = Self::MOVEMENT_SPEED * delta_time as f32;
 
-        let mut pos = camera.position();
-        pos.y += vel_up_down as f32 * ms;
+            let mut pos = camera.position();
+            pos.y += vel_up_down as f32 * ms;
 
-        camera.set_position(pos);
-        camera.move2(vel_front_back as f32 * ms, vel_left_right as f32 * ms);
+            camera.set_position(pos);
+            camera.move2(vel_front_back as f32 * ms, vel_left_right as f32 * ms);
 
-        let mut rotation = camera.rotation();
-        let cursor_offset = (
-            self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY,
-            self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
-        );
+            let mut rotation = camera.rotation();
+            let cursor_offset = (
+                self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY,
+                self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
+            );
 
-        rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
-        rotation.y += cursor_offset.0;
+            rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
+            rotation.y += cursor_offset.0;
 
-        camera.set_rotation(rotation);
+            camera.set_rotation(rotation);
 
-        self.cursor_rel = (0, 0);
+            self.cursor_rel = (0, 0);
+        }
 
         // dbg!(camera.position());
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
-            let game_tick_finished = Arc::clone(&self.game_tick_finished);
-            rayon::spawn(|| game_tick(game_tick_finished));
+            if let Some(overworld) = self.loaded_overworld.clone() {
+                let streamer = Arc::clone(&self.overworld_streamer);
+                let game_tick_finished = Arc::clone(&self.game_tick_finished);
+
+                {
+                    let mut streamer = streamer.lock().unwrap();
+                    let t0 = Instant::now();
+                    streamer.update_renderer(&mut overworld.lock().unwrap());
+                    let t1 = Instant::now();
+                    println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
+
+                    // TODO
+                    // streamer.set_stream_pos()
+                }
+
+                rayon::spawn(|| game_tick(streamer, overworld, game_tick_finished));
+            }
         }
     }
 }
 
-pub fn game_tick(finished: Arc<AtomicBool>) {
-    // todo
+pub fn game_tick(
+    streamer: Arc<Mutex<OverworldStreamer>>,
+    overworld: Arc<Mutex<Overworld>>,
+    finished: Arc<AtomicBool>,
+) {
+    let mut streamer = streamer.lock().unwrap();
+    let mut overworld = overworld.lock().unwrap();
+
+    let t0 = Instant::now();
+    streamer.update(&mut overworld);
+    let t1 = Instant::now();
+    println!("tick time: {}", (t1 - t0).as_secs_f64());
 
     finished.store(true, atomic::Ordering::Relaxed);
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Program {
+pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Game {
     // renderer.lock().unwrap().set_material(
     //     0,
     //     renderer::MaterialInfo {
@@ -177,24 +210,24 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         },
     );
 
-    let block_registry = {
-        let mut reg = GameRegistry::predefined();
-        Arc::new(reg)
-    };
-
+    let main_registry = Arc::new(MainRegistry::init());
     let game_tick_finished = Arc::new(AtomicBool::new(true));
-    let program = Program {
+    let mut overworld = Overworld::new(&main_registry, 0);
+    let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, &mat_pipelines.cluster());
+
+    overworld_streamer.set_render_distance(128);
+    overworld_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
+    // overworld_streamer.update(&mut overworld);
+    // overworld_streamer.update_renderer(&mut overworld);
+
+    let program = Game {
         renderer: Arc::clone(renderer),
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
         game_tick_finished: Arc::clone(&game_tick_finished),
-        loaded_overworld: None,
+        loaded_overworld: Some(Arc::new(Mutex::new(overworld))),
+        overworld_streamer: Arc::new(Mutex::new(overworld_streamer)),
     };
-
-    let mut world_streamer = overworld::streamer::new(&block_registry, renderer, &mat_pipelines.cluster());
-    world_streamer.set_render_distance(128);
-    world_streamer.set_stream_pos(na::Vector3::new(32.0, 32.0, 32.0));
-    world_streamer.on_update();
 
     /*let device = renderer.lock().unwrap().device().clone();
     let mut cluster = cluster::new(&device, 1);

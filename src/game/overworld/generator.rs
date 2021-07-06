@@ -11,7 +11,13 @@ pub fn generate_cluster(cluster: &mut Cluster, pos: I64Vec3, node_size: u32) {
         for y in 0..cluster::SIZE {
             for z in 0..cluster::SIZE {
                 let pos = U32Vec3::new(x as u32, y as u32, z as u32);
-                cluster.set_block(pos, 0).props(BlockProps::default()).build();
+                cluster
+                    .set_block(pos, 0)
+                    .props(BlockProps {
+                        textured_model_id: 0,
+                        is_none: false,
+                    })
+                    .build();
             }
         }
     }
