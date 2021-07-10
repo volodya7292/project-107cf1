@@ -1,5 +1,5 @@
-use crate::renderer::scene::Event;
-use crate::renderer::{component, scene, BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable};
+use crate::renderer::scene::{ComponentStorage, Event};
+use crate::renderer::{component, scene, BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable, Scene};
 use crate::utils::HashMap;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
@@ -92,7 +92,7 @@ impl RendererCompEventsSystem {
         g_per_pipeline_pools
             .get_mut(renderer.mat_pipeline.signature())
             .unwrap()
-            .free(renderer.descriptor_sets[2]);
+            .free(renderer.descriptor_sets[1]);
     }
 
     pub fn run(&mut self) {

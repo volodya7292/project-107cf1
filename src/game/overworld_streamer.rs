@@ -74,7 +74,7 @@ pub struct OverworldStreamer {
 pub trait ClusterProvider {}
 
 pub fn cluster_size(level: u32) -> u64 {
-    2_u64.pow(6 + level)
+    cluster::SIZE as u64 * 2_u64.pow(level)
 }
 
 fn cluster_aligned_pos(pos: DVec3, cluster_lod: u32) -> I64Vec3 {
@@ -130,7 +130,7 @@ impl OverworldStreamer {
                     for l in 0..2 {
                         let pos2 = pos + map_dst_pos(&glm::convert(d), k, l) * cluster_size0;
 
-                        if self.clusters[level - 1].contains_key(&pos2) {
+                        if overworld.loaded_clusters[level - 1].contains_key(&pos2) {
                             neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level - 1, pos2)));
                         }
                     }
@@ -227,6 +227,11 @@ impl OverworldStreamer {
         let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; LOD_LEVELS + 1];
 
         for i in 0..LOD_LEVELS {
+            // TODO: REMOVE
+            if i > 0 {
+                break;
+            }
+
             let cluster_size = cluster_size(i as u32) as i64;
             let stream_pos_i = cluster_aligned_pos(self.stream_pos, i as u32);
             let r = (R * cluster_size) as f64;
@@ -310,9 +315,10 @@ impl OverworldStreamer {
             for i in 0..LOD_LEVELS {
                 // Remove unnecessary clusters
                 overworld.loaded_clusters[i].retain(|pos, overworld_cluster| {
-                    if (curr_time_secs - overworld_cluster.creation_time_secs) < 5
-                        || cluster_layout[i].contains(pos)
-                    {
+                    // TODO: uncomment
+                    // if (curr_time_secs - overworld_cluster.creation_time_secs) < 5
+                    //     || cluster_layout[i].contains(pos)
+                    if cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64))) {
                         true
                     } else {
                         self.clusters_to_remove.push(ClusterToRemove {
@@ -426,7 +432,6 @@ impl OverworldStreamer {
                     {
                         if let Ok(mut cluster) = ocluster.cluster.lock() {
                             cluster.update_mesh();
-                            println!("GOV");
                             rcluster.mesh_changed.store(true, atomic::Ordering::Relaxed);
                             rcluster.changed.store(false, atomic::Ordering::Relaxed);
                         }
@@ -440,16 +445,18 @@ impl OverworldStreamer {
         let renderer = self.renderer.lock().unwrap();
         let scene = renderer.scene();
 
-        scene.remove_entities(
+        for v in &self.clusters_to_remove {
+            self.clusters[v.level as usize].remove(&v.pos);
+        }
+
+        crate::renderer::remove_entities(
+            scene,
             &self
                 .clusters_to_remove
                 .iter()
                 .map(|v| v.entity)
                 .collect::<Vec<u32>>(),
         );
-        for v in &self.clusters_to_remove {
-            self.clusters[v.level as usize].remove(&v.pos);
-        }
 
         let entities = scene.entities();
         let transform_comps = scene.storage::<component::Transform>();

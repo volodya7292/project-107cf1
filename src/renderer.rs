@@ -8,26 +8,24 @@ pub(crate) mod vertex_mesh;
 pub mod scene;
 mod systems;
 
-pub use scene::Scene;
-pub use vertex_mesh::VertexMesh;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::{iter, mem, slice};
 
-use crate::resource_file::{ResourceFile, ResourceRef};
-use crate::utils;
-use crate::utils::{HashMap, UInteger};
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
-use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use scene::ComponentStorage;
 use smallvec::SmallVec;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{iter, mem, slice};
+
+use material_pipeline::{MaterialPipeline, PipelineMapping};
+use scene::ComponentStorage;
+pub use scene::Scene;
 use texture_atlas::TextureAtlas;
+pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::{
     swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
@@ -40,6 +38,12 @@ use vk_wrapper::{
     PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, SubmitInfo, SubmitPacket,
     Subpass, Surface, Swapchain, WaitSemaphore,
 };
+
+use crate::resource_file::{ResourceFile, ResourceRef};
+use crate::utils;
+use crate::utils::{HashMap, UInteger};
+
+pub use scene::remove_entities;
 
 pub struct Renderer {
     thread_pool: ThreadPool,

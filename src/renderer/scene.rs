@@ -1,3 +1,4 @@
+use crate::renderer::component;
 use crate::utils::HashMap;
 use bit_set::BitSet;
 use std::any::{Any, TypeId};
@@ -13,7 +14,7 @@ trait Storage: Send + Sync {
     fn resize(&mut self, new_len: usize);
     fn as_ptr(&self) -> *const u8;
     fn as_mut_ptr(&mut self) -> *mut u8;
-    fn swap_remove(&mut self, index: usize);
+    unsafe fn set_none(&mut self, index: usize, dst: Option<*mut u8>);
     fn clear(&mut self);
 }
 
@@ -42,8 +43,12 @@ where
         Vec::as_mut_ptr(self) as *mut u8
     }
 
-    fn swap_remove(&mut self, index: usize) {
-        Vec::swap_remove(self, index);
+    unsafe fn set_none(&mut self, index: usize, dst: Option<*mut u8>) {
+        let old = mem::replace(&mut self[index], None);
+
+        if let Some(dst) = dst {
+            *(dst as *mut Option<T>) = old;
+        }
     }
 
     fn clear(&mut self) {
@@ -113,12 +118,16 @@ impl RawComponentStorage {
                 self.modified.insert(index);
             }
         } else {
-            if let Some(v) = self.removed.remove(&(index as u32)) {
-                self.removed_values.swap_remove(v as usize);
-                self.modified.insert(index);
-            } else {
-                self.created.insert(index);
-            }
+            // if let Some(v) = self.removed.remove(&(index as u32)) {
+            //     self.removed_values.set_none(v as usize, None);
+            //     self.modified.insert(index);
+            //     // self.created.insert(index);
+            // } else {
+            //     self.created.insert(index);
+            // }
+
+            // TODO (set_none): ??????
+            self.created.insert(index);
         }
 
         *val = Some(v);
@@ -145,6 +154,29 @@ impl RawComponentStorage {
                 .insert(index as u32, (self.removed_values.len() - 1) as u32);
         }
         self.modified.remove(index);
+    }
+
+    pub unsafe fn set_none(&mut self, index: u32) {
+        let index = index as usize;
+
+        let len = self.data.len();
+        if index >= len {
+            panic!("index (is {}) should be < len (is {})", index, len);
+        }
+
+        self.available.remove(index);
+        let mut dst = None;
+
+        // TODO: ??????? created?
+
+        if !self.created.remove(index) {
+            dst = Some(self.removed_values.push());
+            self.removed
+                .insert(index as u32, (self.removed_values.len() - 1) as u32);
+        }
+        self.modified.remove(index);
+
+        self.data.set_none(index as usize, dst);
     }
 
     /// # Safety
@@ -198,18 +230,18 @@ impl RawComponentStorage {
     pub unsafe fn events<T>(&mut self) -> Vec<Event<T>> {
         let mut events = Vec::with_capacity(self.created.len() + self.modified.len() + self.removed.len());
 
+        for (&index, &rm_i) in &self.removed {
+            let val = &mut *(self.removed_values.as_mut_ptr() as *mut Option<T>).add(rm_i as usize);
+
+            if let Some(val) = mem::replace(val, None) {
+                events.push(Event::Removed(index as u32, val));
+            }
+        }
         for index in &self.created {
             events.push(Event::Created(index as u32));
         }
         for index in &self.modified {
             events.push(Event::Modified(index as u32));
-        }
-        for (&index, &rm_i) in &self.removed {
-            let val = &mut *(self.removed_values.as_mut_ptr().offset(rm_i as isize) as *mut Option<T>);
-
-            if let Some(val) = mem::replace(val, None) {
-                events.push(Event::Removed(index as u32, val));
-            }
         }
 
         self.created.clear();
@@ -248,6 +280,10 @@ impl<'a, T> ComponentStorageMut<'a, T> {
 
     pub fn remove(&mut self, index: u32) {
         unsafe { self.raw.remove::<T>(index) };
+    }
+
+    pub fn set_none(&mut self, index: u32) {
+        unsafe { self.raw.set_none(index) };
     }
 
     pub fn get(&self, index: u32) -> Option<&T> {
@@ -374,8 +410,10 @@ impl Scene {
         for comps in self.comp_storages.lock().unwrap().values() {
             let mut comps = comps.write().unwrap();
 
-            for index in indices {
-                comps.data.swap_remove(*index as usize);
+            for &index in indices {
+                if comps.contains(index) {
+                    unsafe { comps.set_none(index) };
+                }
             }
         }
     }
@@ -404,4 +442,31 @@ impl Scene {
             _ty: Default::default(),
         }
     }
+}
+
+fn collect_children(
+    children: &mut Vec<u32>,
+    child_comps: &ComponentStorage<component::Children>,
+    entity: u32,
+) {
+    if let Some(childred_comp) = child_comps.get(entity) {
+        for &child in &childred_comp.0 {
+            collect_children(children, child_comps, child);
+        }
+        children.extend(&childred_comp.0);
+    }
+}
+
+/// Remove entities and their children from the scene recursively.
+pub fn remove_entities(scene: &Scene, entities: &[u32]) {
+    let child_comps = scene.storage::<component::Children>();
+    let child_comps = child_comps.read().unwrap();
+    let mut total_entites = entities.to_vec();
+
+    for &entity in entities {
+        collect_children(&mut total_entites, &child_comps, entity);
+    }
+
+    drop(child_comps);
+    scene.remove_entities(&total_entites);
 }
