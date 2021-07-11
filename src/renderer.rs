@@ -8,22 +8,23 @@ pub(crate) mod vertex_mesh;
 pub mod scene;
 mod systems;
 
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{iter, mem, slice};
-
+use crate::resource_file::{ResourceFile, ResourceRef};
+use crate::utils;
+use crate::utils::{HashMap, UInteger};
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
+use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use smallvec::SmallVec;
-
-use material_pipeline::{MaterialPipeline, PipelineMapping};
 use scene::ComponentStorage;
 pub use scene::Scene;
+use smallvec::SmallVec;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
@@ -38,12 +39,6 @@ use vk_wrapper::{
     PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, SubmitInfo, SubmitPacket,
     Subpass, Surface, Swapchain, WaitSemaphore,
 };
-
-use crate::resource_file::{ResourceFile, ResourceRef};
-use crate::utils;
-use crate::utils::{HashMap, UInteger};
-
-pub use scene::remove_entities;
 
 pub struct Renderer {
     thread_pool: ThreadPool,
@@ -178,6 +173,8 @@ enum BufferUpdate {
 
 struct Renderable {
     buffers: SmallVec<[Arc<DeviceBuffer>; 4]>,
+    pipe_signature: Arc<PipelineSignature>,
+    descriptor_sets: SmallVec<[DescriptorSet; 4]>,
 }
 
 #[derive(Debug)]
@@ -528,12 +525,6 @@ impl Renderer {
             model_transform_comps: self.scene.storage::<component::ModelTransform>(),
         };
 
-        let mut world_transform_events_system = systems::WorldTransformEventsSystem {
-            buffer_updates: Arc::clone(&buffer_updates3),
-            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
-            renderer_comps: self.scene.storage::<component::Renderer>(),
-        };
-
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
             parent_comps: self.scene.storage::<component::Parent>(),
             children_comps: self.scene.storage::<component::Children>(),
@@ -541,17 +532,21 @@ impl Renderer {
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
 
+        let mut world_transform_events_system = systems::WorldTransformEventsSystem {
+            buffer_updates: Arc::clone(&buffer_updates3),
+            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            renderer_comps: self.scene.storage::<component::Renderer>(),
+        };
+
         self.thread_pool.scope(|s| {
-            s.spawn(|_| {
-                renderer_events_system.run();
-            });
-            s.spawn(|_| {
-                vertex_mesh_system.run();
-            });
-            s.spawn(|_| {
-                transform_events_system.run();
-            });
+            s.spawn(|_| {});
+            s.spawn(|_| {});
+            s.spawn(|_| {});
         });
+        renderer_events_system.run();
+        vertex_mesh_system.run();
+        transform_events_system.run();
+
         hierarchy_propagation_system.run();
         world_transform_events_system.run();
 
@@ -645,13 +640,14 @@ impl Renderer {
 
     fn record_depth_cmd_lists(
         &mut self,
-        renderables: &[u32],
+        renderable_ids: &[u32],
         camera: &component::Camera,
+        renderables: &HashMap<u32, Renderable>,
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
         vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) -> u32 {
-        let object_count = renderables.len();
+        let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
 
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
@@ -681,11 +677,11 @@ impl Renderer {
                             break;
                         }
 
-                        let renderable = renderables[entity_index];
+                        let renderable_id = renderable_ids[entity_index];
 
-                        let transform = world_transform_comps.get(renderable);
-                        let renderer = renderer_comps.get(renderable);
-                        let vertex_mesh = vertex_mesh_comps.get(renderable);
+                        let transform = world_transform_comps.get(renderable_id);
+                        let renderer = renderer_comps.get(renderable_id);
+                        let vertex_mesh = vertex_mesh_comps.get(renderable_id);
 
                         if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
                             continue;
@@ -721,7 +717,9 @@ impl Renderer {
                             cl.bind_pipeline(&self.depth_pipeline_rw);
                         }
 
-                        cl.bind_graphics_input(&self.depth_signature, 1, renderer.descriptor_sets[0]);
+                        let renderable = &renderables[&renderable_id];
+
+                        cl.bind_graphics_input(&self.depth_signature, 1, renderable.descriptor_sets[0]);
                         cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
@@ -743,11 +741,12 @@ impl Renderer {
 
     fn record_g_cmd_lists(
         &self,
-        renderables: &[u32],
+        renderable_ids: &[u32],
+        renderables: &HashMap<u32, Renderable>,
         renderer_comps: &ComponentStorage<component::Renderer>,
         vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) {
-        let object_count = renderables.len();
+        let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
 
         let pipeline_mapping = PipelineMapping {
@@ -777,10 +776,10 @@ impl Renderer {
                             break;
                         }
 
-                        let renderable = renderables[entity_index];
+                        let renderable_id = renderable_ids[entity_index];
 
-                        let renderer = renderer_comps.get(renderable).unwrap();
-                        let vertex_mesh = vertex_mesh_comps.get(renderable);
+                        let renderer = renderer_comps.get(renderable_id).unwrap();
+                        let vertex_mesh = vertex_mesh_comps.get(renderable_id);
 
                         if vertex_mesh.is_none() {
                             continue;
@@ -797,12 +796,13 @@ impl Renderer {
                         let mat_pipeline = &renderer.mat_pipeline;
                         let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
                         let signature = pipeline.signature();
+                        let renderable = &renderables[&renderable_id];
 
                         let already_bound = cl.bind_pipeline(pipeline);
                         if !already_bound {
                             cl.bind_graphics_input(&signature, 0, self.g_per_frame_desc);
                         }
-                        cl.bind_graphics_input(&signature, 1, renderer.descriptor_sets[1]);
+                        cl.bind_graphics_input(&signature, 1, renderable.descriptor_sets[1]);
                         cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                     }
 
@@ -827,13 +827,16 @@ impl Renderer {
         let renderer_comps = renderer_comp.read().unwrap();
         let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
+        let renderables = Arc::clone(&self.renderables);
+        let renderables = renderables.lock().unwrap();
 
-        let renderables: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
-        let object_count = renderables.len() as u32;
+        let renderable_ids: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
+        let object_count = renderable_ids.len() as u32;
 
         let frustum_visible_objects = self.record_depth_cmd_lists(
-            &renderables,
+            &renderable_ids,
             &camera,
+            &renderables,
             &world_transform_comps,
             &renderer_comps,
             &vertex_mesh_comps,
@@ -979,7 +982,7 @@ impl Renderer {
             submit.wait().unwrap();
         }
 
-        self.record_g_cmd_lists(&renderables, &renderer_comps, &vertex_mesh_comps);
+        self.record_g_cmd_lists(&renderable_ids, &renderables, &renderer_comps, &vertex_mesh_comps);
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         self.compose_pool.update(

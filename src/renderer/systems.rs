@@ -17,14 +17,14 @@ pub(super) struct RendererCompEventsSystem {
 
 impl RendererCompEventsSystem {
     fn renderer_comp_created(
-        renderer: &mut component::Renderer,
+        renderable: &mut Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
-        renderer.descriptor_sets = vec![
+        renderable.descriptor_sets = smallvec![
             depth_per_object_pool.alloc().unwrap(),
             g_per_pipeline_pools
-                .get_mut(renderer.mat_pipeline.signature())
+                .get_mut(&renderable.pipe_signature)
                 .unwrap()
                 .alloc()
                 .unwrap(),
@@ -33,13 +33,14 @@ impl RendererCompEventsSystem {
 
     fn renderer_comp_modified(
         renderer: &mut component::Renderer,
+        renderable: &mut Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
         buffer_updates: &mut Vec<BufferUpdate>,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
-        let inputs = &mut renderer.descriptor_sets;
+        let inputs = &mut renderable.descriptor_sets;
 
         depth_per_object_pool.update(
             inputs[0],
@@ -84,15 +85,15 @@ impl RendererCompEventsSystem {
     }
 
     fn renderer_comp_removed(
-        renderer: &mut component::Renderer,
+        renderable: &Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     ) {
-        depth_per_object_pool.free(renderer.descriptor_sets[0]);
+        depth_per_object_pool.free(renderable.descriptor_sets[0]);
         g_per_pipeline_pools
-            .get_mut(renderer.mat_pipeline.signature())
+            .get_mut(&renderable.pipe_signature)
             .unwrap()
-            .free(renderer.descriptor_sets[1]);
+            .free(renderable.descriptor_sets[1]);
     }
 
     pub fn run(&mut self) {
@@ -105,39 +106,60 @@ impl RendererCompEventsSystem {
             match event {
                 scene::Event::Created(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
+                    let mut renderable = Renderable {
+                        buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
+                        pipe_signature: Arc::clone(renderer_comp.mat_pipeline.signature()),
+                        descriptor_sets: Default::default(),
+                    };
 
                     Self::renderer_comp_created(
-                        renderer_comp,
+                        &mut renderable,
                         &mut self.depth_per_object_pool,
                         &mut self.g_per_pipeline_pools,
                     );
                     Self::renderer_comp_modified(
                         renderer_comp,
+                        &mut renderable,
                         &mut self.depth_per_object_pool,
                         &mut self.g_per_pipeline_pools,
                         &mut *buffer_updates,
                     );
-                    renderables.insert(
-                        entity,
-                        Renderable {
-                            buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
-                        },
-                    );
+                    renderables.insert(entity, renderable);
                 }
                 scene::Event::Modified(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
+
+                    let renderable = &renderables[&entity];
+                    Self::renderer_comp_removed(
+                        &renderable,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
+                    );
+                    renderables.remove(&entity);
+
+                    let mut renderable = Renderable {
+                        buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
+                        pipe_signature: Arc::clone(renderer_comp.mat_pipeline.signature()),
+                        descriptor_sets: Default::default(),
+                    };
+                    Self::renderer_comp_created(
+                        &mut renderable,
+                        &mut self.depth_per_object_pool,
+                        &mut self.g_per_pipeline_pools,
+                    );
                     Self::renderer_comp_modified(
                         renderer_comp,
+                        &mut renderable,
                         &mut self.depth_per_object_pool,
                         &mut self.g_per_pipeline_pools,
                         &mut *buffer_updates,
                     );
-                    renderables.get_mut(&entity).unwrap().buffers =
-                        smallvec![Arc::clone(&renderer_comp.uniform_buffer)];
+                    renderables.insert(entity, renderable);
                 }
-                Event::Removed(entity, mut renderer) => {
+                Event::Removed(entity) => {
+                    let renderable = &renderables[&entity];
                     Self::renderer_comp_removed(
-                        &mut renderer,
+                        &renderable,
                         &mut self.depth_per_object_pool,
                         &mut self.g_per_pipeline_pools,
                     );
@@ -275,6 +297,8 @@ impl WorldTransformEventsSystem {
         let renderer_comps = self.renderer_comps.read().unwrap();
         let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
+        // TODO optimization: Make intersection between world_transform_comps & renderer_comps
+
         for event in events {
             match event {
                 Event::Created(entity) => {
@@ -334,13 +358,12 @@ impl HierarchyPropagationSystem {
         parent_comps.set(entity, component::Parent(parent_entity));
 
         if let Some(children) = children_comps.get(entity) {
-            assert_eq!(children.0.len(), 0);
-            for child in &children.0 {
+            for &child in children.get() {
                 Self::propagate_hierarchy(
                     world_transform,
                     world_transform_changed,
                     entity,
-                    *child,
+                    child,
                     parent_comps,
                     children_comps,
                     model_transform_comps,
@@ -356,6 +379,7 @@ impl HierarchyPropagationSystem {
         let mut model_transform_comps = self.model_transform_comps.write().unwrap();
         let mut world_transform_comps = self.world_transform_comps.write().unwrap();
 
+        // Collect global parents
         // !Parent & ModelTransform
         let entities: Vec<usize> = model_transform_comps
             .entries()
@@ -377,7 +401,7 @@ impl HierarchyPropagationSystem {
             };
 
             if let Some(children) = children_comps.get(entity as u32) {
-                for &child in &children.0 {
+                for &child in children.get() {
                     Self::propagate_hierarchy(
                         world_transform,
                         model_transform_changed,

@@ -1,16 +1,7 @@
-use std::f32::consts::FRAC_PI_2;
-use std::sync::atomic::AtomicBool;
-use std::sync::{atomic, Arc, Mutex};
-use std::thread;
-use std::time::Instant;
-
-use entity_data::EntityStorageLayout;
-use futures::FutureExt;
-use nalgebra as na;
-use simdnoise::NoiseBuilder;
-
-use overworld::Overworld;
-use registry::Registry;
+mod main_registry;
+mod overworld;
+pub mod overworld_streamer;
+pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld_streamer::OverworldStreamer;
@@ -18,13 +9,20 @@ use crate::renderer;
 use crate::renderer::material_pipelines::MaterialPipelines;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
+use entity_data::EntityStorageLayout;
+use futures::FutureExt;
+use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::DVec3;
-
-mod main_registry;
-mod overworld;
-pub mod overworld_streamer;
-pub mod registry;
+use overworld::Overworld;
+use registry::Registry;
+use simdnoise::NoiseBuilder;
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::AtomicBool;
+use std::sync::{atomic, Arc, Mutex};
+use std::thread;
+use std::time::Instant;
+use winit::event::VirtualKeyCode;
 
 pub struct Game {
     pub(crate) renderer: Arc<Mutex<Renderer>>,
@@ -38,6 +36,7 @@ pub struct Game {
     overworld_streamer: Arc<Mutex<OverworldStreamer>>,
 
     player_pos: DVec3,
+    change_stream_pos: bool,
 }
 
 impl Game {
@@ -57,6 +56,10 @@ impl Game {
                     if input.state == ElementState::Pressed {
                         if let Some(keycode) = input.virtual_keycode {
                             self.pressed_keys.insert(keycode);
+
+                            if keycode == VirtualKeyCode::L {
+                                self.change_stream_pos = !self.change_stream_pos;
+                            }
                         }
                     } else {
                         if let Some(keycode) = input.virtual_keycode {
@@ -153,7 +156,10 @@ impl Game {
                     // println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
 
                     let p = DVec3::new(self.player_pos.x, 0.0, self.player_pos.z);
-                    streamer.set_stream_pos(p);
+
+                    if self.change_stream_pos {
+                        streamer.set_stream_pos(p);
+                    }
                 }
 
                 rayon::spawn(|| game_tick(streamer, overworld, game_tick_finished));
@@ -233,6 +239,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         loaded_overworld: Some(Arc::new(Mutex::new(overworld))),
         overworld_streamer: Arc::new(Mutex::new(overworld_streamer)),
         player_pos: Default::default(),
+        change_stream_pos: true,
     };
 
     /*let device = renderer.lock().unwrap().device().clone();

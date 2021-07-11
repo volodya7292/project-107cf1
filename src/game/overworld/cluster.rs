@@ -1,16 +1,3 @@
-use std::collections::hash_map;
-use std::convert::TryInto;
-use std::sync::Arc;
-use std::{iter, mem, slice};
-
-use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
-use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
-use nalgebra_glm as glm;
-use smallvec::smallvec;
-
-use vk_wrapper as vkw;
-use vk_wrapper::PrimitiveTopology;
-
 use crate::game::overworld::block::BlockProps;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{Quad, Vertex};
@@ -20,8 +7,18 @@ use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{component, scene};
 use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
 use crate::{renderer, utils};
+use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
+use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
 use nalgebra::Vector3;
+use nalgebra_glm as glm;
+use smallvec::smallvec;
+use std::collections::hash_map;
+use std::convert::TryInto;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use std::sync::Arc;
+use std::{iter, mem, slice};
+use vk_wrapper as vkw;
+use vk_wrapper::PrimitiveTopology;
 
 const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 2;
@@ -548,6 +545,7 @@ pub struct UpdateSystemData<'a> {
     pub transform: scene::ComponentStorageMut<'a, component::Transform>,
     pub renderer: scene::ComponentStorageMut<'a, component::Renderer>,
     pub vertex_mesh: scene::ComponentStorageMut<'a, component::VertexMesh>,
+    pub parent: scene::ComponentStorageMut<'a, component::Parent>,
     pub children: scene::ComponentStorageMut<'a, component::Children>,
 }
 
@@ -556,23 +554,24 @@ impl Cluster {
         let transform_comps = &mut data.transform;
         let renderer_comps = &mut data.renderer;
         let vertex_mesh_comps = &mut data.vertex_mesh;
+        let parent_comps = &mut data.parent;
         let children_comps = &mut data.children;
         let entities = &mut data.entities;
 
         let is_children_empty = if let Some(children) = children_comps.get(entity) {
-            children.0.is_empty()
+            children.get().is_empty()
         } else {
             children_comps.set(entity, component::Children::default());
             true
         };
 
         if is_children_empty {
-            let children = children_comps.get_mut(entity).unwrap();
             let sector_count = SIZE_IN_SECTORS * SIZE_IN_SECTORS * SIZE_IN_SECTORS;
+            let children: Vec<u32> = (0..sector_count).into_iter().map(|_| entities.create()).collect();
 
-            children.0 = (0..sector_count).into_iter().map(|_| entities.create()).collect();
+            component::set_children(entity, &children, parent_comps, children_comps);
 
-            for (i, &ent) in children.0.iter().enumerate() {
+            for (i, &ent) in children.iter().enumerate() {
                 let p = index_1d_to_3d(i, SIZE_IN_SECTORS);
                 let node_size = self.entry_size as usize;
 
@@ -592,7 +591,7 @@ impl Cluster {
 
         let children = children_comps.get(entity).unwrap();
 
-        for (i, &ent) in children.0.iter().enumerate() {
+        for (i, &ent) in children.get().iter().enumerate() {
             let sector = &self.sectors[i];
 
             vertex_mesh_comps.set(ent, component::VertexMesh::new(&sector.vertex_mesh.raw()));

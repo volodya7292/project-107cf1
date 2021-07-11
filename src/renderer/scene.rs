@@ -14,7 +14,7 @@ trait Storage: Send + Sync {
     fn resize(&mut self, new_len: usize);
     fn as_ptr(&self) -> *const u8;
     fn as_mut_ptr(&mut self) -> *mut u8;
-    unsafe fn set_none(&mut self, index: usize, dst: Option<*mut u8>);
+    fn set_none(&mut self, index: usize);
     fn clear(&mut self);
 }
 
@@ -43,12 +43,8 @@ where
         Vec::as_mut_ptr(self) as *mut u8
     }
 
-    unsafe fn set_none(&mut self, index: usize, dst: Option<*mut u8>) {
-        let old = mem::replace(&mut self[index], None);
-
-        if let Some(dst) = dst {
-            *(dst as *mut Option<T>) = old;
-        }
+    fn set_none(&mut self, index: usize) {
+        self[index] = None;
     }
 
     fn clear(&mut self) {
@@ -62,15 +58,14 @@ pub struct RawComponentStorage {
     available: BitSet,
     created: BitSet,
     modified: BitSet,
-    removed: HashMap<u32, u32>,
-    removed_values: Box<dyn Storage>,
+    removed: BitSet,
 }
 
 #[derive(Copy, Clone)]
-pub enum Event<T> {
+pub enum Event {
     Created(u32),
     Modified(u32),
-    Removed(u32, T),
+    Removed(u32),
 }
 
 impl RawComponentStorage {
@@ -85,7 +80,6 @@ impl RawComponentStorage {
             created: Default::default(),
             modified: Default::default(),
             removed: Default::default(),
-            removed_values: Box::new(Vec::<Option<T>>::new()),
         }
     }
 
@@ -113,21 +107,18 @@ impl RawComponentStorage {
 
         let val = &mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize);
 
-        if !self.available.insert(index) {
+        let already_present = !self.available.insert(index);
+        if already_present {
             if !self.created.contains(index) {
                 self.modified.insert(index);
             }
         } else {
-            // if let Some(v) = self.removed.remove(&(index as u32)) {
-            //     self.removed_values.set_none(v as usize, None);
-            //     self.modified.insert(index);
-            //     // self.created.insert(index);
-            // } else {
-            //     self.created.insert(index);
-            // }
-
-            // TODO (set_none): ??????
-            self.created.insert(index);
+            let was_removed = self.removed.remove(index);
+            if was_removed {
+                self.modified.insert(index);
+            } else {
+                self.created.insert(index);
+            }
         }
 
         *val = Some(v);
@@ -135,7 +126,7 @@ impl RawComponentStorage {
 
     /// # Safety
     /// size of T must equal self.type_size
-    unsafe fn remove<T>(&mut self, index: u32) {
+    pub unsafe fn remove(&mut self, index: u32) {
         let index = index as usize;
 
         let len = self.data.len();
@@ -143,40 +134,14 @@ impl RawComponentStorage {
             panic!("index (is {}) should be < len (is {})", index, len);
         }
 
-        let val = &mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize);
-        let val = mem::replace(val, None);
+        self.data.set_none(index as usize);
 
         self.available.remove(index);
-
-        if !self.created.remove(index) {
-            *(self.removed_values.push() as *mut Option<T>) = val;
-            self.removed
-                .insert(index as u32, (self.removed_values.len() - 1) as u32);
-        }
         self.modified.remove(index);
-    }
-
-    pub unsafe fn set_none(&mut self, index: u32) {
-        let index = index as usize;
-
-        let len = self.data.len();
-        if index >= len {
-            panic!("index (is {}) should be < len (is {})", index, len);
+        let just_created = self.created.remove(index);
+        if !just_created {
+            self.removed.insert(index);
         }
-
-        self.available.remove(index);
-        let mut dst = None;
-
-        // TODO: ??????? created?
-
-        if !self.created.remove(index) {
-            dst = Some(self.removed_values.push());
-            self.removed
-                .insert(index as u32, (self.removed_values.len() - 1) as u32);
-        }
-        self.modified.remove(index);
-
-        self.data.set_none(index as usize, dst);
     }
 
     /// # Safety
@@ -199,8 +164,9 @@ impl RawComponentStorage {
         let index = index as usize;
 
         if self.available.contains(index) {
-            self.created.remove(index);
-            self.modified.insert(index);
+            if !self.created.contains(index) {
+                self.modified.insert(index);
+            }
 
             (&mut *(&mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize))).as_mut()
         } else {
@@ -227,15 +193,11 @@ impl RawComponentStorage {
     }
 
     /// Returns events and clears them internally
-    pub unsafe fn events<T>(&mut self) -> Vec<Event<T>> {
+    pub fn events(&mut self) -> Vec<Event> {
         let mut events = Vec::with_capacity(self.created.len() + self.modified.len() + self.removed.len());
 
-        for (&index, &rm_i) in &self.removed {
-            let val = &mut *(self.removed_values.as_mut_ptr() as *mut Option<T>).add(rm_i as usize);
-
-            if let Some(val) = mem::replace(val, None) {
-                events.push(Event::Removed(index as u32, val));
-            }
+        for index in &self.removed {
+            events.push(Event::Removed(index as u32));
         }
         for index in &self.created {
             events.push(Event::Created(index as u32));
@@ -247,7 +209,6 @@ impl RawComponentStorage {
         self.created.clear();
         self.modified.clear();
         self.removed.clear();
-        self.removed_values.clear();
 
         events
     }
@@ -279,11 +240,7 @@ impl<'a, T> ComponentStorageMut<'a, T> {
     }
 
     pub fn remove(&mut self, index: u32) {
-        unsafe { self.raw.remove::<T>(index) };
-    }
-
-    pub fn set_none(&mut self, index: u32) {
-        unsafe { self.raw.set_none(index) };
+        unsafe { self.raw.remove(index) };
     }
 
     pub fn get(&self, index: u32) -> Option<&T> {
@@ -298,7 +255,7 @@ impl<'a, T> ComponentStorageMut<'a, T> {
         unsafe { self.raw.get_mut_unchecked(index) }
     }
 
-    pub fn events(&mut self) -> Vec<Event<T>> {
+    pub fn events(&mut self) -> Vec<Event> {
         unsafe { self.raw.events() }
     }
 
@@ -412,7 +369,7 @@ impl Scene {
 
             for &index in indices {
                 if comps.contains(index) {
-                    unsafe { comps.set_none(index) };
+                    unsafe { comps.remove(index) };
                 }
             }
         }
@@ -442,31 +399,4 @@ impl Scene {
             _ty: Default::default(),
         }
     }
-}
-
-fn collect_children(
-    children: &mut Vec<u32>,
-    child_comps: &ComponentStorage<component::Children>,
-    entity: u32,
-) {
-    if let Some(childred_comp) = child_comps.get(entity) {
-        for &child in &childred_comp.0 {
-            collect_children(children, child_comps, child);
-        }
-        children.extend(&childred_comp.0);
-    }
-}
-
-/// Remove entities and their children from the scene recursively.
-pub fn remove_entities(scene: &Scene, entities: &[u32]) {
-    let child_comps = scene.storage::<component::Children>();
-    let child_comps = child_comps.read().unwrap();
-    let mut total_entites = entities.to_vec();
-
-    for &entity in entities {
-        collect_children(&mut total_entites, &child_comps, entity);
-    }
-
-    drop(child_comps);
-    scene.remove_entities(&total_entites);
 }

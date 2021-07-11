@@ -1,15 +1,3 @@
-use std::collections::hash_map;
-use std::sync::atomic::{AtomicBool, AtomicU32};
-use std::sync::{atomic, Arc, Mutex};
-use std::time::Instant;
-
-use crossbeam_channel as cb;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, Vec3};
-use rayon::prelude::*;
-use simdnoise::NoiseBuilder;
-use smallvec::SmallVec;
-
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
@@ -18,7 +6,17 @@ use crate::game::overworld::{generator, Overworld};
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
 use crate::utils::{HashMap, HashSet};
+use crossbeam_channel as cb;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, Vec3};
+use rayon::prelude::*;
+use simdnoise::NoiseBuilder;
+use smallvec::SmallVec;
+use std::collections::hash_map;
 use std::convert::TryInto;
+use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::{atomic, Arc, Mutex};
+use std::time::Instant;
 use vk_wrapper::Device;
 
 pub const LOD0_RANGE: usize = 128;
@@ -413,6 +411,8 @@ impl OverworldStreamer {
                 }
             }
 
+            // TODO: clean cluster boundaries before filling them to not keep old boundaries
+
             // Parallelize avoiding deadlocks between side clusters
             let side_pair_count = self.side_occlusion_work.sender.len();
             self.side_occlusion_work
@@ -449,7 +449,7 @@ impl OverworldStreamer {
             self.clusters[v.level as usize].remove(&v.pos);
         }
 
-        crate::renderer::remove_entities(
+        component::remove_entities(
             scene,
             &self
                 .clusters_to_remove
@@ -462,12 +462,14 @@ impl OverworldStreamer {
         let transform_comps = scene.storage::<component::Transform>();
         let renderer_comps = scene.storage::<component::Renderer>();
         let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
+        let parent_comps = scene.storage::<component::Parent>();
         let children_comps = scene.storage::<component::Children>();
 
         let mut entities = entities.lock().unwrap();
         let mut transform_comps = transform_comps.write().unwrap();
         let renderer_comps = renderer_comps.write().unwrap();
         let vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
+        let parent_comps = parent_comps.write().unwrap();
         let children_comps = children_comps.write().unwrap();
 
         let mut d = cluster::UpdateSystemData {
@@ -476,6 +478,7 @@ impl OverworldStreamer {
             transform: transform_comps,
             renderer: renderer_comps,
             vertex_mesh: vertex_mesh_comps,
+            parent: parent_comps,
             children: children_comps,
         };
 

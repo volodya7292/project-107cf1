@@ -55,7 +55,6 @@ impl Resource {
 
 pub struct Renderer {
     pub(in crate::renderer) mat_pipeline: Arc<MaterialPipeline>,
-    pub(in crate::renderer) descriptor_sets: Vec<vkw::DescriptorSet>,
 
     pub(in crate::renderer) uniform_buffer: Arc<vkw::DeviceBuffer>,
     // binding id -> Resource
@@ -71,7 +70,6 @@ impl Renderer {
     ) -> Renderer {
         Renderer {
             mat_pipeline: Arc::clone(&mat_pipeline),
-            descriptor_sets: vec![],
             uniform_buffer: device
                 .create_device_buffer(
                     vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
