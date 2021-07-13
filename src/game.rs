@@ -13,7 +13,7 @@ use entity_data::EntityStorageLayout;
 use futures::FutureExt;
 use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::DVec3;
+use nalgebra_glm::{DVec3, Vec3};
 use overworld::Overworld;
 use registry::Registry;
 use simdnoise::NoiseBuilder;
@@ -137,11 +137,10 @@ impl Game {
             camera.set_rotation(rotation);
 
             self.player_pos = glm::convert(pos);
-
             self.cursor_rel = (0, 0);
-        }
 
-        // dbg!(camera.position());
+            // dbg!(camera.position());
+        }
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
             if let Some(overworld) = self.loaded_overworld.clone() {
@@ -156,6 +155,7 @@ impl Game {
                     // println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
 
                     let p = DVec3::new(self.player_pos.x, 0.0, self.player_pos.z);
+                    // let p = DVec3::new(220.0, 0.0, -22.0);
 
                     if self.change_stream_pos {
                         streamer.set_stream_pos(p);

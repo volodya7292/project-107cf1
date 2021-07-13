@@ -5,9 +5,8 @@ mod qef;
 pub mod slice_split;
 pub mod value_noise;
 
-use nalgebra as na;
-
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+use nalgebra as na;
 pub use slice_split::SliceSplitImpl;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
@@ -40,29 +39,34 @@ pub trait Integer {
     fn div_floor(&self, other: Self) -> Self;
 }
 
-impl UInteger for u32 {
-    fn log2(&self) -> Self {
-        u32::BITS - self.leading_zeros() - 1
-    }
-}
-
-impl UInteger for u64 {
-    fn log2(&self) -> Self {
-        u64::BITS as u64 - self.leading_zeros() as u64 - 1
-    }
-}
-
-impl Integer for i64 {
-    fn div_floor(&self, other: i64) -> i64 {
-        let d = self / other;
-        let r = self % other;
-        if (r > 0 && other < 0) || (r < 0 && other > 0) {
-            d - 1
-        } else {
-            d
+macro_rules! u_integer_impl {
+    ($($t: ty)*) => ($(
+        impl UInteger for $t {
+            fn log2(&self) -> Self {
+                <$t>::BITS as $t - self.leading_zeros() as $t - 1
+            }
         }
-    }
+    )*)
 }
+macro_rules! integer_impl {
+    ($($t: ty)*) => ($(
+        impl Integer for $t {
+            #[inline]
+            fn div_floor(&self, other: Self) -> Self {
+                let d = self / other;
+                let r = self % other;
+                if (r > 0 && other < 0) || (r < 0 && other > 0) {
+                    d - 1
+                } else {
+                    d
+                }
+            }
+        }
+    )*)
+}
+
+u_integer_impl! { u8 u16 u32 u64 }
+integer_impl! { i8 i16 i32 i64 }
 
 pub trait AllSame {
     fn all_same(&mut self) -> bool;

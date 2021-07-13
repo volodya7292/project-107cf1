@@ -7,7 +7,7 @@ mod vertex_mesh;
 mod world_transform;
 
 use crate::renderer::scene::{ComponentStorage, ComponentStorageMut};
-use crate::renderer::{component, Scene};
+use crate::renderer::Scene;
 pub use camera::Camera;
 pub use model_transform::ModelTransform;
 pub use relation::Children;

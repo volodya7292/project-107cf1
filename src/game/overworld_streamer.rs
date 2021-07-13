@@ -5,10 +5,10 @@ use crate::game::overworld::{cluster, OverworldCluster, LOD_LEVELS};
 use crate::game::overworld::{generator, Overworld};
 use crate::renderer::material_pipeline::MaterialPipeline;
 use crate::renderer::{component, Renderer};
-use crate::utils::{HashMap, HashSet};
+use crate::utils::{HashMap, HashSet, Integer};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, Vec3};
 use rayon::prelude::*;
 use simdnoise::NoiseBuilder;
 use smallvec::SmallVec;
@@ -148,13 +148,13 @@ impl OverworldStreamer {
         }
 
         // Higher level
-        if level < LOD_LEVELS {
+        if level + 1 < LOD_LEVELS {
             for &d in &Facing::DIRECTIONS {
                 let d: I64Vec3 = glm::convert(d);
                 let pos2 = pos
                     + d * cluster_size2
                     + d.zip_map(&pos, |d, p| {
-                        (-cluster_size1 * (d > 0) as i64) - (p % cluster_size2 * (d == 0) as i64).abs()
+                        (-cluster_size1 * (d > 0) as i64) - (p.rem_euclid(cluster_size2) * (d == 0) as i64)
                     });
 
                 if glm::all(&pos2.map(|v| v % cluster_size2 != 0)) {
@@ -225,32 +225,29 @@ impl OverworldStreamer {
         let mut masks = [[[[false; D as usize]; D as usize]; D as usize]; LOD_LEVELS + 1];
 
         for i in 0..LOD_LEVELS {
-            // TODO: REMOVE
-            if i > 0 {
-                break;
-            }
-
             let cluster_size = cluster_size(i as u32) as i64;
-            let stream_pos_i = cluster_aligned_pos(self.stream_pos, i as u32);
+            let stream_pos_i0 = cluster_aligned_pos(self.stream_pos, i as u32);
+            let m = stream_pos_i0.map(|v| v.rem_euclid(2));
             let r = (R * cluster_size) as f64;
 
             // Fill mask of used clusters
             for x in 0..D {
                 for y in 0..D {
                     for z in 0..D {
-                        let pos = stream_pos_i + I64Vec3::new(x, y, z).add_scalar(-R);
+                        let xyz = I64Vec3::new(x, y, z);
+                        let pos = stream_pos_i0 + xyz.add_scalar(-R);
                         let center = (pos * cluster_size).add_scalar(cluster_size / 2);
-
                         let dist = glm::distance(&self.stream_pos, &glm::convert(center));
 
                         if dist <= r && dist <= (self.render_distance as f64) {
-                            let p = [(R + x) as usize / 2, (R + y) as usize / 2, (R + z) as usize / 2];
+                            let p: TVec3<usize> = glm::try_convert((xyz.add_scalar(R) + m) / 2).unwrap();
                             masks[i + 1][p[0]][p[1]][p[2]] = true;
                         }
                     }
                 }
             }
 
+            let stream_pos_i1 = cluster_aligned_pos(self.stream_pos, i as u32 + 1);
             let mask0 = &masks[i];
             let mask1 = &masks[i + 1];
 
@@ -262,8 +259,9 @@ impl OverworldStreamer {
                             continue;
                         }
 
-                        let pos = stream_pos_i + I64Vec3::new(x, y, z).add_scalar(-R) * 2;
-                        let in_p = [x * 2 - R, y * 2 - R, z * 2 - R];
+                        let xyz = glm::vec3(x, y, z);
+                        let pos = (stream_pos_i1 + xyz.add_scalar(-R)) * 2;
+                        let in_p = (xyz * 2).add_scalar(-R) - m;
 
                         if (in_p[0] < 0 || in_p[0] >= D)
                             || (in_p[1] < 0 || in_p[1] >= D)
@@ -272,14 +270,12 @@ impl OverworldStreamer {
                             continue;
                         }
 
-                        for x2 in 0..2_usize {
-                            for y2 in 0..2_usize {
-                                for z2 in 0..2_usize {
-                                    let p = [
-                                        in_p[0] as usize + x2,
-                                        in_p[1] as usize + y2,
-                                        in_p[2] as usize + z2,
-                                    ];
+                        for x2 in 0..2_i64 {
+                            for y2 in 0..2_i64 {
+                                for z2 in 0..2_i64 {
+                                    let xyz2 = glm::vec3(x2, y2, z2);
+                                    let p: TVec3<usize> = glm::try_convert(in_p + xyz2).unwrap();
+
                                     if p[0] < D as usize
                                         && p[1] < D as usize
                                         && p[2] < D as usize
@@ -288,7 +284,7 @@ impl OverworldStreamer {
                                         continue;
                                     }
 
-                                    let pos = pos + I64Vec3::new(x2 as i64, y2 as i64, z2 as i64);
+                                    let pos = pos + xyz2;
                                     cluster_layout[i].insert(pos);
                                 }
                             }
@@ -315,7 +311,7 @@ impl OverworldStreamer {
                 overworld.loaded_clusters[i].retain(|pos, overworld_cluster| {
                     // TODO: uncomment
                     // if (curr_time_secs - overworld_cluster.creation_time_secs) < 5
-                    //     || cluster_layout[i].contains(pos)
+                    //     || cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64)))
                     if cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64))) {
                         true
                     } else {
