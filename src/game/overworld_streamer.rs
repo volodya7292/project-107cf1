@@ -402,6 +402,8 @@ impl OverworldStreamer {
 
                         if available {
                             if cluster.changed() {
+                                rcluster.changed.store(true, atomic::Ordering::Relaxed);
+
                                 for p in self.find_side_clusters(overworld, ClusterPos::new(i, *pos)) {
                                     occlusion_clusters.insert(ClusterSidePair(ClusterPos::new(i, *pos), p));
                                 }
