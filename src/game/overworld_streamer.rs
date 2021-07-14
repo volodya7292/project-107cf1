@@ -21,7 +21,7 @@ use vk_wrapper::Device;
 
 pub const LOD0_RANGE: usize = 128;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct ClusterPos {
     level: usize,
     pos: I64Vec3,
@@ -33,6 +33,7 @@ impl ClusterPos {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct ClusterSidePair(ClusterPos, ClusterPos);
 
 struct SideOcclusionWorkSync {
@@ -45,12 +46,13 @@ struct RenderCluster {
     entity: u32,
     available: AtomicBool,
     changed: AtomicBool,
+    needs_occlusion_clean: AtomicBool,
+    needs_occlusion_fill: AtomicBool,
     mesh_changed: AtomicBool,
 }
 
 struct ClusterToRemove {
-    level: u32,
-    pos: I64Vec3,
+    cluster_pos: ClusterPos,
     entity: u32,
 }
 
@@ -65,7 +67,7 @@ pub struct OverworldStreamer {
     clusters: [HashMap<I64Vec3, RenderCluster>; LOD_LEVELS],
     side_occlusion_work: SideOcclusionWorkSync,
     clusters_to_remove: Vec<ClusterToRemove>,
-    clusters_to_add: Vec<(u32, I64Vec3)>,
+    clusters_to_add: Vec<ClusterPos>,
     clusters_in_process: Arc<AtomicU32>,
 }
 
@@ -94,14 +96,14 @@ impl OverworldStreamer {
             .max(Self::MIN_RENDER_DISTANCE);
     }
 
-    fn find_cluster_side_pairs(
+    fn find_side_clusters(
         &self,
         overworld: &Overworld,
         cluster_pos: ClusterPos,
-    ) -> SmallVec<[ClusterSidePair; 24]> {
+    ) -> SmallVec<[ClusterPos; 24]> {
         let level = cluster_pos.level;
         let pos = cluster_pos.pos;
-        let mut neighbours = SmallVec::<[ClusterSidePair; 24]>::new();
+        let mut neighbours = SmallVec::<[ClusterPos; 24]>::new();
 
         let cluster_size1 = cluster_size(level as u32) as i64;
         let cluster_size2 = cluster_size(level as u32 + 1) as i64;
@@ -129,7 +131,7 @@ impl OverworldStreamer {
                         let pos2 = pos + map_dst_pos(&glm::convert(d), k, l) * cluster_size0;
 
                         if overworld.loaded_clusters[level - 1].contains_key(&pos2) {
-                            neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level - 1, pos2)));
+                            neighbours.push(ClusterPos::new(level - 1, pos2));
                         }
                     }
                 }
@@ -142,7 +144,7 @@ impl OverworldStreamer {
                 let pos2 = pos + glm::convert::<I32Vec3, I64Vec3>(d) * cluster_size1;
 
                 if overworld.loaded_clusters[level].contains_key(&pos2) {
-                    neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level, pos2)));
+                    neighbours.push(ClusterPos::new(level, pos2));
                 }
             }
         }
@@ -162,7 +164,7 @@ impl OverworldStreamer {
                 }
 
                 if overworld.loaded_clusters[level + 1].contains_key(&pos2) {
-                    neighbours.push(ClusterSidePair(cluster_pos, ClusterPos::new(level + 1, pos2)));
+                    neighbours.push(ClusterPos::new(level + 1, pos2));
                 }
             }
         }
@@ -175,14 +177,10 @@ impl OverworldStreamer {
 
         while sync.process_count.load(atomic::Ordering::Relaxed) > 0 {
             if let Ok(pair) = sync.receiver.try_recv() {
-                let aval0 = self.clusters[pair.0.level][&pair.0.pos]
+                if !self.clusters[pair.1.level][&pair.1.pos]
                     .available
-                    .load(atomic::Ordering::Relaxed);
-                let aval1 = self.clusters[pair.1.level][&pair.1.pos]
-                    .available
-                    .load(atomic::Ordering::Relaxed);
-
-                if !aval0 || !aval1 {
+                    .load(atomic::Ordering::Relaxed)
+                {
                     sync.process_count.fetch_sub(1, atomic::Ordering::Relaxed);
                     continue;
                 }
@@ -193,20 +191,14 @@ impl OverworldStreamer {
                 let lock1 = cluster1.cluster.try_lock();
 
                 if lock0.is_ok() && lock1.is_ok() {
-                    let mut side_cluster = lock0.unwrap();
-                    let mut cluster = lock1.unwrap();
+                    let mut cluster = lock0.unwrap();
+                    let mut side_cluster = lock1.unwrap();
 
+                    let r_side_cluster = &self.clusters[pair.1.level][&pair.1.pos];
                     let offset = pair.0.pos - pair.1.pos;
-                    cluster.paste_outer_side_occlusion(&side_cluster, glm::convert(offset));
-                    let offset = pair.1.pos - pair.0.pos;
                     side_cluster.paste_outer_side_occlusion(&cluster, glm::convert(offset));
+                    r_side_cluster.changed.store(true, atomic::Ordering::Relaxed);
 
-                    self.clusters[pair.0.level][&pair.0.pos]
-                        .changed
-                        .store(true, atomic::Ordering::Relaxed);
-                    self.clusters[pair.1.level][&pair.1.pos]
-                        .changed
-                        .store(true, atomic::Ordering::Relaxed);
                     sync.process_count.fetch_sub(1, atomic::Ordering::Relaxed);
                 } else {
                     drop(lock0);
@@ -316,13 +308,21 @@ impl OverworldStreamer {
                         true
                     } else {
                         self.clusters_to_remove.push(ClusterToRemove {
-                            level: i as u32,
-                            pos: *pos,
+                            cluster_pos: ClusterPos { level: i, pos: *pos },
                             entity: self.clusters[i][pos].entity,
                         });
                         false
                     }
                 });
+
+                // Set `side_occlusion_changed` flags affected clusters
+                for cluster in &self.clusters_to_remove {
+                    for p in self.find_side_clusters(overworld, cluster.cluster_pos) {
+                        self.clusters[p.level][&p.pos]
+                            .needs_occlusion_clean
+                            .store(true, atomic::Ordering::Relaxed);
+                    }
+                }
 
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
@@ -344,10 +344,12 @@ impl OverworldStreamer {
                                 entity: u32::MAX,
                                 available: AtomicBool::new(false),
                                 changed: AtomicBool::new(false),
+                                needs_occlusion_clean: AtomicBool::new(false),
+                                needs_occlusion_fill: AtomicBool::new(true),
                                 mesh_changed: AtomicBool::new(false),
                             },
                         );
-                        self.clusters_to_add.push((i as u32, pos));
+                        self.clusters_to_add.push(ClusterPos::new(i, pos));
                     }
                 }
             }
@@ -387,6 +389,9 @@ impl OverworldStreamer {
 
         // Generate meshes
         {
+            // Collect changed clusters
+            let mut occlusion_clusters = HashSet::with_capacity(4096);
+
             for (i, level) in overworld.loaded_clusters.iter().enumerate() {
                 for (pos, ocluster) in level {
                     let rcluster = &self.clusters[i][pos];
@@ -394,22 +399,53 @@ impl OverworldStreamer {
 
                     if let Ok(cluster) = ocluster.cluster.try_lock() {
                         available = !ocluster.generating.load(atomic::Ordering::Relaxed);
-                        if available && cluster.changed() {
-                            rcluster.changed.store(true, atomic::Ordering::Relaxed);
-                            for p in self.find_cluster_side_pairs(overworld, ClusterPos::new(i, *pos)) {
-                                self.side_occlusion_work.sender.send(p).unwrap()
+
+                        if available {
+                            if cluster.changed() {
+                                for p in self.find_side_clusters(overworld, ClusterPos::new(i, *pos)) {
+                                    occlusion_clusters.insert(ClusterSidePair(ClusterPos::new(i, *pos), p));
+                                }
+                            }
+                            if rcluster
+                                .needs_occlusion_fill
+                                .swap(false, atomic::Ordering::Relaxed)
+                                || rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
+                            {
+                                for p in self.find_side_clusters(overworld, ClusterPos::new(i, *pos)) {
+                                    occlusion_clusters.insert(ClusterSidePair(p, ClusterPos::new(i, *pos)));
+                                }
                             }
                         }
                     } else {
                         available = false;
                     }
+
                     rcluster.available.store(available, atomic::Ordering::Relaxed);
                 }
             }
+            for p in occlusion_clusters {
+                self.side_occlusion_work.sender.send(p).unwrap();
+            }
 
-            // TODO: clean cluster boundaries before filling them to not keep old boundaries
+            // Clean cluster outer side occlusion to not keep old occlusion before filling
+            self.clusters.par_iter().enumerate().for_each(|(i, level)| {
+                level.par_iter().for_each(|(pos, rcluster)| {
+                    if rcluster.available.load(atomic::Ordering::Relaxed)
+                        && rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
+                    {
+                        if let Some(ocluster) = overworld.loaded_clusters[i].get(pos) {
+                            let mut cluster = ocluster.cluster.lock().unwrap();
+                            cluster.clean_outer_side_occlusion();
+                            rcluster
+                                .needs_occlusion_clean
+                                .store(false, atomic::Ordering::Relaxed)
+                        }
+                    }
+                });
+            });
 
-            // Parallelize avoiding deadlocks between side clusters
+            // Update cluster outer side occlusions
+            // Note: parallelize avoiding deadlocks between side clusters
             let side_pair_count = self.side_occlusion_work.sender.len();
             self.side_occlusion_work
                 .process_count
@@ -442,7 +478,7 @@ impl OverworldStreamer {
         let scene = renderer.scene();
 
         for v in &self.clusters_to_remove {
-            self.clusters[v.level as usize].remove(&v.pos);
+            self.clusters[v.cluster_pos.level].remove(&v.cluster_pos.pos);
         }
 
         component::remove_entities(
@@ -478,7 +514,8 @@ impl OverworldStreamer {
             children: children_comps,
         };
 
-        for (level, pos) in &self.clusters_to_add {
+        for cluster_pos in &self.clusters_to_add {
+            let pos = &cluster_pos.pos;
             let transform_comp = component::Transform::new(
                 Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
                 Vec3::new(0.0, 0.0, 0.0),
@@ -487,7 +524,7 @@ impl OverworldStreamer {
 
             let entity = d.entities.create();
             d.transform.set(entity, transform_comp);
-            self.clusters[*level as usize].get_mut(&pos).unwrap().entity = entity;
+            self.clusters[cluster_pos.level].get_mut(pos).unwrap().entity = entity;
         }
 
         for (i, level) in overworld.loaded_clusters.iter().enumerate() {

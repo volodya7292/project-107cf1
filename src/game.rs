@@ -85,8 +85,6 @@ impl Game {
     }
 
     pub fn on_update(&mut self, delta_time: f64) {
-        use winit::event::VirtualKeyCode;
-
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
@@ -155,7 +153,7 @@ impl Game {
                     // println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
 
                     let p = DVec3::new(self.player_pos.x, 0.0, self.player_pos.z);
-                    // let p = DVec3::new(220.0, 0.0, -22.0);
+                    // let p = DVec3::new(43.0, 0.0, -44.0);
 
                     if self.change_stream_pos {
                         streamer.set_stream_pos(p);

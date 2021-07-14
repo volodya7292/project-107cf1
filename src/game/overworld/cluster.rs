@@ -69,6 +69,10 @@ impl Occluder {
     pub fn occludes_side(&self, facing: Facing) -> bool {
         ((self.0 >> (facing as u8)) & 1) == 1
     }
+
+    pub fn clear_side(&mut self, facing: Facing) {
+        self.0 &= !(1 << (facing as u8));
+    }
 }
 
 impl BitOr for Occluder {
@@ -266,6 +270,36 @@ impl Cluster {
         //     glm::any(&pos.map(|v| v == 0)) || glm::any(&pos.map(|v| v == (SIZE as u32 - 1)));
 
         sector.set_block(pos, archetype_id)
+    }
+
+    pub fn clean_outer_side_occlusion(&mut self) {
+        macro_rules! side_loop {
+            ($i: ident, $j: ident, $k: ident, $l: ident, $cx: expr, $cy: expr, $cz: expr, $x: expr, $y: expr, $z: expr, $oi: expr) => {
+                for $i in 0..SIZE_IN_SECTORS as u32 {
+                    for $j in 0..SIZE_IN_SECTORS as u32 {
+                        let sector = &mut self.sectors[sector_index(U32Vec3::new($cx, $cy, $cz))];
+                        sector.changed = true;
+
+                        for $k in 0..SECTOR_SIZE {
+                            for $l in 0..SECTOR_SIZE {
+                                sector.occluders[$x][$y][$z].clear_side($oi);
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        let n = (SIZE_IN_SECTORS - 1) as u32;
+        let m = ALIGNED_SECTOR_SIZE - 1;
+
+        side_loop!(i, j, k, l, i, j, 0, k + 1, l + 1, 0, Facing::PositiveZ);
+        side_loop!(i, j, k, l, i, 0, j, k + 1, 0, l + 1, Facing::PositiveY);
+        side_loop!(i, j, k, l, 0, i, j, 0, k + 1, l + 1, Facing::PositiveX);
+        side_loop!(i, j, k, l, i, j, n, k + 1, l + 1, m, Facing::NegativeZ);
+        side_loop!(i, j, k, l, i, n, j, k + 1, m, l + 1, Facing::NegativeY);
+        side_loop!(i, j, k, l, n, i, j, m, k + 1, l + 1, Facing::NegativeX);
+        self.changed = true;
     }
 
     pub fn paste_outer_side_occlusion(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
