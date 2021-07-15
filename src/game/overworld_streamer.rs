@@ -46,7 +46,9 @@ struct RenderCluster {
     entity: u32,
     available: AtomicBool,
     changed: AtomicBool,
+    // TODO OPTIMIZE: specify which side needs to be cleaned
     needs_occlusion_clean: AtomicBool,
+    // TODO OPTIMIZE: specify which side needs to be filled
     needs_occlusion_fill: AtomicBool,
     mesh_changed: AtomicBool,
 }
@@ -177,10 +179,11 @@ impl OverworldStreamer {
 
         while sync.process_count.load(atomic::Ordering::Relaxed) > 0 {
             if let Ok(pair) = sync.receiver.try_recv() {
-                if !self.clusters[pair.1.level][&pair.1.pos]
-                    .available
-                    .load(atomic::Ordering::Relaxed)
-                {
+                let r_side_cluster = &self.clusters[pair.1.level][&pair.1.pos];
+                if !r_side_cluster.available.load(atomic::Ordering::Relaxed) {
+                    r_side_cluster
+                        .needs_occlusion_fill
+                        .store(true, atomic::Ordering::Relaxed);
                     sync.process_count.fetch_sub(1, atomic::Ordering::Relaxed);
                     continue;
                 }
@@ -194,7 +197,6 @@ impl OverworldStreamer {
                     let mut cluster = lock0.unwrap();
                     let mut side_cluster = lock1.unwrap();
 
-                    let r_side_cluster = &self.clusters[pair.1.level][&pair.1.pos];
                     let offset = pair.0.pos - pair.1.pos;
                     side_cluster.paste_outer_side_occlusion(&cluster, glm::convert(offset));
                     r_side_cluster.changed.store(true, atomic::Ordering::Relaxed);
@@ -395,34 +397,35 @@ impl OverworldStreamer {
             for (i, level) in overworld.loaded_clusters.iter().enumerate() {
                 for (pos, ocluster) in level {
                     let rcluster = &self.clusters[i][pos];
-                    let available;
-
-                    if let Ok(cluster) = ocluster.cluster.try_lock() {
-                        available = !ocluster.generating.load(atomic::Ordering::Relaxed);
-
-                        if available {
-                            if cluster.changed() {
-                                rcluster.changed.store(true, atomic::Ordering::Relaxed);
-
-                                for p in self.find_side_clusters(overworld, ClusterPos::new(i, *pos)) {
-                                    occlusion_clusters.insert(ClusterSidePair(ClusterPos::new(i, *pos), p));
-                                }
-                            }
-                            if rcluster
-                                .needs_occlusion_fill
-                                .swap(false, atomic::Ordering::Relaxed)
-                                || rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
-                            {
-                                for p in self.find_side_clusters(overworld, ClusterPos::new(i, *pos)) {
-                                    occlusion_clusters.insert(ClusterSidePair(p, ClusterPos::new(i, *pos)));
-                                }
-                            }
-                        }
-                    } else {
-                        available = false;
+                    let available = !ocluster.generating.load(atomic::Ordering::Relaxed);
+                    rcluster.available.store(available, atomic::Ordering::Relaxed);
+                    if !available {
+                        continue;
                     }
 
-                    rcluster.available.store(available, atomic::Ordering::Relaxed);
+                    let cluster = ocluster.cluster.lock().unwrap();
+                    let cluster_pos = ClusterPos::new(i, *pos);
+                    let cluster_changed = cluster.changed();
+                    let occlusion_needs = rcluster
+                        .needs_occlusion_fill
+                        .swap(false, atomic::Ordering::Relaxed)
+                        || rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed);
+
+                    if cluster_changed || occlusion_needs {
+                        let side_clusters = self.find_side_clusters(overworld, cluster_pos);
+
+                        if cluster_changed {
+                            rcluster.changed.store(true, atomic::Ordering::Relaxed);
+                            for p in &side_clusters {
+                                occlusion_clusters.insert(ClusterSidePair(cluster_pos, *p));
+                            }
+                        }
+                        if occlusion_needs {
+                            for p in &side_clusters {
+                                occlusion_clusters.insert(ClusterSidePair(*p, cluster_pos));
+                            }
+                        }
+                    }
                 }
             }
             for p in occlusion_clusters {
@@ -430,21 +433,25 @@ impl OverworldStreamer {
             }
 
             // Clean cluster outer side occlusion to not keep old occlusion before filling
-            self.clusters.par_iter().enumerate().for_each(|(i, level)| {
-                level.par_iter().for_each(|(pos, rcluster)| {
-                    if rcluster.available.load(atomic::Ordering::Relaxed)
-                        && rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
-                    {
-                        if let Some(ocluster) = overworld.loaded_clusters[i].get(pos) {
+            overworld
+                .loaded_clusters
+                .par_iter()
+                .enumerate()
+                .for_each(|(i, level)| {
+                    level.par_iter().for_each(|(pos, ocluster)| {
+                        let rcluster = &self.clusters[i][pos];
+
+                        if rcluster.available.load(atomic::Ordering::Relaxed)
+                            && rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
+                        {
                             let mut cluster = ocluster.cluster.lock().unwrap();
                             cluster.clean_outer_side_occlusion();
                             rcluster
                                 .needs_occlusion_clean
                                 .store(false, atomic::Ordering::Relaxed)
                         }
-                    }
+                    });
                 });
-            });
 
             // Update cluster outer side occlusions
             // Note: parallelize avoiding deadlocks between side clusters
@@ -456,22 +463,25 @@ impl OverworldStreamer {
                 self.cluster_update_worker(overworld);
             });
 
-            for (i, level) in overworld.loaded_clusters.iter().enumerate() {
-                let rlevel = &self.clusters[i];
+            overworld
+                .loaded_clusters
+                .par_iter()
+                .enumerate()
+                .for_each(|(i, level)| {
+                    let rlevel = &self.clusters[i];
 
-                level.par_iter().for_each(|(pos, ocluster)| {
-                    let rcluster = &rlevel[pos];
-                    if rcluster.changed.load(atomic::Ordering::Relaxed)
-                        && rcluster.available.load(atomic::Ordering::Relaxed)
-                    {
-                        if let Ok(mut cluster) = ocluster.cluster.lock() {
+                    level.par_iter().for_each(|(pos, ocluster)| {
+                        let rcluster = &rlevel[pos];
+                        if rcluster.changed.load(atomic::Ordering::Relaxed)
+                            && rcluster.available.load(atomic::Ordering::Relaxed)
+                        {
+                            let mut cluster = ocluster.cluster.lock().unwrap();
                             cluster.update_mesh();
                             rcluster.mesh_changed.store(true, atomic::Ordering::Relaxed);
                             rcluster.changed.store(false, atomic::Ordering::Relaxed);
                         }
-                    }
+                    });
                 });
-            }
         }
     }
 
