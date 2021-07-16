@@ -15,17 +15,20 @@ use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, Vec3};
 use overworld::Overworld;
+use rayon::prelude::*;
+use rayon::ThreadPool;
 use registry::Registry;
 use simdnoise::NoiseBuilder;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Mutex};
 use std::thread;
+use std::thread::Thread;
 use std::time::Instant;
 use winit::event::VirtualKeyCode;
 
 pub struct Game {
-    pub(crate) renderer: Arc<Mutex<Renderer>>,
+    renderer: Arc<Mutex<Renderer>>,
 
     pressed_keys: HashSet<winit::event::VirtualKeyCode>,
 
@@ -84,7 +87,7 @@ impl Game {
         self.pressed_keys.contains(&keycode)
     }
 
-    pub fn on_update(&mut self, delta_time: f64) {
+    pub fn on_update(&mut self, delta_time: f64, thread_pool: &ThreadPool) {
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
@@ -136,8 +139,6 @@ impl Game {
 
             self.player_pos = glm::convert(pos);
             self.cursor_rel = (0, 0);
-
-            // dbg!(camera.position());
         }
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
@@ -150,7 +151,10 @@ impl Game {
                     let t0 = Instant::now();
                     streamer.update_renderer(&mut overworld.lock().unwrap());
                     let t1 = Instant::now();
-                    // println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
+                    let el = (t1 - t0).as_secs_f64();
+                    if el > 0.001 {
+                        println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
+                    }
 
                     let p = DVec3::new(self.player_pos.x, 0.0, self.player_pos.z);
                     // let p = DVec3::new(43.0, 0.0, -44.0);
@@ -160,7 +164,7 @@ impl Game {
                     }
                 }
 
-                rayon::spawn(|| game_tick(streamer, overworld, game_tick_finished));
+                thread_pool.spawn(|| game_tick(streamer, overworld, game_tick_finished));
             }
         }
     }

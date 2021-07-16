@@ -257,13 +257,6 @@ impl OverworldStreamer {
                         let pos = (stream_pos_i1 + xyz.add_scalar(-R)) * 2;
                         let in_p = (xyz * 2).add_scalar(-R) - m;
 
-                        if (in_p[0] < 0 || in_p[0] >= D)
-                            || (in_p[1] < 0 || in_p[1] >= D)
-                            || (in_p[2] < 0 || in_p[2] >= D)
-                        {
-                            continue;
-                        }
-
                         for x2 in 0..2_i64 {
                             for y2 in 0..2_i64 {
                                 for z2 in 0..2_i64 {
@@ -317,7 +310,7 @@ impl OverworldStreamer {
                     }
                 });
 
-                // Set `side_occlusion_changed` flags affected clusters
+                // Set `side_occlusion_changed` flag in affected clusters
                 for cluster in &self.clusters_to_remove {
                     for p in self.find_side_clusters(overworld, cluster.cluster_pos) {
                         self.clusters[p.level][&p.pos]
@@ -493,6 +486,7 @@ impl OverworldStreamer {
             self.clusters[v.cluster_pos.level].remove(&v.cluster_pos.pos);
         }
 
+        // TODO: remove renderer of a cluster only if lower/higher-lod replacement clusters are already generated
         component::remove_entities(
             scene,
             &self

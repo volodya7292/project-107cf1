@@ -16,6 +16,7 @@ use crate::utils::noise::ParamNoise;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
 use noise::{NoiseFn, Seedable};
 use rand::Rng;
+use rayon::ThreadPoolBuilder;
 
 mod utils;
 
@@ -74,6 +75,16 @@ fn noise_test() {
 
 fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
+
+    let thread_count = num_cpus::get_physical().max(2) / 2;
+    let render_thread_pool = ThreadPoolBuilder::new()
+        .num_threads(thread_count / 2)
+        .build()
+        .unwrap();
+    let update_thread_pool = ThreadPoolBuilder::new()
+        .num_threads(thread_count / 2)
+        .build()
+        .unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
@@ -276,11 +287,11 @@ fn main() {
                 _ => {}
             },
             Event::MainEventsCleared => {
-                program.on_update(delta_time);
+                program.on_update(delta_time, &update_thread_pool);
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
-                renderer.lock().unwrap().on_draw();
+                render_thread_pool.install(|| renderer.lock().unwrap().on_draw());
             }
             Event::RedrawEventsCleared => {
                 let end_t = Instant::now();
