@@ -1,59 +1,17 @@
-use crate::renderer::component;
 use crate::utils::HashMap;
 use bit_set::BitSet;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
-use std::mem;
 use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
-
-trait Storage: Send + Sync {
-    fn push(&mut self) -> *mut u8;
-    fn len(&self) -> usize;
-    fn resize(&mut self, new_len: usize);
-    fn as_ptr(&self) -> *const u8;
-    fn as_mut_ptr(&mut self) -> *mut u8;
-    fn set_none(&mut self, index: usize);
-    fn clear(&mut self);
-}
-
-impl<T> Storage for Vec<Option<T>>
-where
-    T: Send + Sync,
-{
-    fn push(&mut self) -> *mut u8 {
-        Vec::push(self, None);
-        self.last_mut().unwrap() as *mut Option<T> as *mut u8
-    }
-
-    fn len(&self) -> usize {
-        Vec::len(self)
-    }
-
-    fn resize(&mut self, new_len: usize) {
-        Vec::resize_with(self, new_len, || None);
-    }
-
-    fn as_ptr(&self) -> *const u8 {
-        Vec::as_ptr(self) as *const u8
-    }
-
-    fn as_mut_ptr(&mut self) -> *mut u8 {
-        Vec::as_mut_ptr(self) as *mut u8
-    }
-
-    fn set_none(&mut self, index: usize) {
-        self[index] = None;
-    }
-
-    fn clear(&mut self) {
-        Vec::clear(self);
-    }
-}
+use std::{mem, ptr};
 
 pub struct RawComponentStorage {
-    data: Box<dyn Storage>,
+    data: Vec<u8>,
+    elem_size: usize,
+    drop_func: fn(*mut u8),
+    needs_drop: bool,
     entity_allocated_count: Arc<AtomicU32>,
     available: BitSet,
     created: BitSet,
@@ -73,8 +31,15 @@ impl RawComponentStorage {
     where
         T: 'static + Send + Sync,
     {
+        let drop_func = |p: *mut u8| unsafe { ptr::drop_in_place(p as *mut T) };
+        let elem_size = mem::size_of::<T>();
+        let entity_count = entity_allocated_count.load(atomic::Ordering::Relaxed) as usize;
+
         RawComponentStorage {
-            data: Box::new(Vec::<Option<T>>::new()),
+            data: vec![0; entity_count * elem_size],
+            elem_size,
+            drop_func,
+            needs_drop: mem::needs_drop::<T>(),
             entity_allocated_count: Arc::clone(entity_allocated_count),
             available: Default::default(),
             created: Default::default(),
@@ -83,32 +48,36 @@ impl RawComponentStorage {
         }
     }
 
-    /// Checks if component is present
+    /// Checks if a component is available.
     pub fn contains(&self, index: u32) -> bool {
         self.available.contains(index as usize)
     }
 
-    /// Creates or modifies component
+    /// Creates or modifies a component.
     ///
-    /// # Safety
-    /// size of T must equal self.type_size
+    /// # Safety:
+    ///
+    /// T must match the type of component.
     pub unsafe fn set<T>(&mut self, index: u32, v: T) {
         let index = index as usize;
+        let index_b = index * self.elem_size;
 
         let len = self.data.len();
-        if index >= len {
-            let new_len = self.entity_allocated_count.load(atomic::Ordering::Relaxed) as usize;
-            self.data.resize(new_len);
+        if index_b >= len {
+            let new_count = self.entity_allocated_count.load(atomic::Ordering::Relaxed) as usize;
+            self.data.resize(new_count * self.elem_size, 0);
 
-            if index >= new_len {
-                panic!("index (is {}) should be < len (is {})", index, new_len);
+            if index >= new_count {
+                panic!("index (is {}) should be < len (is {})", index, new_count);
             }
         }
-
-        let val = &mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize);
+        let ptr = (self.data.as_mut_ptr() as *mut T).add(index);
 
         let already_present = !self.available.insert(index);
         if already_present {
+            if self.needs_drop {
+                (self.drop_func)(ptr as *mut u8);
+            }
             if !self.created.contains(index) {
                 self.modified.insert(index);
             }
@@ -121,45 +90,57 @@ impl RawComponentStorage {
             }
         }
 
-        *val = Some(v);
+        ptr.write(v);
     }
 
-    /// # Safety
-    /// size of T must equal self.type_size
-    pub unsafe fn remove(&mut self, index: u32) {
-        let index = index as usize;
-
-        let len = self.data.len();
-        if index >= len {
+    /// Removes a component.
+    pub fn remove(&mut self, index: u32) {
+        #[cold]
+        #[inline(never)]
+        fn assert_failed(index: usize, len: usize) -> ! {
             panic!("index (is {}) should be < len (is {})", index, len);
         }
 
-        self.data.set_none(index as usize);
+        let index = index as usize;
+        let index_b = index * self.elem_size;
 
-        self.available.remove(index);
-        self.modified.remove(index);
+        let len = self.data.len();
+        if index_b >= len {
+            assert_failed(index, len / self.elem_size);
+        }
+
+        let was_present = self.available.remove(index);
         let just_created = self.created.remove(index);
+        self.modified.remove(index);
         if !just_created {
             self.removed.insert(index);
         }
+
+        if was_present && self.needs_drop {
+            (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
+        }
     }
 
-    /// # Safety
-    /// size of T must equal self.type_size
+    /// Returns a reference to the specified component.
+    ///
+    /// # Safety:
+    ///
+    /// T must match the type of component.
     pub unsafe fn get<T>(&self, index: u32) -> Option<&T> {
         let index = index as usize;
 
         if self.available.contains(index) {
-            (&*(self.data.as_ptr() as *const Option<T>).offset(index as isize)).as_ref()
+            Some(&*(self.data.as_ptr() as *const T).add(index))
         } else {
             None
         }
     }
 
-    /// Modifies component
+    /// Modifies a component
     ///
-    /// # Safety
-    /// size of T must equal self.type_size
+    /// # Safety:
+    ///
+    /// T must match the type of component.
     pub unsafe fn get_mut<T>(&mut self, index: u32) -> Option<&mut T> {
         let index = index as usize;
 
@@ -167,22 +148,18 @@ impl RawComponentStorage {
             if !self.created.contains(index) {
                 self.modified.insert(index);
             }
-
-            (&mut *(&mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize))).as_mut()
+            Some(&mut *(self.data.as_mut_ptr() as *mut T).add(index))
         } else {
             None
         }
     }
 
-    /// Get mutable component without emission modification event
-    ///
-    /// # Safety
-    /// size of T must equal self.type_size
+    /// Returns a mutable reference to the component without emitting a modification event
     pub unsafe fn get_mut_unchecked<T>(&mut self, index: u32) -> Option<&mut T> {
         let index = index as usize;
 
         if self.available.contains(index) {
-            (&mut *(&mut *(self.data.as_mut_ptr() as *mut Option<T>).offset(index as isize))).as_mut()
+            Some(&mut *(self.data.as_mut_ptr() as *mut T).add(index))
         } else {
             None
         }
@@ -235,34 +212,42 @@ pub struct ComponentStorageMut<'a, T> {
 }
 
 impl<'a, T> ComponentStorageMut<'a, T> {
+    #[inline]
     pub fn set(&mut self, index: u32, v: T) {
         unsafe { self.raw.set(index, v) };
     }
 
+    #[inline]
     pub fn remove(&mut self, index: u32) {
-        unsafe { self.raw.remove(index) };
+        self.raw.remove(index);
     }
 
+    #[inline]
     pub fn get(&self, index: u32) -> Option<&T> {
         unsafe { self.raw.get::<T>(index) }
     }
 
+    #[inline]
     pub fn get_mut(&mut self, index: u32) -> Option<&mut T> {
         unsafe { self.raw.get_mut::<T>(index) }
     }
 
+    #[inline]
     pub fn get_mut_unchecked(&mut self, index: u32) -> Option<&mut T> {
         unsafe { self.raw.get_mut_unchecked(index) }
     }
 
+    #[inline]
     pub fn events(&mut self) -> Vec<Event> {
-        unsafe { self.raw.events() }
+        self.raw.events()
     }
 
+    #[inline]
     pub fn contains(&self, index: u32) -> bool {
         self.raw.contains(index)
     }
 
+    #[inline]
     pub fn entries(&self) -> &BitSet {
         self.raw.entries()
     }
@@ -303,7 +288,7 @@ impl Entities {
             index as u32
         } else {
             self.entity_allocated_count
-                .fetch_add(1, atomic::Ordering::Relaxed)
+                .fetch_add(1, atomic::Ordering::Relaxed) as u32
         }
     }
 }
@@ -369,7 +354,7 @@ impl Scene {
 
             for &index in indices {
                 if comps.contains(index) {
-                    unsafe { comps.remove(index) };
+                    comps.remove(index);
                 }
             }
         }
