@@ -55,7 +55,14 @@ fn block_pos_to_sector_index(cell_pos: U32Vec3) -> usize {
 pub struct Occluder(u8);
 
 impl Occluder {
-    pub fn new(x_neg: bool, x_pos: bool, y_neg: bool, y_pos: bool, z_neg: bool, z_pos: bool) -> Occluder {
+    pub const fn new(
+        x_neg: bool,
+        x_pos: bool,
+        y_neg: bool,
+        y_pos: bool,
+        z_neg: bool,
+        z_pos: bool,
+    ) -> Occluder {
         Occluder(
             ((x_neg as u8) << (Facing::NegativeX as u8))
                 | ((x_pos as u8) << (Facing::PositiveX as u8))
@@ -66,8 +73,16 @@ impl Occluder {
         )
     }
 
-    pub fn occludes_side(&self, facing: Facing) -> bool {
+    pub const fn occludes_side(&self, facing: Facing) -> bool {
         ((self.0 >> (facing as u8)) & 1) == 1
+    }
+
+    pub fn occlude_side(&mut self, facing: Facing) {
+        self.0 |= 1 << (facing as u8);
+    }
+
+    pub fn set_side(&mut self, facing: Facing, value: bool) {
+        self.0 = (self.0 & !(1 << (facing as u8))) | ((value as u8) << (facing as u8));
     }
 
     pub fn clear_side(&mut self, facing: Facing) {
@@ -75,18 +90,18 @@ impl Occluder {
     }
 }
 
-impl BitOr for Occluder {
+impl BitAnd for Occluder {
     type Output = Self;
 
-    fn bitor(mut self, rhs: Self) -> Self::Output {
-        self.0 |= rhs.0;
+    fn bitand(mut self, rhs: Self) -> Self::Output {
+        self.0 &= rhs.0;
         self
     }
 }
 
-impl BitOrAssign for Occluder {
-    fn bitor_assign(&mut self, rhs: Self) {
-        *self = *self | rhs;
+impl BitAndAssign for Occluder {
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = *self & rhs;
     }
 }
 
@@ -315,7 +330,11 @@ impl Cluster {
 
         let lb = -(SIZE as i32 * side_cluster.entry_size as i32);
         let rb = SIZE as i32 * self.entry_size as i32;
+
+        // Direction towards side cluster
         let dir = side_offset.map(|v| (v == rb) as i32 - (v == lb) as i32);
+        let facing = Facing::from_direction(dir);
+        let facing_m = facing.mirror();
         // let side_changed_from_dir = {
         //     let dir = -dir;
         //     (((dir.x + 1) / 2) + dir.y.abs() * 2 + (dir.y + 1) / 2 + dir.z.abs() * 4 + (dir.z + 1) / 2)
@@ -365,11 +384,12 @@ impl Cluster {
                         for l in (0..SECTOR_SIZE).step_by(2) {
                             let dst_p = map_pos(dir, ks + k / 2 + 1, ls + l / 2 + 1, ALIGNED_SECTOR_SIZE - 1);
                             let mut occluder = Occluder::default();
+                            occluder.occlude_side(facing_m);
 
                             for k2 in 0..2 {
                                 for l2 in 0..2 {
                                     let src_p = map_pos(-dir, k + k2, l + l2, SECTOR_SIZE - 2).add_scalar(1);
-                                    occluder |= src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                                    occluder &= src_sector.occluders[src_p.x][src_p.y][src_p.z];
                                 }
                             }
 
@@ -417,55 +437,43 @@ impl Cluster {
     }
 
     fn update_inner_side_occluders(&mut self) {
-        fn map_dst_pos(facing: Facing, k: usize, l: usize) -> (usize, usize, usize) {
-            let d = facing.direction();
-            let dx = (d.x != 0) as usize;
-            let dy = (d.y != 0) as usize;
-            let dz = (d.z != 0) as usize;
-
-            let (k, l) = (k + 1, l + 1);
-            let x = k * dy + k * dz + (ALIGNED_SECTOR_SIZE - 1) * (d.x > 0) as usize;
-            let y = k * dx + l * dz + (ALIGNED_SECTOR_SIZE - 1) * (d.y > 0) as usize;
-            let z = l * dx + l * dy + (ALIGNED_SECTOR_SIZE - 1) * (d.z > 0) as usize;
-
-            (x, y, z)
-        }
-
         macro_rules! side_loop {
-            ($sector: ident, $sectors: ident, $pos: ident, $facing: expr) => {
+            ($sector_i: expr, $facing: expr, $k: ident, $l: ident, $x: expr, $y: expr, $z: expr, $x2: expr, $y2: expr, $z2: expr) => {
+                let (sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+                let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
                 let j = $facing as usize;
-                let rel = ($pos + $facing.direction());
+                let rel = (pos + $facing.direction());
 
-                if $sector.side_changed[j]
+                if sector.side_changed[j]
                     && rel >= I32Vec3::from_element(0)
                     && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
                 {
-                    let side_sector = &mut $sectors[sector_index(glm::try_convert(rel).unwrap())];
+                    let side_sector = &mut sectors[sector_index(glm::try_convert(rel).unwrap())];
                     let facing_m = $facing.mirror();
 
-                    for k in 0..SECTOR_SIZE {
-                        for l in 0..SECTOR_SIZE {
-                            let p = map_dst_pos(facing_m, k, l);
-                            side_sector.occluders[p.0][p.1][p.2] =
-                                Occluder::new(true, true, true, true, true, true);
+                    for $k in 0..SECTOR_SIZE {
+                        for $l in 0..SECTOR_SIZE {
+                            side_sector.occluders[$x][$y][$z].set_side(
+                                $facing,
+                                sector.occluders[$x2][$y2][$z2].occludes_side(facing_m),
+                            );
                         }
                     }
 
-                    $sector.side_changed[j] = false;
+                    sector.side_changed[j] = false;
                 }
             };
         }
 
-        for i in 0..VOLUME_IN_SECTORS {
-            let (sector, mut sectors) = self.sectors.split_mid_mut(i).unwrap();
-            let pos: I32Vec3 = glm::convert(sector_pos(i));
+        let m = ALIGNED_SECTOR_SIZE - 1;
 
-            side_loop!(sector, sectors, pos, Facing::NegativeX);
-            side_loop!(sector, sectors, pos, Facing::PositiveX);
-            side_loop!(sector, sectors, pos, Facing::NegativeY);
-            side_loop!(sector, sectors, pos, Facing::PositiveY);
-            side_loop!(sector, sectors, pos, Facing::NegativeZ);
-            side_loop!(sector, sectors, pos, Facing::PositiveZ);
+        for i in 0..VOLUME_IN_SECTORS {
+            side_loop!(i, Facing::PositiveZ, k, l, k + 1, l + 1, 0, k + 1, l + 1, m - 1);
+            side_loop!(i, Facing::PositiveY, k, l, k + 1, 0, l + 1, k + 1, m - 1, l + 1);
+            side_loop!(i, Facing::PositiveX, k, l, 0, k + 1, l + 1, m - 1, k + 1, l + 1);
+            side_loop!(i, Facing::NegativeZ, k, l, k + 1, l + 1, m, k + 1, l + 1, 1);
+            side_loop!(i, Facing::NegativeY, k, l, k + 1, m, l + 1, k + 1, 1, l + 1);
+            side_loop!(i, Facing::NegativeX, k, l, m, k + 1, l + 1, 1, k + 1, l + 1);
         }
     }
 
