@@ -53,6 +53,8 @@ impl Resource {
     }
 }
 
+// TODO GRAPHICS ENGINE OPTIMIZE: REMOVE USE OF `Arc`s
+
 pub struct Renderer {
     pub(in crate::renderer) mat_pipeline: Arc<MaterialPipeline>,
 

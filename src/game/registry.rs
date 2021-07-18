@@ -1,4 +1,5 @@
 use crate::game::overworld;
+use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::TexturedBlockModel;
@@ -9,6 +10,7 @@ pub struct Registry {
     structured_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
     textured_models: Vec<TexturedBlockModel>,
+    blocks: Vec<Block>,
     cluster_layout: EntityStorageLayout,
 }
 
@@ -19,6 +21,7 @@ impl Registry {
             structured_by_level: Default::default(),
             models: vec![],
             textured_models: vec![],
+            blocks: vec![],
             cluster_layout: Default::default(),
         }
     }
@@ -39,6 +42,11 @@ impl Registry {
     pub fn register_textured_block_model(&mut self, textured_block_model: TexturedBlockModel) -> u32 {
         self.textured_models.push(textured_block_model);
         (self.textured_models.len() - 1) as u32
+    }
+
+    pub fn register_block(&mut self, block: Block) -> u32 {
+        self.blocks.push(block);
+        (self.blocks.len() - 1) as u32
     }
 
     pub fn register_structure(&mut self, structure: Structure) -> u32 {

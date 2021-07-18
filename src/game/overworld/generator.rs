@@ -1,38 +1,53 @@
-use crate::game::overworld::block::BlockProps;
+use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
+use crate::utils::noise::ParamNoise;
 use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, U32Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U32Vec3, Vec3};
+use noise::Seedable;
 use simdnoise::NoiseBuilder;
 
-pub fn generate_cluster(cluster: &mut Cluster, pos: I64Vec3, node_size: u32) {
+pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos: I64Vec3) {
+    let entry_size = cluster.entry_size();
+    let noise = noise::SuperSimplex::new().set_seed(0);
+
+    // NoiseBuilder::cellular2_2d_offset().generate().
+    // let noise = NoiseBuilder::gradient_3d_offset(
+    //     pos.x as f32 / (entry_size as f32),
+    //     cluster::SIZE,
+    //     pos.y as f32 / (entry_size as f32),
+    //     cluster::SIZE,
+    //     pos.z as f32 / (entry_size as f32),
+    //     cluster::SIZE,
+    // )
+    // .with_seed(0)
+    // .with_freq(1.0 / 50.0 * entry_size as f32)
+    // .generate();
+
+    let block_default = main_registry.block_default();
+
+    let sample = |point: DVec3, freq: f64| -> f64 { noise.sample(point, freq, 1.0, 0.5) };
+
     for x in 0..cluster::SIZE {
         for y in 0..cluster::SIZE {
             for z in 0..cluster::SIZE {
-                let pos = U32Vec3::new(x as u32, y as u32, z as u32);
-                cluster
-                    .set_block(pos, 0)
-                    .props(BlockProps {
-                        textured_model_id: 0,
-                        is_none: false,
-                    })
-                    .build();
+                let xyz = U32Vec3::new(x as u32, y as u32, z as u32);
+                let posf: DVec3 =
+                    glm::convert(glm::convert::<U32Vec3, I64Vec3>(xyz) * (entry_size as i64) + pos);
+
+                let n = sample(posf, 0.05);
+                let n = (n + 2.0) * ((posf.y - 30.0) / 128.0);
+
+                if n < 0.5 {
+                    cluster.set_block(xyz, block_default).build();
+                }
+
+                // let n = noise.0
             }
         }
     }
 
-    // let noise = NoiseBuilder::gradient_3d_offset(
-    //     pos.x as f32 / (node_size as f32),
-    //     cluster::SIZE,
-    //     pos.y as f32 / (node_size as f32),
-    //     cluster::SIZE,
-    //     pos.z as f32 / (node_size as f32),
-    //     cluster::SIZE,
-    // )
-    // .with_seed(0)
-    // .with_freq(1.0 / 50.0 * node_size as f32)
-    // .generate();
     //
     // let sample_noise =
     //     |x, y, z| -> f32 { noise.0[z * (cluster::SIZE) * (cluster::SIZE) + y * (cluster::SIZE) + x] * 35.0 };

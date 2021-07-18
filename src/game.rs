@@ -224,7 +224,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
         },
     );
 
-    let main_registry = Arc::new(MainRegistry::init());
+    let main_registry = MainRegistry::init();
     let game_tick_finished = Arc::new(AtomicBool::new(true));
     let mut overworld = Overworld::new(&main_registry, 0);
     let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, &mat_pipelines.cluster());

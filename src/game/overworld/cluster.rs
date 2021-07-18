@@ -1,4 +1,4 @@
-use crate::game::overworld::block::BlockProps;
+use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{Quad, Vertex};
 use crate::game::registry::Registry;
@@ -93,7 +93,7 @@ impl BitOrAssign for Occluder {
 struct Sector {
     block_storage: EntityStorage,
     block_map: Box<[[[EntityId; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
-    block_props: Box<[[[BlockProps; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
+    blocks: Box<[[[Block; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
     occluders: Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     changed: bool,
     side_changed: [bool; 6],
@@ -105,7 +105,7 @@ impl Sector {
         Self {
             block_storage: EntityStorage::new(layout),
             block_map: Default::default(),
-            block_props: Default::default(),
+            blocks: Default::default(),
             occluders: Default::default(),
             changed: false,
             side_changed: [false; 6],
@@ -122,13 +122,13 @@ impl Sector {
         self.changed
     }
 
-    fn set_block(&mut self, pos: U32Vec3, archetype_id: u32) -> BlockDataBuilder {
+    fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
         let pos: Vector3<usize> = glm::convert(pos);
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
         if *entity_id != EntityId::NULL {
             self.block_storage.remove(entity_id);
         }
-        let entity_builder = self.block_storage.add_entity(archetype_id);
+        let entity_builder = self.block_storage.add_entity(block.archetype());
 
         self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = Occluder::new(true, true, true, true, true, true); // TODO
 
@@ -140,16 +140,13 @@ impl Sector {
         side_changed[4] |= pos.z == 0;
         side_changed[5] |= pos.z == 15;
 
+        self.blocks[pos.x][pos.y][pos.z] = block;
         self.side_changed = side_changed;
         self.changed = true;
-
-        let block_props = &mut self.block_props[pos.x][pos.y][pos.z];
-        block_props.is_none = false;
 
         BlockDataBuilder {
             entity_builder,
             entity_id,
-            block_props,
         }
     }
 }
@@ -183,15 +180,9 @@ impl BlockDataMut<'_> {
 pub struct BlockDataBuilder<'a> {
     entity_builder: EntityBuilder<'a>,
     entity_id: &'a mut EntityId,
-    block_props: &'a mut BlockProps,
 }
 
 impl BlockDataBuilder<'_> {
-    pub fn props(mut self, props: BlockProps) -> Self {
-        *self.block_props = props;
-        self
-    }
-
     pub fn with<C: 'static>(mut self, comp: C) -> Self {
         self.entity_builder = self.entity_builder.with::<C>(comp);
         self
@@ -252,7 +243,7 @@ impl Cluster {
         BlockDataMut { sector, id: entity }
     }
 
-    pub fn set_block(&mut self, pos: U32Vec3, archetype_id: u32) -> BlockDataBuilder {
+    pub fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
@@ -269,7 +260,7 @@ impl Cluster {
         // self.sides_changed |=
         //     glm::any(&pos.map(|v| v == 0)) || glm::any(&pos.map(|v| v == (SIZE as u32 - 1)));
 
-        sector.set_block(pos, archetype_id)
+        sector.set_block(pos, block)
     }
 
     pub fn clean_outer_side_occlusion(&mut self) {
@@ -496,15 +487,15 @@ impl Cluster {
                 for z in 0..SECTOR_SIZE {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
                     let posf: Vec3 = glm::convert(pos);
-                    let props = &sector.block_props[x][y][z];
+                    let block = &sector.blocks[x][y][z];
 
-                    if props.is_none {
+                    if block.is_none() {
                         continue;
                     }
 
                     let model = self
                         .registry
-                        .get_textured_block_model(props.textured_model_id())
+                        .get_textured_block_model(block.textured_model())
                         .unwrap();
 
                     add_vertices(&mut vertices, posf, scale, model.get_inner_quads());

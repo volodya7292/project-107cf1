@@ -365,14 +365,14 @@ impl OverworldStreamer {
 
                     if !overworld_cluster.generated.load(atomic::Ordering::Acquire) && pos.y == 0 {
                         let ocluster = Arc::clone(overworld_cluster);
-                        let entry_size = 2_u32.pow(i as u32);
                         let pos = *pos;
+                        let main_registry = Arc::clone(&self.registry);
 
                         ocluster.generating.store(true, atomic::Ordering::Relaxed);
                         clusters_in_process.fetch_add(1, atomic::Ordering::Relaxed);
                         rayon::spawn(move || {
                             let mut cluster = ocluster.cluster.lock().unwrap();
-                            generator::generate_cluster(&mut cluster, pos, entry_size);
+                            generator::generate_cluster(&mut cluster, &main_registry, pos);
                             ocluster.generating.store(false, atomic::Ordering::Release);
                             ocluster.generated.store(true, atomic::Ordering::Release);
                             clusters_in_process.fetch_sub(1, atomic::Ordering::Release);
