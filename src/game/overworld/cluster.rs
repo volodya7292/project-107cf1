@@ -388,7 +388,7 @@ impl Cluster {
 
                             for k2 in 0..2 {
                                 for l2 in 0..2 {
-                                    let src_p = map_pos(-dir, k + k2, l + l2, SECTOR_SIZE - 2).add_scalar(1);
+                                    let src_p = map_pos(-dir, k + k2, l + l2, SECTOR_SIZE - 1).add_scalar(1);
                                     occluder &= src_sector.occluders[src_p.x][src_p.y][src_p.z];
                                 }
                             }
@@ -421,7 +421,7 @@ impl Cluster {
                     for k in 0..SECTOR_SIZE {
                         for l in 0..SECTOR_SIZE {
                             let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
-                            let src_p = map_pos(-dir, ks + k / 2, ls + l / 2, SECTOR_SIZE - 2).add_scalar(1);
+                            let src_p = map_pos(-dir, ks + k / 2, ls + l / 2, SECTOR_SIZE - 1).add_scalar(1);
 
                             dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
                                 src_sector.occluders[src_p.x][src_p.y][src_p.z];
