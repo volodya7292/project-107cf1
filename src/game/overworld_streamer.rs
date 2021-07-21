@@ -354,7 +354,7 @@ impl OverworldStreamer {
         {
             let max_clusters_in_process = num_cpus::get().saturating_sub(2).max(1) as u32;
 
-            'l: for (i, level) in overworld.loaded_clusters.iter_mut().enumerate() {
+            'l: for level in &overworld.loaded_clusters {
                 for (pos, overworld_cluster) in level {
                     let clusters_in_process = Arc::clone(&self.clusters_in_process);
                     let curr_clusters_in_process = clusters_in_process.load(atomic::Ordering::Acquire);
@@ -363,7 +363,7 @@ impl OverworldStreamer {
                         break 'l;
                     }
 
-                    if !overworld_cluster.generated.load(atomic::Ordering::Acquire) && pos.y == 0 {
+                    if !overworld_cluster.generated.load(atomic::Ordering::Acquire) {
                         let ocluster = Arc::clone(overworld_cluster);
                         let pos = *pos;
                         let main_registry = Arc::clone(&self.registry);

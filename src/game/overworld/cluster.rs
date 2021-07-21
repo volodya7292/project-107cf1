@@ -11,6 +11,7 @@ use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
 use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
 use nalgebra::Vector3;
 use nalgebra_glm as glm;
+use nalgebra_glm::{I32Vec2, U32Vec2};
 use smallvec::smallvec;
 use std::collections::hash_map;
 use std::convert::TryInto;
@@ -163,6 +164,105 @@ impl Sector {
             entity_builder,
             entity_id,
         }
+    }
+
+    // TODO: optimize this
+    fn calculate_ao(&self, block_pos: I32Vec3, vertex_pos: Vec3, facing: Facing) -> f32 {
+        let dir = facing.direction();
+
+        let mut k: I32Vec2 = Default::default();
+        let mut c = 0;
+        let corner: I32Vec3 = glm::try_convert(vertex_pos.zip_zip_map(&dir, &block_pos, |v, d, b| {
+            if d != 0 {
+                if v.fract() > 0.0001 {
+                    v.floor()
+                } else {
+                    if d < 0 {
+                        v - 1.0
+                    } else {
+                        v
+                    }
+                }
+            } else {
+                k[c] = (v - b as f32 - 0.5).signum() as i32;
+                c += 1;
+                b as f32 + (v - b as f32 - 0.5).signum()
+            }
+        }))
+        .unwrap();
+
+        c = 0;
+        let side1 = corner.zip_map(&dir, |v, d| {
+            if d != 0 {
+                v
+            } else {
+                c += 1;
+
+                if c == 1 {
+                    if k[0] < 0 && k[1] < 0 {
+                        v
+                    } else if k[0] < 0 && k[1] > 0 {
+                        v + 1
+                    } else if k[0] > 0 && k[1] > 0 {
+                        v
+                    } else {
+                        v - 1
+                    }
+                } else {
+                    if k[0] < 0 && k[1] < 0 {
+                        v + 1
+                    } else if k[0] < 0 && k[1] > 0 {
+                        v
+                    } else if k[0] > 0 && k[1] > 0 {
+                        v - 1
+                    } else {
+                        v
+                    }
+                }
+            }
+        });
+
+        c = 0;
+        let side2 = corner.zip_map(&dir, |v, d| {
+            if d != 0 {
+                v
+            } else {
+                c += 1;
+
+                if c == 1 {
+                    if k[0] < 0 && k[1] < 0 {
+                        v + 1
+                    } else if k[0] < 0 && k[1] > 0 {
+                        v
+                    } else if k[0] > 0 && k[1] > 0 {
+                        v - 1
+                    } else {
+                        v
+                    }
+                } else {
+                    if k[0] < 0 && k[1] < 0 {
+                        v
+                    } else if k[0] < 0 && k[1] > 0 {
+                        v - 1
+                    } else if k[0] > 0 && k[1] > 0 {
+                        v
+                    } else {
+                        v + 1
+                    }
+                }
+            }
+        });
+
+        let corner = corner.add_scalar(1);
+        let side1 = side1.add_scalar(1);
+        let side2 = side2.add_scalar(1);
+
+        // TODO: to account for boundaries, access global occluders instead of sector-local
+        let corner = self.occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
+        let side1 = self.occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
+        let side2 = self.occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
+
+        !(side1 || side2 || corner) as u32 as f32
     }
 }
 
@@ -516,8 +616,38 @@ impl Cluster {
                             .occludes_side(facing.mirror());
 
                         if !occludes {
-                            add_vertices(&mut vertices, posf, scale, model.get_quads_by_facing(facing));
-                            // TODO: Ambient occlusion
+                            for v in model.get_quads_by_facing(facing).chunks_exact(4) {
+                                let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
+
+                                v[0].position += posf;
+                                v[1].position += posf;
+                                v[2].position += posf;
+                                v[3].position += posf;
+                                v[0].normal = glm::vec3(1.0, 1.0, 0.0);
+                                v[1].normal = glm::vec3(0.0, 1.0, 1.0);
+                                v[2].normal = glm::vec3(1.0, 0.0, 1.0);
+                                v[3].normal = glm::vec3(1.0, 0.0, 0.0);
+                                v[0].ao = sector.calculate_ao(pos, v[0].position, facing);
+                                v[1].ao = sector.calculate_ao(pos, v[1].position, facing);
+                                v[2].ao = sector.calculate_ao(pos, v[2].position, facing);
+                                v[3].ao = sector.calculate_ao(pos, v[3].position, facing);
+
+                                if v[1].ao != v[2].ao {
+                                    // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {
+                                    let vc = v;
+
+                                    v[1] = vc[0];
+                                    v[3] = vc[1];
+                                    v[0] = vc[2];
+                                    v[2] = vc[3];
+                                }
+
+                                for j in 0..4 {
+                                    v[j].position *= scale;
+                                }
+
+                                vertices.extend(v);
+                            }
                         }
                     }
                 }

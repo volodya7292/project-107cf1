@@ -91,7 +91,7 @@ impl TexturedBlockModel {
                         position: *p,
                         normal: Default::default(), // TODO
                         tex_uv: *uv,
-                        ao: 0.0, // TODO
+                        ao: 0.0,
                         material_id,
                     })
             })

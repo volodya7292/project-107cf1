@@ -21,6 +21,7 @@ layout(location = 0) out Output {
     vec3 world_pos;
     vec3 surface_normal;
     uint material_id;
+    float ao;
 } vs_out;
 
 void main() {
@@ -30,6 +31,7 @@ void main() {
     vs_out.local_pos = inPosition;
     vs_out.world_pos = world_pos.xyz;
     vs_out.surface_normal = inNormal;
+    vs_out.ao = inAO;
     vs_out.material_id = inMaterialId;
     gl_Position = info.camera.proj_view * world_pos;
 }

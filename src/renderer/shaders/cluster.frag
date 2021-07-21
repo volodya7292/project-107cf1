@@ -29,6 +29,7 @@ layout(location = 0) in Output {
     vec3 world_pos;
     vec3 surface_normal;
     uint material_id;
+    float ao;
 } vs_in;
 
 vec2 triplan_coord[3];
@@ -134,7 +135,9 @@ void main() {
     uint material_id;
     sample_material(vs_in.material_id, vs_in.tex_uv, mat);
 
-    vec3 diffuse = mat.diffuse.rgb;
+    vec3 diffuse = mat.diffuse.rgb * max(0.75, vs_in.ao);
+    // vec3 diffuse = vec3(1.0) * vs_in.ao;
+    // diffuse = vs_in.surface_normal;
 
     // outDiffuse = vec4(color, 1);
     outDiffuse = vec4(diffuse.rgb, 1);
