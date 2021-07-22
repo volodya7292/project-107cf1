@@ -258,6 +258,8 @@ impl Sector {
         let side2 = side2.add_scalar(1);
 
         // TODO: to account for boundaries, access global occluders instead of sector-local
+
+        // TODO: fully fill inner occluders
         let corner = self.occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
         let side1 = self.occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
         let side2 = self.occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
@@ -451,7 +453,7 @@ impl Cluster {
                     for k in 0..SECTOR_SIZE {
                         for l in 0..SECTOR_SIZE {
                             let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
-                            let src_p = map_pos(-dir, k, l, SECTOR_SIZE - 2).add_scalar(1);
+                            let src_p = map_pos(-dir, k, l, SECTOR_SIZE - 1).add_scalar(1);
 
                             dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
                                 src_sector.occluders[src_p.x][src_p.y][src_p.z];
