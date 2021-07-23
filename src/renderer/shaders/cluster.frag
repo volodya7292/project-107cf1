@@ -135,8 +135,8 @@ void main() {
     uint material_id;
     sample_material(vs_in.material_id, vs_in.tex_uv, mat);
 
-    vec3 diffuse = mat.diffuse.rgb * max(0.75, vs_in.ao);
-    // vec3 diffuse = vec3(1.0) * vs_in.ao;
+    // vec3 diffuse = mat.diffuse.rgb * max(0.75, vs_in.ao);
+    vec3 diffuse = vec3(1.0) * (0.75 + vs_in.ao * 0.25);
     // diffuse = vs_in.surface_normal;
 
     // outDiffuse = vec4(color, 1);

@@ -127,10 +127,13 @@ impl OverworldStreamer {
 
             let cluster_size0 = cluster_size(level as u32 - 1) as i64;
 
-            for &d in &Facing::DIRECTIONS {
-                for k in 0..2 {
-                    for l in 0..2 {
-                        let pos2 = pos + map_dst_pos(&glm::convert(d), k, l) * cluster_size0;
+            for x in -1..3 {
+                for y in -1..3 {
+                    for z in -1..3 {
+                        if x >= 0 && x < 2 && y >= 0 && y < 2 && z >= 0 && z < 2 {
+                            continue;
+                        }
+                        let pos2 = pos + I64Vec3::new(x, y, z) * cluster_size0;
 
                         if overworld.loaded_clusters[level - 1].contains_key(&pos2) {
                             neighbours.push(ClusterPos::new(level - 1, pos2));
@@ -142,31 +145,49 @@ impl OverworldStreamer {
 
         // Current level
         {
-            for &d in &Facing::DIRECTIONS {
-                let pos2 = pos + glm::convert::<I32Vec3, I64Vec3>(d) * cluster_size1;
+            for x in -1..2 {
+                for y in -1..2 {
+                    for z in -1..2 {
+                        if x == 0 && y == 0 && z == 0 {
+                            continue;
+                        }
+                        let pos2 = pos + I64Vec3::new(x, y, z) * cluster_size1;
 
-                if overworld.loaded_clusters[level].contains_key(&pos2) {
-                    neighbours.push(ClusterPos::new(level, pos2));
+                        if overworld.loaded_clusters[level].contains_key(&pos2) {
+                            neighbours.push(ClusterPos::new(level, pos2));
+                        }
+                    }
                 }
             }
         }
 
         // Higher level
         if level + 1 < LOD_LEVELS {
-            for &d in &Facing::DIRECTIONS {
-                let d: I64Vec3 = glm::convert(d);
-                let pos2 = pos
-                    + d * cluster_size2
-                    + d.zip_map(&pos, |d, p| {
-                        (-cluster_size1 * (d > 0) as i64) - (p.rem_euclid(cluster_size2) * (d == 0) as i64)
-                    });
+            let align = pos.map(|v| v.rem_euclid(cluster_size2));
+            let align_pos = pos - align;
+            let align_pos2 = pos + align;
 
-                if glm::all(&pos2.map(|v| v % cluster_size2 != 0)) {
-                    continue;
-                }
+            for x in -1..2 {
+                for y in -1..2 {
+                    for z in -1..2 {
+                        if x == 0 && y == 0 && z == 0 {
+                            continue;
+                        }
+                        let xyz = I64Vec3::new(x, y, z);
+                        let pos2 = align_pos + xyz * cluster_size2;
 
-                if overworld.loaded_clusters[level + 1].contains_key(&pos2) {
-                    neighbours.push(ClusterPos::new(level + 1, pos2));
+                        if glm::any(&glm::not_equal(
+                            &(pos2
+                                + align.zip_map(&xyz, |a, v| (v < 0 || (v == 0 && a > 0)) as i64)
+                                    * cluster_size2),
+                            &align_pos2,
+                        )) {
+                            continue;
+                        }
+                        if overworld.loaded_clusters[level + 1].contains_key(&pos2) {
+                            neighbours.push(ClusterPos::new(level + 1, pos2));
+                        }
+                    }
                 }
             }
         }
@@ -381,6 +402,12 @@ impl OverworldStreamer {
                 }
             }
         }
+
+        // TODO OPTIMIZE: Update cluster meshes only when neighbour clusters are fully loaded
+        // TODO OPTIMIZE: to compensate for large number of updates due to neighbour updates.
+        // TODO: To do this, firstly fully load all the clusters up to a certain radius.
+        // TODO: Secondly, fully update their meshes.
+        // TODO: Lastly, repeat the same process for a larger radius until the limit is reached.
 
         // Generate meshes
         {

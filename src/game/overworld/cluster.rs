@@ -9,9 +9,9 @@ use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
 use crate::{renderer, utils};
 use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
 use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
-use nalgebra::Vector3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{I32Vec2, U32Vec2};
+use nalgebra_glm::{I32Vec2, TVec, TVec3, U32Vec2};
+use rand_distr::num_traits::real::Real;
 use smallvec::smallvec;
 use std::collections::hash_map;
 use std::convert::TryInto;
@@ -72,6 +72,10 @@ impl Occluder {
                 | ((z_neg as u8) << (Facing::NegativeZ as u8))
                 | ((z_pos as u8) << (Facing::PositiveZ as u8)),
         )
+    }
+
+    pub const fn full() -> Occluder {
+        Self::new(true, true, true, true, true, true)
     }
 
     pub const fn occludes_side(&self, facing: Facing) -> bool {
@@ -139,7 +143,7 @@ impl Sector {
     }
 
     fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
-        let pos: Vector3<usize> = glm::convert(pos);
+        let pos: TVec3<usize> = glm::convert(pos);
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
         if *entity_id != EntityId::NULL {
             self.block_storage.remove(entity_id);
@@ -259,7 +263,9 @@ impl Sector {
 
         // TODO: to account for boundaries, access global occluders instead of sector-local
 
-        // TODO: fully fill inner occluders
+        // TODO: try another method: use outer clusters to get global occluders on boundaries.
+        // TODO: cache their locks to improve performance
+
         let corner = self.occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
         let side1 = self.occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
         let side2 = self.occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
@@ -411,6 +417,21 @@ impl Cluster {
     }
 
     pub fn paste_outer_side_occlusion(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        let so = side_offset;
+        let sc_size = SIZE as i32 * side_cluster.entry_size as i32;
+        let self_size = SIZE as i32 * self.entry_size as i32;
+        let b = so.map(|v| v == -sc_size || v == self_size);
+
+        if glm::all(&b) {
+            self.paste_outer_side_occlusion_corner(side_cluster, so);
+        } else if b.x && b.y || b.x && b.z || b.y && b.z {
+            self.paste_outer_side_occlusion_edge(side_cluster, side_offset);
+        } else {
+            self.paste_outer_side_occlusion_side(side_cluster, side_offset);
+        }
+    }
+
+    fn paste_outer_side_occlusion_side(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         fn map_sector_pos(d: I32Vec3, k: u32, l: u32) -> U32Vec3 {
             let dx = (d.x != 0) as u32;
             let dy = (d.y != 0) as u32;
@@ -420,14 +441,14 @@ impl Cluster {
             let z = l * dx + l * dy + (SIZE_IN_SECTORS as u32 - 1) * (d.z > 0) as u32;
             U32Vec3::new(x, y, z)
         }
-        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> Vector3<usize> {
+        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
             let dx = (d.x != 0) as usize;
             let dy = (d.y != 0) as usize;
             let dz = (d.z != 0) as usize;
             let x = k * dy + k * dz + v * (d.x > 0) as usize;
             let y = k * dx + l * dz + v * (d.y > 0) as usize;
             let z = l * dx + l * dy + v * (d.z > 0) as usize;
-            Vector3::new(x, y, z)
+            TVec3::new(x, y, z)
         }
 
         let lb = -(SIZE as i32 * side_cluster.entry_size as i32);
@@ -437,11 +458,6 @@ impl Cluster {
         let dir = side_offset.map(|v| (v == rb) as i32 - (v == lb) as i32);
         let facing = Facing::from_direction(dir);
         let facing_m = facing.mirror();
-        // let side_changed_from_dir = {
-        //     let dir = -dir;
-        //     (((dir.x + 1) / 2) + dir.y.abs() * 2 + (dir.y + 1) / 2 + dir.z.abs() * 4 + (dir.z + 1) / 2)
-        //         as usize
-        // };
 
         if side_cluster.entry_size == self.entry_size {
             for i in 0..SIZE_IN_SECTORS {
@@ -520,8 +536,9 @@ impl Cluster {
                     let ks = (i % 2) * SECTOR_SIZE / 2;
                     let ls = (j % 2) * SECTOR_SIZE / 2;
 
-                    for k in 0..SECTOR_SIZE {
-                        for l in 0..SECTOR_SIZE {
+                    // Note: 0..(SECTOR_SIZE + 1) : added 1 to compensate for lower-lod edges and corners.
+                    for k in 0..(SECTOR_SIZE + 1) {
+                        for l in 0..(SECTOR_SIZE + 1) {
                             let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
                             let src_p = map_pos(-dir, ks + k / 2, ls + l / 2, SECTOR_SIZE - 1).add_scalar(1);
 
@@ -538,8 +555,132 @@ impl Cluster {
         self.changed = true;
     }
 
+    fn paste_outer_side_occlusion_edge(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        fn map_sector_pos(m: I32Vec3, i: u32) -> U32Vec3 {
+            let s = SIZE_IN_SECTORS as u32 - 1;
+            m.map(|v| i * (v == 0) as u32 + s * (v > 0) as u32)
+        }
+        fn map_pos(m: I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+            m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+        }
+
+        let m =
+            side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32 * self.entry_size as i32) as i32);
+        let n = -m;
+
+        if side_cluster.entry_size == self.entry_size {
+            for i in 0..SIZE_IN_SECTORS {
+                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
+                let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
+
+                for k in 0..SECTOR_SIZE {
+                    let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
+                    let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
+
+                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
+                        src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                }
+
+                dst_sector.changed = true;
+            }
+        } else if side_cluster.entry_size == (self.entry_size / 2) {
+            let abs = m.map(|v| (v == 0) as i32);
+            let is = (side_offset.x * abs.x + side_offset.y * abs.y + side_offset.z * abs.z)
+                / self.entry_size as i32
+                / SECTOR_SIZE as i32;
+
+            for i in 0..SIZE_IN_SECTORS {
+                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, is as u32 + i as u32 / 2))];
+                let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
+                let ks = (i % 2) * SECTOR_SIZE / 2;
+
+                for k in (0..SECTOR_SIZE).step_by(2) {
+                    let dst_p = map_pos(m, ks + k / 2 + 1, ALIGNED_SECTOR_SIZE - 1);
+                    let src_p = map_pos(n, k, SECTOR_SIZE - 2).add_scalar(1);
+                    let mut occluder = Occluder::full();
+
+                    for x in 0..2 {
+                        for y in 0..2 {
+                            for z in 0..2 {
+                                let src_p = src_p + glm::vec3(x, y, z);
+                                occluder &= src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                            }
+                        }
+                    }
+
+                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] = occluder;
+                }
+
+                dst_sector.changed = true;
+            }
+        } else if side_cluster.entry_size == (self.entry_size * 2) {
+            let abs = m.map(|v| (v == 0) as i32);
+            let is = (side_offset.x * abs.x + side_offset.y * abs.y + side_offset.z * abs.z)
+                / side_cluster.entry_size as i32
+                / SECTOR_SIZE as i32;
+
+            for i in 0..SIZE_IN_SECTORS {
+                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
+                let src_sector =
+                    &side_cluster.sectors[sector_index(map_sector_pos(n, is as u32 + i as u32 / 2))];
+                let ks = (i % 2) * SECTOR_SIZE / 2;
+
+                for k in 0..SECTOR_SIZE {
+                    let dst_p = map_pos(m, k, ALIGNED_SECTOR_SIZE - 1);
+                    let src_p = map_pos(n, ks + k / 2, SECTOR_SIZE - 1).add_scalar(1);
+
+                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
+                        src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                }
+
+                dst_sector.changed = true;
+            }
+        }
+
+        self.changed = true;
+    }
+
+    fn paste_outer_side_occlusion_corner(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        let m = side_offset.map(|v| (v > 0) as u32);
+        let n = side_offset.map(|v| (v < 0) as u32);
+
+        let dst_p = m * (ALIGNED_SECTOR_SIZE - 1) as u32;
+        let dst_sector_pos = m * (SIZE_IN_SECTORS - 1) as u32;
+        let dst_sector = &mut self.sectors[sector_index(dst_sector_pos)];
+
+        if side_cluster.entry_size == self.entry_size || side_cluster.entry_size == (self.entry_size * 2) {
+            let src_pos = (n * (SECTOR_SIZE - 1) as u32).add_scalar(1);
+            let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
+            let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
+
+            dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] =
+                src_sector.occluders[src_pos.x as usize][src_pos.y as usize][src_pos.z as usize];
+            dst_sector.changed = true;
+        } else if side_cluster.entry_size == (self.entry_size / 2) {
+            let src_p = (n * (SECTOR_SIZE - 2) as u32).add_scalar(1);
+            let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
+            let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
+            let mut occluder = Occluder::full();
+
+            for x in 0..2 {
+                for y in 0..2 {
+                    for z in 0..2 {
+                        let src_p = src_p + U32Vec3::new(x, y, z);
+                        occluder &=
+                            src_sector.occluders[src_p.x as usize][src_p.y as usize][src_p.z as usize];
+                    }
+                }
+            }
+
+            dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] = occluder;
+            dst_sector.changed = true;
+        }
+
+        self.changed = true;
+    }
+
     fn update_inner_side_occluders(&mut self) {
-        macro_rules! side_loop {
+        macro_rules! side {
             ($sector_i: expr, $facing: expr, $k: ident, $l: ident, $x: expr, $y: expr, $z: expr, $x2: expr, $y2: expr, $z2: expr) => {
                 let (sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
                 let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
@@ -566,16 +707,84 @@ impl Cluster {
                 }
             };
         }
+        macro_rules! edge {
+            ($sector_i: expr, $side_offset: expr) => {
+                let (src_sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+                let n = $side_offset;
+                let m = -n;
+                let src_sector_pos: I32Vec3 = glm::convert(sector_pos($sector_i));
+                let dst_sector_pos = src_sector_pos + $side_offset;
+
+                if dst_sector_pos >= I32Vec3::from_element(0)
+                    && dst_sector_pos < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
+                {
+                    let dst_sector = &mut sectors[sector_index(glm::try_convert(dst_sector_pos).unwrap())];
+
+                    fn map_pos(m: I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+                        m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+                    }
+
+                    for k in 0..SECTOR_SIZE {
+                        let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
+                        let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
+
+                        dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
+                            src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                    }
+                }
+            };
+        }
+
+        macro_rules! corner {
+            ($sector_i: expr, $xyz: expr) => {
+                let (sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+
+                if sector.changed {
+                    let xyz = $xyz;
+                    let xyz2 = xyz.map(|v| (ALIGNED_SECTOR_SIZE - 1) * (v == 1) as usize);
+                    let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
+                    let rel = pos + glm::sign(&xyz.map(|v| v as i32 - SECTOR_SIZE as i32 / 2));
+
+                    if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
+                    {
+                        let side_sector = &mut sectors[sector_index(glm::try_convert(rel).unwrap())];
+                        side_sector.occluders[xyz2.x][xyz2.y][xyz2.z] = sector.occluders[xyz.x][xyz.y][xyz.z];
+                    }
+                }
+            };
+        }
 
         let m = ALIGNED_SECTOR_SIZE - 1;
 
         for i in 0..VOLUME_IN_SECTORS {
-            side_loop!(i, Facing::PositiveZ, k, l, k + 1, l + 1, 0, k + 1, l + 1, m - 1);
-            side_loop!(i, Facing::PositiveY, k, l, k + 1, 0, l + 1, k + 1, m - 1, l + 1);
-            side_loop!(i, Facing::PositiveX, k, l, 0, k + 1, l + 1, m - 1, k + 1, l + 1);
-            side_loop!(i, Facing::NegativeZ, k, l, k + 1, l + 1, m, k + 1, l + 1, 1);
-            side_loop!(i, Facing::NegativeY, k, l, k + 1, m, l + 1, k + 1, 1, l + 1);
-            side_loop!(i, Facing::NegativeX, k, l, m, k + 1, l + 1, 1, k + 1, l + 1);
+            side!(i, Facing::PositiveZ, k, l, k + 1, l + 1, 0, k + 1, l + 1, m - 1);
+            side!(i, Facing::PositiveY, k, l, k + 1, 0, l + 1, k + 1, m - 1, l + 1);
+            side!(i, Facing::PositiveX, k, l, 0, k + 1, l + 1, m - 1, k + 1, l + 1);
+            side!(i, Facing::NegativeZ, k, l, k + 1, l + 1, m, k + 1, l + 1, 1);
+            side!(i, Facing::NegativeY, k, l, k + 1, m, l + 1, k + 1, 1, l + 1);
+            side!(i, Facing::NegativeX, k, l, m, k + 1, l + 1, 1, k + 1, l + 1);
+
+            edge!(i, glm::vec3(0, -1, -1));
+            edge!(i, glm::vec3(0, -1, 1));
+            edge!(i, glm::vec3(0, 1, -1));
+            edge!(i, glm::vec3(0, 1, 1));
+            edge!(i, glm::vec3(-1, 0, -1));
+            edge!(i, glm::vec3(-1, 0, 1));
+            edge!(i, glm::vec3(1, 0, -1));
+            edge!(i, glm::vec3(1, 0, 1));
+            edge!(i, glm::vec3(-1, -1, 0));
+            edge!(i, glm::vec3(-1, 1, 0));
+            edge!(i, glm::vec3(1, -1, 0));
+            edge!(i, glm::vec3(1, 1, 0));
+
+            corner!(i, glm::vec3(1, 1, 1));
+            corner!(i, glm::vec3(1, 1, SECTOR_SIZE));
+            corner!(i, glm::vec3(1, SECTOR_SIZE, 1));
+            corner!(i, glm::vec3(1, SECTOR_SIZE, SECTOR_SIZE));
+            corner!(i, glm::vec3(SECTOR_SIZE, 1, 1));
+            corner!(i, glm::vec3(SECTOR_SIZE, 1, SECTOR_SIZE));
+            corner!(i, glm::vec3(SECTOR_SIZE, SECTOR_SIZE, 1));
+            corner!(i, glm::vec3(SECTOR_SIZE, SECTOR_SIZE, SECTOR_SIZE));
         }
     }
 
@@ -743,7 +952,7 @@ impl Cluster {
                 transform_comps.set(
                     ent,
                     component::Transform::new(
-                        glm::convert(Vector3::new(p[0], p[1], p[2]) * SECTOR_SIZE * node_size),
+                        glm::convert(TVec3::new(p[0], p[1], p[2]) * SECTOR_SIZE * node_size),
                         Vec3::default(),
                         Vec3::from_element(1.0),
                     ),
