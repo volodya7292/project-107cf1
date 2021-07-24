@@ -1,4 +1,4 @@
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+use crate::render_engine::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use crate::utils::qef;
 use nalgebra as na;
 

@@ -1,11 +1,11 @@
-use crate::renderer::component::model_transform::ModelTransform;
+use crate::render_engine::component::model_transform::ModelTransform;
 use nalgebra as na;
 
 #[derive(Copy, Clone)]
 pub struct WorldTransform {
-    pub(in crate::renderer) matrix: na::Matrix4<f32>,
-    pub(in crate::renderer) position: na::Vector3<f32>,
-    pub(in crate::renderer) scale: na::Vector3<f32>,
+    pub(in crate::render_engine) matrix: na::Matrix4<f32>,
+    pub(in crate::render_engine) position: na::Vector3<f32>,
+    pub(in crate::render_engine) scale: na::Vector3<f32>,
 }
 
 impl WorldTransform {

@@ -3,8 +3,8 @@ use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::{cluster, OverworldCluster, LOD_LEVELS};
 use crate::game::overworld::{generator, Overworld};
-use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::{component, Renderer};
+use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine::{component, RenderEngine};
 use crate::utils::{HashMap, HashSet, Integer};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
@@ -60,9 +60,9 @@ struct ClusterToRemove {
 
 pub struct OverworldStreamer {
     registry: Arc<MainRegistry>,
-    renderer: Arc<Mutex<Renderer>>,
+    renderer: Arc<Mutex<RenderEngine>>,
     device: Arc<Device>,
-    cluster_mat_pipeline: Arc<MaterialPipeline>,
+    cluster_mat_pipeline: u32,
     /// render distance in discrete meters
     render_distance: u32,
     stream_pos: DVec3,
@@ -512,8 +512,11 @@ impl OverworldStreamer {
         for v in &self.clusters_to_remove {
             self.clusters[v.cluster_pos.level].remove(&v.cluster_pos.pos);
         }
+        if !self.clusters_to_remove.is_empty() {
+            println!("to remove: {}", self.clusters_to_remove.len());
+        }
 
-        // TODO: remove renderer of a cluster only if lower/higher-lod replacement clusters are already generated
+        // TODO: remove render_engine of a cluster only if lower/higher-lod replacement clusters are already generated
         component::remove_entities(
             scene,
             &self
@@ -538,7 +541,7 @@ impl OverworldStreamer {
         let children_comps = children_comps.write().unwrap();
 
         let mut d = cluster::UpdateSystemData {
-            mat_pipeline: Arc::clone(&self.cluster_mat_pipeline),
+            mat_pipeline: self.cluster_mat_pipeline,
             entities: &mut entities,
             transform: transform_comps,
             renderer: renderer_comps,
@@ -564,11 +567,11 @@ impl OverworldStreamer {
             for (pos, overworld_cluster) in level {
                 let render_cluster = &self.clusters[i][pos];
                 if render_cluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
-                    overworld_cluster
-                        .cluster
-                        .lock()
-                        .unwrap()
-                        .update_renderable(render_cluster.entity, &mut d);
+                    overworld_cluster.cluster.lock().unwrap().update_renderable(
+                        &renderer,
+                        render_cluster.entity,
+                        &mut d,
+                    );
                 }
             }
         }
@@ -577,8 +580,8 @@ impl OverworldStreamer {
 
 pub fn new(
     registry: &Arc<MainRegistry>,
-    renderer: &Arc<Mutex<Renderer>>,
-    cluster_mat_pipeline: &Arc<MaterialPipeline>,
+    renderer: &Arc<Mutex<RenderEngine>>,
+    cluster_mat_pipeline: u32,
 ) -> OverworldStreamer {
     let (occ_s, occ_r) = cb::unbounded();
 
@@ -586,7 +589,7 @@ pub fn new(
         registry: Arc::clone(registry),
         renderer: Arc::clone(renderer),
         device: Arc::clone(renderer.lock().unwrap().device()),
-        cluster_mat_pipeline: Arc::clone(cluster_mat_pipeline),
+        cluster_mat_pipeline: cluster_mat_pipeline,
         render_distance: 0,
         stream_pos: DVec3::new(0.0, 0.0, 0.0),
         clusters: Default::default(),

@@ -1,26 +1,26 @@
-use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::Renderer;
+use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine::RenderEngine;
 use crate::resource_file::ResourceFile;
 use nalgebra as na;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 
 pub struct MaterialPipelines {
-    triag: Arc<MaterialPipeline>,
-    cluster: Arc<MaterialPipeline>,
+    triag: u32,
+    cluster: u32,
 }
 
 impl MaterialPipelines {
-    pub fn triag(&self) -> Arc<MaterialPipeline> {
-        Arc::clone(&self.triag)
+    pub fn triag(&self) -> u32 {
+        self.triag
     }
 
-    pub fn cluster(&self) -> Arc<MaterialPipeline> {
-        Arc::clone(&self.cluster)
+    pub fn cluster(&self) -> u32 {
+        self.cluster
     }
 }
 
-pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> MaterialPipelines {
+pub fn create(resources: &Arc<ResourceFile>, renderer: &mut RenderEngine) -> MaterialPipelines {
     let device = Arc::clone(renderer.device());
 
     let triag = {
@@ -42,7 +42,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             )
             .unwrap();
 
-        renderer.create_material_pipeline::<BasicUniformInfo>(&[triag_vertex, triag_g_pixel])
+        renderer.register_material_pipeline::<BasicUniformInfo>(&[triag_vertex, triag_g_pixel])
     };
     let cluster = {
         let vertex = device
@@ -66,7 +66,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             )
             .unwrap();
 
-        renderer.create_material_pipeline::<BasicUniformInfo>(&[vertex, pixel])
+        renderer.register_material_pipeline::<BasicUniformInfo>(&[vertex, pixel])
     };
 
     MaterialPipelines { triag, cluster }

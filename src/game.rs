@@ -5,9 +5,9 @@ pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::renderer;
-use crate::renderer::material_pipelines::MaterialPipelines;
-use crate::renderer::{component, Renderer};
+use crate::render_engine;
+use crate::render_engine::material_pipelines::MaterialPipelines;
+use crate::render_engine::{component, RenderEngine};
 use crate::utils::{HashMap, HashSet};
 use entity_data::EntityStorageLayout;
 use futures::FutureExt;
@@ -28,7 +28,7 @@ use std::time::Instant;
 use winit::event::VirtualKeyCode;
 
 pub struct Game {
-    renderer: Arc<Mutex<Renderer>>,
+    renderer: Arc<Mutex<RenderEngine>>,
 
     pressed_keys: HashSet<winit::event::VirtualKeyCode>,
 
@@ -187,10 +187,10 @@ pub fn game_tick(
     finished.store(true, atomic::Ordering::Relaxed);
 }
 
-pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -> Game {
-    // renderer.lock().unwrap().set_material(
+pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipelines) -> Game {
+    // render_engine.lock().unwrap().set_material(
     //     0,
-    //     renderer::MaterialInfo {
+    //     render_engine::MaterialInfo {
     //         diffuse_tex_id: u32::MAX,
     //         specular_tex_id: u32::MAX,
     //         normal_tex_id: u32::MAX,
@@ -202,7 +202,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     // );
     renderer.lock().unwrap().set_material(
         1,
-        renderer::MaterialInfo {
+        render_engine::MaterialInfo {
             diffuse_tex_id: u32::MAX,
             specular_tex_id: u32::MAX,
             normal_tex_id: u32::MAX,
@@ -214,7 +214,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     );
     renderer.lock().unwrap().set_material(
         2,
-        renderer::MaterialInfo {
+        render_engine::MaterialInfo {
             diffuse_tex_id: u32::MAX,
             specular_tex_id: u32::MAX,
             normal_tex_id: u32::MAX,
@@ -228,7 +228,7 @@ pub fn new(renderer: &Arc<Mutex<Renderer>>, mat_pipelines: &MaterialPipelines) -
     let main_registry = MainRegistry::init();
     let game_tick_finished = Arc::new(AtomicBool::new(true));
     let mut overworld = Overworld::new(&main_registry, 0);
-    let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, &mat_pipelines.cluster());
+    let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, mat_pipelines.cluster());
 
     overworld_streamer.set_render_distance(128);
     // overworld_streamer.update(&mut overworld);

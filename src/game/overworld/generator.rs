@@ -43,6 +43,10 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
                     cluster.set_block(xyz, block_default).build();
                 }
 
+                // if posf.x.abs().max(posf.z.abs()) < posf.y {
+                //     cluster.set_block(xyz, block_default).build();
+                // }
+
                 // let n = noise.0
             }
         }

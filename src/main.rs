@@ -8,9 +8,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::{Fullscreen, WindowBuilder};
 
-use crate::renderer::vertex_mesh::VertexMeshCreate;
-use crate::renderer::{component, TextureQuality, TranslucencyMaxDepth};
-use crate::renderer::{material_pipeline, material_pipelines};
+use crate::render_engine::vertex_mesh::VertexMeshCreate;
+use crate::render_engine::{component, TextureQuality, TranslucencyMaxDepth};
+use crate::render_engine::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
 use crate::utils::noise::ParamNoise;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
@@ -21,7 +21,7 @@ use rayon::ThreadPoolBuilder;
 mod utils;
 
 #[macro_use]
-pub(crate) mod renderer;
+pub(crate) mod render_engine;
 mod game;
 mod resource_file;
 
@@ -121,14 +121,14 @@ fn main() {
 
     let window_size = window.inner_size();
 
-    let renderer_settings = renderer::Settings {
+    let renderer_settings = render_engine::Settings {
         vsync: true,
         texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };
-    let renderer = renderer::new(
+    let renderer = render_engine::new(
         &surface,
         (window_size.width, window_size.height),
         renderer_settings,
@@ -142,7 +142,7 @@ fn main() {
     {
         let mut renderer = renderer.lock().unwrap();
         let index = renderer.add_texture(
-            renderer::TextureAtlasType::ALBEDO,
+            render_engine::TextureAtlasType::ALBEDO,
             resources.get("textures/test_texture.ktx").unwrap(),
         );
 
@@ -189,7 +189,7 @@ fn main() {
         transform_comps.set(ent0, component::Transform::default());
         renderer_comps.set(
             ent0,
-            component::Renderer::new(&device, &mat_pipelines.triag(), false),
+            component::Renderer::new(&renderer, mat_pipelines.triag(), false),
         );
         vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
 
@@ -211,7 +211,7 @@ fn main() {
     }
 
     /*{
-        let mut comps = renderer.scene().world.write_component::<component::Transform>();
+        let mut comps = render_engine.scene().world.write_component::<component::Transform>();
         let mut trans = comps.get_mut(entity).unwrap();
         *trans = component::Transform::default();
     }*/

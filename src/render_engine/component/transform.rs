@@ -1,9 +1,9 @@
 use nalgebra::{Matrix4, Rotation3, Vector3};
 
 pub struct Transform {
-    pub(in crate::renderer) position: Vector3<f32>,
-    pub(in crate::renderer) rotation: Vector3<f32>,
-    pub(in crate::renderer) scale: Vector3<f32>,
+    pub(in crate::render_engine) position: Vector3<f32>,
+    pub(in crate::render_engine) rotation: Vector3<f32>,
+    pub(in crate::render_engine) scale: Vector3<f32>,
 }
 
 impl Transform {

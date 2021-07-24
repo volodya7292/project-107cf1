@@ -1,13 +1,14 @@
-use crate::renderer::material_pipeline::MaterialPipeline;
+use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine::RenderEngine;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
 use vk_wrapper as vkw;
 
 pub struct BufferResource {
-    pub(in crate::renderer) buffer: Vec<u8>,
-    pub(in crate::renderer) device_buffer: Arc<vkw::DeviceBuffer>,
-    pub(in crate::renderer) changed: bool,
+    pub(in crate::render_engine) buffer: Vec<u8>,
+    pub(in crate::render_engine) device_buffer: Arc<vkw::DeviceBuffer>,
+    pub(in crate::render_engine) changed: bool,
 }
 
 impl BufferResource {
@@ -56,26 +57,27 @@ impl Resource {
 // TODO GRAPHICS ENGINE OPTIMIZE: REMOVE USE OF `Arc`s
 
 pub struct Renderer {
-    pub(in crate::renderer) mat_pipeline: Arc<MaterialPipeline>,
+    pub(in crate::render_engine) mat_pipeline: u32,
 
-    pub(in crate::renderer) uniform_buffer: Arc<vkw::DeviceBuffer>,
+    pub(in crate::render_engine) uniform_buffer_offset_model: u32,
+    pub(in crate::render_engine) uniform_buffer: Arc<vkw::DeviceBuffer>,
     // binding id -> Resource
-    pub(in crate::renderer) resources: SmallVec<[(u32, Resource); 4]>,
-    pub(in crate::renderer) translucent: bool,
+    pub(in crate::render_engine) resources: SmallVec<[(u32, Resource); 4]>,
+    pub(in crate::render_engine) translucent: bool,
 }
 
 impl Renderer {
-    pub fn new(
-        device: &Arc<vkw::Device>,
-        mat_pipeline: &Arc<MaterialPipeline>,
-        translucent: bool,
-    ) -> Renderer {
+    pub fn new(renderer: &RenderEngine, mat_pipeline: u32, translucent: bool) -> Renderer {
+        let device = &renderer.device;
+        let pipe = &renderer.material_pipelines[mat_pipeline as usize];
+
         Renderer {
-            mat_pipeline: Arc::clone(&mat_pipeline),
+            mat_pipeline,
+            uniform_buffer_offset_model: pipe.uniform_buffer_offset_model(),
             uniform_buffer: device
                 .create_device_buffer(
                     vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
-                    mat_pipeline.uniform_buffer_size() as u64,
+                    pipe.uniform_buffer_size() as u64,
                     1,
                 )
                 .unwrap(),

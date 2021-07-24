@@ -1,12 +1,12 @@
-use crate::renderer::component::Transform;
+use crate::render_engine::component::Transform;
 use nalgebra as na;
 
 #[derive(Copy, Clone)]
 pub struct ModelTransform {
-    pub(in crate::renderer) matrix: na::Matrix4<f32>,
-    pub(in crate::renderer) position: na::Vector3<f32>,
-    pub(in crate::renderer) scale: na::Vector3<f32>,
-    pub(in crate::renderer) changed: bool,
+    pub(in crate::render_engine) matrix: na::Matrix4<f32>,
+    pub(in crate::render_engine) position: na::Vector3<f32>,
+    pub(in crate::render_engine) scale: na::Vector3<f32>,
+    pub(in crate::render_engine) changed: bool,
 }
 
 impl ModelTransform {

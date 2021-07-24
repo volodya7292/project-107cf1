@@ -34,7 +34,7 @@ pub trait VertexNormalImpl {
 
 macro_rules! __impl_position_methods {
     ($vertex: ty, position) => {
-        impl $crate::renderer::vertex_mesh::VertexPositionImpl for $vertex {
+        impl $crate::render_engine::vertex_mesh::VertexPositionImpl for $vertex {
             fn position(&self) -> &nalgebra::Vector3<f32> {
                 &self.position
             }
@@ -49,7 +49,7 @@ macro_rules! __impl_position_methods {
 
 macro_rules! __impl_normal_methods {
     ($vertex: ty, normal) => {
-        impl $crate::renderer::vertex_mesh::VertexNormalImpl for $vertex {
+        impl $crate::render_engine::vertex_mesh::VertexNormalImpl for $vertex {
             fn normal(&self) -> &nalgebra::Vector3<f32> {
                 &self.normal
             }
@@ -64,9 +64,9 @@ macro_rules! __impl_normal_methods {
 
 macro_rules! vertex_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
-        impl $crate::renderer::vertex_mesh::VertexImpl for $vertex {
+        impl $crate::render_engine::vertex_mesh::VertexImpl for $vertex {
             fn attributes() -> Vec<(u32, vk_wrapper::Format)> {
-                use crate::renderer::vertex_mesh::VertexMember;
+                use crate::render_engine::vertex_mesh::VertexMember;
 
                 fn get_format<T: VertexMember>(_: &T) -> vk_wrapper::Format { T::vk_format() }
 
@@ -87,7 +87,7 @@ macro_rules! vertex_impl {
             }
 
             fn member_info(name: &str) -> Option<(u32, vk_wrapper::Format)> {
-                use crate::renderer::vertex_mesh::VertexMember;
+                use crate::render_engine::vertex_mesh::VertexMember;
 
                 $(
                     if name == stringify!($member_name) {
@@ -186,16 +186,16 @@ impl Sphere {
 #[derive(Default)]
 pub struct RawVertexMesh {
     indexed: bool,
-    pub(in crate::renderer) staging_buffer: Option<vkw::HostBuffer<u8>>,
-    pub(in crate::renderer) buffer: Option<Arc<vkw::DeviceBuffer>>,
+    pub(in crate::render_engine) staging_buffer: Option<vkw::HostBuffer<u8>>,
+    pub(in crate::render_engine) buffer: Option<Arc<vkw::DeviceBuffer>>,
     _vertex_size: u32,
-    pub(in crate::renderer) vertex_count: u32,
+    pub(in crate::render_engine) vertex_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
     sphere: Sphere,
     bindings: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
     indices_offset: u64,
-    pub(in crate::renderer) changed: AtomicBool,
+    pub(in crate::render_engine) changed: AtomicBool,
 }
 
 impl RawVertexMesh {

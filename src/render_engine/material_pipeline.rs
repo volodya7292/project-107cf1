@@ -1,5 +1,5 @@
-use crate::renderer;
-use crate::renderer::Renderer;
+use crate::render_engine;
+use crate::render_engine::RenderEngine;
 use crate::utils::HashMap;
 use std::collections::hash_map;
 use std::mem;
@@ -30,11 +30,11 @@ pub struct PipelineMapping {
 }
 
 pub struct MaterialPipeline {
-    device: Arc<vkw::Device>,
-    signature: Arc<vkw::PipelineSignature>,
-    pipelines: HashMap<PipelineMapping, Arc<vkw::Pipeline>>,
-    uniform_buffer_size: u32,
-    uniform_buffer_model_offset: u32,
+    pub(super) device: Arc<vkw::Device>,
+    pub(super) signature: Arc<vkw::PipelineSignature>,
+    pub(super) pipelines: HashMap<PipelineMapping, Arc<vkw::Pipeline>>,
+    pub(super) uniform_buffer_size: u32,
+    pub(super) uniform_buffer_model_offset: u32,
 }
 
 impl MaterialPipeline {
@@ -75,29 +75,5 @@ impl MaterialPipeline {
     /// Get model matrix (mat4) offset in uniform buffer struct
     pub fn uniform_buffer_offset_model(&self) -> u32 {
         self.uniform_buffer_model_offset
-    }
-}
-
-impl Renderer {
-    pub fn create_material_pipeline<T: UniformStruct>(
-        &mut self,
-        shaders: &[Arc<vkw::Shader>],
-    ) -> Arc<MaterialPipeline> {
-        let device = Arc::clone(&self.device);
-
-        let signature = device
-            .create_pipeline_signature(shaders, &*renderer::ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
-
-        let mut mat_pipeline = MaterialPipeline {
-            device,
-            signature,
-            pipelines: Default::default(),
-            uniform_buffer_size: mem::size_of::<T>() as u32,
-            uniform_buffer_model_offset: T::model_offset(),
-        };
-        self.prepare_material_pipeline(&mut mat_pipeline);
-
-        Arc::new(mat_pipeline)
     }
 }

@@ -1,5 +1,5 @@
-use crate::renderer::vertex_mesh;
-use crate::renderer::vertex_mesh::VertexMeshCreate;
+use crate::render_engine::vertex_mesh;
+use crate::render_engine::vertex_mesh::VertexMeshCreate;
 use nalgebra as na;
 use std::sync::Arc;
 use vk_wrapper as vkw;

@@ -5,7 +5,7 @@ mod qef;
 pub mod slice_split;
 pub mod value_noise;
 
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+use crate::render_engine::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra as na;
 pub use slice_split::SliceSplitImpl;
 

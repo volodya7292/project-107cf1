@@ -8,6 +8,7 @@ pub(crate) mod vertex_mesh;
 pub mod scene;
 mod systems;
 
+use crate::render_engine::material_pipeline::UniformStruct;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use crate::utils::{HashMap, UInteger};
@@ -30,8 +31,8 @@ pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::{
     swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
-    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, ShaderBinding,
-    ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
+    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, Shader,
+    ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
 };
 use vk_wrapper::{
     Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
@@ -40,7 +41,7 @@ use vk_wrapper::{
     Subpass, Surface, Swapchain, WaitSemaphore,
 };
 
-pub struct Renderer {
+pub struct RenderEngine {
     scene: Scene,
 
     surface: Arc<Surface>,
@@ -71,7 +72,7 @@ pub struct Renderer {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_object_pool: Option<DescriptorPool>,
+    depth_per_object_pool: DescriptorPool,
     _depth_per_frame_pool: DescriptorPool,
     depth_per_frame_in: DescriptorSet,
 
@@ -100,7 +101,7 @@ pub struct Renderer {
     g_framebuffer: Option<Arc<Framebuffer>>,
     _g_per_frame_pool: DescriptorPool,
     g_per_frame_desc: DescriptorSet,
-    g_per_pipeline_pools: Option<HashMap<Arc<PipelineSignature>, DescriptorPool>>,
+    g_per_pipeline_pools: HashMap<Arc<PipelineSignature>, DescriptorPool>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
@@ -110,7 +111,8 @@ pub struct Renderer {
     material_buffer: Arc<DeviceBuffer>,
     material_updates: HashMap<u32, MaterialInfo>,
 
-    renderables: Arc<Mutex<HashMap<u32, Renderable>>>,
+    renderables: HashMap<u32, Renderable>,
+    material_pipelines: Vec<MaterialPipeline>,
 }
 
 #[derive(Copy, Clone)]
@@ -301,7 +303,7 @@ fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
-impl Renderer {
+impl RenderEngine {
     pub fn device(&self) -> &Arc<Device> {
         &self.device
     }
@@ -318,7 +320,7 @@ impl Renderer {
         self.active_camera_desc = entity;
     }
 
-    /// Add texture to renderer
+    /// Add texture to render_engine
     pub fn add_texture(&mut self, atlas_type: TextureAtlasType, res_ref: ResourceRef) -> usize {
         self.texture_resources.push((res_ref, atlas_type, None));
         self.texture_resources.len() - 1
@@ -375,25 +377,61 @@ impl Renderer {
         *tex_index = None;
     }
 
-    pub fn prepare_material_pipeline(&mut self, material_pipeline: &mut MaterialPipeline) {
-        material_pipeline.prepare_pipeline(&PipelineMapping {
+    /// Returns id of registered material pipeline.
+    pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
+        let signature = self
+            .device
+            .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
+            .unwrap();
+
+        let mut mat_pipeline = MaterialPipeline {
+            device: Arc::clone(&self.device),
+            signature,
+            pipelines: Default::default(),
+            uniform_buffer_size: mem::size_of::<T>() as u32,
+            uniform_buffer_model_offset: T::model_offset(),
+        };
+        mat_pipeline.prepare_pipeline(&PipelineMapping {
             render_pass: Arc::clone(&self.g_render_pass),
             subpass_index: 0,
             cull_back_faces: false,
         });
-        material_pipeline.prepare_pipeline(&PipelineMapping {
+        mat_pipeline.prepare_pipeline(&PipelineMapping {
             render_pass: Arc::clone(&self.g_render_pass),
             subpass_index: 0,
             cull_back_faces: true,
         });
 
-        let g_per_pipeline_pools = self.g_per_pipeline_pools.as_mut().unwrap();
-        let signature = material_pipeline.signature();
-
+        let g_per_pipeline_pools = &mut self.g_per_pipeline_pools;
+        let signature = mat_pipeline.signature();
         if !g_per_pipeline_pools.contains_key(signature) {
             g_per_pipeline_pools.insert(Arc::clone(signature), signature.create_pool(1, 16).unwrap());
         }
+
+        let mat_pipelines = &mut self.material_pipelines;
+        mat_pipelines.push(mat_pipeline);
+        (mat_pipelines.len() - 1) as u32
     }
+
+    // pub fn prepare_material_pipeline(&mut self, material_pipeline: &mut MaterialPipeline) {
+    //     material_pipeline.prepare_pipeline(&PipelineMapping {
+    //         render_pass: Arc::clone(&self.g_render_pass),
+    //         subpass_index: 0,
+    //         cull_back_faces: false,
+    //     });
+    //     material_pipeline.prepare_pipeline(&PipelineMapping {
+    //         render_pass: Arc::clone(&self.g_render_pass),
+    //         subpass_index: 0,
+    //         cull_back_faces: true,
+    //     });
+    //
+    //     let g_per_pipeline_pools = self.g_per_pipeline_pools.as_mut().unwrap();
+    //     let signature = material_pipeline.signature();
+    //
+    //     if !g_per_pipeline_pools.contains_key(signature) {
+    //         g_per_pipeline_pools.insert(Arc::clone(signature), signature.create_pool(1, 16).unwrap());
+    //     }
+    // }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
         self.material_updates.insert(id, info);
@@ -508,10 +546,11 @@ impl Renderer {
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             renderer_comps: self.scene.storage::<component::Renderer>(),
-            depth_per_object_pool: self.depth_per_object_pool.take().unwrap(),
-            g_per_pipeline_pools: self.g_per_pipeline_pools.take().unwrap(),
-            renderables: Arc::clone(&self.renderables),
-            buffer_updates: Arc::clone(&buffer_updates),
+            depth_per_object_pool: &mut self.depth_per_object_pool,
+            g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
+            renderables: &mut self.renderables,
+            buffer_updates: &buffer_updates,
+            material_pipelines: &self.material_pipelines,
         };
 
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
@@ -544,9 +583,6 @@ impl Renderer {
         });
         hierarchy_propagation_system.run();
         world_transform_events_system.run();
-
-        self.depth_per_object_pool = Some(renderer_events_system.depth_per_object_pool);
-        self.g_per_pipeline_pools = Some(renderer_events_system.g_per_pipeline_pools);
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -637,14 +673,12 @@ impl Renderer {
         &mut self,
         renderable_ids: &[u32],
         camera: &component::Camera,
-        renderables: &HashMap<u32, Renderable>,
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
         vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) -> u32 {
         let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
-
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
         self.depth_secondary_cls
@@ -711,7 +745,7 @@ impl Renderer {
                         cl.bind_pipeline(&self.depth_pipeline_rw);
                     }
 
-                    let renderable = &renderables[&renderable_id];
+                    let renderable = &self.renderables[&renderable_id];
 
                     cl.bind_graphics_input(&self.depth_signature, 1, renderable.descriptor_sets[0]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
@@ -735,10 +769,10 @@ impl Renderer {
     fn record_g_cmd_lists(
         &self,
         renderable_ids: &[u32],
-        renderables: &HashMap<u32, Renderable>,
         renderer_comps: &ComponentStorage<component::Renderer>,
         vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) {
+        let mat_pipelines = &self.material_pipelines;
         let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
 
@@ -785,10 +819,10 @@ impl Renderer {
                     let mesh = vertex_mesh.unwrap();
                     let vertex_mesh = &mesh.0;
 
-                    let mat_pipeline = &renderer.mat_pipeline;
+                    let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
                     let signature = pipeline.signature();
-                    let renderable = &renderables[&renderable_id];
+                    let renderable = &self.renderables[&renderable_id];
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
@@ -818,8 +852,6 @@ impl Renderer {
         let renderer_comps = renderer_comp.read().unwrap();
         let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
         let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
-        let renderables = Arc::clone(&self.renderables);
-        let renderables = renderables.lock().unwrap();
 
         let renderable_ids: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
         let object_count = renderable_ids.len() as u32;
@@ -827,7 +859,6 @@ impl Renderer {
         let frustum_visible_objects = self.record_depth_cmd_lists(
             &renderable_ids,
             &camera,
-            &renderables,
             &world_transform_comps,
             &renderer_comps,
             &vertex_mesh_comps,
@@ -973,7 +1004,7 @@ impl Renderer {
             submit.wait().unwrap();
         }
 
-        self.record_g_cmd_lists(&renderable_ids, &renderables, &renderer_comps, &vertex_mesh_comps);
+        self.record_g_cmd_lists(&renderable_ids, &renderer_comps, &vertex_mesh_comps);
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         self.compose_pool.update(
@@ -1455,7 +1486,7 @@ pub fn new(
     device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
-) -> Result<Arc<Mutex<Renderer>>, DeviceError> {
+) -> Result<Arc<Mutex<RenderEngine>>, DeviceError> {
     let scene = Scene::new();
 
     // TODO: pipeline cache management
@@ -1787,7 +1818,7 @@ pub fn new(
 
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
-    let mut renderer = Renderer {
+    let mut renderer = RenderEngine {
         scene,
         surface: Arc::clone(surface),
         swapchain: None,
@@ -1818,7 +1849,7 @@ pub fn new(
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
         depth_pipeline_rw,
-        depth_per_object_pool: Some(depth_signature.create_pool(1, MAX_OBJECT_COUNT)?),
+        depth_per_object_pool: depth_signature.create_pool(1, MAX_OBJECT_COUNT)?,
         _depth_per_frame_pool: depth_per_frame_pool,
         depth_per_frame_in,
         depth_pyramid_pipeline,
@@ -1835,7 +1866,7 @@ pub fn new(
         g_framebuffer: None,
         _g_per_frame_pool: g_per_frame_pool,
         g_per_frame_desc: g_per_frame_in,
-        g_per_pipeline_pools: Some(Default::default()),
+        g_per_pipeline_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
         active_camera_desc: active_camera,
@@ -1850,13 +1881,14 @@ pub fn new(
         material_buffer,
         material_updates: Default::default(),
         compose_desc,
+        material_pipelines: vec![],
     };
     renderer.on_resize(size);
 
     Ok(Arc::new(Mutex::new(renderer)))
 }
 
-impl Drop for Renderer {
+impl Drop for RenderEngine {
     fn drop(&mut self) {
         self.device.wait_idle().unwrap();
     }

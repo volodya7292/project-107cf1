@@ -2,11 +2,11 @@ use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{Quad, Vertex};
 use crate::game::registry::Registry;
-use crate::renderer::material_pipeline::MaterialPipeline;
-use crate::renderer::vertex_mesh::VertexMeshCreate;
-use crate::renderer::{component, scene};
+use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine::vertex_mesh::VertexMeshCreate;
+use crate::render_engine::{component, scene};
 use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
-use crate::{renderer, utils};
+use crate::{render_engine, utils};
 use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
 use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
 use nalgebra_glm as glm;
@@ -117,7 +117,7 @@ struct Sector {
     occluders: Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     changed: bool,
     side_changed: [bool; 6],
-    vertex_mesh: renderer::VertexMesh<Vertex, ()>,
+    vertex_mesh: render_engine::VertexMesh<Vertex, ()>,
 }
 
 impl Sector {
@@ -914,7 +914,7 @@ impl Cluster {
 }
 
 pub struct UpdateSystemData<'a> {
-    pub mat_pipeline: Arc<MaterialPipeline>,
+    pub mat_pipeline: u32,
     pub entities: &'a mut scene::Entities,
     pub transform: scene::ComponentStorageMut<'a, component::Transform>,
     pub renderer: scene::ComponentStorageMut<'a, component::Renderer>,
@@ -924,7 +924,12 @@ pub struct UpdateSystemData<'a> {
 }
 
 impl Cluster {
-    pub fn update_renderable(&self, entity: u32, data: &mut UpdateSystemData) {
+    pub fn update_renderable(
+        &self,
+        renderer: &render_engine::RenderEngine,
+        entity: u32,
+        data: &mut UpdateSystemData,
+    ) {
         let transform_comps = &mut data.transform;
         let renderer_comps = &mut data.renderer;
         let vertex_mesh_comps = &mut data.vertex_mesh;
@@ -958,7 +963,7 @@ impl Cluster {
                     ),
                 );
 
-                let renderer = component::Renderer::new(&self.device, &data.mat_pipeline, false);
+                let renderer = component::Renderer::new(&renderer, data.mat_pipeline, false);
                 renderer_comps.set(ent, renderer);
             }
         }

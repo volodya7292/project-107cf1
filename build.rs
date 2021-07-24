@@ -122,9 +122,8 @@ fn build_resources(src_dir: &Path, dst_file: &Path) {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=work_dir/resources");
     println!("cargo:rustc-env=RUSTC_FORCE_INCREMENTAL=1");
 
-    compile_shaders(Path::new("src/renderer/shaders"), Path::new("res/shaders"));
+    compile_shaders(Path::new("src/render_engine/shaders"), Path::new("res/shaders"));
     build_resources(Path::new("res"), Path::new("work_dir/resources"));
 }
