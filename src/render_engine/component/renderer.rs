@@ -58,29 +58,19 @@ impl Resource {
 
 pub struct Renderer {
     pub(in crate::render_engine) mat_pipeline: u32,
-
     pub(in crate::render_engine) uniform_buffer_offset_model: u32,
-    pub(in crate::render_engine) uniform_buffer: Arc<vkw::DeviceBuffer>,
-    // binding id -> Resource
+    /// binding id -> Resource
     pub(in crate::render_engine) resources: SmallVec<[(u32, Resource); 4]>,
     pub(in crate::render_engine) translucent: bool,
 }
 
 impl Renderer {
     pub fn new(renderer: &RenderEngine, mat_pipeline: u32, translucent: bool) -> Renderer {
-        let device = &renderer.device;
         let pipe = &renderer.material_pipelines[mat_pipeline as usize];
 
         Renderer {
             mat_pipeline,
             uniform_buffer_offset_model: pipe.uniform_buffer_offset_model(),
-            uniform_buffer: device
-                .create_device_buffer(
-                    vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
-                    pipe.uniform_buffer_size() as u64,
-                    1,
-                )
-                .unwrap(),
             resources: Default::default(),
             translucent,
         }

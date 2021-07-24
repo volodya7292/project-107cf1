@@ -545,6 +545,7 @@ impl RenderEngine {
         let buffer_updates3 = Arc::new(Mutex::new(vec![]));
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
+            device: &self.device,
             renderer_comps: self.scene.storage::<component::Renderer>(),
             depth_per_object_pool: &mut self.depth_per_object_pool,
             g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
@@ -552,16 +553,19 @@ impl RenderEngine {
             buffer_updates: &buffer_updates,
             material_pipelines: &self.material_pipelines,
         };
-
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             buffer_updates: Arc::clone(&buffer_updates2),
         };
-
         let mut transform_events_system = systems::TransformEventsSystem {
             transform_comps: self.scene.storage::<component::Transform>(),
             model_transform_comps: self.scene.storage::<component::ModelTransform>(),
         };
+        rayon::scope(|s| {
+            s.spawn(|_| renderer_events_system.run());
+            s.spawn(|_| vertex_mesh_system.run());
+            s.spawn(|_| transform_events_system.run());
+        });
 
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
             parent_comps: self.scene.storage::<component::Parent>(),
@@ -569,19 +573,14 @@ impl RenderEngine {
             model_transform_comps: self.scene.storage::<component::ModelTransform>(),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
+        hierarchy_propagation_system.run();
 
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
             buffer_updates: Arc::clone(&buffer_updates3),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
+            renderables: &self.renderables,
         };
-
-        rayon::scope(|s| {
-            s.spawn(|_| renderer_events_system.run());
-            s.spawn(|_| vertex_mesh_system.run());
-            s.spawn(|_| transform_events_system.run());
-        });
-        hierarchy_propagation_system.run();
         world_transform_events_system.run();
 
         // Update camera uniform buffers

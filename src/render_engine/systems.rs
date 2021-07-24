@@ -10,6 +10,7 @@ use std::{mem, slice};
 use vk_wrapper as vkw;
 
 pub(super) struct RendererCompEventsSystem<'a> {
+    pub device: &'a Arc<vkw::Device>,
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
     pub depth_per_object_pool: &'a mut vkw::DescriptorPool,
     pub g_per_pipeline_pools: &'a mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
@@ -51,14 +52,14 @@ impl RendererCompEventsSystem<'_> {
             &[vkw::Binding {
                 id: 0,
                 array_index: 0,
-                res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+                res: vkw::BindingRes::Buffer(Arc::clone(&renderable.buffers[0])),
             }],
         );
 
         let mut updates: SmallVec<[vkw::Binding; 4]> = smallvec![vkw::Binding {
             id: 0,
             array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderer.uniform_buffer)),
+            res: vkw::BindingRes::Buffer(Arc::clone(&renderable.buffers[0])),
         }];
 
         for (binding_id, res) in &mut renderer.resources {
@@ -109,11 +110,18 @@ impl RendererCompEventsSystem<'_> {
             match event {
                 scene::Event::Created(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
+                    let pipe = &self.material_pipelines[renderer_comp.mat_pipeline as usize];
+                    let uniform_buffer = self
+                        .device
+                        .create_device_buffer(
+                            vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
+                            pipe.uniform_buffer_size() as u64,
+                            1,
+                        )
+                        .unwrap();
                     let mut renderable = Renderable {
-                        buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
-                        pipe_signature: Arc::clone(
-                            self.material_pipelines[renderer_comp.mat_pipeline as usize].signature(),
-                        ),
+                        buffers: smallvec![uniform_buffer],
+                        pipe_signature: Arc::clone(pipe.signature()),
                         descriptor_sets: Default::default(),
                     };
 
@@ -143,11 +151,18 @@ impl RendererCompEventsSystem<'_> {
                     );
                     self.renderables.remove(&entity);
 
+                    let pipe = &self.material_pipelines[renderer_comp.mat_pipeline as usize];
+                    let uniform_buffer = self
+                        .device
+                        .create_device_buffer(
+                            vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::UNIFORM,
+                            pipe.uniform_buffer_size() as u64,
+                            1,
+                        )
+                        .unwrap();
                     let mut renderable = Renderable {
-                        buffers: smallvec![Arc::clone(&renderer_comp.uniform_buffer)],
-                        pipe_signature: Arc::clone(
-                            self.material_pipelines[renderer_comp.mat_pipeline as usize].signature(),
-                        ),
+                        buffers: smallvec![uniform_buffer],
+                        pipe_signature: Arc::clone(pipe.signature()),
                         descriptor_sets: Default::default(),
                     };
                     Self::renderer_comp_created(
@@ -271,17 +286,20 @@ impl TransformEventsSystem {
 }
 
 // Updates world transform uniform buffers
-pub(super) struct WorldTransformEventsSystem {
+pub(super) struct WorldTransformEventsSystem<'a> {
     pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
     pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
+    pub renderables: &'a HashMap<u32, Renderable>,
 }
 
-impl WorldTransformEventsSystem {
+impl WorldTransformEventsSystem<'_> {
     fn world_transform_modified(
+        entity: u32,
         world_transform: &component::WorldTransform,
         renderer: Option<&component::Renderer>,
         buffer_updates: &mut Vec<BufferUpdate>,
+        renderables: &HashMap<u32, Renderable>,
     ) {
         if let Some(renderer) = renderer {
             let matrix_bytes = unsafe {
@@ -291,9 +309,10 @@ impl WorldTransformEventsSystem {
                 )
                 .to_vec()
             };
+            let renderable = &renderables[&entity];
 
             buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
-                buffer: Arc::clone(&renderer.uniform_buffer),
+                buffer: Arc::clone(&renderable.buffers[0]),
                 offset: renderer.uniform_buffer_offset_model as u64,
                 data: matrix_bytes,
             }));
@@ -310,16 +329,20 @@ impl WorldTransformEventsSystem {
             match event {
                 Event::Created(entity) => {
                     Self::world_transform_modified(
+                        entity,
                         world_transform_comps.get(entity).unwrap(),
                         renderer_comps.get(entity),
                         &mut buffer_updates,
+                        self.renderables,
                     );
                 }
                 Event::Modified(entity) => {
                     Self::world_transform_modified(
+                        entity,
                         world_transform_comps.get(entity).unwrap(),
                         renderer_comps.get(entity),
                         &mut buffer_updates,
+                        self.renderables,
                     );
                 }
                 _ => {}
