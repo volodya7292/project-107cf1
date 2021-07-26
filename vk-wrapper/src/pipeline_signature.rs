@@ -54,9 +54,6 @@ impl PipelineSignature {
             native: smallvec![base_native_pool],
             allocated: vec![],
             free_sets: Default::default(),
-            used_buffers: Default::default(),
-            used_image_views: Default::default(),
-            used_samplers: Default::default(),
         })
     }
 }

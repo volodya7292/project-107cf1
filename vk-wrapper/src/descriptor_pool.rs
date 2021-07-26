@@ -1,5 +1,4 @@
 use crate::{Device, DeviceBuffer, Image, ImageLayout, ImageView, PipelineSignature, Sampler};
-use ahash::AHashMap;
 use ash::version::DeviceV1_0;
 use ash::vk;
 use bit_set::BitSet;
@@ -46,9 +45,6 @@ pub struct DescriptorPool {
     pub(crate) native: SmallVec<[NativeDescriptorPool; 16]>,
     pub(crate) allocated: Vec<DescriptorSet>,
     pub(crate) free_sets: BitSet,
-    pub(crate) used_buffers: AHashMap<BindingMapping, Arc<DeviceBuffer>>,
-    pub(crate) used_image_views: AHashMap<BindingMapping, Arc<ImageView>>,
-    pub(crate) used_samplers: AHashMap<BindingMapping, Arc<Sampler>>,
 }
 
 impl DescriptorPool {
@@ -113,11 +109,6 @@ impl DescriptorPool {
                 .dst_binding(binding.id)
                 .dst_array_element(binding.array_index)
                 .descriptor_type(self.signature.binding_types[self.set_layout_id as usize][&binding.id]);
-            let mapping = BindingMapping {
-                descriptor_set_id: descriptor_set.id,
-                binding_id: binding.id,
-                array_index: binding.array_index,
-            };
 
             match &binding.res {
                 BindingRes::Buffer(buffer) => {
@@ -127,8 +118,6 @@ impl DescriptorPool {
                         range: vk::WHOLE_SIZE,
                     });
                     write_info = write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
-
-                    self.used_buffers.insert(mapping, Arc::clone(buffer));
                 }
                 BindingRes::Image(image, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
@@ -137,9 +126,6 @@ impl DescriptorPool {
                         image_layout: layout.0,
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-
-                    self.used_image_views.insert(mapping, Arc::clone(&image.view));
-                    self.used_samplers.insert(mapping, Arc::clone(&image.sampler));
                 }
                 BindingRes::ImageView(image_view, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
@@ -148,8 +134,6 @@ impl DescriptorPool {
                         image_layout: layout.0,
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-
-                    self.used_image_views.insert(mapping, Arc::clone(&image_view));
                 }
                 BindingRes::ImageViewSampler(image_view, sampler, layout) => {
                     native_image_infos.push(vk::DescriptorImageInfo {
@@ -158,9 +142,6 @@ impl DescriptorPool {
                         image_layout: layout.0,
                     });
                     write_info = write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-
-                    self.used_image_views.insert(mapping, Arc::clone(&image_view));
-                    self.used_samplers.insert(mapping, Arc::clone(&sampler));
                 }
             }
 
