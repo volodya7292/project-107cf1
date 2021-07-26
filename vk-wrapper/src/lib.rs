@@ -32,6 +32,7 @@ use swapchain::SwapchainWrapper;
 
 pub use adapter::Adapter;
 pub use buffer::BufferBarrier;
+pub use buffer::BufferHandle;
 pub use buffer::BufferUsageFlags;
 pub use buffer::DeviceBuffer;
 pub use buffer::HostBuffer;

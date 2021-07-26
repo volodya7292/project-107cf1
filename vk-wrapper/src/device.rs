@@ -141,11 +141,17 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .size(bytesize as vk::DeviceSize);
 
+        let preferred_flags = if mem_usage == vk_mem::MemoryUsage::CpuOnly {
+            vk::MemoryPropertyFlags::HOST_CACHED
+        } else {
+            Default::default()
+        };
+
         let allocation_create_info = vk_mem::AllocationCreateInfo {
             usage: mem_usage,
             flags: vk_mem::AllocationCreateFlags::MAPPED,
             required_flags: Default::default(),
-            preferred_flags: Default::default(),
+            preferred_flags,
             memory_type_bits: 0,
             pool: None,
             user_data: None,
@@ -193,9 +199,9 @@ impl Device {
         usage: BufferUsageFlags,
         element_size: u64,
         size: u64,
-    ) -> Result<Arc<DeviceBuffer>, DeviceError> {
+    ) -> Result<DeviceBuffer, DeviceError> {
         let (buffer, _) = self.create_buffer(usage, element_size, size, vk_mem::MemoryUsage::GpuOnly)?;
-        Ok(Arc::new(DeviceBuffer { buffer }))
+        Ok(DeviceBuffer { buffer })
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.

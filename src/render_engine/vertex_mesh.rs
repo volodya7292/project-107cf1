@@ -5,7 +5,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::Format;
+use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::{BufferHandle, Format};
 
 #[derive(Debug)]
 pub enum Error {
@@ -187,13 +188,13 @@ impl Sphere {
 pub struct RawVertexMesh {
     indexed: bool,
     pub(in crate::render_engine) staging_buffer: Option<vkw::HostBuffer<u8>>,
-    pub(in crate::render_engine) buffer: Option<Arc<vkw::DeviceBuffer>>,
+    pub(in crate::render_engine) buffer: Option<vkw::DeviceBuffer>,
     _vertex_size: u32,
     pub(in crate::render_engine) vertex_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
     sphere: Sphere,
-    bindings: Vec<(Arc<vkw::DeviceBuffer>, u64)>,
+    bindings: Vec<(BufferHandle, u64)>,
     indices_offset: u64,
     pub(in crate::render_engine) changed: AtomicBool,
 }
@@ -272,6 +273,10 @@ where
         }
 
         indices
+    }
+
+    pub fn vertex_count(&self) -> u32 {
+        self.raw.vertex_count
     }
 
     /*pub fn set_component<T: VertexMember>(&mut self, member_name: &str, values: &[T]) -> Result<(), Error> {
@@ -384,7 +389,7 @@ impl VertexMeshCreate for vkw::Device {
                 }
 
                 // Set binging buffers
-                bindings.push((Arc::clone(&buffer), buffer_offset as u64));
+                bindings.push((buffer.handle(), buffer_offset as u64));
             }
 
             // Copy instances
@@ -406,7 +411,7 @@ impl VertexMeshCreate for vkw::Device {
                 }
 
                 // Set binging buffers
-                bindings.push((Arc::clone(&buffer), buffer_offset as u64));
+                bindings.push((buffer.handle(), buffer_offset as u64));
             }
 
             // Copy indices
@@ -484,7 +489,7 @@ impl VertexMeshCmdList for vkw::CmdList {
     fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
         if vertex_mesh.indexed && vertex_mesh.index_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-            self.bind_index_buffer(&vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
+            self.bind_index_buffer(vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
             self.draw_indexed(vertex_mesh.index_count, 0, 0);
         } else if vertex_mesh.vertex_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);

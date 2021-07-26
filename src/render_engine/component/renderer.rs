@@ -7,7 +7,7 @@ use vk_wrapper as vkw;
 
 pub struct BufferResource {
     pub(in crate::render_engine) buffer: Vec<u8>,
-    pub(in crate::render_engine) device_buffer: Arc<vkw::DeviceBuffer>,
+    pub(in crate::render_engine) device_buffer: vkw::DeviceBuffer,
     pub(in crate::render_engine) changed: bool,
 }
 

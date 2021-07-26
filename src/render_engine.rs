@@ -11,6 +11,7 @@ mod systems;
 use crate::render_engine::material_pipeline::UniformStruct;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
+use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, UInteger};
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
@@ -29,6 +30,7 @@ use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
+use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::{
     swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
     DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, Shader,
@@ -86,9 +88,9 @@ pub struct RenderEngine {
     cull_signature: Arc<PipelineSignature>,
     cull_pool: DescriptorPool,
     cull_desc: DescriptorSet,
-    cull_buffer: Arc<DeviceBuffer>,
+    cull_buffer: DeviceBuffer,
     cull_host_buffer: HostBuffer<CullObject>,
-    visibility_buffer: Arc<DeviceBuffer>,
+    visibility_buffer: DeviceBuffer,
     visibility_host_buffer: HostBuffer<u32>,
 
     sw_render_pass: Option<Arc<RenderPass>>,
@@ -107,12 +109,13 @@ pub struct RenderEngine {
     translucency_texel_image: Option<Arc<Image>>,
 
     active_camera_desc: u32,
-    per_frame_ub: Arc<DeviceBuffer>,
-    material_buffer: Arc<DeviceBuffer>,
+    per_frame_ub: DeviceBuffer,
+    material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
 
     renderables: HashMap<u32, Renderable>,
     material_pipelines: Vec<MaterialPipeline>,
+    device_buffers: SlotVec<DeviceBuffer>,
 }
 
 #[derive(Copy, Clone)]
@@ -146,7 +149,7 @@ pub enum TextureAtlasType {
 }
 
 struct BufferUpdate1 {
-    buffer: Arc<DeviceBuffer>,
+    buffer: BufferHandle,
     offset: u64,
     data: Vec<u8>,
 }
@@ -154,13 +157,13 @@ struct BufferUpdate1 {
 struct BufferUpdate2 {
     src_buffer: RawHostBuffer,
     src_offset: u64,
-    dst_buffer: Arc<DeviceBuffer>,
+    dst_buffer: BufferHandle,
     dst_offset: u64,
     size: u64,
 }
 
 struct BufferUpdate3 {
-    buffer: Arc<DeviceBuffer>,
+    buffer: BufferHandle,
     data: Vec<u8>,
     // (src data offset, dst offset, size)
     regions: Vec<(u64, u64, u64)>,
@@ -173,8 +176,8 @@ enum BufferUpdate {
 }
 
 struct Renderable {
-    buffers: SmallVec<[Arc<DeviceBuffer>; 4]>,
-    pipe_signature: Arc<PipelineSignature>,
+    buffers: SmallVec<[DeviceBuffer; 4]>,
+    material_pipe: u32,
     descriptor_sets: SmallVec<[DescriptorSet; 4]>,
 }
 
@@ -451,6 +454,8 @@ impl RenderEngine {
         let mut used_size = 0;
         let mut i = 0;
 
+        let mut total_copy = 0;
+
         while i < update_count {
             {
                 let mut cl = self.staging_cl.lock().unwrap();
@@ -481,7 +486,7 @@ impl RenderEngine {
                     match update {
                         BufferUpdate::Type1(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
-
+                            total_copy += copy_size;
                             cl.copy_buffer_to_device(
                                 &self.staging_buffer,
                                 used_size,
@@ -498,6 +503,7 @@ impl RenderEngine {
                                 update.dst_offset,
                                 update.size,
                             );
+                            total_copy += update.size;
                         }
                         BufferUpdate::Type3(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
@@ -505,10 +511,13 @@ impl RenderEngine {
                             let regions: SmallVec<[CopyRegion; 128]> = update
                                 .regions
                                 .iter()
-                                .map(|region| CopyRegion {
-                                    src_element_index: used_size + region.0,
-                                    dst_element_index: region.1,
-                                    size: region.2,
+                                .map(|region| {
+                                    total_copy += region.2;
+                                    CopyRegion {
+                                        src_element_index: used_size + region.0,
+                                        dst_element_index: region.1,
+                                        size: region.2,
+                                    }
                                 })
                                 .collect();
 
@@ -523,9 +532,17 @@ impl RenderEngine {
                 cl.end().unwrap();
             }
 
+            let t0 = Instant::now();
+
             let mut submit = self.staging_submit.lock().unwrap();
             graphics_queue.submit(&mut submit).unwrap();
             submit.wait().unwrap();
+
+            let t1 = Instant::now();
+            let t = (t1 - t0).as_secs_f64();
+            if t > 0.003 {
+                println!("update buffers {} | size {}", t, total_copy);
+            }
         }
     }
 
@@ -535,6 +552,7 @@ impl RenderEngine {
     }
 
     fn on_update(&mut self) {
+        let mut t0 = Instant::now();
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
             let camera_comps = camera_comps.read().unwrap();
@@ -583,6 +601,9 @@ impl RenderEngine {
         };
         world_transform_events_system.run();
 
+        let mut t00 = Instant::now();
+        let systems_t = (t00 - t0).as_secs_f64();
+
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
@@ -618,7 +639,7 @@ impl RenderEngine {
                 .lock()
                 .unwrap()
                 .push(BufferUpdate::Type1(BufferUpdate1 {
-                    buffer: Arc::clone(&self.per_frame_ub),
+                    buffer: self.per_frame_ub.handle(),
                     offset: 0,
                     data,
                 }));
@@ -647,7 +668,7 @@ impl RenderEngine {
                 .lock()
                 .unwrap()
                 .push(BufferUpdate::Type3(BufferUpdate3 {
-                    buffer: Arc::clone(&self.material_buffer),
+                    buffer: self.material_buffer.handle(),
                     data: data.to_vec(),
                     regions,
                 }));
@@ -664,8 +685,17 @@ impl RenderEngine {
             self.update_device_buffers(&buffer_updates3.lock().unwrap());
         }
 
-        // let t2 = Instant::now();
-        // println!("{}", (t2 - t).as_secs_f64());
+        let t1 = Instant::now();
+        let updates_t = (t1 - t00).as_secs_f64();
+
+        let t1 = Instant::now();
+        let t = (t1 - t0).as_secs_f64();
+        // if t > 0.003 {
+        //     println!(
+        //         "renderer::update {} | systems {} | updates {}",
+        //         t, systems_t, updates_t
+        //     );
+        // }
     }
 
     fn record_depth_cmd_lists(
@@ -1345,17 +1375,17 @@ impl RenderEngine {
                 Binding {
                     id: 1,
                     array_index: 0,
-                    res: BindingRes::Buffer(Arc::clone(&self.per_frame_ub)),
+                    res: BindingRes::Buffer(&self.per_frame_ub),
                 },
                 Binding {
                     id: 2,
                     array_index: 0,
-                    res: BindingRes::Buffer(Arc::clone(&self.cull_buffer)),
+                    res: BindingRes::Buffer(&self.cull_buffer),
                 },
                 Binding {
                     id: 3,
                     array_index: 0,
-                    res: BindingRes::Buffer(Arc::clone(&self.visibility_buffer)),
+                    res: BindingRes::Buffer(&self.visibility_buffer),
                 },
             ],
         );
@@ -1768,7 +1798,7 @@ pub fn new(
         &[Binding {
             id: 0,
             array_index: 0,
-            res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+            res: BindingRes::Buffer(&per_frame_uniform_buffer),
         }],
     );
     g_per_frame_pool.update(
@@ -1777,7 +1807,7 @@ pub fn new(
             Binding {
                 id: 0,
                 array_index: 0,
-                res: BindingRes::Buffer(Arc::clone(&per_frame_uniform_buffer)),
+                res: BindingRes::Buffer(&per_frame_uniform_buffer),
             },
             Binding {
                 id: 1,
@@ -1797,7 +1827,7 @@ pub fn new(
             Binding {
                 id: 4,
                 array_index: 0,
-                res: BindingRes::Buffer(Arc::clone(&material_buffer)),
+                res: BindingRes::Buffer(&material_buffer),
             },
         ],
     );
@@ -1817,6 +1847,7 @@ pub fn new(
 
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
+    // TODO: allocate buffers with capacity of MAX_OBJECTS
     let mut renderer = RenderEngine {
         scene,
         surface: Arc::clone(surface),
@@ -1881,6 +1912,7 @@ pub fn new(
         material_updates: Default::default(),
         compose_desc,
         material_pipelines: vec![],
+        device_buffers: SlotVec::new(),
     };
     renderer.on_resize(size);
 

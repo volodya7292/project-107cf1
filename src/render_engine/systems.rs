@@ -8,6 +8,7 @@ use smallvec::{smallvec, SmallVec};
 use std::sync::{atomic, Arc, Mutex};
 use std::{mem, slice};
 use vk_wrapper as vkw;
+use vk_wrapper::buffer::BufferHandleImpl;
 
 pub(super) struct RendererCompEventsSystem<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -24,11 +25,12 @@ impl RendererCompEventsSystem<'_> {
         renderable: &mut Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        mat_pipes: &[MaterialPipeline],
     ) {
         renderable.descriptor_sets = smallvec![
             depth_per_object_pool.alloc().unwrap(),
             g_per_pipeline_pools
-                .get_mut(&renderable.pipe_signature)
+                .get_mut(&mat_pipes[renderable.material_pipe as usize].signature)
                 .unwrap()
                 .alloc()
                 .unwrap(),
@@ -36,12 +38,12 @@ impl RendererCompEventsSystem<'_> {
     }
 
     fn renderer_comp_modified(
-        mat_pipes: &[MaterialPipeline],
         renderer: &mut component::Renderer,
         renderable: &mut Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
         buffer_updates: &mut Vec<BufferUpdate>,
+        mat_pipes: &[MaterialPipeline],
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
@@ -52,14 +54,14 @@ impl RendererCompEventsSystem<'_> {
             &[vkw::Binding {
                 id: 0,
                 array_index: 0,
-                res: vkw::BindingRes::Buffer(Arc::clone(&renderable.buffers[0])),
+                res: vkw::BindingRes::Buffer(&renderable.buffers[0]),
             }],
         );
 
         let mut updates: SmallVec<[vkw::Binding; 4]> = smallvec![vkw::Binding {
             id: 0,
             array_index: 0,
-            res: vkw::BindingRes::Buffer(Arc::clone(&renderable.buffers[0])),
+            res: vkw::BindingRes::Buffer(&renderable.buffers[0]),
         }];
 
         for (binding_id, res) in &mut renderer.resources {
@@ -68,7 +70,7 @@ impl RendererCompEventsSystem<'_> {
                     let data = mem::replace(&mut buf_res.buffer, vec![]);
 
                     buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
-                        buffer: Arc::clone(&buf_res.device_buffer),
+                        buffer: buf_res.device_buffer.handle(),
                         offset: 0,
                         data,
                     }));
@@ -77,7 +79,7 @@ impl RendererCompEventsSystem<'_> {
                     updates.push(vkw::Binding {
                         id: *binding_id,
                         array_index: 0,
-                        res: vkw::BindingRes::Buffer(Arc::clone(&buf_res.device_buffer)),
+                        res: vkw::BindingRes::Buffer(&buf_res.device_buffer),
                     });
                 }
             }
@@ -93,10 +95,11 @@ impl RendererCompEventsSystem<'_> {
         renderable: &Renderable,
         depth_per_object_pool: &mut vkw::DescriptorPool,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
+        mat_pipes: &[MaterialPipeline],
     ) {
         depth_per_object_pool.free(renderable.descriptor_sets[0]);
         g_per_pipeline_pools
-            .get_mut(&renderable.pipe_signature)
+            .get_mut(&mat_pipes[renderable.material_pipe as usize].signature)
             .unwrap()
             .free(renderable.descriptor_sets[1]);
     }
@@ -121,7 +124,7 @@ impl RendererCompEventsSystem<'_> {
                         .unwrap();
                     let mut renderable = Renderable {
                         buffers: smallvec![uniform_buffer],
-                        pipe_signature: Arc::clone(pipe.signature()),
+                        material_pipe: renderer_comp.mat_pipeline,
                         descriptor_sets: Default::default(),
                     };
 
@@ -129,14 +132,15 @@ impl RendererCompEventsSystem<'_> {
                         &mut renderable,
                         self.depth_per_object_pool,
                         self.g_per_pipeline_pools,
+                        self.material_pipelines,
                     );
                     Self::renderer_comp_modified(
-                        &self.material_pipelines,
                         renderer_comp,
                         &mut renderable,
-                        &mut self.depth_per_object_pool,
-                        &mut self.g_per_pipeline_pools,
-                        &mut *buffer_updates,
+                        self.depth_per_object_pool,
+                        self.g_per_pipeline_pools,
+                        &mut buffer_updates,
+                        self.material_pipelines,
                     );
                     self.renderables.insert(entity, renderable);
                 }
@@ -146,8 +150,9 @@ impl RendererCompEventsSystem<'_> {
                     let renderable = &self.renderables[&entity];
                     Self::renderer_comp_removed(
                         &renderable,
-                        &mut self.depth_per_object_pool,
-                        &mut self.g_per_pipeline_pools,
+                        self.depth_per_object_pool,
+                        self.g_per_pipeline_pools,
+                        self.material_pipelines,
                     );
                     self.renderables.remove(&entity);
 
@@ -162,21 +167,22 @@ impl RendererCompEventsSystem<'_> {
                         .unwrap();
                     let mut renderable = Renderable {
                         buffers: smallvec![uniform_buffer],
-                        pipe_signature: Arc::clone(pipe.signature()),
+                        material_pipe: renderer_comp.mat_pipeline,
                         descriptor_sets: Default::default(),
                     };
                     Self::renderer_comp_created(
                         &mut renderable,
-                        &mut self.depth_per_object_pool,
-                        &mut self.g_per_pipeline_pools,
+                        self.depth_per_object_pool,
+                        self.g_per_pipeline_pools,
+                        self.material_pipelines,
                     );
                     Self::renderer_comp_modified(
-                        &self.material_pipelines,
                         renderer_comp,
                         &mut renderable,
-                        &mut self.depth_per_object_pool,
-                        &mut self.g_per_pipeline_pools,
-                        &mut *buffer_updates,
+                        self.depth_per_object_pool,
+                        self.g_per_pipeline_pools,
+                        &mut buffer_updates,
+                        self.material_pipelines,
                     );
                     self.renderables.insert(entity, renderable);
                 }
@@ -184,8 +190,9 @@ impl RendererCompEventsSystem<'_> {
                     let renderable = &self.renderables[&entity];
                     Self::renderer_comp_removed(
                         &renderable,
-                        &mut self.depth_per_object_pool,
-                        &mut self.g_per_pipeline_pools,
+                        self.depth_per_object_pool,
+                        self.g_per_pipeline_pools,
+                        self.material_pipelines,
                     );
                     self.renderables.remove(&entity);
                 }
@@ -212,7 +219,7 @@ impl VertexMeshCompEventsSystem {
             buffer_updates.push(BufferUpdate::Type2(BufferUpdate2 {
                 src_buffer: staging_buffer.raw(),
                 src_offset: 0,
-                dst_buffer: Arc::clone(vertex_mesh.buffer.as_ref().unwrap()),
+                dst_buffer: vertex_mesh.buffer.as_ref().unwrap().handle(),
                 dst_offset: 0,
                 size: staging_buffer.size(),
             }));
@@ -312,7 +319,7 @@ impl WorldTransformEventsSystem<'_> {
             let renderable = &renderables[&entity];
 
             buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
-                buffer: Arc::clone(&renderable.buffers[0]),
+                buffer: renderable.buffers[0].handle(),
                 offset: renderer.uniform_buffer_offset_model as u64,
                 data: matrix_bytes,
             }));

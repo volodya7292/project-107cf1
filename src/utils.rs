@@ -3,6 +3,7 @@ pub mod noise;
 pub mod ordered_hashmap;
 mod qef;
 pub mod slice_split;
+pub mod slot_vec;
 pub mod value_noise;
 
 use crate::render_engine::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};

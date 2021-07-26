@@ -6,17 +6,17 @@ use smallvec::SmallVec;
 use std::slice;
 use std::sync::Arc;
 
-pub enum BindingRes {
-    Buffer(Arc<DeviceBuffer>),
+pub enum BindingRes<'a> {
+    Buffer(&'a DeviceBuffer),
     Image(Arc<Image>, ImageLayout),
     ImageView(Arc<ImageView>, ImageLayout),
     ImageViewSampler(Arc<ImageView>, Arc<Sampler>, ImageLayout),
 }
 
-pub struct Binding {
+pub struct Binding<'a> {
     pub id: u32,
     pub array_index: u32,
-    pub res: BindingRes,
+    pub res: BindingRes<'a>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]

@@ -1,9 +1,10 @@
+use crate::buffer::BufferHandleImpl;
 use crate::render_pass::vk_clear_value;
-use crate::DeviceWrapper;
 use crate::{
-    BufferBarrier, ClearValue, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout,
-    Pipeline, PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
+    BufferBarrier, ClearValue, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout, Pipeline,
+    PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
+use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
 use ash::{version::DeviceV1_0, vk};
 use smallvec::SmallVec;
@@ -250,12 +251,12 @@ impl CmdList {
     }
 
     /// buffers (max: 16): [buffer, offset]
-    pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(Arc<DeviceBuffer>, u64)]) {
+    pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(BufferHandle, u64)]) {
         let mut native_buffers = [vk::Buffer::default(); 16];
         let mut offsets = [0u64; 16];
 
         for (i, (buffer, offset)) in buffers.iter().enumerate() {
-            native_buffers[i] = buffer.buffer.native;
+            native_buffers[i] = buffer.0;
             offsets[i] = *offset;
         }
 
@@ -269,11 +270,11 @@ impl CmdList {
         };
     }
 
-    pub fn bind_index_buffer(&mut self, buffer: &Arc<DeviceBuffer>, offset: u64) {
+    pub fn bind_index_buffer(&mut self, buffer: &impl BufferHandleImpl, offset: u64) {
         unsafe {
             self.device_wrapper.0.cmd_bind_index_buffer(
                 self.native,
-                buffer.buffer.native,
+                buffer.handle().0,
                 offset,
                 vk::IndexType::UINT32,
             )
@@ -323,7 +324,7 @@ impl CmdList {
         &mut self,
         src_buffer: &HostBuffer<T>,
         src_element_index: u64,
-        dst_buffer: &Arc<DeviceBuffer>,
+        dst_buffer: &impl BufferHandleImpl,
         dst_element_index: u64,
         size: u64,
     ) {
@@ -340,7 +341,7 @@ impl CmdList {
             self.device_wrapper.0.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
-                dst_buffer.buffer.native,
+                dst_buffer.handle().0,
                 &[region],
             )
         };
@@ -349,7 +350,7 @@ impl CmdList {
     pub fn copy_buffer_regions_to_device<T>(
         &mut self,
         src_buffer: &HostBuffer<T>,
-        dst_buffer: &Arc<DeviceBuffer>,
+        dst_buffer: &impl BufferHandleImpl,
         regions: &[CopyRegion],
     ) {
         let regions: SmallVec<[vk::BufferCopy; 128]> = regions
@@ -375,7 +376,7 @@ impl CmdList {
             self.device_wrapper.0.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
-                dst_buffer.buffer.native,
+                dst_buffer.handle().0,
                 &regions,
             )
         };
@@ -385,7 +386,7 @@ impl CmdList {
         &mut self,
         src_buffer: &RawHostBuffer,
         src_element_index: u64,
-        dst_buffer: &Arc<DeviceBuffer>,
+        dst_buffer: &impl BufferHandleImpl,
         dst_element_index: u64,
         size: u64,
     ) {
@@ -402,7 +403,7 @@ impl CmdList {
             self.device_wrapper.0.cmd_copy_buffer(
                 self.native,
                 src_buffer.0.native,
-                dst_buffer.buffer.native,
+                dst_buffer.handle().0,
                 &[region],
             )
         };
@@ -410,7 +411,7 @@ impl CmdList {
 
     pub fn copy_buffer_to_host<T>(
         &mut self,
-        src_buffer: &Arc<DeviceBuffer>,
+        src_buffer: &impl BufferHandleImpl,
         src_element_index: u64,
         dst_buffer: &HostBuffer<T>,
         dst_element_index: u64,
@@ -421,14 +422,14 @@ impl CmdList {
         }
 
         let region = vk::BufferCopy {
-            src_offset: src_element_index * src_buffer.buffer.aligned_elem_size,
-            dst_offset: dst_element_index * src_buffer.buffer.aligned_elem_size,
-            size: size * src_buffer.buffer.aligned_elem_size,
+            src_offset: src_element_index * dst_buffer.buffer.aligned_elem_size,
+            dst_offset: dst_element_index * dst_buffer.buffer.aligned_elem_size,
+            size: size * dst_buffer.buffer.aligned_elem_size,
         };
         unsafe {
             self.device_wrapper.0.cmd_copy_buffer(
                 self.native,
-                src_buffer.buffer.native,
+                src_buffer.handle().0,
                 dst_buffer.buffer.native,
                 &[region],
             )
@@ -619,15 +620,11 @@ impl CmdList {
         };
     }
 
-    pub fn clear_buffer(&mut self, buffer: &Arc<DeviceBuffer>, value: u32) {
+    pub fn clear_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
         unsafe {
-            self.device_wrapper.0.cmd_fill_buffer(
-                self.native,
-                buffer.buffer.native,
-                0,
-                vk::WHOLE_SIZE,
-                value,
-            );
+            self.device_wrapper
+                .0
+                .cmd_fill_buffer(self.native, buffer.handle().0, 0, vk::WHOLE_SIZE, value);
         }
     }
 

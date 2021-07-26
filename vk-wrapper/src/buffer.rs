@@ -5,6 +5,19 @@ use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 use std::{marker::PhantomData, mem, ptr};
 
+#[derive(Copy, Clone)]
+pub struct BufferHandle(pub(crate) vk::Buffer);
+
+pub trait BufferHandleImpl {
+    fn handle(&self) -> BufferHandle;
+}
+
+impl BufferHandleImpl for BufferHandle {
+    fn handle(&self) -> BufferHandle {
+        *self
+    }
+}
+
 pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
@@ -274,6 +287,12 @@ impl DeviceBuffer {
                 .build(),
             buffer: Arc::clone(&self.buffer),
         }
+    }
+}
+
+impl BufferHandleImpl for DeviceBuffer {
+    fn handle(&self) -> BufferHandle {
+        BufferHandle(self.buffer.native)
     }
 }
 
