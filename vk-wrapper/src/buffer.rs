@@ -1,4 +1,4 @@
-use crate::{AccessFlags, Device};
+use crate::{AccessFlags, Device, Queue};
 use ash::vk;
 use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
@@ -86,6 +86,16 @@ impl BufferBarrier {
 
     pub fn dst_access_mask(mut self, dst_access_mask: AccessFlags) -> Self {
         self.native.dst_access_mask = dst_access_mask.0;
+        self
+    }
+
+    pub fn src_queue(mut self, src_queue: &Queue) -> Self {
+        self.native.src_queue_family_index = src_queue.family_index;
+        self
+    }
+
+    pub fn dst_queue(mut self, dst_queue: &Queue) -> Self {
+        self.native.dst_queue_family_index = dst_queue.family_index;
         self
     }
 }

@@ -118,7 +118,7 @@ impl Queue {
         unsafe {
             self.device_wrapper
                 .0
-                .queue_submit(*queue, native_submit_infos.as_slice(), fence.native)?
+                .queue_submit(*queue, &native_submit_infos, fence.native)?
         }
 
         Ok(())
@@ -150,7 +150,7 @@ impl Queue {
             info.completion_signal_sp = Some(signal_sp);
         }
 
-        self.submit_infos(packet.infos.as_slice(), &mut packet.fence)?;
+        self.submit_infos(&packet.infos, &mut packet.fence)?;
         *sp_last_signal_value = new_last_signal_value;
 
         // Remove implicitly added semaphores

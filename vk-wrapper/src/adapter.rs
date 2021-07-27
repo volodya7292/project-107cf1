@@ -90,8 +90,13 @@ impl Adapter {
         }
 
         // Graphics queue always exists. Compute, transfer, present queues may be the same as the graphics queue.
-        for i in 0..(QUEUE_TYPE_COUNT - queues.len()) {
-            queues.push(Arc::clone(&queues[self.queue_family_indices[i][1] as usize]));
+        for i in queues.len()..QUEUE_TYPE_COUNT {
+            queues.push(Arc::clone(
+                &queues
+                    .iter()
+                    .find(|v| v.family_index == self.queue_family_indices[i][0])
+                    .unwrap(),
+            ));
         }
 
         // Create allocator

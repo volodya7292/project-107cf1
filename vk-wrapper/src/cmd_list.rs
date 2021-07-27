@@ -679,8 +679,8 @@ impl CmdList {
                 dst_stage_mask.0,
                 vk::DependencyFlags::default(),
                 &[],
-                native_buffer_barriers.as_slice(),
-                native_image_barriers.as_slice(),
+                &native_buffer_barriers,
+                &native_image_barriers,
             );
         }
     }
