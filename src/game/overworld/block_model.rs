@@ -5,6 +5,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{Vec2, Vec3};
 use std::ops::Range;
 
+// TODO OPTIMIZE storage
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct Vertex {

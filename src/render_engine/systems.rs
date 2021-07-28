@@ -111,7 +111,7 @@ impl RendererCompEventsSystem<'_> {
     }
 
     pub fn run(&mut self) {
-        let mut t0 = Instant::now();
+        let mut t = 0.0;
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
 
@@ -151,6 +151,7 @@ impl RendererCompEventsSystem<'_> {
                     self.renderables.insert(entity, renderable);
                 }
                 scene::Event::Modified(entity) => {
+                    let t0 = Instant::now();
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
 
                     let renderable = &self.renderables[&entity];
@@ -161,6 +162,8 @@ impl RendererCompEventsSystem<'_> {
                         self.material_pipelines,
                     );
                     self.renderables.remove(&entity);
+                    let t1 = Instant::now();
+                    t += (t1 - t0).as_secs_f64();
 
                     let pipe = &self.material_pipelines[renderer_comp.mat_pipeline as usize];
                     let uniform_buffer = self
@@ -205,8 +208,6 @@ impl RendererCompEventsSystem<'_> {
             }
         }
 
-        let t1 = Instant::now();
-        let t = (t1 - t0).as_secs_f64();
         if t > 0.003 {
             println!("renderer system {}", t);
         }
@@ -572,6 +573,7 @@ pub(super) struct CommitBufferUpdatesSystem<'a> {
 impl CommitBufferUpdatesSystem<'_> {
     pub fn run(self) {
         for update in self.updates {
+            // TODO: check if the entity exists before adding mesh
             self.vertex_meshes.insert(update.entity, update.mesh);
         }
     }

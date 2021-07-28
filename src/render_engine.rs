@@ -541,8 +541,10 @@ impl RenderEngine {
         let mut buffer_updates = vec![];
         let mut buffer_updates2 = vec![];
 
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-        unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+        if !self.vertex_mesh_pending_updates.is_empty() {
+            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+            unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+        }
 
         let mut t00 = Instant::now();
 
@@ -587,6 +589,7 @@ impl RenderEngine {
         };
 
         // Wait for previous transfers before committing them
+        self.transfer_submit[0].wait().unwrap();
         self.transfer_submit[1].wait().unwrap();
 
         let mut t00 = Instant::now();
@@ -795,7 +798,6 @@ impl RenderEngine {
         &self,
         renderable_ids: &[u32],
         renderer_comps: &ComponentStorage<component::Renderer>,
-        vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) {
         let mat_pipelines = &self.material_pipelines;
         let object_count = renderable_ids.len();
@@ -880,13 +882,8 @@ impl RenderEngine {
         let renderable_ids: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
         let object_count = renderable_ids.len() as u32;
 
-        let frustum_visible_objects = self.record_depth_cmd_lists(
-            &renderable_ids,
-            &camera,
-            &world_transform_comps,
-            &renderer_comps,
-            &vertex_mesh_comps,
-        );
+        let frustum_visible_objects =
+            self.record_depth_cmd_lists(&renderable_ids, &camera, &world_transform_comps, &renderer_comps);
 
         {
             let mut cl = self.staging_cl.lock().unwrap();
@@ -1028,7 +1025,7 @@ impl RenderEngine {
             submit.wait().unwrap();
         }
 
-        self.record_g_cmd_lists(&renderable_ids, &renderer_comps, &vertex_mesh_comps);
+        self.record_g_cmd_lists(&renderable_ids, &renderer_comps);
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         self.compose_pool.update(
