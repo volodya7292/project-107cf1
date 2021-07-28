@@ -76,7 +76,7 @@ fn noise_test() {
 fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
 
-    let thread_count = num_cpus::get_physical().max(2) / 2;
+    let thread_count = num_cpus::get_physical().max(2);
     let render_thread_pool = ThreadPoolBuilder::new()
         .num_threads(thread_count / 2)
         .build()

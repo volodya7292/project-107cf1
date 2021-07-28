@@ -1,14 +1,20 @@
 use crate::render_engine;
 use crate::render_engine::material_pipeline::MaterialPipeline;
 use crate::render_engine::scene::{ComponentStorage, Event};
-use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable, Scene};
+use crate::render_engine::vertex_mesh::RawVertexMesh;
+use crate::render_engine::{
+    component, scene, BufferUpdate, BufferUpdate1, Renderable, Scene, VMBufferUpdate,
+};
 use crate::utils::HashMap;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
+use std::collections::VecDeque;
 use std::sync::{atomic, Arc, Mutex};
+use std::time::Instant;
 use std::{mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::{AccessFlags, WaitSemaphore};
 
 pub(super) struct RendererCompEventsSystem<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -16,7 +22,7 @@ pub(super) struct RendererCompEventsSystem<'a> {
     pub depth_per_object_pool: &'a mut vkw::DescriptorPool,
     pub g_per_pipeline_pools: &'a mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     pub renderables: &'a mut HashMap<u32, Renderable>,
-    pub buffer_updates: &'a Arc<Mutex<Vec<BufferUpdate>>>,
+    pub buffer_updates: &'a mut Vec<BufferUpdate>,
     pub material_pipelines: &'a [MaterialPipeline],
 }
 
@@ -105,9 +111,9 @@ impl RendererCompEventsSystem<'_> {
     }
 
     pub fn run(&mut self) {
+        let mut t0 = Instant::now();
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
-        let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
         for event in events {
             match event {
@@ -139,7 +145,7 @@ impl RendererCompEventsSystem<'_> {
                         &mut renderable,
                         self.depth_per_object_pool,
                         self.g_per_pipeline_pools,
-                        &mut buffer_updates,
+                        self.buffer_updates,
                         self.material_pipelines,
                     );
                     self.renderables.insert(entity, renderable);
@@ -181,7 +187,7 @@ impl RendererCompEventsSystem<'_> {
                         &mut renderable,
                         self.depth_per_object_pool,
                         self.g_per_pipeline_pools,
-                        &mut buffer_updates,
+                        self.buffer_updates,
                         self.material_pipelines,
                     );
                     self.renderables.insert(entity, renderable);
@@ -198,51 +204,60 @@ impl RendererCompEventsSystem<'_> {
                 }
             }
         }
+
+        let t1 = Instant::now();
+        let t = (t1 - t0).as_secs_f64();
+        if t > 0.003 {
+            println!("renderer system {}", t);
+        }
     }
 }
 
-pub(super) struct VertexMeshCompEventsSystem {
+pub(super) struct VertexMeshCompEventsSystem<'a> {
+    pub vertex_meshes: &'a mut HashMap<u32, Arc<RawVertexMesh>>,
     pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
-    pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
+    pub buffer_updates: &'a mut VecDeque<VMBufferUpdate>,
 }
 
-impl VertexMeshCompEventsSystem {
+impl VertexMeshCompEventsSystem<'_> {
     fn vertex_mesh_comp_modified(
+        entity: u32,
         vertex_mesh_comp: &component::VertexMesh,
-        buffer_updates: &mut Vec<BufferUpdate>,
+        buffer_updates: &mut VecDeque<VMBufferUpdate>,
     ) {
         let vertex_mesh = &vertex_mesh_comp.0;
-
-        if vertex_mesh.changed.swap(false, atomic::Ordering::Relaxed) {
-            let staging_buffer = vertex_mesh.staging_buffer.as_ref().unwrap();
-
-            buffer_updates.push(BufferUpdate::Type2(BufferUpdate2 {
-                src_buffer: staging_buffer.raw(),
-                src_offset: 0,
-                dst_buffer: vertex_mesh.buffer.as_ref().unwrap().handle(),
-                dst_offset: 0,
-                size: staging_buffer.size(),
-            }));
-        }
+        buffer_updates.push_back(VMBufferUpdate {
+            entity,
+            mesh: Arc::clone(vertex_mesh),
+        });
     }
 
     pub fn run(&mut self) {
         let events = self.vertex_mesh_comps.write().unwrap().events();
 
         let vertex_mesh_comps = self.vertex_mesh_comps.read().unwrap();
-        let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
         // Update device buffers of vertex meshes
         // ------------------------------------------------------------------------------------
         for event in &events {
             match event {
                 scene::Event::Created(i) => {
-                    Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *buffer_updates);
+                    Self::vertex_mesh_comp_modified(
+                        *i,
+                        vertex_mesh_comps.get(*i).unwrap(),
+                        self.buffer_updates,
+                    );
                 }
                 scene::Event::Modified(i) => {
-                    Self::vertex_mesh_comp_modified(vertex_mesh_comps.get(*i).unwrap(), &mut *buffer_updates);
+                    Self::vertex_mesh_comp_modified(
+                        *i,
+                        vertex_mesh_comps.get(*i).unwrap(),
+                        self.buffer_updates,
+                    );
                 }
-                _ => {}
+                Event::Removed(i) => {
+                    self.vertex_meshes.remove(i);
+                }
             }
         }
     }
@@ -294,7 +309,7 @@ impl TransformEventsSystem {
 
 // Updates world transform uniform buffers
 pub(super) struct WorldTransformEventsSystem<'a> {
-    pub buffer_updates: Arc<Mutex<Vec<BufferUpdate>>>,
+    pub buffer_updates: &'a mut Vec<BufferUpdate>,
     pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
     pub renderer_comps: scene::LockedStorage<component::Renderer>,
     pub renderables: &'a HashMap<u32, Renderable>,
@@ -330,7 +345,6 @@ impl WorldTransformEventsSystem<'_> {
         let events = self.world_transform_comps.write().unwrap().events();
         let world_transform_comps = self.world_transform_comps.read().unwrap();
         let renderer_comps = self.renderer_comps.read().unwrap();
-        let mut buffer_updates = self.buffer_updates.lock().unwrap();
 
         for event in events {
             match event {
@@ -339,7 +353,7 @@ impl WorldTransformEventsSystem<'_> {
                         entity,
                         world_transform_comps.get(entity).unwrap(),
                         renderer_comps.get(entity),
-                        &mut buffer_updates,
+                        self.buffer_updates,
                         self.renderables,
                     );
                 }
@@ -348,7 +362,7 @@ impl WorldTransformEventsSystem<'_> {
                         entity,
                         world_transform_comps.get(entity).unwrap(),
                         renderer_comps.get(entity),
-                        &mut buffer_updates,
+                        self.buffer_updates,
                         self.renderables,
                     );
                 }
@@ -451,6 +465,114 @@ impl HierarchyPropagationSystem {
                     );
                 }
             }
+        }
+    }
+}
+
+pub(super) struct BufferUpdateSystem<'a> {
+    pub device: Arc<vkw::Device>,
+    pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
+    pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
+    pub buffer_updates: &'a mut VecDeque<VMBufferUpdate>,
+    pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
+}
+
+impl BufferUpdateSystem<'_> {
+    const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
+
+    pub fn run(&mut self) {
+        let transfer_queue = self.device.get_queue(vkw::Queue::TYPE_TRANSFER);
+        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+
+        {
+            let mut t_cl = self.transfer_cl[0].lock().unwrap();
+            t_cl.begin(true).unwrap();
+            let mut g_cl = self.transfer_cl[1].lock().unwrap();
+            g_cl.begin(true).unwrap();
+
+            let mut total_copy_size = 0;
+            let mut transfer_barriers = Vec::with_capacity(self.buffer_updates.len());
+            let mut graphics_barriers = Vec::with_capacity(transfer_barriers.len());
+
+            for _ in 0..self.buffer_updates.len() {
+                let update = self.buffer_updates.pop_front().unwrap();
+                let mesh = &update.mesh;
+
+                if mesh.staging_buffer.is_none() {
+                    self.pending_buffer_updates.push(update);
+                    continue;
+                }
+
+                let src_buffer = mesh.staging_buffer.as_ref().unwrap();
+                let dst_buffer = mesh.buffer.as_ref().unwrap();
+
+                t_cl.copy_raw_host_buffer_to_device(&src_buffer.raw(), 0, dst_buffer, 0, src_buffer.size());
+
+                transfer_barriers.push(
+                    dst_buffer
+                        .barrier()
+                        .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
+                        .src_queue(transfer_queue)
+                        .dst_queue(graphics_queue),
+                );
+                graphics_barriers.push(
+                    dst_buffer
+                        .barrier()
+                        .src_queue(transfer_queue)
+                        .dst_queue(graphics_queue),
+                );
+
+                total_copy_size += src_buffer.size();
+                self.pending_buffer_updates.push(update);
+
+                if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
+                    break;
+                }
+            }
+
+            t_cl.barrier_buffer(
+                vkw::PipelineStageFlags::TRANSFER,
+                vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                &transfer_barriers,
+            );
+
+            g_cl.barrier_buffer(
+                vkw::PipelineStageFlags::TOP_OF_PIPE,
+                vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
+                &graphics_barriers,
+            );
+
+            t_cl.end().unwrap();
+            g_cl.end().unwrap();
+        }
+
+        unsafe {
+            transfer_queue.submit(&mut self.transfer_submit[0]).unwrap();
+
+            self.transfer_submit[1]
+                .set(&[vkw::SubmitInfo::new(
+                    &[WaitSemaphore {
+                        semaphore: Arc::clone(transfer_queue.timeline_semaphore()),
+                        wait_dst_mask: vkw::PipelineStageFlags::TRANSFER,
+                        wait_value: self.transfer_submit[0].get_signal_value(0).unwrap(),
+                    }],
+                    &[Arc::clone(&self.transfer_cl[1])],
+                    &[],
+                )])
+                .unwrap();
+        }
+    }
+}
+
+pub(super) struct CommitBufferUpdatesSystem<'a> {
+    pub updates: Vec<VMBufferUpdate>,
+    pub vertex_meshes: &'a mut HashMap<u32, Arc<RawVertexMesh>>,
+}
+
+impl CommitBufferUpdatesSystem<'_> {
+    pub fn run(self) {
+        for update in self.updates {
+            self.vertex_meshes.insert(update.entity, update.mesh);
         }
     }
 }

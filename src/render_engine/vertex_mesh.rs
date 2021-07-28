@@ -196,7 +196,6 @@ pub struct RawVertexMesh {
     sphere: Sphere,
     bindings: Vec<(BufferHandle, u64)>,
     indices_offset: u64,
-    pub(in crate::render_engine) changed: AtomicBool,
 }
 
 impl RawVertexMesh {
@@ -469,7 +468,6 @@ impl VertexMeshCreate for vkw::Device {
                 sphere: Sphere { center, radius },
                 bindings,
                 indices_offset: indices_offset as u64,
-                changed: AtomicBool::new(true),
             }
         };
 

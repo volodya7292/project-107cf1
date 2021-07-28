@@ -9,10 +9,12 @@ pub mod scene;
 mod systems;
 
 use crate::render_engine::material_pipeline::UniformStruct;
+use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, UInteger};
+use crossbeam_channel as cb;
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
@@ -24,7 +26,9 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use scene::ComponentStorage;
 pub use scene::Scene;
 use smallvec::SmallVec;
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
+use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
@@ -58,8 +62,10 @@ pub struct RenderEngine {
     free_texture_indices: [Vec<u32>; 4],
 
     staging_buffer: HostBuffer<u8>,
+    transfer_cl: [Arc<Mutex<CmdList>>; 2],
+    transfer_submit: [SubmitPacket; 2],
     staging_cl: Arc<Mutex<CmdList>>,
-    staging_submit: Arc<Mutex<SubmitPacket>>,
+    staging_submit: SubmitPacket,
     final_cl: [Arc<Mutex<CmdList>>; 2],
     final_submit: [SubmitPacket; 2],
 
@@ -70,6 +76,7 @@ pub struct RenderEngine {
 
     depth_render_pass: Arc<RenderPass>,
     depth_pyramid_image: Option<Arc<Image>>,
+    depth_pyramid_views: Vec<Arc<ImageView>>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
@@ -112,8 +119,11 @@ pub struct RenderEngine {
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
+    vertex_mesh_updates: VecDeque<VMBufferUpdate>,
+    vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
     renderables: HashMap<u32, Renderable>,
+    vertex_meshes: HashMap<u32, Arc<RawVertexMesh>>,
     material_pipelines: Vec<MaterialPipeline>,
     device_buffers: SlotVec<DeviceBuffer>,
 }
@@ -154,15 +164,12 @@ struct BufferUpdate1 {
     data: Vec<u8>,
 }
 
-struct BufferUpdate2 {
-    src_buffer: RawHostBuffer,
-    src_offset: u64,
-    dst_buffer: BufferHandle,
-    dst_offset: u64,
-    size: u64,
+struct VMBufferUpdate {
+    entity: u32,
+    mesh: Arc<RawVertexMesh>,
 }
 
-struct BufferUpdate3 {
+struct BufferUpdate2 {
     buffer: BufferHandle,
     data: Vec<u8>,
     // (src data offset, dst offset, size)
@@ -172,7 +179,6 @@ struct BufferUpdate3 {
 enum BufferUpdate {
     Type1(BufferUpdate1),
     Type2(BufferUpdate2),
-    Type3(BufferUpdate3),
 }
 
 struct Renderable {
@@ -446,15 +452,12 @@ impl RenderEngine {
             return;
         }
 
-        let update_count = updates.len();
-
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
 
+        let update_count = updates.len();
         let staging_size = self.staging_buffer.size();
         let mut used_size = 0;
         let mut i = 0;
-
-        let mut total_copy = 0;
 
         while i < update_count {
             {
@@ -470,8 +473,7 @@ impl RenderEngine {
                             assert!(copy_size <= staging_size);
                             (copy_size, used_size + copy_size)
                         }
-                        BufferUpdate::Type2(update) => (update.size, used_size),
-                        BufferUpdate::Type3(update) => {
+                        BufferUpdate::Type2(update) => {
                             let copy_size = update.data.len() as u64;
                             assert!(copy_size <= staging_size);
                             (copy_size, used_size + copy_size)
@@ -486,7 +488,6 @@ impl RenderEngine {
                     match update {
                         BufferUpdate::Type1(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
-                            total_copy += copy_size;
                             cl.copy_buffer_to_device(
                                 &self.staging_buffer,
                                 used_size,
@@ -496,28 +497,15 @@ impl RenderEngine {
                             );
                         }
                         BufferUpdate::Type2(update) => {
-                            cl.copy_raw_host_buffer_to_device(
-                                &update.src_buffer,
-                                update.src_offset,
-                                &update.dst_buffer,
-                                update.dst_offset,
-                                update.size,
-                            );
-                            total_copy += update.size;
-                        }
-                        BufferUpdate::Type3(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
 
                             let regions: SmallVec<[CopyRegion; 128]> = update
                                 .regions
                                 .iter()
-                                .map(|region| {
-                                    total_copy += region.2;
-                                    CopyRegion {
-                                        src_element_index: used_size + region.0,
-                                        dst_element_index: region.1,
-                                        size: region.2,
-                                    }
+                                .map(|region| CopyRegion {
+                                    src_element_index: used_size + region.0,
+                                    dst_element_index: region.1,
+                                    size: region.2,
                                 })
                                 .collect();
 
@@ -532,17 +520,9 @@ impl RenderEngine {
                 cl.end().unwrap();
             }
 
-            let t0 = Instant::now();
-
-            let mut submit = self.staging_submit.lock().unwrap();
+            let mut submit = &mut self.staging_submit;
             graphics_queue.submit(&mut submit).unwrap();
             submit.wait().unwrap();
-
-            let t1 = Instant::now();
-            let t = (t1 - t0).as_secs_f64();
-            if t > 0.003 {
-                println!("update buffers {} | size {}", t, total_copy);
-            }
         }
     }
 
@@ -558,9 +538,13 @@ impl RenderEngine {
             let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
-        let buffer_updates = Arc::new(Mutex::new(vec![]));
-        let buffer_updates2 = Arc::new(Mutex::new(vec![]));
-        let buffer_updates3 = Arc::new(Mutex::new(vec![]));
+        let mut buffer_updates = vec![];
+        let mut buffer_updates2 = vec![];
+
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+        unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+
+        let mut t00 = Instant::now();
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             device: &self.device,
@@ -568,12 +552,13 @@ impl RenderEngine {
             depth_per_object_pool: &mut self.depth_per_object_pool,
             g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
             renderables: &mut self.renderables,
-            buffer_updates: &buffer_updates,
+            buffer_updates: &mut buffer_updates,
             material_pipelines: &self.material_pipelines,
         };
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
+            vertex_meshes: &mut self.vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
-            buffer_updates: Arc::clone(&buffer_updates2),
+            buffer_updates: &mut self.vertex_mesh_updates,
         };
         let mut transform_events_system = systems::TransformEventsSystem {
             transform_comps: self.scene.storage::<component::Transform>(),
@@ -585,24 +570,51 @@ impl RenderEngine {
             s.spawn(|_| transform_events_system.run());
         });
 
+        let mut t11 = Instant::now();
+        let mut systems_t = (t11 - t00).as_secs_f64();
+
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
             parent_comps: self.scene.storage::<component::Parent>(),
             children_comps: self.scene.storage::<component::Children>(),
             model_transform_comps: self.scene.storage::<component::ModelTransform>(),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
-        hierarchy_propagation_system.run();
-
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
-            buffer_updates: Arc::clone(&buffer_updates3),
+            buffer_updates: &mut buffer_updates2,
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
             renderables: &self.renderables,
         };
-        world_transform_events_system.run();
+
+        // Wait for previous transfers before committing them
+        self.transfer_submit[1].wait().unwrap();
 
         let mut t00 = Instant::now();
-        let systems_t = (t00 - t0).as_secs_f64();
+
+        // Before updating new buffers, collect all the completed updates to commit them
+        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
+        let mut buffer_update_system = systems::BufferUpdateSystem {
+            device: Arc::clone(&self.device),
+            transfer_cl: &self.transfer_cl,
+            transfer_submit: &mut self.transfer_submit,
+            buffer_updates: &mut self.vertex_mesh_updates,
+            pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
+        };
+        let commit_buffer_updates_system = systems::CommitBufferUpdatesSystem {
+            updates: completed_updates,
+            vertex_meshes: &mut self.vertex_meshes,
+        };
+        rayon::scope(|s| {
+            s.spawn(|_| {
+                hierarchy_propagation_system.run();
+                world_transform_events_system.run();
+            });
+            s.spawn(|_| buffer_update_system.run());
+            s.spawn(|_| commit_buffer_updates_system.run())
+        });
+
+        let mut t11 = Instant::now();
+        let systems2_t = (t11 - t00).as_secs_f64();
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -635,14 +647,11 @@ impl RenderEngine {
                 )
                 .to_vec()
             };
-            buffer_updates
-                .lock()
-                .unwrap()
-                .push(BufferUpdate::Type1(BufferUpdate1 {
-                    buffer: self.per_frame_ub.handle(),
-                    offset: 0,
-                    data,
-                }));
+            buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
+                buffer: self.per_frame_ub.handle(),
+                offset: 0,
+                data,
+            }));
         }
 
         // Update material buffer
@@ -664,38 +673,28 @@ impl RenderEngine {
             let data =
                 unsafe { slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * mat_size as usize) };
 
-            buffer_updates
-                .lock()
-                .unwrap()
-                .push(BufferUpdate::Type3(BufferUpdate3 {
-                    buffer: self.material_buffer.handle(),
-                    data: data.to_vec(),
-                    regions,
-                }));
-
-            unsafe { self.update_device_buffers(&[]) };
+            buffer_updates.push(BufferUpdate::Type2(BufferUpdate2 {
+                buffer: self.material_buffer.handle(),
+                data: data.to_vec(),
+                regions,
+            }));
         }
-
-        // Wait for vertex buffer updates
-        self.staging_submit.lock().unwrap().wait().unwrap();
 
         unsafe {
-            self.update_device_buffers(&buffer_updates.lock().unwrap());
-            self.update_device_buffers(&buffer_updates2.lock().unwrap());
-            self.update_device_buffers(&buffer_updates3.lock().unwrap());
+            self.update_device_buffers(&buffer_updates);
+            self.update_device_buffers(&buffer_updates2);
         }
 
         let t1 = Instant::now();
-        let updates_t = (t1 - t00).as_secs_f64();
+        let updates_t = (t1 - t11).as_secs_f64();
 
-        let t1 = Instant::now();
         let t = (t1 - t0).as_secs_f64();
-        // if t > 0.003 {
-        //     println!(
-        //         "renderer::update {} | systems {} | updates {}",
-        //         t, systems_t, updates_t
-        //     );
-        // }
+        if t > 0.003 {
+            println!(
+                "renderer::update {} | systems {} | systems2 {} | updates {}",
+                t, systems_t, systems2_t, updates_t
+            );
+        }
     }
 
     fn record_depth_cmd_lists(
@@ -704,7 +703,6 @@ impl RenderEngine {
         camera: &component::Camera,
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
-        vertex_mesh_comps: &ComponentStorage<component::VertexMesh>,
     ) -> u32 {
         let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
@@ -738,7 +736,7 @@ impl RenderEngine {
 
                     let transform = world_transform_comps.get(renderable_id);
                     let renderer = renderer_comps.get(renderable_id);
-                    let vertex_mesh = vertex_mesh_comps.get(renderable_id);
+                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
 
                     if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
                         continue;
@@ -747,8 +745,6 @@ impl RenderEngine {
                     let transform = transform.unwrap();
                     let renderer = renderer.unwrap();
                     let vertex_mesh = vertex_mesh.unwrap();
-
-                    let vertex_mesh = &vertex_mesh.0;
 
                     if vertex_mesh.vertex_count == 0 {
                         continue;
@@ -834,7 +830,7 @@ impl RenderEngine {
                     let renderable_id = renderable_ids[entity_index];
 
                     let renderer = renderer_comps.get(renderable_id).unwrap();
-                    let vertex_mesh = vertex_mesh_comps.get(renderable_id);
+                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
 
                     if vertex_mesh.is_none() {
                         continue;
@@ -845,8 +841,7 @@ impl RenderEngine {
                         continue;
                     }
 
-                    let mesh = vertex_mesh.unwrap();
-                    let vertex_mesh = &mesh.0;
+                    let vertex_mesh = vertex_mesh.unwrap();
 
                     let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
@@ -1026,7 +1021,7 @@ impl RenderEngine {
             cl.end().unwrap();
         }
         {
-            let mut submit = self.staging_submit.lock().unwrap();
+            let mut submit = &mut self.staging_submit;
             unsafe {
                 graphics_queue.submit(&mut submit).unwrap();
             }
@@ -1300,7 +1295,7 @@ impl RenderEngine {
                 .unwrap(),
         );
         let depth_pyramid_levels = self.depth_pyramid_image.as_ref().unwrap().mip_levels();
-        let depth_pyramid_views: Vec<Arc<ImageView>> = (0..depth_pyramid_levels)
+        self.depth_pyramid_views = (0..depth_pyramid_levels)
             .map(|i| {
                 self.depth_pyramid_image
                     .as_ref()
@@ -1313,14 +1308,13 @@ impl RenderEngine {
             })
             .collect();
 
-        self.depth_pyramid_pool = Some(
-            self.depth_pyramid_signature
-                .create_pool(0, depth_pyramid_levels)
-                .unwrap(),
-        );
+        let mut depth_pyramid_pool = self
+            .depth_pyramid_signature
+            .create_pool(0, depth_pyramid_levels)
+            .unwrap();
         self.depth_pyramid_descs = {
             let sampler = &self.depth_pyramid_sampler;
-            let pool = self.depth_pyramid_pool.as_mut().unwrap();
+            let pool = &mut depth_pyramid_pool;
 
             (0..depth_pyramid_levels as usize)
                 .map(|i| {
@@ -1339,7 +1333,7 @@ impl RenderEngine {
                                     )
                                 } else {
                                     BindingRes::ImageViewSampler(
-                                        Arc::clone(&depth_pyramid_views[i - 1]),
+                                        Arc::clone(&self.depth_pyramid_views[i - 1]),
                                         Arc::clone(&sampler),
                                         ImageLayout::GENERAL,
                                     )
@@ -1349,7 +1343,7 @@ impl RenderEngine {
                                 id: 1,
                                 array_index: 0,
                                 res: BindingRes::ImageView(
-                                    Arc::clone(&depth_pyramid_views[i]),
+                                    Arc::clone(&self.depth_pyramid_views[i]),
                                     ImageLayout::GENERAL,
                                 ),
                             },
@@ -1359,6 +1353,7 @@ impl RenderEngine {
                 })
                 .collect()
         };
+        self.depth_pyramid_pool = Some(depth_pyramid_pool);
 
         self.cull_pool.update(
             self.cull_desc,
@@ -1526,6 +1521,7 @@ pub fn new(
         component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
     );
 
+    let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
     let present_queue = device.get_queue(Queue::TYPE_PRESENT);
     let phys_cores = num_cpus::get_physical();
@@ -1832,6 +1828,15 @@ pub fn new(
         ],
     );
 
+    let transfer_cl = [
+        transfer_queue.create_primary_cmd_list()?,
+        graphics_queue.create_primary_cmd_list()?,
+    ];
+    let transfer_submit = [
+        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[0])], &[])])?,
+        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[1])], &[])])?,
+    ];
+
     let staging_cl = graphics_queue.create_primary_cmd_list()?;
     let staging_submit =
         device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])?;
@@ -1865,8 +1870,10 @@ pub fn new(
             free_indices.clone(),
         ],
         staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
+        transfer_cl,
+        transfer_submit,
         staging_cl,
-        staging_submit: Arc::new(Mutex::new(staging_submit)),
+        staging_submit,
         final_cl,
         final_submit,
         sw_framebuffers: vec![],
@@ -1875,6 +1882,7 @@ pub fn new(
         g_secondary_cls,
         depth_render_pass,
         depth_pyramid_image: None,
+        depth_pyramid_views: vec![],
         depth_framebuffer: None,
         depth_signature: Arc::clone(&depth_signature),
         depth_pipeline_r,
@@ -1913,6 +1921,9 @@ pub fn new(
         compose_desc,
         material_pipelines: vec![],
         device_buffers: SlotVec::new(),
+        vertex_meshes: Default::default(),
+        vertex_mesh_updates: Default::default(),
+        vertex_mesh_pending_updates: vec![],
     };
     renderer.on_resize(size);
 
