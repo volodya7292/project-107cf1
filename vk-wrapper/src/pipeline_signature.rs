@@ -44,7 +44,6 @@ impl PipelineSignature {
         let base_native_pool = NativeDescriptorPool {
             handle: self.create_native_pool(set_layout_id, base_reserve)?,
             size: 0,
-            allocated_count: 0,
         };
 
         Ok(DescriptorPool {

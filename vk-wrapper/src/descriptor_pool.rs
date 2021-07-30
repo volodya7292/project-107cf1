@@ -35,7 +35,6 @@ pub struct DescriptorSet {
 pub struct NativeDescriptorPool {
     pub(crate) handle: vk::DescriptorPool,
     pub(crate) size: u32,
-    pub(crate) allocated_count: u32,
 }
 
 pub struct DescriptorPool {
@@ -53,37 +52,31 @@ impl DescriptorPool {
             self.free_sets.remove(id);
             Ok(self.allocated[id])
         } else {
-            let (last_size, last_allocated_count) = {
-                let last = self.native.last().unwrap();
-                (last.size, last.allocated_count)
+            let last_size = self.native.last().unwrap().size;
+            let next_size = (last_size + 1).next_power_of_two();
+            let next_pool = NativeDescriptorPool {
+                handle: self.signature.create_native_pool(self.set_layout_id, next_size)?,
+                size: next_size,
             };
-
-            if last_allocated_count == last_size {
-                let next_size = (last_size + 1).next_power_of_two();
-                let next_pool = NativeDescriptorPool {
-                    handle: self.signature.create_native_pool(self.set_layout_id, next_size)?,
-                    size: next_size,
-                    allocated_count: 0,
-                };
-
-                self.native.push(next_pool);
-            }
-
-            let native_pool = self.native.last_mut().unwrap();
+            let layouts = vec![self.signature.native[self.set_layout_id as usize]; next_size as usize];
             let alloc_info = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(native_pool.handle)
-                .set_layouts(slice::from_ref(
-                    &self.signature.native[self.set_layout_id as usize],
-                ));
+                .descriptor_pool(next_pool.handle)
+                .set_layouts(&layouts);
+            let sets = unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)? };
 
-            let descriptor_set = DescriptorSet {
-                native: unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)?[0] },
-                id: self.allocated.len() as u32,
-            };
-            native_pool.allocated_count += 1;
+            let start_i = self.allocated.len() as u32;
+            self.allocated
+                .extend(sets.into_iter().enumerate().map(|(i, v)| DescriptorSet {
+                    native: v,
+                    id: start_i + i as u32,
+                }));
+            self.free_sets
+                .extend((start_i as usize..(start_i + next_size) as usize).into_iter());
+            self.native.push(next_pool);
 
-            self.allocated.push(descriptor_set);
-            Ok(descriptor_set)
+            let id = self.free_sets.iter().next().unwrap();
+            self.free_sets.remove(id);
+            Ok(self.allocated[id])
         }
     }
 
