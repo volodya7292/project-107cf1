@@ -9,12 +9,13 @@ use crate::utils::HashMap;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
 use std::{mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{AccessFlags, WaitSemaphore};
+use vk_wrapper::{AccessFlags, DescriptorSet, WaitSemaphore};
 
 pub(super) struct RendererCompEventsSystem<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -50,30 +51,32 @@ impl RendererCompEventsSystem<'_> {
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
         buffer_updates: &mut Vec<BufferUpdate>,
         mat_pipes: &[MaterialPipeline],
+        binding_updates: &mut Vec<vkw::Binding>,
+        desc_updates: &mut Vec<(DescriptorSet, Range<usize>)>,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
         let inputs = &mut renderable.descriptor_sets;
 
-        depth_per_object_pool.update(
-            inputs[0],
-            &[vkw::Binding {
-                id: 0,
-                array_index: 0,
-                res: vkw::BindingRes::Buffer(&renderable.buffers[0]),
-            }],
-        );
+        let s0 = binding_updates.len();
+        binding_updates.push(depth_per_object_pool.create_binding(
+            0,
+            0,
+            vkw::BindingRes::Buffer(renderable.buffers[0].handle()),
+        ));
+        let s1 = binding_updates.len();
+        desc_updates.push((inputs[0], s0..s1));
 
-        let mut updates: SmallVec<[vkw::Binding; 4]> = smallvec![vkw::Binding {
-            id: 0,
-            array_index: 0,
-            res: vkw::BindingRes::Buffer(&renderable.buffers[0]),
-        }];
+        let g_pool = g_per_pipeline_pools
+            .get_mut(mat_pipes[renderer.mat_pipeline as usize].signature())
+            .unwrap();
+        let mut updates: SmallVec<[vkw::Binding; 4]> =
+            smallvec![g_pool.create_binding(0, 0, vkw::BindingRes::Buffer(renderable.buffers[0].handle()))];
 
         for (binding_id, res) in &mut renderer.resources {
             if let component::renderer::Resource::Buffer(buf_res) = res {
                 if buf_res.changed {
-                    let data = mem::replace(&mut buf_res.buffer, vec![]);
+                    let data = mem::take(&mut buf_res.buffer);
 
                     buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
                         buffer: buf_res.device_buffer.handle(),
@@ -82,19 +85,19 @@ impl RendererCompEventsSystem<'_> {
                     }));
                     buf_res.changed = false;
 
-                    updates.push(vkw::Binding {
-                        id: *binding_id,
-                        array_index: 0,
-                        res: vkw::BindingRes::Buffer(&buf_res.device_buffer),
-                    });
+                    updates.push(g_pool.create_binding(
+                        *binding_id,
+                        0,
+                        vkw::BindingRes::Buffer(buf_res.device_buffer.handle()),
+                    ));
                 }
             }
         }
 
-        g_per_pipeline_pools
-            .get_mut(mat_pipes[renderer.mat_pipeline as usize].signature())
-            .unwrap()
-            .update(inputs[1], &updates);
+        let s0 = binding_updates.len();
+        binding_updates.extend(updates);
+        let s1 = binding_updates.len();
+        desc_updates.push((inputs[1], s0..s1));
     }
 
     fn renderer_comp_removed(
@@ -112,12 +115,18 @@ impl RendererCompEventsSystem<'_> {
 
     pub fn run(&mut self) {
         let mut t = 0.0;
+        let mut c = 0;
         let mut renderer_comps = self.renderer_comps.write().unwrap();
         let events = renderer_comps.events();
+        let mut binding_updates = Vec::<vkw::Binding>::with_capacity(events.len());
+        let mut desc_updates = Vec::<(vkw::DescriptorSet, Range<usize>)>::with_capacity(events.len());
+
+        // TODO OPTIMIZE this shit
 
         for event in events {
             match event {
                 scene::Event::Created(entity) => {
+                    let t0 = Instant::now();
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
                     let pipe = &self.material_pipelines[renderer_comp.mat_pipeline as usize];
                     let uniform_buffer = self
@@ -147,11 +156,15 @@ impl RendererCompEventsSystem<'_> {
                         self.g_per_pipeline_pools,
                         self.buffer_updates,
                         self.material_pipelines,
+                        &mut binding_updates,
+                        &mut desc_updates,
                     );
                     self.renderables.insert(entity, renderable);
+                    let t1 = Instant::now();
+                    t += (t1 - t0).as_secs_f64();
+                    c += 1;
                 }
                 scene::Event::Modified(entity) => {
-                    let t0 = Instant::now();
                     let renderer_comp = renderer_comps.get_mut_unchecked(entity).unwrap();
 
                     let renderable = &self.renderables[&entity];
@@ -162,8 +175,6 @@ impl RendererCompEventsSystem<'_> {
                         self.material_pipelines,
                     );
                     self.renderables.remove(&entity);
-                    let t1 = Instant::now();
-                    t += (t1 - t0).as_secs_f64();
 
                     let pipe = &self.material_pipelines[renderer_comp.mat_pipeline as usize];
                     let uniform_buffer = self
@@ -192,6 +203,8 @@ impl RendererCompEventsSystem<'_> {
                         self.g_per_pipeline_pools,
                         self.buffer_updates,
                         self.material_pipelines,
+                        &mut binding_updates,
+                        &mut desc_updates,
                     );
                     self.renderables.insert(entity, renderable);
                 }
@@ -208,8 +221,13 @@ impl RendererCompEventsSystem<'_> {
             }
         }
 
+        unsafe {
+            self.device
+                .update_descriptor_sets(&binding_updates, &desc_updates)
+        };
+
         if t > 0.003 {
-            println!("renderer system {}", t);
+            println!("renderer system {} - {}", t, c);
         }
     }
 }

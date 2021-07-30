@@ -1,8 +1,6 @@
-use crate::descriptor_pool::NativeDescriptorPool;
 use crate::{DescriptorPool, Device, Shader, ShaderStage};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use smallvec::smallvec;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -40,20 +38,16 @@ impl PipelineSignature {
         set_layout_id: u32,
         base_reserve: u32,
     ) -> Result<DescriptorPool, vk::Result> {
-        let base_reserve = base_reserve.next_power_of_two();
-        let base_native_pool = NativeDescriptorPool {
-            handle: self.create_native_pool(set_layout_id, base_reserve)?,
-            size: 0,
-        };
-
-        Ok(DescriptorPool {
+        let mut pool = DescriptorPool {
             device: Arc::clone(&self.device),
             signature: Arc::clone(&self),
             set_layout_id,
-            native: smallvec![base_native_pool],
+            native: Default::default(),
             allocated: vec![],
             free_sets: Default::default(),
-        })
+        };
+        pool.alloc_next_pool(base_reserve.next_power_of_two())?;
+        Ok(pool)
     }
 }
 

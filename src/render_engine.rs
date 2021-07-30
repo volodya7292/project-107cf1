@@ -693,10 +693,10 @@ impl RenderEngine {
 
         let t = (t1 - t0).as_secs_f64();
         if t > 0.003 {
-            println!(
-                "renderer::update {} | systems {} | systems2 {} | updates {}",
-                t, systems_t, systems2_t, updates_t
-            );
+            // println!(
+            //     "renderer::update {} | systems {} | systems2 {} | updates {}",
+            //     t, systems_t, systems2_t, updates_t
+            // );
         }
     }
 
@@ -1019,23 +1019,23 @@ impl RenderEngine {
         }
         {
             let mut submit = &mut self.staging_submit;
-            unsafe {
-                graphics_queue.submit(&mut submit).unwrap();
-            }
+            unsafe { graphics_queue.submit(&mut submit).unwrap() };
             submit.wait().unwrap();
         }
 
         self.record_g_cmd_lists(&renderable_ids, &renderer_comps);
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-        self.compose_pool.update(
-            self.compose_desc,
-            &[Binding {
-                id: 0,
-                array_index: 0,
-                res: BindingRes::Image(Arc::clone(albedo), ImageLayout::SHADER_READ),
-            }],
-        );
+        unsafe {
+            self.device.update_descriptor_set(
+                self.compose_desc,
+                &[self.compose_pool.create_binding(
+                    0,
+                    0,
+                    BindingRes::Image(Arc::clone(albedo), ImageLayout::SHADER_READ),
+                )],
+            )
+        };
         let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
         // Record G-Buffer cmd list
@@ -1315,72 +1315,67 @@ impl RenderEngine {
 
             (0..depth_pyramid_levels as usize)
                 .map(|i| {
-                    let id = pool.alloc().unwrap();
-                    pool.update(
-                        id,
-                        &[
-                            Binding {
-                                id: 0,
-                                array_index: 0,
-                                res: if i == 0 {
-                                    BindingRes::ImageViewSampler(
-                                        Arc::clone(depth_image.view()),
-                                        Arc::clone(&sampler),
-                                        ImageLayout::SHADER_READ,
-                                    )
-                                } else {
-                                    BindingRes::ImageViewSampler(
-                                        Arc::clone(&self.depth_pyramid_views[i - 1]),
-                                        Arc::clone(&sampler),
-                                        ImageLayout::GENERAL,
-                                    )
-                                },
-                            },
-                            Binding {
-                                id: 1,
-                                array_index: 0,
-                                res: BindingRes::ImageView(
-                                    Arc::clone(&self.depth_pyramid_views[i]),
-                                    ImageLayout::GENERAL,
+                    let set = pool.alloc().unwrap();
+                    unsafe {
+                        self.device.update_descriptor_set(
+                            set,
+                            &[
+                                pool.create_binding(
+                                    0,
+                                    0,
+                                    if i == 0 {
+                                        BindingRes::ImageViewSampler(
+                                            Arc::clone(depth_image.view()),
+                                            Arc::clone(&sampler),
+                                            ImageLayout::SHADER_READ,
+                                        )
+                                    } else {
+                                        BindingRes::ImageViewSampler(
+                                            Arc::clone(&self.depth_pyramid_views[i - 1]),
+                                            Arc::clone(&sampler),
+                                            ImageLayout::GENERAL,
+                                        )
+                                    },
                                 ),
-                            },
-                        ],
-                    );
-                    id
+                                pool.create_binding(
+                                    1,
+                                    0,
+                                    BindingRes::ImageView(
+                                        Arc::clone(&self.depth_pyramid_views[i]),
+                                        ImageLayout::GENERAL,
+                                    ),
+                                ),
+                            ],
+                        )
+                    };
+                    set
                 })
                 .collect()
         };
         self.depth_pyramid_pool = Some(depth_pyramid_pool);
 
-        self.cull_pool.update(
-            self.cull_desc,
-            &[
-                Binding {
-                    id: 0,
-                    array_index: 0,
-                    res: BindingRes::ImageViewSampler(
-                        Arc::clone(self.depth_pyramid_image.as_ref().unwrap().view()),
-                        Arc::clone(&self.depth_pyramid_sampler),
-                        ImageLayout::GENERAL,
+        unsafe {
+            self.device.update_descriptor_set(
+                self.cull_desc,
+                &[
+                    self.cull_pool.create_binding(
+                        0,
+                        0,
+                        BindingRes::ImageViewSampler(
+                            Arc::clone(self.depth_pyramid_image.as_ref().unwrap().view()),
+                            Arc::clone(&self.depth_pyramid_sampler),
+                            ImageLayout::GENERAL,
+                        ),
                     ),
-                },
-                Binding {
-                    id: 1,
-                    array_index: 0,
-                    res: BindingRes::Buffer(&self.per_frame_ub),
-                },
-                Binding {
-                    id: 2,
-                    array_index: 0,
-                    res: BindingRes::Buffer(&self.cull_buffer),
-                },
-                Binding {
-                    id: 3,
-                    array_index: 0,
-                    res: BindingRes::Buffer(&self.visibility_buffer),
-                },
-            ],
-        );
+                    self.cull_pool
+                        .create_binding(1, 0, BindingRes::Buffer(self.per_frame_ub.handle())),
+                    self.cull_pool
+                        .create_binding(2, 0, BindingRes::Buffer(self.cull_buffer.handle())),
+                    self.cull_pool
+                        .create_binding(3, 0, BindingRes::Buffer(self.visibility_buffer.handle())),
+                ],
+            )
+        };
 
         self.depth_framebuffer = Some(
             self.depth_render_pass
@@ -1786,44 +1781,38 @@ pub fn new(
     ];
 
     // Update pipeline inputs
-    depth_per_frame_pool.update(
-        depth_per_frame_in,
-        &[Binding {
-            id: 0,
-            array_index: 0,
-            res: BindingRes::Buffer(&per_frame_uniform_buffer),
-        }],
-    );
-    g_per_frame_pool.update(
-        g_per_frame_in,
-        &[
-            Binding {
-                id: 0,
-                array_index: 0,
-                res: BindingRes::Buffer(&per_frame_uniform_buffer),
-            },
-            Binding {
-                id: 1,
-                array_index: 0,
-                res: BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
-            },
-            Binding {
-                id: 2,
-                array_index: 0,
-                res: BindingRes::Image(Arc::clone(&texture_atlases[1].image()), ImageLayout::SHADER_READ),
-            },
-            Binding {
-                id: 3,
-                array_index: 0,
-                res: BindingRes::Image(Arc::clone(&texture_atlases[3].image()), ImageLayout::SHADER_READ),
-            },
-            Binding {
-                id: 4,
-                array_index: 0,
-                res: BindingRes::Buffer(&material_buffer),
-            },
-        ],
-    );
+    unsafe {
+        device.update_descriptor_set(
+            depth_per_frame_in,
+            &[depth_per_frame_pool.create_binding(
+                0,
+                0,
+                BindingRes::Buffer(per_frame_uniform_buffer.handle()),
+            )],
+        );
+        device.update_descriptor_set(
+            g_per_frame_in,
+            &[
+                g_per_frame_pool.create_binding(0, 0, BindingRes::Buffer(per_frame_uniform_buffer.handle())),
+                g_per_frame_pool.create_binding(
+                    1,
+                    0,
+                    BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+                ),
+                g_per_frame_pool.create_binding(
+                    2,
+                    0,
+                    BindingRes::Image(Arc::clone(&texture_atlases[1].image()), ImageLayout::SHADER_READ),
+                ),
+                g_per_frame_pool.create_binding(
+                    3,
+                    0,
+                    BindingRes::Image(Arc::clone(&texture_atlases[3].image()), ImageLayout::SHADER_READ),
+                ),
+                g_per_frame_pool.create_binding(4, 0, BindingRes::Buffer(material_buffer.handle())),
+            ],
+        )
+    }
 
     let transfer_cl = [
         transfer_queue.create_primary_cmd_list()?,
