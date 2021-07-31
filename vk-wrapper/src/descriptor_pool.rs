@@ -115,9 +115,12 @@ impl Device {
             return;
         }
 
-        let mut native_buffer_infos = Vec::with_capacity(updates.len());
-        let mut native_image_infos = Vec::with_capacity(updates.len());
-        let mut native_writes = Vec::with_capacity(updates.len());
+        // Safety: calculate total buffers size to prevent reallocating them
+        let buf_len = updates.iter().fold(0, |c, (_, r)| c + r.len());
+
+        let mut native_buffer_infos = Vec::with_capacity(buf_len);
+        let mut native_image_infos = Vec::with_capacity(buf_len);
+        let mut native_writes = Vec::with_capacity(buf_len);
 
         for (descriptor_set, range) in updates {
             for i in range.clone() {
