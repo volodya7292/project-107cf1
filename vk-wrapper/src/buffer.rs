@@ -286,6 +286,10 @@ impl DeviceBuffer {
         self.buffer.size
     }
 
+    pub fn aligned_element_size(&self) -> u64 {
+        self.buffer.aligned_elem_size
+    }
+
     pub fn barrier(&self) -> BufferBarrier {
         BufferBarrier {
             native: vk::BufferMemoryBarrier::builder()

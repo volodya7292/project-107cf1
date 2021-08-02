@@ -135,8 +135,7 @@ fn main() {
         &device,
         &mut resources,
         4,
-    )
-    .unwrap();
+    );
 
     let mat_pipelines;
     {

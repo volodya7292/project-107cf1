@@ -1,4 +1,3 @@
-use crate::render_engine::material_pipeline::MaterialPipeline;
 use crate::render_engine::RenderEngine;
 use smallvec::SmallVec;
 use std::sync::Arc;

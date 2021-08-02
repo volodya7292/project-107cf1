@@ -16,23 +16,6 @@ pub struct PipelineSignature {
 }
 
 impl PipelineSignature {
-    pub(crate) fn create_native_pool(
-        &self,
-        set_layout_id: u32,
-        max_sets: u32,
-    ) -> Result<vk::DescriptorPool, vk::Result> {
-        let mut pool_sizes = self.descriptor_sizes[set_layout_id as usize].clone();
-        for mut pool_size in &mut pool_sizes {
-            pool_size.descriptor_count *= max_sets;
-        }
-
-        let pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(max_sets)
-            .pool_sizes(&pool_sizes);
-
-        unsafe { self.device.wrapper.0.create_descriptor_pool(&pool_info, None) }
-    }
-
     pub fn create_pool(
         self: &Arc<Self>,
         set_layout_id: u32,

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 pub enum BindingRes {
     Buffer(BufferHandle),
+    BufferRange(BufferHandle, Range<u64>),
     Image(Arc<Image>, ImageLayout),
     ImageView(Arc<ImageView>, ImageLayout),
     ImageViewSampler(Arc<ImageView>, Arc<Sampler>, ImageLayout),
@@ -28,10 +29,17 @@ pub(crate) struct BindingMapping {
     array_index: u32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct DescriptorSet {
     pub(crate) native: vk::DescriptorSet,
     pub(crate) id: u32,
+}
+
+impl DescriptorSet {
+    pub const NULL: DescriptorSet = DescriptorSet {
+        native: vk::DescriptorSet::null(),
+        id: u32::MAX,
+    };
 }
 
 pub struct NativeDescriptorPool {
@@ -49,9 +57,36 @@ pub struct DescriptorPool {
 }
 
 impl DescriptorPool {
+    fn create_native_pool(
+        &self,
+        set_layout_id: u32,
+        max_sets: u32,
+    ) -> Result<Option<vk::DescriptorPool>, vk::Result> {
+        let mut pool_sizes = self.signature.descriptor_sizes[set_layout_id as usize].clone();
+        for mut pool_size in &mut pool_sizes {
+            pool_size.descriptor_count *= max_sets;
+        }
+        if pool_sizes.is_empty() {
+            return Ok(None);
+        }
+
+        let pool_info = vk::DescriptorPoolCreateInfo::builder()
+            .max_sets(max_sets)
+            .pool_sizes(&pool_sizes);
+
+        Ok(Some(unsafe {
+            self.device.wrapper.0.create_descriptor_pool(&pool_info, None)?
+        }))
+    }
+
     pub(crate) fn alloc_next_pool(&mut self, size: u32) -> Result<(), vk::Result> {
+        let new_pool = self.create_native_pool(self.set_layout_id, size)?;
+        if new_pool.is_none() {
+            return Ok(());
+        }
+
         let next_pool = NativeDescriptorPool {
-            handle: self.signature.create_native_pool(self.set_layout_id, size)?,
+            handle: new_pool.unwrap(),
             size,
         };
         let layouts = vec![self.signature.native[self.set_layout_id as usize]; size as usize];
@@ -72,7 +107,13 @@ impl DescriptorPool {
         Ok(())
     }
 
+    /// Allocate a new descriptor from the pool.
+    /// If the pool doesn't have layout (its descriptor sizes = 0), this returns `DescriptorSet::NULL`.
     pub fn alloc(&mut self) -> Result<DescriptorSet, vk::Result> {
+        if self.native.is_empty() {
+            return Ok(DescriptorSet::NULL);
+        }
+
         if let Some(id) = self.free_sets.iter().next() {
             self.free_sets.remove(id);
             Ok(self.allocated[id])
@@ -83,7 +124,9 @@ impl DescriptorPool {
     }
 
     pub fn free(&mut self, descriptor_set: DescriptorSet) {
-        self.free_sets.insert(descriptor_set.id as usize);
+        if descriptor_set != DescriptorSet::NULL {
+            self.free_sets.insert(descriptor_set.id as usize);
+        }
     }
 
     pub fn create_binding(&self, id: u32, array_index: u32, res: BindingRes) -> Binding {
@@ -106,6 +149,12 @@ impl Drop for DescriptorPool {
 }
 
 impl Device {
+    /// Updates descriptor sets with new bindings of respective ranges of `bindings`.
+    ///
+    /// # Safety
+    ///
+    /// - Access to `DescriptorSet`s must be synchronized.
+    /// - Buffers and images in `bindings` must be valid.
     pub unsafe fn update_descriptor_sets(
         &self,
         bindings: &[Binding],
@@ -123,6 +172,10 @@ impl Device {
         let mut native_writes = Vec::with_capacity(buf_len);
 
         for (descriptor_set, range) in updates {
+            if *descriptor_set == DescriptorSet::NULL {
+                panic!("descriptor_set = NULL");
+            }
+
             for i in range.clone() {
                 let binding = &bindings[i];
 
@@ -138,6 +191,15 @@ impl Device {
                             buffer: handle.0,
                             offset: 0,
                             range: vk::WHOLE_SIZE,
+                        });
+                        write_info =
+                            write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
+                    }
+                    BindingRes::BufferRange(handle, range) => {
+                        native_buffer_infos.push(vk::DescriptorBufferInfo {
+                            buffer: handle.0,
+                            offset: range.start,
+                            range: range.end - range.start,
                         });
                         write_info =
                             write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));

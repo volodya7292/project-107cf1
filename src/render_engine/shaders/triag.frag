@@ -15,7 +15,7 @@ layout(set = 0, binding = 0) uniform per_frame_data {
     PerFrameInfo info;
 };
 
-layout(set = 0, binding = 1) uniform sampler2D albedoAtlas;
+layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
 
 layout(location = 0) in vec2 tex_coord;
 

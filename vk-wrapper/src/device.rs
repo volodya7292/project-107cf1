@@ -587,13 +587,8 @@ impl Device {
         macro_rules! binding_image_array_size {
             ($res: ident, $img_type: ident, $desc_type: ident) => {{
                 let var_type = ast.get_type($res.type_id)?;
-                let shader_binding_mod = binding_types_map
-                    .get($res.name.as_str())
-                    .or_else(|| Some(&ShaderBindingMod::DEFAULT))
-                    .unwrap();
                 ShaderBinding {
                     binding_type: BindingType(vk::DescriptorType::$desc_type),
-                    binding_mod: *shader_binding_mod,
                     descriptor_set: ast
                         .get_decoration($res.id, spirv::Decoration::DescriptorSet)
                         .unwrap(),
@@ -620,14 +615,13 @@ impl Device {
                     .or_else(|| Some(&ShaderBindingMod::DEFAULT))
                     .unwrap();
                 ShaderBinding {
-                    binding_type: if shader_binding_mod == &ShaderBindingMod::DEFAULT
-                        || shader_binding_mod == &ShaderBindingMod::DYNAMIC_UPDATE
+                    binding_type: if *shader_binding_mod == ShaderBindingMod::DEFAULT
+                        || *shader_binding_mod == ShaderBindingMod::DYNAMIC_UPDATE
                     {
                         BindingType(vk::DescriptorType::$desc_type0)
                     } else {
                         BindingType(vk::DescriptorType::$desc_type1)
                     },
-                    binding_mod: *shader_binding_mod,
                     descriptor_set: ast
                         .get_decoration($res.id, spirv::Decoration::DescriptorSet)
                         .unwrap(),

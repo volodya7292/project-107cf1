@@ -122,6 +122,9 @@ fn build_resources(src_dir: &Path, dst_file: &Path) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/render_engine/shaders");
+    println!("cargo:rerun-if-changed=res/");
+
     compile_shaders(Path::new("src/render_engine/shaders"), Path::new("res/shaders"));
     build_resources(Path::new("res"), Path::new("work_dir/resources"));
 }

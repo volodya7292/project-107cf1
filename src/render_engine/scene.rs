@@ -197,6 +197,10 @@ pub struct ComponentStorage<'a, T> {
 }
 
 impl<'a, T> ComponentStorage<'a, T> {
+    pub fn contains(&self, index: u32) -> bool {
+        self.raw.contains(index)
+    }
+
     pub fn get(&self, index: u32) -> Option<&T> {
         unsafe { self.raw.get::<T>(index) }
     }

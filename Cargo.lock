@@ -1311,6 +1311,7 @@ dependencies = [
  "ahash",
  "approx",
  "bit-set",
+ "bit-vec",
  "byteorder",
  "crossbeam-channel",
  "entity_data",

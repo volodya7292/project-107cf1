@@ -14,14 +14,13 @@ layout(location = 3) out vec4 outNormal;
 layout(set = 0, binding = 0) uniform per_frame_data {
     PerFrameInfo info;
 };
-
-layout(set = 0, binding = 1) uniform sampler2D albedoAtlas;
-layout(set = 0, binding = 2) uniform sampler2D specularAtlas;
-layout(set = 0, binding = 3) uniform sampler2D normalAtlas;
-
-layout(set = 0, binding = 4, std430) readonly buffer Materials {
+layout(set = 0, binding = 1, std430) readonly buffer Materials {
     Material materials[];
 };
+layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
+layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
+layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
+
 
 layout(location = 0) in Output {
     vec2 tex_uv;

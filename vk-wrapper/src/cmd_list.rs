@@ -19,10 +19,17 @@ pub struct CmdList {
     pub(crate) last_pipeline: *const Pipeline,
 }
 
-pub struct CopyRegion {
-    pub src_element_index: u64,
-    pub dst_element_index: u64,
-    pub size: u64,
+#[repr(transparent)]
+pub struct CopyRegion(vk::BufferCopy);
+
+impl CopyRegion {
+    pub fn new(src_offset: u64, dst_offset: u64, size: u64) -> CopyRegion {
+        CopyRegion(vk::BufferCopy {
+            src_offset,
+            dst_offset,
+            size,
+        })
+    }
 }
 
 unsafe impl Send for CmdList {}
@@ -219,6 +226,7 @@ impl CmdList {
         bind_point: vk::PipelineBindPoint,
         set_id: u32,
         descriptor_set: DescriptorSet,
+        dynamic_offsets: &[u32],
     ) {
         unsafe {
             self.device_wrapper.0.cmd_bind_descriptor_sets(
@@ -227,7 +235,7 @@ impl CmdList {
                 signature.pipeline_layout,
                 set_id,
                 &[descriptor_set.native],
-                &[],
+                dynamic_offsets,
             );
         };
     }
@@ -237,8 +245,15 @@ impl CmdList {
         signature: &Arc<PipelineSignature>,
         set_id: u32,
         descriptor_set: DescriptorSet,
+        dynamic_offsets: &[u32],
     ) {
-        self.bind_pipeline_input(signature, vk::PipelineBindPoint::GRAPHICS, set_id, descriptor_set);
+        self.bind_pipeline_input(
+            signature,
+            vk::PipelineBindPoint::GRAPHICS,
+            set_id,
+            descriptor_set,
+            dynamic_offsets,
+        );
     }
 
     pub fn bind_compute_input(
@@ -246,8 +261,15 @@ impl CmdList {
         signature: &Arc<PipelineSignature>,
         set_id: u32,
         descriptor_set: DescriptorSet,
+        dynamic_offsets: &[u32],
     ) {
-        self.bind_pipeline_input(signature, vk::PipelineBindPoint::COMPUTE, set_id, descriptor_set);
+        self.bind_pipeline_input(
+            signature,
+            vk::PipelineBindPoint::COMPUTE,
+            set_id,
+            descriptor_set,
+            dynamic_offsets,
+        );
     }
 
     /// buffers (max: 16): [buffer, offset]
@@ -356,17 +378,40 @@ impl CmdList {
         let regions: SmallVec<[vk::BufferCopy; 128]> = regions
             .iter()
             .filter_map(|region| {
-                if region.size > 0 {
+                if region.0.size > 0 {
                     Some(vk::BufferCopy {
-                        src_offset: region.src_element_index * src_buffer.buffer.aligned_elem_size,
-                        dst_offset: region.dst_element_index * src_buffer.buffer.aligned_elem_size,
-                        size: region.size * src_buffer.buffer.aligned_elem_size,
+                        src_offset: region.0.src_offset * src_buffer.buffer.aligned_elem_size,
+                        dst_offset: region.0.dst_offset * src_buffer.buffer.aligned_elem_size,
+                        size: region.0.size * src_buffer.buffer.aligned_elem_size,
                     })
                 } else {
                     None
                 }
             })
             .collect();
+
+        if regions.is_empty() {
+            return;
+        }
+
+        unsafe {
+            self.device_wrapper.0.cmd_copy_buffer(
+                self.native,
+                src_buffer.buffer.native,
+                dst_buffer.handle().0,
+                &regions,
+            )
+        };
+    }
+
+    pub fn copy_buffer_regions_to_device_bytes<T>(
+        &mut self,
+        src_buffer: &HostBuffer<T>,
+        dst_buffer: &impl BufferHandleImpl,
+        regions: &[CopyRegion],
+    ) {
+        let regions =
+            unsafe { slice::from_raw_parts(regions.as_ptr() as *const vk::BufferCopy, regions.len()) };
 
         if regions.is_empty() {
             return;

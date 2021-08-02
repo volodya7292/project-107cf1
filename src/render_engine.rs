@@ -12,9 +12,9 @@ use crate::render_engine::material_pipeline::UniformStruct;
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
+use crate::utils::index_alloc::IndexAlloc;
 use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, UInteger};
-use crossbeam_channel as cb;
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
@@ -22,13 +22,11 @@ use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use rayon::prelude::*;
-use rayon::{ThreadPool, ThreadPoolBuilder};
 use scene::ComponentStorage;
 pub use scene::Scene;
 use smallvec::SmallVec;
 use std::collections::VecDeque;
-use std::sync::atomic::AtomicBool;
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
@@ -36,15 +34,12 @@ pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::{
-    swapchain, AccessFlags, Binding, BindingRes, BindingType, CopyRegion, DescriptorPool, DescriptorSet,
-    DeviceError, HostBuffer, Image, ImageUsageFlags, ImageView, RawHostBuffer, Sampler, Shader,
-    ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore, SwapchainImage,
-};
-use vk_wrapper::{
-    Attachment, AttachmentRef, BufferUsageFlags, ClearValue, CmdList, Device, DeviceBuffer, Format,
-    Framebuffer, ImageLayout, ImageMod, LoadStore, Pipeline, PipelineDepthStencil, PipelineRasterization,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, SubmitInfo, SubmitPacket,
-    Subpass, Surface, Swapchain, WaitSemaphore,
+    swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
+    CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
+    HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
+    PipelineDepthStencil, PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology,
+    Queue, RenderPass, Sampler, Shader, ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore,
+    SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 pub struct RenderEngine {
@@ -81,9 +76,10 @@ pub struct RenderEngine {
     depth_signature: Arc<PipelineSignature>,
     depth_pipeline_r: Arc<Pipeline>,
     depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_object_pool: DescriptorPool,
-    _depth_per_frame_pool: DescriptorPool,
+    depth_per_frame_pool: DescriptorPool,
+    depth_dyn_pool: DescriptorPool,
     depth_per_frame_in: DescriptorSet,
+    depth_dyn_in: DescriptorSet,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     depth_pyramid_signature: Arc<PipelineSignature>,
@@ -108,8 +104,10 @@ pub struct RenderEngine {
 
     g_render_pass: Arc<RenderPass>,
     g_framebuffer: Option<Arc<Framebuffer>>,
-    _g_per_frame_pool: DescriptorPool,
-    g_per_frame_desc: DescriptorSet,
+    g_per_frame_pool: DescriptorPool,
+    g_dyn_pool: DescriptorPool,
+    g_per_frame_in: DescriptorSet,
+    g_dyn_in: DescriptorSet,
     g_per_pipeline_pools: HashMap<Arc<PipelineSignature>, DescriptorPool>,
 
     translucency_head_image: Option<Arc<Image>>,
@@ -125,7 +123,9 @@ pub struct RenderEngine {
     renderables: HashMap<u32, Renderable>,
     vertex_meshes: HashMap<u32, Arc<RawVertexMesh>>,
     material_pipelines: Vec<MaterialPipeline>,
+    uniform_buffer_basic: DeviceBuffer,
     device_buffers: SlotVec<DeviceBuffer>,
+    uniform_buffer_offsets: IndexAlloc,
 }
 
 #[derive(Copy, Clone)]
@@ -172,8 +172,7 @@ struct VMBufferUpdate {
 struct BufferUpdate2 {
     buffer: BufferHandle,
     data: Vec<u8>,
-    // (src data offset, dst offset, size)
-    regions: Vec<(u64, u64, u64)>,
+    regions: Vec<CopyRegion>,
 }
 
 enum BufferUpdate {
@@ -184,6 +183,7 @@ enum BufferUpdate {
 struct Renderable {
     buffers: SmallVec<[DeviceBuffer; 4]>,
     material_pipe: u32,
+    uniform_buf_index: usize,
     descriptor_sets: SmallVec<[DescriptorSet; 4]>,
 }
 
@@ -239,30 +239,29 @@ struct CullConstants {
 const MAX_OBJECT_COUNT: u32 = 65535;
 const MAX_MATERIAL_COUNT: u32 = 4096;
 const COMPUTE_LOCAL_THREADS: u32 = 32;
+const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
 
 lazy_static! {
 static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]); 3] = [
-    (
-        ShaderStage::VERTEX,
-        &[
-            // Per object info
-            ShaderBinding {
-                binding_type: BindingType::UNIFORM_BUFFER,
-                binding_mod: ShaderBindingMod::DEFAULT,
-                descriptor_set: 1,
-                id: 0,
-                count: 1,
-            },
-        ],
-    ),
     (
         ShaderStage::VERTEX | ShaderStage::PIXEL,
         &[
             // Per frame info
             ShaderBinding {
                 binding_type: BindingType::UNIFORM_BUFFER,
-                binding_mod: ShaderBindingMod::DEFAULT,
                 descriptor_set: 0,
+                id: 0,
+                count: 1,
+            },
+        ],
+    ),
+    (
+        ShaderStage::VERTEX,
+        &[
+            // Per object info
+            ShaderBinding {
+                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
+                descriptor_set: 1,
                 id: 0,
                 count: 1,
             },
@@ -271,34 +270,30 @@ static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]
     (
         ShaderStage::PIXEL,
         &[
+            // Material buffer
+            ShaderBinding {
+                binding_type: BindingType::STORAGE_BUFFER,
+                descriptor_set: 0,
+                id: 1,
+                count: 1,
+            },
             // Albedo atlas
             ShaderBinding {
                 binding_type: BindingType::SAMPLED_IMAGE,
-                binding_mod: ShaderBindingMod::DEFAULT,
                 descriptor_set: 0,
-                id: 1,
+                id: 2,
                 count: 1,
             },
             // Specular atlas
             ShaderBinding {
                 binding_type: BindingType::SAMPLED_IMAGE,
-                binding_mod: ShaderBindingMod::DEFAULT,
                 descriptor_set: 0,
-                id: 2,
+                id: 3,
                 count: 1,
             },
             // Normal atlas
             ShaderBinding {
                 binding_type: BindingType::SAMPLED_IMAGE,
-                binding_mod: ShaderBindingMod::DEFAULT,
-                descriptor_set: 0,
-                id: 3,
-                count: 1,
-            },
-            // Material buffer
-            ShaderBinding {
-                binding_type: BindingType::STORAGE_BUFFER,
-                binding_mod: ShaderBindingMod::DEFAULT,
                 descriptor_set: 0,
                 id: 4,
                 count: 1,
@@ -388,6 +383,8 @@ impl RenderEngine {
 
     /// Returns id of registered material pipeline.
     pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
+        assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
+
         let signature = self
             .device
             .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
@@ -421,26 +418,6 @@ impl RenderEngine {
         mat_pipelines.push(mat_pipeline);
         (mat_pipelines.len() - 1) as u32
     }
-
-    // pub fn prepare_material_pipeline(&mut self, material_pipeline: &mut MaterialPipeline) {
-    //     material_pipeline.prepare_pipeline(&PipelineMapping {
-    //         render_pass: Arc::clone(&self.g_render_pass),
-    //         subpass_index: 0,
-    //         cull_back_faces: false,
-    //     });
-    //     material_pipeline.prepare_pipeline(&PipelineMapping {
-    //         render_pass: Arc::clone(&self.g_render_pass),
-    //         subpass_index: 0,
-    //         cull_back_faces: true,
-    //     });
-    //
-    //     let g_per_pipeline_pools = self.g_per_pipeline_pools.as_mut().unwrap();
-    //     let signature = material_pipeline.signature();
-    //
-    //     if !g_per_pipeline_pools.contains_key(signature) {
-    //         g_per_pipeline_pools.insert(Arc::clone(signature), signature.create_pool(1, 16).unwrap());
-    //     }
-    // }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
         self.material_updates.insert(id, info);
@@ -498,18 +475,11 @@ impl RenderEngine {
                         }
                         BufferUpdate::Type2(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
-
-                            let regions: SmallVec<[CopyRegion; 128]> = update
-                                .regions
-                                .iter()
-                                .map(|region| CopyRegion {
-                                    src_element_index: used_size + region.0,
-                                    dst_element_index: region.1,
-                                    size: region.2,
-                                })
-                                .collect();
-
-                            cl.copy_buffer_regions_to_device(&self.staging_buffer, &update.buffer, &regions);
+                            cl.copy_buffer_regions_to_device_bytes(
+                                &self.staging_buffer,
+                                &update.buffer,
+                                &update.regions,
+                            );
                         }
                     }
 
@@ -532,14 +502,18 @@ impl RenderEngine {
     }
 
     fn on_update(&mut self) {
-        let mut t0 = Instant::now();
+        let t0 = Instant::now();
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
             let camera_comps = camera_comps.read().unwrap();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
         let mut buffer_updates = vec![];
-        let mut buffer_updates2 = vec![];
+        let mut uniform_buffers_updates = [BufferUpdate::Type2(BufferUpdate2 {
+            buffer: self.uniform_buffer_basic.handle(),
+            data: vec![],
+            regions: vec![],
+        })];
 
         if !self.vertex_mesh_pending_updates.is_empty() {
             let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
@@ -551,11 +525,11 @@ impl RenderEngine {
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             device: &self.device,
             renderer_comps: self.scene.storage::<component::Renderer>(),
-            depth_per_object_pool: &mut self.depth_per_object_pool,
             g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
             renderables: &mut self.renderables,
             buffer_updates: &mut buffer_updates,
             material_pipelines: &self.material_pipelines,
+            uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
         let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
             vertex_meshes: &mut self.vertex_meshes,
@@ -573,7 +547,7 @@ impl RenderEngine {
         });
 
         let mut t11 = Instant::now();
-        let mut systems_t = (t11 - t00).as_secs_f64();
+        let systems_t = (t11 - t00).as_secs_f64();
 
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
             parent_comps: self.scene.storage::<component::Parent>(),
@@ -582,7 +556,7 @@ impl RenderEngine {
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
-            buffer_updates: &mut buffer_updates2,
+            uniform_buffer_updates: &mut uniform_buffers_updates,
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
             renderables: &self.renderables,
@@ -592,7 +566,7 @@ impl RenderEngine {
         self.transfer_submit[0].wait().unwrap();
         self.transfer_submit[1].wait().unwrap();
 
-        let mut t00 = Instant::now();
+        let t00 = Instant::now();
 
         // Before updating new buffers, collect all the completed updates to commit them
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
@@ -606,6 +580,7 @@ impl RenderEngine {
         let commit_buffer_updates_system = systems::CommitBufferUpdatesSystem {
             updates: completed_updates,
             vertex_meshes: &mut self.vertex_meshes,
+            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
         };
         rayon::scope(|s| {
             s.spawn(|_| {
@@ -616,7 +591,7 @@ impl RenderEngine {
             s.spawn(|_| commit_buffer_updates_system.run())
         });
 
-        let mut t11 = Instant::now();
+        let t11 = Instant::now();
         let systems2_t = (t11 - t00).as_secs_f64();
 
         // Update camera uniform buffers
@@ -663,13 +638,13 @@ impl RenderEngine {
             let mut data = Vec::<MaterialInfo>::with_capacity(self.material_updates.len());
             let mat_size = mem::size_of::<MaterialInfo>() as u64;
 
-            let regions: Vec<(u64, u64, u64)> = self
+            let regions: Vec<CopyRegion> = self
                 .material_updates
                 .drain()
                 .enumerate()
-                .map(|(i, info)| {
-                    data.push(info.1);
-                    (i as u64 * mat_size, info.0 as u64 * mat_size, mat_size)
+                .map(|(i, (id, info))| {
+                    data.push(info);
+                    CopyRegion::new(i as u64 * mat_size, id as u64 * mat_size, mat_size)
                 })
                 .collect();
 
@@ -685,7 +660,7 @@ impl RenderEngine {
 
         unsafe {
             self.update_device_buffers(&buffer_updates);
-            self.update_device_buffers(&buffer_updates2);
+            self.update_device_buffers(&uniform_buffers_updates);
         }
 
         let t1 = Instant::now();
@@ -693,10 +668,10 @@ impl RenderEngine {
 
         let t = (t1 - t0).as_secs_f64();
         if t > 0.003 {
-            // println!(
-            //     "renderer::update {} | systems {} | systems2 {} | updates {}",
-            //     t, systems_t, systems2_t, updates_t
-            // );
+            println!(
+                "renderer::update {} | systems {} | systems2 {} | updates {}",
+                t, systems_t, systems2_t, updates_t
+            );
         }
     }
 
@@ -727,7 +702,7 @@ impl RenderEngine {
                 )
                 .unwrap();
 
-                cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in);
+                cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in, &[]);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -775,7 +750,13 @@ impl RenderEngine {
 
                     let renderable = &self.renderables[&renderable_id];
 
-                    cl.bind_graphics_input(&self.depth_signature, 1, renderable.descriptor_sets[0]);
+                    cl.bind_graphics_input(
+                        &self.depth_signature,
+                        1,
+                        self.depth_dyn_in,
+                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
+                    );
+                    // cl.bind_graphics_input(&self.depth_signature, 1, renderable.descriptor_sets[0]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -852,9 +833,15 @@ impl RenderEngine {
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, self.g_per_frame_desc);
+                        cl.bind_graphics_input(&signature, 0, self.g_per_frame_in, &[]);
                     }
-                    cl.bind_graphics_input(&signature, 1, renderable.descriptor_sets[1]);
+                    cl.bind_graphics_input(
+                        &signature,
+                        1,
+                        self.g_dyn_in,
+                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
+                    );
+                    // cl.bind_graphics_input(&signature, 1, renderable.descriptor_sets[1]);
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -876,8 +863,8 @@ impl RenderEngine {
         let world_transform_comps = world_transform_comp.read().unwrap();
         let renderer_comp = self.scene.storage::<component::Renderer>();
         let renderer_comps = renderer_comp.read().unwrap();
-        let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
-        let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
+        // let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
+        // let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
 
         let renderable_ids: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
         let object_count = renderable_ids.len() as u32;
@@ -926,7 +913,7 @@ impl RenderEngine {
                 let level_width = (size.0 >> i).max(1);
                 let level_height = (size.1 >> i).max(1);
 
-                cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i]);
+                cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
 
                 let constants = DepthPyramidConstants {
                     size: na::Vector2::new(level_width as f32, level_height as f32),
@@ -986,7 +973,7 @@ impl RenderEngine {
             );
 
             cl.bind_pipeline(&self.cull_pipeline);
-            cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc);
+            cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc, &[]);
 
             let pyramid_size = depth_pyramid_image.size_2d();
             let constants = CullConstants {
@@ -1101,7 +1088,7 @@ impl RenderEngine {
                 false,
             );
             cl.bind_pipeline(self.compose_pipeline.as_ref().unwrap());
-            cl.bind_graphics_input(&self.compose_signature, 0, self.compose_desc);
+            cl.bind_graphics_input(&self.compose_signature, 0, self.compose_desc, &[]);
             cl.draw(3, 0);
             cl.end_render_pass();
 
@@ -1502,7 +1489,7 @@ pub fn new(
     device: &Arc<Device>,
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
-) -> Result<Arc<Mutex<RenderEngine>>, DeviceError> {
+) -> Arc<Mutex<RenderEngine>> {
     let scene = Scene::new();
 
     // TODO: pipeline cache management
@@ -1518,11 +1505,35 @@ pub fn new(
     let present_queue = device.get_queue(Queue::TYPE_PRESENT);
     let phys_cores = num_cpus::get_physical();
 
-    let per_frame_uniform_buffer = device.create_device_buffer(
-        BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
-        mem::size_of::<PerFrameInfo>() as u64,
-        1,
-    )?;
+    let staging_buffer = device
+        .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
+        .unwrap();
+    let per_frame_uniform_buffer = device
+        .create_device_buffer(
+            BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
+            mem::size_of::<PerFrameInfo>() as u64,
+            1,
+        )
+        .unwrap();
+    let uniform_buffer_basic = device
+        .create_device_buffer(
+            BufferUsageFlags::UNIFORM | BufferUsageFlags::TRANSFER_DST,
+            MAX_BASIC_UNIFORM_BLOCK_SIZE,
+            MAX_OBJECT_COUNT as u64,
+        )
+        .unwrap();
+    // TODO: allow different alignments
+    assert_eq!(
+        uniform_buffer_basic.aligned_element_size(),
+        MAX_BASIC_UNIFORM_BLOCK_SIZE
+    );
+    // let uniform_buffer1 = device
+    //     .create_device_buffer(
+    //         BufferUsageFlags::UNIFORM | BufferUsageFlags::TRANSFER_DST,
+    //         1024,
+    //         MAX_OBJECT_COUNT as u64,
+    //     )
+    //     .unwrap();
     let material_buffer = device
         .create_device_buffer(
             BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::STORAGE,
@@ -1533,46 +1544,56 @@ pub fn new(
 
     // Create depth pass resources
     // -----------------------------------------------------------------------------------------------------------------
-    let depth_render_pass = device.create_render_pass(
-        &[Attachment {
-            format: Format::D32_FLOAT,
-            init_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::SHADER_READ,
-            load_store: LoadStore::InitClearFinalSave,
-        }],
-        &[Subpass {
-            color: vec![],
-            depth: Some(AttachmentRef {
-                index: 0,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-            }),
-        }],
-        &[],
-    )?;
-    let depth_vertex = device.create_shader(
-        &resources.get("shaders/depth.vert.spv").unwrap().read().unwrap(),
-        &[("inPosition", Format::RGB32_FLOAT)],
-        &[],
-    )?;
-    let depth_signature = device.create_pipeline_signature(&[depth_vertex], &[])?;
-    let depth_pipeline_r = device.create_graphics_pipeline(
-        &depth_render_pass,
-        0,
-        PrimitiveTopology::TRIANGLE_LIST,
-        PipelineDepthStencil::new().depth_test(true).depth_write(false),
-        PipelineRasterization::new().cull_back_faces(true),
-        &depth_signature,
-    )?;
-    let depth_pipeline_rw = device.create_graphics_pipeline(
-        &depth_render_pass,
-        0,
-        PrimitiveTopology::TRIANGLE_LIST,
-        PipelineDepthStencil::new().depth_test(true).depth_write(true),
-        PipelineRasterization::new().cull_back_faces(true),
-        &depth_signature,
-    )?;
-    let mut depth_per_frame_pool = depth_signature.create_pool(0, 1)?;
-    let depth_per_frame_in = depth_per_frame_pool.alloc()?;
+    let depth_render_pass = device
+        .create_render_pass(
+            &[Attachment {
+                format: Format::D32_FLOAT,
+                init_layout: ImageLayout::UNDEFINED,
+                final_layout: ImageLayout::SHADER_READ,
+                load_store: LoadStore::InitClearFinalSave,
+            }],
+            &[Subpass {
+                color: vec![],
+                depth: Some(AttachmentRef {
+                    index: 0,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                }),
+            }],
+            &[],
+        )
+        .unwrap();
+    let depth_vertex = device
+        .create_shader(
+            &resources.get("shaders/depth.vert.spv").unwrap().read().unwrap(),
+            &[("inPosition", Format::RGB32_FLOAT)],
+            &[("per_object_data", ShaderBindingMod::DYNAMIC_OFFSET)],
+        )
+        .unwrap();
+    let depth_signature = device.create_pipeline_signature(&[depth_vertex], &[]).unwrap();
+    let depth_pipeline_r = device
+        .create_graphics_pipeline(
+            &depth_render_pass,
+            0,
+            PrimitiveTopology::TRIANGLE_LIST,
+            PipelineDepthStencil::new().depth_test(true).depth_write(false),
+            PipelineRasterization::new().cull_back_faces(true),
+            &depth_signature,
+        )
+        .unwrap();
+    let depth_pipeline_rw = device
+        .create_graphics_pipeline(
+            &depth_render_pass,
+            0,
+            PrimitiveTopology::TRIANGLE_LIST,
+            PipelineDepthStencil::new().depth_test(true).depth_write(true),
+            PipelineRasterization::new().cull_back_faces(true),
+            &depth_signature,
+        )
+        .unwrap();
+    let mut depth_per_frame_pool = depth_signature.create_pool(0, 1).unwrap();
+    let mut depth_dyn_pool = depth_signature.create_pool(1, 1).unwrap();
+    let depth_per_frame_in = depth_per_frame_pool.alloc().unwrap();
+    let depth_dyn_in = depth_dyn_pool.alloc().unwrap();
 
     let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
@@ -1580,7 +1601,6 @@ pub fn new(
 
     // Depth pyramid pipeline
     // -----------------------------------------------------------------------------------------------------------------
-
     let depth_pyramid_compute = device
         .create_shader(
             &resources
@@ -1657,81 +1677,85 @@ pub fn new(
 
     // Create G-Buffer pass resources
     // -----------------------------------------------------------------------------------------------------------------
-    let g_render_pass = device.create_render_pass(
-        &[
-            // Albedo
-            Attachment {
-                format: Format::RGBA8_UNORM,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ,
-                load_store: LoadStore::InitClearFinalSave,
-            },
-            // Specular
-            Attachment {
-                format: Format::RGBA8_UNORM,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ,
-                load_store: LoadStore::FinalSave,
-            },
-            // Emission
-            Attachment {
-                format: Format::RGBA8_UNORM,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ,
-                load_store: LoadStore::FinalSave,
-            },
-            // Normal
-            Attachment {
-                format: Format::RG16_UNORM,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ,
-                load_store: LoadStore::FinalSave,
-            },
-            // Depth (read)
-            Attachment {
-                format: Format::D32_FLOAT,
-                init_layout: ImageLayout::DEPTH_READ,
-                final_layout: ImageLayout::DEPTH_READ,
-                load_store: LoadStore::InitSave,
-            },
-            Attachment {
-                format: Format::R32_UINT,
-                init_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::GENERAL,
-                load_store: LoadStore::InitClearFinalSave,
-            },
-        ],
-        &[Subpass {
-            color: vec![
-                AttachmentRef {
-                    index: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
+    let g_render_pass = device
+        .create_render_pass(
+            &[
+                // Albedo
+                Attachment {
+                    format: Format::RGBA8_UNORM,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::SHADER_READ,
+                    load_store: LoadStore::InitClearFinalSave,
                 },
-                AttachmentRef {
-                    index: 1,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
+                // Specular
+                Attachment {
+                    format: Format::RGBA8_UNORM,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::SHADER_READ,
+                    load_store: LoadStore::FinalSave,
                 },
-                AttachmentRef {
-                    index: 2,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
+                // Emission
+                Attachment {
+                    format: Format::RGBA8_UNORM,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::SHADER_READ,
+                    load_store: LoadStore::FinalSave,
                 },
-                AttachmentRef {
-                    index: 3,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
+                // Normal
+                Attachment {
+                    format: Format::RG16_UNORM,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::SHADER_READ,
+                    load_store: LoadStore::FinalSave,
+                },
+                // Depth (read)
+                Attachment {
+                    format: Format::D32_FLOAT,
+                    init_layout: ImageLayout::DEPTH_READ,
+                    final_layout: ImageLayout::DEPTH_READ,
+                    load_store: LoadStore::InitSave,
+                },
+                Attachment {
+                    format: Format::R32_UINT,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::GENERAL,
+                    load_store: LoadStore::InitClearFinalSave,
                 },
             ],
-            depth: Some(AttachmentRef {
-                index: 4,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-            }),
-        }],
-        &[],
-    )?;
+            &[Subpass {
+                color: vec![
+                    AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                    AttachmentRef {
+                        index: 1,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                    AttachmentRef {
+                        index: 2,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                    AttachmentRef {
+                        index: 3,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                ],
+                depth: Some(AttachmentRef {
+                    index: 4,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                }),
+            }],
+            &[],
+        )
+        .unwrap();
     let g_signature = device
         .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
         .unwrap();
-    let mut g_per_frame_pool = g_signature.create_pool(0, 1)?;
-    let g_per_frame_in = g_per_frame_pool.alloc()?;
+    let mut g_per_frame_pool = g_signature.create_pool(0, 1).unwrap();
+    let mut g_dyn_pool = g_signature.create_pool(1, 1).unwrap();
+    let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
+    let g_dyn_in = g_dyn_pool.alloc().unwrap();
     let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
         .take(phys_cores)
         .collect();
@@ -1791,49 +1815,70 @@ pub fn new(
             )],
         );
         device.update_descriptor_set(
+            depth_dyn_in,
+            &[depth_dyn_pool.create_binding(
+                0,
+                0,
+                BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
+            )],
+        );
+        device.update_descriptor_set(
             g_per_frame_in,
             &[
                 g_per_frame_pool.create_binding(0, 0, BindingRes::Buffer(per_frame_uniform_buffer.handle())),
+                g_per_frame_pool.create_binding(1, 0, BindingRes::Buffer(material_buffer.handle())),
                 g_per_frame_pool.create_binding(
-                    1,
+                    2,
                     0,
                     BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
                 ),
                 g_per_frame_pool.create_binding(
-                    2,
+                    3,
                     0,
                     BindingRes::Image(Arc::clone(&texture_atlases[1].image()), ImageLayout::SHADER_READ),
                 ),
                 g_per_frame_pool.create_binding(
-                    3,
+                    4,
                     0,
                     BindingRes::Image(Arc::clone(&texture_atlases[3].image()), ImageLayout::SHADER_READ),
                 ),
-                g_per_frame_pool.create_binding(4, 0, BindingRes::Buffer(material_buffer.handle())),
             ],
-        )
+        );
+        device.update_descriptor_set(
+            g_dyn_in,
+            &[g_dyn_pool.create_binding(
+                0,
+                0,
+                BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
+            )],
+        );
     }
 
     let transfer_cl = [
-        transfer_queue.create_primary_cmd_list()?,
-        graphics_queue.create_primary_cmd_list()?,
+        transfer_queue.create_primary_cmd_list().unwrap(),
+        graphics_queue.create_primary_cmd_list().unwrap(),
     ];
     let transfer_submit = [
-        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[0])], &[])])?,
-        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[1])], &[])])?,
+        device
+            .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[0])], &[])])
+            .unwrap(),
+        device
+            .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[1])], &[])])
+            .unwrap(),
     ];
 
-    let staging_cl = graphics_queue.create_primary_cmd_list()?;
-    let staging_submit =
-        device.create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])?;
+    let staging_cl = graphics_queue.create_primary_cmd_list().unwrap();
+    let staging_submit = device
+        .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])
+        .unwrap();
 
     let final_cl = [
-        graphics_queue.create_primary_cmd_list()?,
-        present_queue.create_primary_cmd_list()?,
+        graphics_queue.create_primary_cmd_list().unwrap(),
+        present_queue.create_primary_cmd_list().unwrap(),
     ];
     let final_submit = [
-        device.create_submit_packet(&[])?,
-        device.create_submit_packet(&[])?,
+        device.create_submit_packet(&[]).unwrap(),
+        device.create_submit_packet(&[]).unwrap(),
     ];
 
     let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
@@ -1855,7 +1900,7 @@ pub fn new(
             free_indices.clone(),
             free_indices.clone(),
         ],
-        staging_buffer: device.create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)?,
+        staging_buffer,
         transfer_cl,
         transfer_submit,
         staging_cl,
@@ -1870,12 +1915,13 @@ pub fn new(
         depth_pyramid_image: None,
         depth_pyramid_views: vec![],
         depth_framebuffer: None,
-        depth_signature: Arc::clone(&depth_signature),
+        depth_signature,
         depth_pipeline_r,
         depth_pipeline_rw,
-        depth_per_object_pool: depth_signature.create_pool(1, MAX_OBJECT_COUNT)?,
-        _depth_per_frame_pool: depth_per_frame_pool,
+        depth_per_frame_pool,
+        depth_dyn_pool,
         depth_per_frame_in,
+        depth_dyn_in,
         depth_pyramid_pipeline,
         depth_pyramid_signature,
         depth_pyramid_pool: None,
@@ -1888,8 +1934,10 @@ pub fn new(
         cull_buffer,
         g_render_pass,
         g_framebuffer: None,
-        _g_per_frame_pool: g_per_frame_pool,
-        g_per_frame_desc: g_per_frame_in,
+        g_per_frame_pool,
+        g_dyn_pool,
+        g_per_frame_in,
+        g_dyn_in,
         g_per_pipeline_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
@@ -1906,14 +1954,16 @@ pub fn new(
         material_updates: Default::default(),
         compose_desc,
         material_pipelines: vec![],
+        uniform_buffer_basic,
         device_buffers: SlotVec::new(),
         vertex_meshes: Default::default(),
         vertex_mesh_updates: Default::default(),
         vertex_mesh_pending_updates: vec![],
+        uniform_buffer_offsets: IndexAlloc::new(MAX_OBJECT_COUNT as usize),
     };
     renderer.on_resize(size);
 
-    Ok(Arc::new(Mutex::new(renderer)))
+    Arc::new(Mutex::new(renderer))
 }
 
 impl Drop for RenderEngine {
