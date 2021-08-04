@@ -19,7 +19,7 @@ use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
 use vk_wrapper::Device;
 
-pub const LOD0_RANGE: usize = 128;
+pub const LOD0_RANGE: usize = 256;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct ClusterPos {
@@ -56,6 +56,11 @@ struct RenderCluster {
 struct ClusterToRemove {
     cluster_pos: ClusterPos,
     entity: u32,
+}
+
+struct LayoutClusterPos {
+    pos: I64Vec3,
+    distance: f64,
 }
 
 pub struct OverworldStreamer {
@@ -293,6 +298,11 @@ impl OverworldStreamer {
                                     }
 
                                     let pos = pos + xyz2;
+
+                                    if cluster_layout[i].contains(&pos) {
+                                        panic!("CONTAINS");
+                                    }
+
                                     cluster_layout[i].insert(pos);
                                 }
                             }
@@ -371,6 +381,29 @@ impl OverworldStreamer {
             }
         }
 
+        let (global_vert_count, cluster_count) = overworld.loaded_clusters.iter().fold((0, 0), |i, v| {
+            (
+                i.0 + v.iter().fold(0, |i, v| {
+                    let cl = v.1.cluster.lock().unwrap();
+                    i + cl.vertex_mesh().vertex_count() * 40 + cl.vertex_mesh().vertex_count() * 4
+                }),
+                i.1 + v.len(),
+            )
+        });
+
+        println!("{} - {}", global_vert_count, cluster_count);
+
+        // let sorted_positions: Vec<_> = overworld
+        //     .loaded_clusters
+        //     .par_iter()
+        //     .map(|level| {
+        //         // let mut positions: Vec<_> = level.keys().cloned().collect();
+        //         // positions.sort_by(|a, b| self.stream_pos);
+        //         // positions
+        //         todo!()
+        //     })
+        //     .collect();
+        //
         // Generate clusters
         {
             let max_clusters_in_process = num_cpus::get().saturating_sub(2).max(1) as u32;
@@ -406,7 +439,7 @@ impl OverworldStreamer {
         // TODO OPTIMIZE: Update cluster meshes only when neighbour clusters are fully loaded
         // TODO OPTIMIZE: to compensate for large number of updates due to neighbour updates.
         // TODO: To do this, firstly fully load all the clusters up to a certain radius.
-        // TODO: Secondly, fully update their meshes.
+        // TODO: Secondly, fully update their meshes including borders.
         // TODO: Lastly, repeat the same process for a larger radius until the limit is reached.
 
         // Generate meshes
@@ -530,25 +563,10 @@ impl OverworldStreamer {
         let transform_comps = scene.storage::<component::Transform>();
         let renderer_comps = scene.storage::<component::Renderer>();
         let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let parent_comps = scene.storage::<component::Parent>();
-        let children_comps = scene.storage::<component::Children>();
-
         let mut entities = entities.lock().unwrap();
         let mut transform_comps = transform_comps.write().unwrap();
-        let renderer_comps = renderer_comps.write().unwrap();
-        let vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
-        let parent_comps = parent_comps.write().unwrap();
-        let children_comps = children_comps.write().unwrap();
-
-        let mut d = cluster::UpdateSystemData {
-            mat_pipeline: self.cluster_mat_pipeline,
-            entities: &mut entities,
-            transform: transform_comps,
-            renderer: renderer_comps,
-            vertex_mesh: vertex_mesh_comps,
-            parent: parent_comps,
-            children: children_comps,
-        };
+        let mut renderer_comps = renderer_comps.write().unwrap();
+        let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
 
         for cluster_pos in &self.clusters_to_add {
             let pos = &cluster_pos.pos;
@@ -557,9 +575,11 @@ impl OverworldStreamer {
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
+            let renderer_comp = component::Renderer::new(&renderer, self.cluster_mat_pipeline, false);
 
-            let entity = d.entities.create();
-            d.transform.set(entity, transform_comp);
+            let entity = entities.create();
+            transform_comps.set(entity, transform_comp);
+            renderer_comps.set(entity, renderer_comp);
             self.clusters[cluster_pos.level].get_mut(pos).unwrap().entity = entity;
         }
 
@@ -567,10 +587,10 @@ impl OverworldStreamer {
             for (pos, overworld_cluster) in level {
                 let render_cluster = &self.clusters[i][pos];
                 if render_cluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
-                    overworld_cluster.cluster.lock().unwrap().update_renderable(
-                        &renderer,
+                    let cluster = overworld_cluster.cluster.lock().unwrap();
+                    vertex_mesh_comps.set(
                         render_cluster.entity,
-                        &mut d,
+                        component::VertexMesh::new(&cluster.vertex_mesh().raw()),
                     );
                 }
             }
@@ -589,7 +609,7 @@ pub fn new(
         registry: Arc::clone(registry),
         renderer: Arc::clone(renderer),
         device: Arc::clone(renderer.lock().unwrap().device()),
-        cluster_mat_pipeline: cluster_mat_pipeline,
+        cluster_mat_pipeline,
         render_distance: 0,
         stream_pos: DVec3::new(0.0, 0.0, 0.0),
         clusters: Default::default(),

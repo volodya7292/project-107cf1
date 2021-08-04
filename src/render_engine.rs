@@ -42,6 +42,12 @@ use vk_wrapper::{
     SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
+// Notes
+// --------------------------------------------
+// Encountered causes of VK_ERROR_DEVICE_LOST:
+// - Out of bounds access:
+//   - Incorrect indices of vertex mesh.
+
 pub struct RenderEngine {
     scene: Scene,
 
@@ -766,13 +772,9 @@ impl RenderEngine {
             });
 
         let cull_objects = cull_objects.into_inner().unwrap();
-        let count = cull_objects.len() as u32;
+        self.cull_host_buffer.write(0, &cull_objects);
 
-        cull_objects.into_iter().enumerate().for_each(|(i, obj)| {
-            self.cull_host_buffer[i] = obj;
-        });
-
-        count
+        cull_objects.len() as u32
     }
 
     fn record_g_cmd_lists(

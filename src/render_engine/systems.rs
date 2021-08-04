@@ -209,6 +209,12 @@ impl VertexMeshCompEventsSystem<'_> {
                     );
                 }
                 scene::Event::Modified(i) => {
+                    // FIXME: the cause of spontaneous appearance of some mesh in different location:
+                    // FIXME: Suppose an entity at index 0 was removed and immediately added, but with different transform.
+                    // FIXME: => the rendering mesh stays the same until the new is transferred into GPU memory.
+                    // FIXME: fix #1: upgrade entity indexing: add generational index to `Entity`
+                    // FIXME: fix #2: ???
+
                     Self::vertex_mesh_comp_modified(
                         *i,
                         vertex_mesh_comps.get(*i).unwrap(),

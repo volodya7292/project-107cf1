@@ -278,6 +278,10 @@ where
         self.raw.vertex_count
     }
 
+    pub fn index_count(&self) -> u32 {
+        self.raw.index_count
+    }
+
     /*pub fn set_component<T: VertexMember>(&mut self, member_name: &str, values: &[T]) -> Result<(), Error> {
         let member_info = VertexT::get_member_info(member_name)
             .ok_or_else(|| Error::VertexMemberNotFound(member_name.to_owned()))?;

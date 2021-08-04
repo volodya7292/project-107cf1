@@ -117,19 +117,21 @@ struct Sector {
     occluders: Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
     changed: bool,
     side_changed: [bool; 6],
-    vertex_mesh: render_engine::VertexMesh<Vertex, ()>,
+    cache_vertices: Vec<Vertex>,
+    cache_indices: Vec<u32>,
 }
 
 impl Sector {
-    fn new(layout: &EntityStorageLayout) -> Self {
-        Self {
+    fn new(layout: &EntityStorageLayout) -> Sector {
+        Sector {
             block_storage: EntityStorage::new(layout),
             block_map: Default::default(),
             blocks: Default::default(),
             occluders: Default::default(),
             changed: false,
             side_changed: [false; 6],
-            vertex_mesh: Default::default(),
+            cache_vertices: vec![],
+            cache_indices: vec![],
         }
     }
 
@@ -322,6 +324,7 @@ pub struct Cluster {
     entry_size: u32,
     changed: bool,
     device: Arc<vkw::Device>,
+    vertex_mesh: render_engine::VertexMesh<Vertex, ()>,
 }
 
 impl Cluster {
@@ -332,6 +335,10 @@ impl Cluster {
     /// Returns whether the cluster has been changed since the previous `Cluster::update_mesh()` call.
     pub fn changed(&self) -> bool {
         self.changed
+    }
+
+    pub fn vertex_mesh(&self) -> &render_engine::VertexMesh<Vertex, ()> {
+        &self.vertex_mesh
     }
 
     pub fn get_block(&self, pos: U32Vec3) -> BlockData {
@@ -788,10 +795,12 @@ impl Cluster {
         }
     }
 
-    fn triangulate(&mut self, sector_pos: U32Vec3) -> (Vec<Vertex>, Vec<u32>) {
-        let sector = &mut self.sectors[sector_index(sector_pos)];
+    fn triangulate(&mut self, sector_index: usize) {
+        let sector = &mut self.sectors[sector_index];
+        let sector_pos: TVec3<f32> = glm::convert(sector_pos(sector_index) * (SECTOR_SIZE as u32));
         let scale = self.entry_size as f32;
-        let mut vertices = Vec::<Vertex>::with_capacity(SECTOR_VOLUME * 8);
+
+        sector.cache_vertices = Vec::<Vertex>::with_capacity(SECTOR_VOLUME * 8);
 
         fn add_vertices(out: &mut Vec<Vertex>, pos: Vec3, scale: f32, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
@@ -817,7 +826,7 @@ impl Cluster {
                         .get_textured_block_model(block.textured_model())
                         .unwrap();
 
-                    add_vertices(&mut vertices, posf, scale, model.get_inner_quads());
+                    add_vertices(&mut sector.cache_vertices, posf, scale, model.get_inner_quads());
 
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
@@ -854,10 +863,11 @@ impl Cluster {
                                 }
 
                                 for j in 0..4 {
+                                    v[j].position += sector_pos;
                                     v[j].position *= scale;
                                 }
 
-                                vertices.extend(v);
+                                sector.cache_vertices.extend(v);
                             }
                         }
                     }
@@ -865,7 +875,10 @@ impl Cluster {
             }
         }
 
-        let mut indices = vec![u32::MAX; vertices.len() / 4 * 6];
+        sector.cache_vertices.shrink_to_fit();
+
+        let mut indices = &mut sector.cache_indices;
+        indices.resize(sector.cache_vertices.len() / 4 * 6, 0);
 
         for i in (0..indices.len()).step_by(6) {
             let ind = (i / 6 * 4) as u32;
@@ -876,8 +889,6 @@ impl Cluster {
             indices[i + 4] = ind + 3;
             indices[i + 5] = ind + 1;
         }
-
-        (vertices, indices)
     }
 
     /// Note: sets `Cluster::changed` to `false` and `Sector::changed` to `false` for all the sectors in the cluster.
@@ -889,92 +900,36 @@ impl Cluster {
 
         self.update_inner_side_occluders();
 
-        for x in 0..SIZE_IN_SECTORS {
-            for y in 0..SIZE_IN_SECTORS {
-                for z in 0..SIZE_IN_SECTORS {
-                    let sector_index = sector_index(U32Vec3::new(x as u32, y as u32, z as u32));
-                    let sector_changed = self.sectors[sector_index].changed;
-
-                    if sector_changed {
-                        let (sector_vertices, sector_indices) =
-                            self.triangulate(U32Vec3::new(x as u32, y as u32, z as u32));
-
-                        let sector = &mut self.sectors[sector_index];
-
-                        sector.vertex_mesh = self
-                            .device
-                            .create_vertex_mesh(&sector_vertices, Some(&sector_indices))
-                            .unwrap();
-                        sector.changed = false;
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub struct UpdateSystemData<'a> {
-    pub mat_pipeline: u32,
-    pub entities: &'a mut scene::Entities,
-    pub transform: scene::ComponentStorageMut<'a, component::Transform>,
-    pub renderer: scene::ComponentStorageMut<'a, component::Renderer>,
-    pub vertex_mesh: scene::ComponentStorageMut<'a, component::VertexMesh>,
-    pub parent: scene::ComponentStorageMut<'a, component::Parent>,
-    pub children: scene::ComponentStorageMut<'a, component::Children>,
-}
-
-impl Cluster {
-    pub fn update_renderable(
-        &self,
-        renderer: &render_engine::RenderEngine,
-        entity: u32,
-        data: &mut UpdateSystemData,
-    ) {
-        let transform_comps = &mut data.transform;
-        let renderer_comps = &mut data.renderer;
-        let vertex_mesh_comps = &mut data.vertex_mesh;
-        let parent_comps = &mut data.parent;
-        let children_comps = &mut data.children;
-        let entities = &mut data.entities;
-
-        let is_children_empty = if let Some(children) = children_comps.get(entity) {
-            children.get().is_empty()
-        } else {
-            children_comps.set(entity, component::Children::default());
-            true
-        };
-
-        if is_children_empty {
-            let sector_count = SIZE_IN_SECTORS * SIZE_IN_SECTORS * SIZE_IN_SECTORS;
-            let children: Vec<u32> = (0..sector_count).into_iter().map(|_| entities.create()).collect();
-
-            component::set_children(entity, &children, parent_comps, children_comps);
-
-            for (i, &ent) in children.iter().enumerate() {
-                let p = index_1d_to_3d(i, SIZE_IN_SECTORS);
-                let node_size = self.entry_size as usize;
-
-                transform_comps.set(
-                    ent,
-                    component::Transform::new(
-                        glm::convert(TVec3::new(p[0], p[1], p[2]) * SECTOR_SIZE * node_size),
-                        Vec3::default(),
-                        Vec3::from_element(1.0),
-                    ),
-                );
-
-                let renderer = component::Renderer::new(&renderer, data.mat_pipeline, false);
-                renderer_comps.set(ent, renderer);
+        for i in 0..VOLUME_IN_SECTORS {
+            if self.sectors[i].changed {
+                self.triangulate(i);
+                self.sectors[i].changed = false;
             }
         }
 
-        let children = children_comps.get(entity).unwrap();
+        let (v_count, i_count) = self.sectors.iter().fold((0, 0), |(v_count, i_count), sector| {
+            (
+                v_count + sector.cache_vertices.len(),
+                i_count + sector.cache_indices.len(),
+            )
+        });
+        let mut vertices = Vec::<Vertex>::with_capacity(v_count);
+        let mut indices = Vec::<u32>::with_capacity(i_count);
 
-        for (i, &ent) in children.get().iter().enumerate() {
+        for i in 0..VOLUME_IN_SECTORS {
             let sector = &self.sectors[i];
+            let i_start = vertices.len() as u32;
 
-            vertex_mesh_comps.set(ent, component::VertexMesh::new(&sector.vertex_mesh.raw()));
+            let mut sector_indices = sector.cache_indices.clone();
+            for i in &mut sector_indices {
+                *i += i_start;
+            }
+
+            vertices.extend(&sector.cache_vertices);
+            indices.extend(&sector_indices);
         }
+
+        self.vertex_mesh = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
     }
 }
 
@@ -988,5 +943,6 @@ pub fn new(registry: &Arc<Registry>, device: &Arc<vkw::Device>, node_size: u32) 
         entry_size: node_size,
         changed: false,
         device: Arc::clone(device),
+        vertex_mesh: Default::default(),
     }
 }
