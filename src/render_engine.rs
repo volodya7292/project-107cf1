@@ -48,6 +48,9 @@ use vk_wrapper::{
 // - Out of bounds access:
 //   - Incorrect indices of vertex mesh.
 
+// TODO: Defragment VMA memory (every frame?).
+// TODO: Reallocate memory from CPU (that was allocated there due to out of device-local memory) to GPU.
+
 pub struct RenderEngine {
     scene: Scene,
 

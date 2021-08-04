@@ -1330,6 +1330,7 @@ dependencies = [
  "raw-window-handle",
  "rayon",
  "res-encoder",
+ "rust-dense-bitset",
  "serde",
  "serde_yaml",
  "simdnoise",
@@ -1526,6 +1527,12 @@ dependencies = [
  "bincode",
  "byteorder",
 ]
+
+[[package]]
+name = "rust-dense-bitset"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32ce26bf673f429c3ed2f6cd59bf61df4a6e48300e5c36b15c355045111f3fbb"
 
 [[package]]
 name = "rusttype"
