@@ -1,20 +1,15 @@
 use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::{cluster, OverworldCluster, LOD_LEVELS};
 use crate::game::overworld::{generator, Overworld};
-use crate::render_engine::material_pipeline::MaterialPipeline;
 use crate::render_engine::{component, RenderEngine};
-use crate::utils::{HashMap, HashSet, Integer};
+use crate::utils::{HashMap, HashSet};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, TVec3, Vec3};
 use rayon::prelude::*;
 use rust_dense_bitset::{BitSet, DenseBitSet};
-use simdnoise::NoiseBuilder;
 use smallvec::SmallVec;
 use std::collections::hash_map;
-use std::convert::TryInto;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{atomic, Arc, Mutex};
 use std::time::Instant;
@@ -59,7 +54,7 @@ struct ClusterToRemove {
     entity: u32,
 }
 
-struct LayoutClusterPos {
+struct ClusterPosD {
     pos: I64Vec3,
     distance: f64,
 }
@@ -118,19 +113,6 @@ impl OverworldStreamer {
 
         // Lower level
         if level > 0 {
-            fn map_dst_pos(d: &I64Vec3, k: i64, l: i64) -> I64Vec3 {
-                let dx = (d.x != 0) as i64;
-                let dy = (d.y != 0) as i64;
-                let dz = (d.z != 0) as i64;
-
-                let (k, l) = (k + 1, l + 1);
-                let x = -1 + k * dy + k * dz + 3 * (d.x > 0) as i64;
-                let y = -1 + k * dx + l * dz + 3 * (d.y > 0) as i64;
-                let z = -1 + l * dx + l * dy + 3 * (d.z > 0) as i64;
-
-                I64Vec3::new(x, y, z)
-            }
-
             let cluster_size0 = cluster_size(level as u32 - 1) as i64;
 
             for x in -1..3 {
@@ -221,7 +203,7 @@ impl OverworldStreamer {
                 let lock1 = cluster1.cluster.try_lock();
 
                 if lock0.is_ok() && lock1.is_ok() {
-                    let mut cluster = lock0.unwrap();
+                    let cluster = lock0.unwrap();
                     let mut side_cluster = lock1.unwrap();
 
                     let offset = pair.0.pos - pair.1.pos;
@@ -333,9 +315,10 @@ impl OverworldStreamer {
     }
 
     pub fn update(&mut self, overworld: &mut Overworld) {
+        let cluster_layout = self.calc_cluster_layout();
+
         // Add/remove clusters
         {
-            let cluster_layout = self.calc_cluster_layout();
             let curr_time_secs = Instant::now().elapsed().as_secs();
 
             self.clusters_to_remove.clear();
@@ -343,9 +326,9 @@ impl OverworldStreamer {
 
             for i in 0..LOD_LEVELS {
                 // Remove unnecessary clusters
-                overworld.loaded_clusters[i].retain(|pos, overworld_cluster| {
+                overworld.loaded_clusters[i].retain(|pos, ocluster| {
                     // TODO: uncomment
-                    // if (curr_time_secs - overworld_cluster.creation_time_secs) < 5
+                    // if (curr_time_secs - ocluster.creation_time_secs) < 5
                     //     || cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64)))
                     if cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64))) {
                         true
@@ -398,35 +381,36 @@ impl OverworldStreamer {
             }
         }
 
-        let (global_vert_count, cluster_count) = overworld.loaded_clusters.iter().fold((0, 0), |i, v| {
-            (
-                i.0 + v.iter().fold(0, |i, v| {
-                    let cl = v.1.cluster.lock().unwrap();
-                    i + cl.vertex_mesh().vertex_count() * 40 + cl.vertex_mesh().vertex_count() * 4
-                }),
-                i.1 + v.len(),
-            )
-        });
+        let sorted_layout: Vec<_> = cluster_layout
+            .par_iter()
+            .enumerate()
+            .map(|(i, level)| {
+                let cluster_size = cluster_size(i as u32) as i64;
+                let mut clusters: Vec<_> = level
+                    .iter()
+                    .map(|pos| {
+                        let pos = pos * cluster_size;
+                        ClusterPosD {
+                            pos,
+                            distance: glm::distance(
+                                &glm::convert(pos.add_scalar(cluster_size / 2)),
+                                &self.stream_pos,
+                            ),
+                        }
+                    })
+                    .collect();
+                clusters.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+                clusters
+            })
+            .collect();
 
-        println!("{} - {}", global_vert_count, cluster_count);
-
-        // let sorted_positions: Vec<_> = overworld
-        //     .loaded_clusters
-        //     .par_iter()
-        //     .map(|level| {
-        //         // let mut positions: Vec<_> = level.keys().cloned().collect();
-        //         // positions.sort_by(|a, b| self.stream_pos);
-        //         // positions
-        //         todo!()
-        //     })
-        //     .collect();
-        //
         // Generate clusters
         {
             let max_clusters_in_process = num_cpus::get().saturating_sub(2).max(1) as u32;
 
-            'l: for level in &overworld.loaded_clusters {
-                for (pos, overworld_cluster) in level {
+            'l: for (i, level) in sorted_layout.iter().enumerate() {
+                for lpos in level {
+                    let ocluster = &overworld.loaded_clusters[i][&lpos.pos];
                     let clusters_in_process = Arc::clone(&self.clusters_in_process);
                     let curr_clusters_in_process = clusters_in_process.load(atomic::Ordering::Acquire);
 
@@ -434,9 +418,9 @@ impl OverworldStreamer {
                         break 'l;
                     }
 
-                    if !overworld_cluster.generated.load(atomic::Ordering::Acquire) {
-                        let ocluster = Arc::clone(overworld_cluster);
-                        let pos = *pos;
+                    if !ocluster.generated.load(atomic::Ordering::Acquire) {
+                        let ocluster = Arc::clone(ocluster);
+                        let pos = lpos.pos;
                         let main_registry = Arc::clone(&self.registry);
 
                         ocluster.generating.store(true, atomic::Ordering::Relaxed);
@@ -453,17 +437,9 @@ impl OverworldStreamer {
             }
         }
 
-        // TODO OPTIMIZE: Update cluster meshes only when neighbour clusters are fully loaded
-        // TODO OPTIMIZE: to compensate for large number of updates due to neighbour updates.
-        // TODO: To do this, firstly fully load all the clusters up to a certain radius.
-        // TODO: Secondly, fully update their meshes including borders.
-        // TODO: Lastly, repeat the same process for a larger radius until the limit is reached.
-
         // Generate meshes
         {
-            // Collect changed clusters
-            let mut occlusion_clusters = HashSet::with_capacity(4096);
-
+            // Mark changes
             for (i, level) in overworld.loaded_clusters.iter().enumerate() {
                 for (pos, ocluster) in level {
                     let rcluster = &self.clusters[i][pos];
@@ -473,55 +449,63 @@ impl OverworldStreamer {
                         continue;
                     }
 
-                    let cluster = ocluster.cluster.lock().unwrap();
                     let cluster_pos = ClusterPos::new(i, *pos);
+                    let cluster = ocluster.cluster.lock().unwrap();
                     let cluster_changed = cluster.changed();
-                    let occlusion_needs = rcluster
-                        .needs_occlusion_fill
-                        .swap(false, atomic::Ordering::Relaxed)
-                        || rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed);
 
-                    if cluster_changed || occlusion_needs {
+                    if cluster_changed {
+                        rcluster.changed.store(true, atomic::Ordering::Relaxed);
+
                         let side_clusters = self.find_side_clusters(overworld, cluster_pos);
 
-                        if cluster_changed {
-                            rcluster.changed.store(true, atomic::Ordering::Relaxed);
-                            for p in &side_clusters {
-                                occlusion_clusters.insert(ClusterSidePair(cluster_pos, *p));
+                        for p in &side_clusters {
+                            self.clusters[p.level][&p.pos]
+                                .needs_occlusion_fill
+                                .store(true, atomic::Ordering::Relaxed);
+                        }
+                    }
+                }
+            }
+
+            // Collect changes
+            for (i, level) in overworld.loaded_clusters.iter().enumerate() {
+                for (pos, _) in level {
+                    let rcluster = &self.clusters[i][pos];
+                    if !rcluster.available.load(atomic::Ordering::Relaxed) {
+                        continue;
+                    }
+
+                    let cluster_pos = ClusterPos::new(i, *pos);
+
+                    if rcluster.needs_occlusion_fill.load(atomic::Ordering::Relaxed) {
+                        let side_clusters = self.find_side_clusters(overworld, cluster_pos);
+                        let mut ready_to_update = true;
+
+                        for p in &side_clusters {
+                            if !overworld.loaded_clusters[p.level][&p.pos]
+                                .generated
+                                .load(atomic::Ordering::Relaxed)
+                            {
+                                ready_to_update = false;
+                                break;
                             }
                         }
-                        if occlusion_needs {
-                            for p in &side_clusters {
-                                occlusion_clusters.insert(ClusterSidePair(*p, cluster_pos));
+
+                        if ready_to_update {
+                            rcluster
+                                .needs_occlusion_fill
+                                .store(false, atomic::Ordering::Relaxed);
+
+                            for p in side_clusters {
+                                self.side_occlusion_work
+                                    .sender
+                                    .send(ClusterSidePair(p, cluster_pos))
+                                    .unwrap();
                             }
                         }
                     }
                 }
             }
-            for p in occlusion_clusters {
-                self.side_occlusion_work.sender.send(p).unwrap();
-            }
-
-            // Clean cluster outer side occlusion to not keep old occlusion before filling
-            overworld
-                .loaded_clusters
-                .par_iter()
-                .enumerate()
-                .for_each(|(i, level)| {
-                    level.par_iter().for_each(|(pos, ocluster)| {
-                        let rcluster = &self.clusters[i][pos];
-
-                        if rcluster.available.load(atomic::Ordering::Relaxed)
-                            && rcluster.needs_occlusion_clean.load(atomic::Ordering::Relaxed)
-                        {
-                            let mut cluster = ocluster.cluster.lock().unwrap();
-                            cluster.clean_outer_side_occlusion();
-                            rcluster
-                                .needs_occlusion_clean
-                                .store(false, atomic::Ordering::Relaxed)
-                        }
-                    });
-                });
 
             // Update cluster outer side occlusions
             // Note: parallelize avoiding deadlocks between side clusters
@@ -529,7 +513,7 @@ impl OverworldStreamer {
             self.side_occlusion_work
                 .process_count
                 .store(side_pair_count as u32, atomic::Ordering::Relaxed);
-            (0..num_cpus::get()).into_par_iter().for_each(|k| {
+            (0..num_cpus::get()).into_par_iter().for_each(|_| {
                 self.cluster_update_worker(overworld);
             });
 
