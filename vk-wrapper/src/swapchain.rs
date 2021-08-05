@@ -38,7 +38,7 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    pub fn get_images(&self) -> &Vec<Arc<Image>> {
+    pub fn images(&self) -> &[Arc<Image>] {
         &self.images
     }
 
@@ -56,7 +56,7 @@ impl Swapchain {
         match result {
             Ok(a) => Ok((
                 SwapchainImage {
-                    swapchain: self,
+                    image: Arc::clone(&self.images[a.0 as usize]),
                     index: a.0,
                 },
                 a.1,
@@ -66,22 +66,22 @@ impl Swapchain {
         }
     }
 
-    pub fn get_semaphore(&self) -> &Arc<Semaphore> {
+    pub fn semaphore(&self) -> &Arc<Semaphore> {
         &self.semaphore
     }
 }
 
-pub struct SwapchainImage<'a> {
-    pub(crate) swapchain: &'a Swapchain,
+pub struct SwapchainImage {
+    pub(crate) image: Arc<Image>,
     pub(crate) index: u32,
 }
 
-impl SwapchainImage<'_> {
-    pub fn get_image(&self) -> &Arc<Image> {
-        &self.swapchain.images[self.index as usize]
+impl SwapchainImage {
+    pub fn get(&self) -> &Arc<Image> {
+        &self.image
     }
 
-    pub fn get_index(&self) -> u32 {
+    pub fn index(&self) -> u32 {
         self.index
     }
 }

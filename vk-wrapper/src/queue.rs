@@ -164,7 +164,15 @@ impl Queue {
 
     pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
         let queue = self.native.write().unwrap();
-        let swapchain = sw_image.swapchain.wrapper.native.lock().unwrap();
+        let swapchain = sw_image
+            .image
+            .wrapper
+            ._swapchain_wrapper
+            .as_ref()
+            .unwrap()
+            .native
+            .lock()
+            .unwrap();
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&self.semaphore.native))

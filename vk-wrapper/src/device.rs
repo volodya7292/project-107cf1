@@ -421,8 +421,8 @@ impl Device {
         surface: &Arc<Surface>,
         size: (u32, u32),
         vsync: bool,
-        old_swapchain: Option<&Arc<Swapchain>>,
-    ) -> Result<Arc<Swapchain>, DeviceError> {
+        old_swapchain: Option<Swapchain>,
+    ) -> Result<Swapchain, DeviceError> {
         let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
@@ -500,7 +500,15 @@ impl Device {
             .present_mode(present_mode)
             .clipped(true);
 
-        if let Some(old_swapchain) = old_swapchain {
+        if let Some(old_swapchain) = &old_swapchain {
+            for img in &old_swapchain.images {
+                if Arc::strong_count(img) > 1 {
+                    return Err(DeviceError::SwapchainError(
+                        "old_swapchain images must not be used anywhere at the time of retire of old_swapchain!"
+                            .to_string(),
+                    ));
+                }
+            }
             create_info = create_info.old_swapchain(*old_swapchain.wrapper.native.lock().unwrap());
         }
 
@@ -553,12 +561,12 @@ impl Device {
         })
         .collect();
 
-        Ok(Arc::new(Swapchain {
+        Ok(Swapchain {
             wrapper: swapchain_wrapper,
             _surface: Arc::clone(surface),
             semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
             images: images?,
-        }))
+        })
     }
 
     pub fn create_shader(

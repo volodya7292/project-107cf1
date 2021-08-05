@@ -55,7 +55,7 @@ pub struct RenderEngine {
     scene: Scene,
 
     surface: Arc<Surface>,
-    swapchain: Option<Arc<Swapchain>>,
+    swapchain: Option<Swapchain>,
     surface_changed: bool,
     surface_size: (u32, u32),
     settings: Settings,
@@ -1088,7 +1088,7 @@ impl RenderEngine {
 
             cl.begin_render_pass(
                 self.sw_render_pass.as_ref().unwrap(),
-                &self.sw_framebuffers[sw_image.get_index() as usize],
+                &self.sw_framebuffers[sw_image.index() as usize],
                 &[],
                 false,
             );
@@ -1102,7 +1102,7 @@ impl RenderEngine {
                     PipelineStageFlags::ALL_GRAPHICS,
                     PipelineStageFlags::BOTTOM_OF_PIPE,
                     &[sw_image
-                        .get_image()
+                        .get()
                         .barrier()
                         .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
                         .old_layout(ImageLayout::PRESENT)
@@ -1126,7 +1126,7 @@ impl RenderEngine {
                         PipelineStageFlags::TOP_OF_PIPE,
                         PipelineStageFlags::BOTTOM_OF_PIPE,
                         &[sw_image
-                            .get_image()
+                            .get()
                             .barrier()
                             .old_layout(ImageLayout::PRESENT)
                             .new_layout(ImageLayout::PRESENT)
@@ -1167,13 +1167,15 @@ impl RenderEngine {
                 let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
                 let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
+                self.sw_framebuffers.clear();
+
                 self.swapchain = Some(
                     device
                         .create_swapchain(
                             &self.surface,
                             self.surface_size,
                             self.settings.vsync,
-                            self.swapchain.as_ref(),
+                            self.swapchain.take(),
                         )
                         .unwrap(),
                 );
@@ -1186,7 +1188,7 @@ impl RenderEngine {
                 self.final_submit[0]
                     .set(&[SubmitInfo::new(
                         &[WaitSemaphore {
-                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().get_semaphore()),
+                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().semaphore()),
                             wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // TODO: change if necessary
                             wait_value: 0,
                         }],
@@ -1203,8 +1205,7 @@ impl RenderEngine {
                 self.surface_changed = false;
             }
 
-            let swapchain = Arc::clone(self.swapchain.as_ref().unwrap());
-            let acquire_result = swapchain.acquire_image();
+            let acquire_result = self.swapchain.as_ref().unwrap().acquire_image();
 
             match acquire_result {
                 Ok((sw_image, suboptimal)) => {
@@ -1434,9 +1435,7 @@ impl RenderEngine {
     }
 
     fn create_main_framebuffers(&mut self) {
-        self.sw_framebuffers.clear();
-
-        let images = self.swapchain.as_ref().unwrap().get_images();
+        let images = self.swapchain.as_ref().unwrap().images();
 
         self.sw_render_pass = Some(
             self.device
@@ -1459,6 +1458,7 @@ impl RenderEngine {
                 .unwrap(),
         );
 
+        self.sw_framebuffers.clear();
         for img in images {
             self.sw_framebuffers.push(
                 self.sw_render_pass

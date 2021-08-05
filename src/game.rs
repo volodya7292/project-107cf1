@@ -230,7 +230,7 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
     let mut overworld = Overworld::new(&main_registry, 0);
     let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, mat_pipelines.cluster());
 
-    overworld_streamer.set_render_distance(256);
+    overworld_streamer.set_render_distance(128);
     // overworld_streamer.update(&mut overworld);
     // overworld_streamer.update_renderer(&mut overworld);
 
