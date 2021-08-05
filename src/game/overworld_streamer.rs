@@ -528,6 +528,7 @@ impl OverworldStreamer {
                         let rcluster = &rlevel[pos];
                         if rcluster.changed.load(atomic::Ordering::Relaxed)
                             && rcluster.available.load(atomic::Ordering::Relaxed)
+                            && !rcluster.needs_occlusion_fill.load(atomic::Ordering::Relaxed)
                         {
                             let mut cluster = ocluster.cluster.lock().unwrap();
                             cluster.update_mesh();
