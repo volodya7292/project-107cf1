@@ -2,6 +2,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use nalgebra_glm as glm;
+use utils::thread_pool::ThreadPool;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -14,9 +15,7 @@ use crate::render_engine::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
 use crate::utils::noise::ParamNoise;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
-use noise::{NoiseFn, Seedable};
-use rand::Rng;
-use rayon::ThreadPoolBuilder;
+use noise::{Seedable};
 
 mod utils;
 
@@ -77,14 +76,9 @@ fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
 
     let thread_count = num_cpus::get_physical().max(2);
-    let render_thread_pool = ThreadPoolBuilder::new()
-        .num_threads(thread_count / 2)
-        .build()
-        .unwrap();
-    let update_thread_pool = ThreadPoolBuilder::new()
-        .num_threads(thread_count / 2)
-        .build()
-        .unwrap();
+    // Note: use safe thread pools to account for proper destruction of Vulkan objects.
+    let render_thread_pool = ThreadPool::new(thread_count / 2).unwrap();
+    let update_thread_pool = ThreadPool::new(thread_count / 2).unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
@@ -235,11 +229,12 @@ fn main() {
     // }
     //println!("ITE {:?}", &buf[0..5]);
 
+    let mut cursor_grab = true;
     let mut start_t = Instant::now();
     let mut delta_time = 0.0;
 
-    window.set_cursor_grab(true).unwrap();
-    window.set_cursor_visible(false);
+    window.set_cursor_grab(cursor_grab).unwrap();
+    window.set_cursor_visible(!cursor_grab);
 
     event_loop.run_return(|event, _, control_flow| {
         use winit::event::ElementState;
@@ -276,6 +271,13 @@ fn main() {
                                             window.current_monitor().unwrap().video_modes().next().unwrap();
                                         window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
                                     }
+                                }
+                            }
+                            VirtualKeyCode::T => {
+                                if input.state == ElementState::Released {
+                                    cursor_grab = !cursor_grab;
+                                    window.set_cursor_grab(cursor_grab).unwrap();
+                                    window.set_cursor_visible(!cursor_grab);
                                 }
                             }
                             _ => {}

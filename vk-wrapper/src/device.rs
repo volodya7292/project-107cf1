@@ -427,7 +427,7 @@ impl Device {
         let surface_formats = self.adapter.get_surface_formats(&surface)?;
         let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
 
-        let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST;
+        let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         if !surface_capabs.supported_usage_flags.contains(image_usage) {
             return Err(DeviceError::SwapchainError(
                 "Image usage flags are not supported!".to_string(),
@@ -514,6 +514,7 @@ impl Device {
 
         let swapchain_wrapper = Arc::new(SwapchainWrapper {
             device: Arc::clone(self),
+            _surface: Arc::clone(surface),
             native: Mutex::new(unsafe { self.swapchain_khr.create_swapchain(&create_info, None)? }),
         });
 
@@ -563,7 +564,6 @@ impl Device {
 
         Ok(Swapchain {
             wrapper: swapchain_wrapper,
-            _surface: Arc::clone(surface),
             semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
             images: images?,
         })

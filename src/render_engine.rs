@@ -47,9 +47,10 @@ use vk_wrapper::{
 // Encountered causes of VK_ERROR_DEVICE_LOST:
 // - Out of bounds access:
 //   - Incorrect indices of vertex mesh.
+//
+// Swapchain creation error cause may be *out of device memory*.
 
 // TODO: Incorporate new version of VMA
-
 // TODO: Defragment VMA memory (every frame?).
 // TODO: Reallocate memory from CPU (that was allocated there due to out of device-local memory) to GPU.
 

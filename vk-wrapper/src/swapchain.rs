@@ -16,6 +16,7 @@ impl From<vk::Result> for Error {
 
 pub(crate) struct SwapchainWrapper {
     pub(crate) device: Arc<Device>,
+    pub(crate) _surface: Arc<Surface>,
     pub(crate) native: Mutex<vk::SwapchainKHR>,
 }
 
@@ -32,7 +33,6 @@ impl Drop for SwapchainWrapper {
 
 pub struct Swapchain {
     pub(crate) wrapper: Arc<SwapchainWrapper>,
-    pub(crate) _surface: Arc<Surface>,
     pub(crate) semaphore: Arc<Semaphore>,
     pub(crate) images: Vec<Arc<Image>>,
 }
