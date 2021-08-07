@@ -59,13 +59,13 @@ impl Queue {
             cmd_list_count += info.cmd_lists.len();
         }
 
-        let mut semaphores = Vec::<vk::Semaphore>::with_capacity(semaphore_count);
-        let mut wait_masks = Vec::<vk::PipelineStageFlags>::with_capacity(semaphore_count);
-        let mut command_buffers = Vec::<vk::CommandBuffer>::with_capacity(cmd_list_count);
-        let mut native_submit_infos = Vec::<vk::SubmitInfo>::with_capacity(submit_infos.len());
-        let mut sp_values = Vec::<u64>::with_capacity(semaphore_count);
+        let mut semaphores = SmallVec::<[vk::Semaphore; 4]>::with_capacity(semaphore_count);
+        let mut wait_masks = SmallVec::<[vk::PipelineStageFlags; 4]>::with_capacity(semaphore_count);
+        let mut command_buffers = SmallVec::<[vk::CommandBuffer; 4]>::with_capacity(cmd_list_count);
+        let mut native_submit_infos = SmallVec::<[vk::SubmitInfo; 4]>::with_capacity(submit_infos.len());
+        let mut sp_values = SmallVec::<[u64; 4]>::with_capacity(semaphore_count);
         let mut native_sp_submit_infos =
-            Vec::<vk::TimelineSemaphoreSubmitInfo>::with_capacity(submit_infos.len());
+            SmallVec::<[vk::TimelineSemaphoreSubmitInfo; 4]>::with_capacity(submit_infos.len());
 
         for info in submit_infos {
             let wait_sp_index = semaphores.len();
@@ -137,7 +137,7 @@ impl Queue {
         for info in &mut packet.infos {
             info.wait_semaphores.push(WaitSemaphore {
                 semaphore: Arc::clone(&self.timeline_sp),
-                wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
+                wait_dst_mask: PipelineStageFlags::ALL_COMMANDS,
                 wait_value: new_last_signal_value,
             });
 
@@ -252,7 +252,7 @@ impl SubmitInfo {
 }
 
 pub struct SubmitPacket {
-    pub(crate) infos: Vec<SubmitInfo>,
+    pub(crate) infos: SmallVec<[SubmitInfo; 4]>,
     pub(crate) fence: Fence,
 }
 
@@ -268,7 +268,7 @@ impl SubmitPacket {
 
     pub fn set(&mut self, infos: &[SubmitInfo]) -> Result<(), vk::Result> {
         self.wait()?;
-        self.infos = infos.to_vec();
+        self.infos = infos.into();
         Ok(())
     }
 

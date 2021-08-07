@@ -13,6 +13,10 @@ pub struct Semaphore {
 }
 
 impl Semaphore {
+    pub fn get_current_value(&self) -> Result<u64, vk::Result> {
+        unsafe { self.device_wrapper.0.get_semaphore_counter_value(self.native) }
+    }
+
     pub fn wait(&self, value: u64) -> Result<(), vk::Result> {
         if self.semaphore_type != vk::SemaphoreType::TIMELINE {
             panic!("Semaphore type is not TIMELINE!");

@@ -456,10 +456,14 @@ impl BufferUpdateSystem<'_> {
         let transfer_queue = self.device.get_queue(vkw::Queue::TYPE_TRANSFER);
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
 
+        self.transfer_submit[0].wait().unwrap();
+        self.transfer_submit[1].wait().unwrap();
+
         {
             let mut t_cl = self.transfer_cl[0].lock().unwrap();
-            t_cl.begin(true).unwrap();
             let mut g_cl = self.transfer_cl[1].lock().unwrap();
+
+            t_cl.begin(true).unwrap();
             g_cl.begin(true).unwrap();
 
             let mut total_copy_size = 0;
@@ -507,7 +511,6 @@ impl BufferUpdateSystem<'_> {
                 vkw::PipelineStageFlags::BOTTOM_OF_PIPE,
                 &transfer_barriers,
             );
-
             g_cl.barrier_buffer(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
                 vkw::PipelineStageFlags::BOTTOM_OF_PIPE,

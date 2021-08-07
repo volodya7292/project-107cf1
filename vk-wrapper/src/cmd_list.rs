@@ -30,6 +30,10 @@ impl CopyRegion {
             size,
         })
     }
+
+    pub fn size(&self) -> u64 {
+        self.0.size
+    }
 }
 
 unsafe impl Send for CmdList {}
@@ -711,11 +715,8 @@ impl CmdList {
         buffer_barriers: &[BufferBarrier],
         image_barriers: &[ImageBarrier],
     ) {
-        let native_buffer_barriers: Vec<vk::BufferMemoryBarrier> =
-            buffer_barriers.to_vec().iter().map(|v| v.native).collect();
-
-        let native_image_barriers: Vec<vk::ImageMemoryBarrier> =
-            image_barriers.to_vec().iter().map(|v| v.native).collect();
+        let native_image_barriers: SmallVec<[vk::ImageMemoryBarrier; 4]> =
+            image_barriers.iter().map(|v| v.native).collect();
 
         unsafe {
             self.device_wrapper.0.cmd_pipeline_barrier(
@@ -724,7 +725,10 @@ impl CmdList {
                 dst_stage_mask.0,
                 vk::DependencyFlags::default(),
                 &[],
-                &native_buffer_barriers,
+                slice::from_raw_parts(
+                    buffer_barriers.as_ptr() as *const vk::BufferMemoryBarrier,
+                    buffer_barriers.len(),
+                ),
                 &native_image_barriers,
             );
         }

@@ -73,29 +73,27 @@ unsafe impl Send for RawHostBuffer {}
 unsafe impl Sync for RawHostBuffer {}
 
 #[derive(Clone)]
-pub struct BufferBarrier {
-    pub(crate) native: vk::BufferMemoryBarrier,
-    pub(crate) buffer: Arc<Buffer>,
-}
+#[repr(transparent)]
+pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
 
 impl BufferBarrier {
     pub fn src_access_mask(mut self, src_access_mask: AccessFlags) -> Self {
-        self.native.src_access_mask = src_access_mask.0;
+        self.0.src_access_mask = src_access_mask.0;
         self
     }
 
     pub fn dst_access_mask(mut self, dst_access_mask: AccessFlags) -> Self {
-        self.native.dst_access_mask = dst_access_mask.0;
+        self.0.dst_access_mask = dst_access_mask.0;
         self
     }
 
     pub fn src_queue(mut self, src_queue: &Queue) -> Self {
-        self.native.src_queue_family_index = src_queue.family_index;
+        self.0.src_queue_family_index = src_queue.family_index;
         self
     }
 
     pub fn dst_queue(mut self, dst_queue: &Queue) -> Self {
-        self.native.dst_queue_family_index = dst_queue.family_index;
+        self.0.dst_queue_family_index = dst_queue.family_index;
         self
     }
 }
@@ -260,16 +258,21 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn barrier(&self) -> BufferBarrier {
-        BufferBarrier {
-            native: vk::BufferMemoryBarrier::builder()
+        BufferBarrier(
+            vk::BufferMemoryBarrier::builder()
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .buffer(self.buffer.native)
                 .offset(0)
                 .size(vk::WHOLE_SIZE)
                 .build(),
-            buffer: Arc::clone(&self.buffer),
-        }
+        )
+    }
+}
+
+impl<T> BufferHandleImpl for HostBuffer<T> {
+    fn handle(&self) -> BufferHandle {
+        BufferHandle(self.buffer.native)
     }
 }
 
@@ -291,16 +294,15 @@ impl DeviceBuffer {
     }
 
     pub fn barrier(&self) -> BufferBarrier {
-        BufferBarrier {
-            native: vk::BufferMemoryBarrier::builder()
+        BufferBarrier(
+            vk::BufferMemoryBarrier::builder()
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .buffer(self.buffer.native)
                 .offset(0)
                 .size(vk::WHOLE_SIZE)
                 .build(),
-            buffer: Arc::clone(&self.buffer),
-        }
+        )
     }
 }
 

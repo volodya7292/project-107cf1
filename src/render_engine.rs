@@ -527,10 +527,24 @@ impl RenderEngine {
             regions: vec![],
         })];
 
-        if !self.vertex_mesh_pending_updates.is_empty() {
-            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-            unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
-        }
+        let ready = if !self.vertex_mesh_pending_updates.is_empty() {
+            let curr_value = self
+                .device
+                .get_queue(Queue::TYPE_TRANSFER)
+                .timeline_semaphore()
+                .get_current_value()
+                .unwrap();
+            if curr_value >= self.transfer_submit[0].get_signal_value(0).unwrap() {
+                // println!("acq subm");
+                let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+                unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
 
         let mut t00 = Instant::now();
 
@@ -575,13 +589,20 @@ impl RenderEngine {
         };
 
         // Wait for previous transfers before committing them
-        self.transfer_submit[0].wait().unwrap();
-        self.transfer_submit[1].wait().unwrap();
+        if ready {
+            self.transfer_submit[0].wait().unwrap();
+            self.transfer_submit[1].wait().unwrap();
+        }
 
         let t00 = Instant::now();
 
         // Before updating new buffers, collect all the completed updates to commit them
-        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
+        let ready2 = self.vertex_mesh_pending_updates.is_empty();
+        let completed_updates = if ready {
+            self.vertex_mesh_pending_updates.drain(..).collect()
+        } else {
+            vec![]
+        };
         let mut buffer_update_system = systems::BufferUpdateSystem {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
@@ -599,8 +620,13 @@ impl RenderEngine {
                 hierarchy_propagation_system.run();
                 world_transform_events_system.run();
             });
-            s.spawn(|_| buffer_update_system.run());
-            s.spawn(|_| commit_buffer_updates_system.run())
+            if ready || ready2 {
+                // TODO: make this totally async across frames
+                s.spawn(|_| buffer_update_system.run());
+            }
+            if ready {
+                s.spawn(|_| commit_buffer_updates_system.run())
+            }
         });
 
         let t11 = Instant::now();
