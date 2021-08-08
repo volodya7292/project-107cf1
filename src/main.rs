@@ -15,7 +15,7 @@ use crate::render_engine::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;
 use crate::utils::noise::ParamNoise;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
-use noise::{Seedable};
+use noise::Seedable;
 
 mod utils;
 

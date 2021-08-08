@@ -521,21 +521,19 @@ impl BufferUpdateSystem<'_> {
             g_cl.end().unwrap();
         }
 
-        unsafe {
-            transfer_queue.submit(&mut self.transfer_submit[0]).unwrap();
+        unsafe { transfer_queue.submit(&mut self.transfer_submit[0]).unwrap() };
 
-            self.transfer_submit[1]
-                .set(&[vkw::SubmitInfo::new(
-                    &[WaitSemaphore {
-                        semaphore: Arc::clone(transfer_queue.timeline_semaphore()),
-                        wait_dst_mask: vkw::PipelineStageFlags::TRANSFER,
-                        wait_value: self.transfer_submit[0].get_signal_value(0).unwrap(),
-                    }],
-                    &[Arc::clone(&self.transfer_cl[1])],
-                    &[],
-                )])
-                .unwrap();
-        }
+        self.transfer_submit[1]
+            .set(&[vkw::SubmitInfo::new(
+                &[WaitSemaphore {
+                    semaphore: Arc::clone(transfer_queue.timeline_semaphore()),
+                    wait_dst_mask: vkw::PipelineStageFlags::TRANSFER,
+                    wait_value: self.transfer_submit[0].get_signal_value(0).unwrap(),
+                }],
+                &[Arc::clone(&self.transfer_cl[1])],
+                &[],
+            )])
+            .unwrap();
     }
 }
 

@@ -42,8 +42,6 @@ struct RenderCluster {
     entity: u32,
     available: AtomicBool,
     changed: AtomicBool,
-    // TODO OPTIMIZE: specify which side needs to be cleaned
-    needs_occlusion_clean: AtomicBool,
     // TODO OPTIMIZE: specify which side needs to be filled
     needs_occlusion_fill: AtomicBool,
     mesh_changed: AtomicBool,
@@ -341,15 +339,6 @@ impl OverworldStreamer {
                     }
                 });
 
-                // Set `side_occlusion_changed` flag in affected clusters
-                for cluster in &self.clusters_to_remove {
-                    for p in self.find_side_clusters(overworld, cluster.cluster_pos) {
-                        self.clusters[p.level][&p.pos]
-                            .needs_occlusion_clean
-                            .store(true, atomic::Ordering::Relaxed);
-                    }
-                }
-
                 // Add missing clusters
                 for pos in &cluster_layout[i] {
                     let node_size = 2_u32.pow(i as u32);
@@ -370,7 +359,6 @@ impl OverworldStreamer {
                                 entity: u32::MAX,
                                 available: AtomicBool::new(false),
                                 changed: AtomicBool::new(false),
-                                needs_occlusion_clean: AtomicBool::new(false),
                                 needs_occlusion_fill: AtomicBool::new(true),
                                 mesh_changed: AtomicBool::new(false),
                             },
@@ -546,9 +534,6 @@ impl OverworldStreamer {
 
         for v in &self.clusters_to_remove {
             self.clusters[v.cluster_pos.level].remove(&v.cluster_pos.pos);
-        }
-        if !self.clusters_to_remove.is_empty() {
-            println!("to remove: {}", self.clusters_to_remove.len());
         }
 
         // TODO: remove render_engine of a cluster only if lower/higher-lod replacement clusters are already generated

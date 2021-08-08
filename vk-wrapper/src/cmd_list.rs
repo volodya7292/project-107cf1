@@ -53,10 +53,10 @@ impl CmdList {
 
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .reset_command_pool(self.pool, vk::CommandPoolResetFlags::empty())?;
             self.device_wrapper
-                .0
+                .native
                 .begin_command_buffer(self.native, &begin_info)?;
         }
 
@@ -88,10 +88,10 @@ impl CmdList {
 
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .reset_command_pool(self.pool, vk::CommandPoolResetFlags::empty())?;
             self.device_wrapper
-                .0
+                .native
                 .begin_command_buffer(self.native, &begin_info)?;
         }
 
@@ -104,7 +104,7 @@ impl CmdList {
     }
 
     pub fn end(&mut self) -> Result<(), vk::Result> {
-        unsafe { self.device_wrapper.0.end_command_buffer(self.native) }
+        unsafe { self.device_wrapper.native.end_command_buffer(self.native) }
     }
 
     pub fn begin_render_pass(
@@ -129,7 +129,7 @@ impl CmdList {
             .clear_values(&clear_values);
 
         unsafe {
-            self.device_wrapper.0.cmd_begin_render_pass(
+            self.device_wrapper.native.cmd_begin_render_pass(
                 self.native,
                 &begin_info,
                 if secondary_cmd_lists {
@@ -148,7 +148,7 @@ impl CmdList {
 
     pub fn next_subpass(&mut self, secondary_cmd_lists: bool) {
         unsafe {
-            self.device_wrapper.0.cmd_next_subpass(
+            self.device_wrapper.native.cmd_next_subpass(
                 self.native,
                 if secondary_cmd_lists {
                     vk::SubpassContents::SECONDARY_COMMAND_BUFFERS
@@ -160,12 +160,12 @@ impl CmdList {
     }
 
     pub fn end_render_pass(&mut self) {
-        unsafe { self.device_wrapper.0.cmd_end_render_pass(self.native) };
+        unsafe { self.device_wrapper.native.cmd_end_render_pass(self.native) };
     }
 
     pub fn reset_query_pool(&mut self, query_pool: &Arc<QueryPool>, first_query: u32, query_count: u32) {
         unsafe {
-            self.device_wrapper.0.cmd_reset_query_pool(
+            self.device_wrapper.native.cmd_reset_query_pool(
                 self.native,
                 query_pool.native,
                 first_query,
@@ -176,7 +176,7 @@ impl CmdList {
 
     pub fn set_viewport(&mut self, size: (u32, u32)) {
         unsafe {
-            self.device_wrapper.0.cmd_set_viewport(
+            self.device_wrapper.native.cmd_set_viewport(
                 self.native,
                 0,
                 &[vk::Viewport {
@@ -193,7 +193,7 @@ impl CmdList {
 
     pub fn set_scissor(&mut self, size: (u32, u32)) {
         unsafe {
-            self.device_wrapper.0.cmd_set_scissor(
+            self.device_wrapper.native.cmd_set_scissor(
                 self.native,
                 0,
                 &[vk::Rect2D {
@@ -215,7 +215,7 @@ impl CmdList {
 
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .cmd_bind_pipeline(self.native, pipeline.bind_point, pipeline.native)
         };
 
@@ -233,7 +233,7 @@ impl CmdList {
         dynamic_offsets: &[u32],
     ) {
         unsafe {
-            self.device_wrapper.0.cmd_bind_descriptor_sets(
+            self.device_wrapper.native.cmd_bind_descriptor_sets(
                 self.native,
                 bind_point,
                 signature.pipeline_layout,
@@ -287,7 +287,7 @@ impl CmdList {
         }
 
         unsafe {
-            self.device_wrapper.0.cmd_bind_vertex_buffers(
+            self.device_wrapper.native.cmd_bind_vertex_buffers(
                 self.native,
                 first_binding,
                 &native_buffers[0..buffers.len()],
@@ -298,7 +298,7 @@ impl CmdList {
 
     pub fn bind_index_buffer(&mut self, buffer: &impl BufferHandleImpl, offset: u64) {
         unsafe {
-            self.device_wrapper.0.cmd_bind_index_buffer(
+            self.device_wrapper.native.cmd_bind_index_buffer(
                 self.native,
                 buffer.handle().0,
                 offset,
@@ -312,7 +312,7 @@ impl CmdList {
         assert!(size <= 128);
 
         unsafe {
-            self.device_wrapper.0.cmd_push_constants(
+            self.device_wrapper.native.cmd_push_constants(
                 self.native,
                 signature.pipeline_layout,
                 vk::ShaderStageFlags::ALL,
@@ -325,23 +325,28 @@ impl CmdList {
     pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .cmd_draw(self.native, vertex_count, 1, first_vertex, 0)
         };
     }
 
     pub fn draw_indexed(&mut self, index_count: u32, first_index: u32, vertex_offset: i32) {
         unsafe {
-            self.device_wrapper
-                .0
-                .cmd_draw_indexed(self.native, index_count, 1, first_index, vertex_offset, 0)
+            self.device_wrapper.native.cmd_draw_indexed(
+                self.native,
+                index_count,
+                1,
+                first_index,
+                vertex_offset,
+                0,
+            )
         };
     }
 
     pub fn dispatch(&mut self, group_count_x: u32, group_count_y: u32, group_count_z: u32) {
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .cmd_dispatch(self.native, group_count_x, group_count_y, group_count_z)
         };
     }
@@ -364,7 +369,7 @@ impl CmdList {
             size: size * src_buffer.buffer.aligned_elem_size,
         };
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer(
+            self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
                 dst_buffer.handle().0,
@@ -399,7 +404,7 @@ impl CmdList {
         }
 
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer(
+            self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
                 dst_buffer.handle().0,
@@ -422,7 +427,7 @@ impl CmdList {
         }
 
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer(
+            self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
                 src_buffer.buffer.native,
                 dst_buffer.handle().0,
@@ -449,7 +454,7 @@ impl CmdList {
             size: size * src_buffer.0.aligned_elem_size,
         };
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer(
+            self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
                 src_buffer.0.native,
                 dst_buffer.handle().0,
@@ -476,7 +481,7 @@ impl CmdList {
             size: size * dst_buffer.buffer.aligned_elem_size,
         };
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer(
+            self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
                 src_buffer.handle().0,
                 dst_buffer.buffer.native,
@@ -518,7 +523,7 @@ impl CmdList {
         };
 
         unsafe {
-            self.device_wrapper.0.cmd_copy_buffer_to_image(
+            self.device_wrapper.native.cmd_copy_buffer_to_image(
                 self.native,
                 src_buffer.buffer.native,
                 dst_image.wrapper.native,
@@ -571,7 +576,7 @@ impl CmdList {
         };
 
         unsafe {
-            self.device_wrapper.0.cmd_copy_image(
+            self.device_wrapper.native.cmd_copy_image(
                 self.native,
                 src_image.wrapper.native,
                 src_image_layout.0,
@@ -635,7 +640,7 @@ impl CmdList {
         };
 
         unsafe {
-            self.device_wrapper.0.cmd_blit_image(
+            self.device_wrapper.native.cmd_blit_image(
                 self.native,
                 src_image.wrapper.native,
                 src_image_layout.0,
@@ -656,7 +661,7 @@ impl CmdList {
         dst_offset: u64,
     ) {
         unsafe {
-            self.device_wrapper.0.cmd_copy_query_pool_results(
+            self.device_wrapper.native.cmd_copy_query_pool_results(
                 self.native,
                 query_pool.native,
                 first_query,
@@ -671,9 +676,13 @@ impl CmdList {
 
     pub fn clear_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
         unsafe {
-            self.device_wrapper
-                .0
-                .cmd_fill_buffer(self.native, buffer.handle().0, 0, vk::WHOLE_SIZE, value);
+            self.device_wrapper.native.cmd_fill_buffer(
+                self.native,
+                buffer.handle().0,
+                0,
+                vk::WHOLE_SIZE,
+                value,
+            );
         }
     }
 
@@ -689,7 +698,7 @@ impl CmdList {
 
         unsafe {
             if image.wrapper.aspect == vk::ImageAspectFlags::COLOR {
-                self.device_wrapper.0.cmd_clear_color_image(
+                self.device_wrapper.native.cmd_clear_color_image(
                     self.native,
                     image.wrapper.native,
                     layout.0,
@@ -697,7 +706,7 @@ impl CmdList {
                     &[range],
                 );
             } else if image.wrapper.aspect == vk::ImageAspectFlags::DEPTH {
-                self.device_wrapper.0.cmd_clear_depth_stencil_image(
+                self.device_wrapper.native.cmd_clear_depth_stencil_image(
                     self.native,
                     image.wrapper.native,
                     layout.0,
@@ -719,7 +728,7 @@ impl CmdList {
             image_barriers.iter().map(|v| v.native).collect();
 
         unsafe {
-            self.device_wrapper.0.cmd_pipeline_barrier(
+            self.device_wrapper.native.cmd_pipeline_barrier(
                 self.native,
                 src_stage_mask.0,
                 dst_stage_mask.0,
@@ -760,7 +769,7 @@ impl CmdList {
 
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .cmd_execute_commands(self.native, &native_cmd_lists)
         };
     }
@@ -787,7 +796,7 @@ impl CmdList {
             .build();
 
         unsafe {
-            self.device_wrapper.0.cmd_pipeline_barrier(
+            self.device_wrapper.native.cmd_pipeline_barrier(
                 self.native,
                 vk::PipelineStageFlags::ALL_COMMANDS,
                 vk::PipelineStageFlags::ALL_COMMANDS,
@@ -802,6 +811,6 @@ impl CmdList {
 
 impl Drop for CmdList {
     fn drop(&mut self) {
-        unsafe { self.device_wrapper.0.destroy_command_pool(self.pool, None) };
+        unsafe { self.device_wrapper.native.destroy_command_pool(self.pool, None) };
     }
 }

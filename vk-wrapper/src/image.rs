@@ -172,7 +172,7 @@ impl ImageViewBuilder {
             self.image_wrapper
                 .device
                 .wrapper
-                .0
+                .native
                 .create_image_view(&self.info, None)?
         };
 

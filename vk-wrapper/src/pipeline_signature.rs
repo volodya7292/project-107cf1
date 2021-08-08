@@ -53,7 +53,7 @@ impl Drop for PipelineSignature {
         unsafe {
             self.device
                 .wrapper
-                .0
+                .native
                 .destroy_pipeline_layout(self.pipeline_layout, None)
         };
 
@@ -62,7 +62,7 @@ impl Drop for PipelineSignature {
                 unsafe {
                     self.device
                         .wrapper
-                        .0
+                        .native
                         .destroy_descriptor_set_layout(*native_set_layout, None)
                 };
             }

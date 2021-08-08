@@ -29,7 +29,7 @@ impl Drop for ImageView {
             self.image_wrapper
                 .device
                 .wrapper
-                .0
+                .native
                 .destroy_image_view(self.native, None)
         };
     }

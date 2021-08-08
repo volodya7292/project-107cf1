@@ -33,6 +33,6 @@ impl Hash for Sampler {
 
 impl Drop for Sampler {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_sampler(self.native, None) };
+        unsafe { self.device.wrapper.native.destroy_sampler(self.native, None) };
     }
 }

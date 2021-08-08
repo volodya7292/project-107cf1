@@ -95,6 +95,7 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                         .arg("--target-env=vulkan1.2")
                         .arg("--upgrade-memory-model")
                         .arg("--skip-validation")
+                        .arg("--preserve-bindings")
                         .arg("-O");
 
                     let output = cmd.output().unwrap();

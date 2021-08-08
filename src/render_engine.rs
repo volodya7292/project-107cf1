@@ -527,24 +527,11 @@ impl RenderEngine {
             regions: vec![],
         })];
 
-        let ready = if !self.vertex_mesh_pending_updates.is_empty() {
-            let curr_value = self
-                .device
-                .get_queue(Queue::TYPE_TRANSFER)
-                .timeline_semaphore()
-                .get_current_value()
-                .unwrap();
-            if curr_value >= self.transfer_submit[0].get_signal_value(0).unwrap() {
-                // println!("acq subm");
-                let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-                unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
+        // Submit buffer acquisition asynchronously
+        if !self.vertex_mesh_pending_updates.is_empty() {
+            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+            unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+        }
 
         let mut t00 = Instant::now();
 
@@ -589,20 +576,14 @@ impl RenderEngine {
         };
 
         // Wait for previous transfers before committing them
-        if ready {
-            self.transfer_submit[0].wait().unwrap();
+        if !self.vertex_mesh_pending_updates.is_empty() {
             self.transfer_submit[1].wait().unwrap();
         }
 
         let t00 = Instant::now();
 
         // Before updating new buffers, collect all the completed updates to commit them
-        let ready2 = self.vertex_mesh_pending_updates.is_empty();
-        let completed_updates = if ready {
-            self.vertex_mesh_pending_updates.drain(..).collect()
-        } else {
-            vec![]
-        };
+        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
         let mut buffer_update_system = systems::BufferUpdateSystem {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
@@ -620,14 +601,11 @@ impl RenderEngine {
                 hierarchy_propagation_system.run();
                 world_transform_events_system.run();
             });
-            if ready || ready2 {
-                // TODO: make this totally async across frames
-                s.spawn(|_| buffer_update_system.run());
-            }
-            if ready {
-                s.spawn(|_| commit_buffer_updates_system.run())
-            }
+            s.spawn(|_| buffer_update_system.run());
+            s.spawn(|_| commit_buffer_updates_system.run())
         });
+
+        // FIXME: VMA: parallel invocations (when creating Cluster meshes) of `vkAllocateMemory` causes huge stutters
 
         let t11 = Instant::now();
         let systems2_t = (t11 - t00).as_secs_f64();
@@ -1629,9 +1607,13 @@ pub fn new(
     let depth_per_frame_in = depth_per_frame_pool.alloc().unwrap();
     let depth_dyn_in = depth_dyn_pool.alloc().unwrap();
 
-    let depth_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
-        .take(phys_cores)
-        .collect();
+    let depth_secondary_cls = iter::repeat_with(|| {
+        graphics_queue
+            .create_secondary_cmd_list("depth_secondary")
+            .unwrap()
+    })
+    .take(phys_cores)
+    .collect();
 
     // Depth pyramid pipeline
     // -----------------------------------------------------------------------------------------------------------------
@@ -1790,9 +1772,10 @@ pub fn new(
     let mut g_dyn_pool = g_signature.create_pool(1, 1).unwrap();
     let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
     let g_dyn_in = g_dyn_pool.alloc().unwrap();
-    let g_secondary_cls = iter::repeat_with(|| graphics_queue.create_secondary_cmd_list().unwrap())
-        .take(phys_cores)
-        .collect();
+    let g_secondary_cls =
+        iter::repeat_with(|| graphics_queue.create_secondary_cmd_list("g_secondary").unwrap())
+            .take(phys_cores)
+            .collect();
 
     let tile_count = max_texture_count;
     let texture_atlases = [
@@ -1889,8 +1872,8 @@ pub fn new(
     }
 
     let transfer_cl = [
-        transfer_queue.create_primary_cmd_list().unwrap(),
-        graphics_queue.create_primary_cmd_list().unwrap(),
+        transfer_queue.create_primary_cmd_list("transfer_0").unwrap(),
+        graphics_queue.create_primary_cmd_list("transfer_1").unwrap(),
     ];
     let transfer_submit = [
         device
@@ -1901,14 +1884,14 @@ pub fn new(
             .unwrap(),
     ];
 
-    let staging_cl = graphics_queue.create_primary_cmd_list().unwrap();
+    let staging_cl = graphics_queue.create_primary_cmd_list("staging").unwrap();
     let staging_submit = device
         .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])
         .unwrap();
 
     let final_cl = [
-        graphics_queue.create_primary_cmd_list().unwrap(),
-        present_queue.create_primary_cmd_list().unwrap(),
+        graphics_queue.create_primary_cmd_list("final").unwrap(),
+        present_queue.create_primary_cmd_list("final").unwrap(),
     ];
     let final_submit = [
         device.create_submit_packet(&[]).unwrap(),

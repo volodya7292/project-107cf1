@@ -161,7 +161,7 @@ pub fn new(
     )?;
 
     let graphics_queue = device.get_queue(vkw::Queue::TYPE_GRAPHICS);
-    let cmd_list = graphics_queue.create_primary_cmd_list()?;
+    let cmd_list = graphics_queue.create_primary_cmd_list("tex-atlas_cmd")?;
 
     let mut submit_packet =
         device.create_submit_packet(&[vkw::SubmitInfo::new(&[], &[Arc::clone(&cmd_list)], &[])])?;

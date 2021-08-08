@@ -63,12 +63,16 @@ impl Adapter {
             .enabled_features(&self.features)
             .push_next(&mut features12);
 
-        let device_wrapper = Arc::new(DeviceWrapper(unsafe {
-            self.instance
-                .native
-                .create_device(self.native, &create_info, None)?
-        }));
-        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &device_wrapper.0);
+        let device_wrapper = Arc::new(DeviceWrapper {
+            native: unsafe {
+                self.instance
+                    .native
+                    .create_device(self.native, &create_info, None)?
+            },
+            adapter: Arc::clone(self),
+        });
+        let swapchain_khr =
+            ash::extensions::khr::Swapchain::new(&self.instance.native, &device_wrapper.native);
 
         // Get queues
         let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
@@ -79,7 +83,7 @@ impl Adapter {
                     swapchain_khr: swapchain_khr.clone(),
                     native: RwLock::new(unsafe {
                         device_wrapper
-                            .0
+                            .native
                             .get_device_queue(queue_info.queue_family_index, i)
                     }),
                     semaphore: Arc::new(device::create_binary_semaphore(&device_wrapper)?),
@@ -102,7 +106,7 @@ impl Adapter {
         // Create allocator
         let allocator_info = vk_mem::AllocatorCreateInfo {
             physical_device: self.native,
-            device: device_wrapper.0.clone(),
+            device: device_wrapper.native.clone(),
             instance: self.instance.native.clone(),
             flags: Default::default(),
             preferred_large_heap_block_size: 0,
@@ -114,12 +118,11 @@ impl Adapter {
         let pipeline_cache_info = vk::PipelineCacheCreateInfo::builder();
         let pipeline_cache = unsafe {
             device_wrapper
-                .0
+                .native
                 .create_pipeline_cache(&pipeline_cache_info, None)?
         };
 
         Ok(Arc::new(Device {
-            adapter: Arc::clone(self),
             wrapper: device_wrapper,
             allocator,
             swapchain_khr,

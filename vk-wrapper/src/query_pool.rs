@@ -10,6 +10,6 @@ pub struct QueryPool {
 
 impl Drop for QueryPool {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_query_pool(self.native, None) };
+        unsafe { self.device.wrapper.native.destroy_query_pool(self.native, None) };
     }
 }

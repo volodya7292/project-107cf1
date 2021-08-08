@@ -55,6 +55,11 @@ pub struct Shader {
 
 impl Drop for Shader {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_shader_module(self.native, None) };
+        unsafe {
+            self.device
+                .wrapper
+                .native
+                .destroy_shader_module(self.native, None)
+        };
     }
 }

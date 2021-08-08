@@ -3,6 +3,7 @@ use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
 use ash::version::DeviceV1_0;
 use ash::vk;
+use ash::vk::Handle;
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{ptr, slice};
@@ -25,30 +26,52 @@ impl Queue {
     pub const TYPE_TRANSFER: QueueType = QueueType(2);
     pub const TYPE_PRESENT: QueueType = QueueType(3);
 
-    fn create_cmd_list(&self, level: vk::CommandBufferLevel) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+    fn create_cmd_list(
+        &self,
+        name: &str,
+        level: vk::CommandBufferLevel,
+    ) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
-        let native_pool = unsafe { self.device_wrapper.0.create_command_pool(&create_info, None)? };
+        let native_pool = unsafe {
+            self.device_wrapper
+                .native
+                .create_command_pool(&create_info, None)?
+        };
 
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(native_pool)
             .level(level)
             .command_buffer_count(1);
+        let native = unsafe { self.device_wrapper.native.allocate_command_buffers(&alloc_info)?[0] };
+
+        unsafe {
+            self.device_wrapper.debug_set_object_name(
+                vk::ObjectType::COMMAND_POOL,
+                native_pool.as_raw(),
+                name,
+            )?;
+            self.device_wrapper.debug_set_object_name(
+                vk::ObjectType::COMMAND_BUFFER,
+                native.as_raw(),
+                name,
+            )?;
+        }
 
         Ok(Arc::new(Mutex::new(CmdList {
             device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
-            native: unsafe { self.device_wrapper.0.allocate_command_buffers(&alloc_info)?[0] },
+            native,
             one_time_exec: false,
             last_pipeline: ptr::null(),
         })))
     }
 
-    pub fn create_primary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
-        self.create_cmd_list(vk::CommandBufferLevel::PRIMARY)
+    pub fn create_primary_cmd_list(&self, name: &str) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+        self.create_cmd_list(name, vk::CommandBufferLevel::PRIMARY)
     }
 
-    pub fn create_secondary_cmd_list(&self) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
-        self.create_cmd_list(vk::CommandBufferLevel::SECONDARY)
+    pub fn create_secondary_cmd_list(&self, name: &str) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+        self.create_cmd_list(name, vk::CommandBufferLevel::SECONDARY)
     }
 
     fn submit_infos(&self, submit_infos: &[SubmitInfo], fence: &mut Fence) -> Result<(), vk::Result> {
@@ -117,7 +140,7 @@ impl Queue {
 
         unsafe {
             self.device_wrapper
-                .0
+                .native
                 .queue_submit(*queue, &native_submit_infos, fence.native)?
         }
 
@@ -197,7 +220,7 @@ impl Queue {
 
     pub fn wait_idle(&self) -> Result<(), vk::Result> {
         let queue = self.native.write().unwrap();
-        unsafe { self.device_wrapper.0.queue_wait_idle(*queue) }
+        unsafe { self.device_wrapper.native.queue_wait_idle(*queue) }
     }
 }
 

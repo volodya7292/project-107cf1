@@ -155,7 +155,12 @@ impl RenderPass {
         Ok(Arc::new(Framebuffer {
             device: Arc::clone(&self.device),
             _render_pass: Arc::clone(self),
-            native: unsafe { self.device.wrapper.0.create_framebuffer(&create_info, None)? },
+            native: unsafe {
+                self.device
+                    .wrapper
+                    .native
+                    .create_framebuffer(&create_info, None)?
+            },
             images,
             _image_views: image_views,
             size,
@@ -179,6 +184,6 @@ impl Hash for RenderPass {
 
 impl Drop for RenderPass {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_render_pass(self.native, None) };
+        unsafe { self.device.wrapper.native.destroy_render_pass(self.native, None) };
     }
 }

@@ -147,7 +147,7 @@ impl Hash for Pipeline {
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.wrapper.0.destroy_pipeline(self.native, None);
+            self.device.wrapper.native.destroy_pipeline(self.native, None);
         }
     }
 }

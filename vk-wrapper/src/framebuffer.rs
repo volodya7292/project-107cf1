@@ -21,6 +21,6 @@ impl Framebuffer {
 
 impl Drop for Framebuffer {
     fn drop(&mut self) {
-        unsafe { self.device.wrapper.0.destroy_framebuffer(self.native, None) };
+        unsafe { self.device.wrapper.native.destroy_framebuffer(self.native, None) };
     }
 }

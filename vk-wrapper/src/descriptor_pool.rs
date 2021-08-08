@@ -75,7 +75,10 @@ impl DescriptorPool {
             .pool_sizes(&pool_sizes);
 
         Ok(Some(unsafe {
-            self.device.wrapper.0.create_descriptor_pool(&pool_info, None)?
+            self.device
+                .wrapper
+                .native
+                .create_descriptor_pool(&pool_info, None)?
         }))
     }
 
@@ -93,7 +96,7 @@ impl DescriptorPool {
         let alloc_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(next_pool.handle)
             .set_layouts(&layouts);
-        let sets = unsafe { self.device.wrapper.0.allocate_descriptor_sets(&alloc_info)? };
+        let sets = unsafe { self.device.wrapper.native.allocate_descriptor_sets(&alloc_info)? };
 
         let start_i = self.allocated.len() as u32;
         self.allocated
@@ -143,7 +146,12 @@ impl DescriptorPool {
 impl Drop for DescriptorPool {
     fn drop(&mut self) {
         for native in &self.native {
-            unsafe { self.device.wrapper.0.destroy_descriptor_pool(native.handle, None) };
+            unsafe {
+                self.device
+                    .wrapper
+                    .native
+                    .destroy_descriptor_pool(native.handle, None)
+            };
         }
     }
 }
@@ -237,7 +245,7 @@ impl Device {
             }
         }
 
-        self.wrapper.0.update_descriptor_sets(&native_writes, &[]);
+        self.wrapper.native.update_descriptor_sets(&native_writes, &[]);
     }
 
     pub unsafe fn update_descriptor_set(&self, set: DescriptorSet, bindings: &[Binding]) {

@@ -17,6 +17,7 @@ use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::{hash_map, HashMap, HashSet};
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
 
@@ -50,19 +51,47 @@ impl From<spirv_cross::ErrorCode> for DeviceError {
     }
 }
 
-pub(crate) struct DeviceWrapper(pub(crate) ash::Device);
+pub(crate) struct DeviceWrapper {
+    pub(crate) native: ash::Device,
+    pub(crate) adapter: Arc<Adapter>,
+}
+
+impl DeviceWrapper {
+    pub(crate) unsafe fn debug_set_object_name(
+        &self,
+        ty: vk::ObjectType,
+        handle: u64,
+        name: &str,
+    ) -> Result<(), vk::Result> {
+        if cfg!(debug_assertions) {
+            let c_name = CString::new(name).unwrap();
+
+            let info = vk::DebugUtilsObjectNameInfoEXT::builder()
+                .object_type(ty)
+                .object_handle(handle)
+                .object_name(c_name.as_c_str());
+
+            if let Some(debug_utils) = &self.adapter.instance.debug_utils_ext {
+                debug_utils.debug_utils_set_object_name(self.native.handle(), &info)
+            } else {
+                unreachable!()
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
 
 impl Drop for DeviceWrapper {
     fn drop(&mut self) {
         unsafe {
-            self.0.device_wait_idle().unwrap();
-            self.0.destroy_device(None);
+            self.native.device_wait_idle().unwrap();
+            self.native.destroy_device(None);
         }
     }
 }
 
 pub struct Device {
-    pub(crate) adapter: Arc<Adapter>,
     pub(crate) wrapper: Arc<DeviceWrapper>,
     pub(crate) allocator: vk_mem::Allocator,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
@@ -80,7 +109,7 @@ pub(crate) fn create_semaphore(
     let create_info = vk::SemaphoreCreateInfo::builder().push_next(&mut type_info);
     Ok(Semaphore {
         device_wrapper: Arc::clone(device_wrapper),
-        native: unsafe { device_wrapper.0.create_semaphore(&create_info, None)? },
+        native: unsafe { device_wrapper.native.create_semaphore(&create_info, None)? },
         semaphore_type: sp_type,
         last_signal_value: Mutex::new(0),
     })
@@ -101,17 +130,17 @@ pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence,
     create_info.flags = vk::FenceCreateFlags::SIGNALED;
     Ok(Fence {
         device_wrapper: Arc::clone(device_wrapper),
-        native: unsafe { device_wrapper.0.create_fence(&create_info, None)? },
+        native: unsafe { device_wrapper.native.create_fence(&create_info, None)? },
     })
 }
 
 impl Device {
     pub fn get_adapter(&self) -> &Arc<Adapter> {
-        &self.adapter
+        &self.wrapper.adapter
     }
 
     pub fn is_extension_supported(&self, name: &str) -> bool {
-        self.adapter.is_extension_enabled(name)
+        self.wrapper.adapter.is_extension_enabled(name)
     }
 
     pub fn get_queue(&self, queue_type: QueueType) -> &Queue {
@@ -218,7 +247,7 @@ impl Device {
             panic!("Image format {:?} is not supported!", format);
         }
 
-        let format_props = self.adapter.get_image_format_properties(
+        let format_props = self.wrapper.adapter.get_image_format_properties(
             format.0,
             image_type.0,
             vk::ImageTiling::OPTIMAL,
@@ -295,6 +324,7 @@ impl Device {
                 | ImageUsageFlags::STORAGE,
         ) {
             let linear_filter_supported = self
+                .wrapper
                 .adapter
                 .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
 
@@ -320,7 +350,7 @@ impl Device {
                 .max_lod(mip_levels as f32 - 1.0)
                 .unnormalized_coordinates(false);
 
-            unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? }
+            unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? }
         } else {
             vk::Sampler::default()
         };
@@ -401,7 +431,7 @@ impl Device {
 
         Ok(Arc::new(Sampler {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+            native: unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? },
         }))
     }
 
@@ -412,7 +442,7 @@ impl Device {
 
         Ok(Arc::new(QueryPool {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.0.create_query_pool(&create_info, None)? },
+            native: unsafe { self.wrapper.native.create_query_pool(&create_info, None)? },
         }))
     }
 
@@ -423,9 +453,9 @@ impl Device {
         vsync: bool,
         old_swapchain: Option<Swapchain>,
     ) -> Result<Swapchain, DeviceError> {
-        let surface_capabs = self.adapter.get_surface_capabilities(&surface)?;
-        let surface_formats = self.adapter.get_surface_formats(&surface)?;
-        let surface_present_modes = self.adapter.get_surface_present_modes(&surface)?;
+        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
+        let surface_formats = self.wrapper.adapter.get_surface_formats(&surface)?;
+        let surface_present_modes = self.wrapper.adapter.get_surface_present_modes(&surface)?;
 
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         if !surface_capabs.supported_usage_flags.contains(image_usage) {
@@ -554,7 +584,7 @@ impl Device {
                 view,
                 sampler: Arc::new(Sampler {
                     device: Arc::clone(self),
-                    native: unsafe { self.wrapper.0.create_sampler(&sampler_info, None)? },
+                    native: unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? },
                 }),
                 size: (size.0, size.1, 1),
                 mip_levels: 1,
@@ -718,7 +748,7 @@ impl Device {
 
         Ok(Arc::new(Shader {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.0.create_shader_module(&create_info, None)? },
+            native: unsafe { self.wrapper.native.create_shader_module(&create_info, None)? },
             stage,
             input_locations,
             bindings,
@@ -857,7 +887,7 @@ impl Device {
 
         Ok(Arc::new(RenderPass {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.0.create_render_pass(&create_info, None)? },
+            native: unsafe { self.wrapper.native.create_render_pass(&create_info, None)? },
             subpasses: subpasses.into(),
             attachments: attachments.to_vec(),
             _color_attachments: color_attachments,
@@ -985,8 +1015,11 @@ impl Device {
                     .bindings(bindings)
                     .push_next(&mut binding_flags_info);
 
-                native_descriptor_sets[i] =
-                    unsafe { self.wrapper.0.create_descriptor_set_layout(&create_info, None)? };
+                native_descriptor_sets[i] = unsafe {
+                    self.wrapper
+                        .native
+                        .create_descriptor_set_layout(&create_info, None)?
+                };
             }
         }
 
@@ -1017,7 +1050,11 @@ impl Device {
                     layout_create_info.push_constant_ranges(slice::from_ref(&push_constant_range));
             }
 
-            unsafe { self.wrapper.0.create_pipeline_layout(&layout_create_info, None)? }
+            unsafe {
+                self.wrapper
+                    .native
+                    .create_pipeline_layout(&layout_create_info, None)?
+            }
         };
 
         Ok(Arc::new(PipelineSignature {
@@ -1034,16 +1071,16 @@ impl Device {
     pub fn load_pipeline_cache(&self, data: &[u8]) -> Result<(), vk::Result> {
         let mut pipeline_cache = self.pipeline_cache.lock().unwrap();
 
-        unsafe { self.wrapper.0.destroy_pipeline_cache(*pipeline_cache, None) };
+        unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
         let create_info = vk::PipelineCacheCreateInfo::builder().initial_data(data);
-        *pipeline_cache = unsafe { self.wrapper.0.create_pipeline_cache(&create_info, None)? };
+        *pipeline_cache = unsafe { self.wrapper.native.create_pipeline_cache(&create_info, None)? };
 
         Ok(())
     }
 
     pub fn get_pipeline_cache(&self) -> Result<Vec<u8>, vk::Result> {
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
-        unsafe { self.wrapper.0.get_pipeline_cache_data(*pipeline_cache) }
+        unsafe { self.wrapper.native.get_pipeline_cache_data(*pipeline_cache) }
     }
 
     pub fn create_graphics_pipeline(
@@ -1192,9 +1229,11 @@ impl Device {
 
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
         let native_pipeline = unsafe {
-            self.wrapper
-                .0
-                .create_graphics_pipelines(*pipeline_cache, slice::from_ref(&create_info), None)
+            self.wrapper.native.create_graphics_pipelines(
+                *pipeline_cache,
+                slice::from_ref(&create_info),
+                None,
+            )
         };
         if let Err((_, err)) = native_pipeline {
             return Err(err.into());
@@ -1228,7 +1267,7 @@ impl Device {
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
         let native_pipeline = unsafe {
             self.wrapper
-                .0
+                .native
                 .create_compute_pipelines(*pipeline_cache, slice::from_ref(&create_info), None)
         };
         if let Err((_, err)) = native_pipeline {
@@ -1250,7 +1289,7 @@ impl Device {
         submit_infos: &[SubmitInfo],
     ) -> Result<SubmitPacket, vk::Result> {
         Ok(SubmitPacket {
-            infos: submit_infos.to_vec(),
+            infos: submit_infos.into(),
             fence: create_fence(&self.wrapper)?,
         })
     }
@@ -1266,7 +1305,7 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
-        unsafe { self.wrapper.0.destroy_pipeline_cache(*pipeline_cache, None) };
+        unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
 
         self.allocator.destroy();
     }
