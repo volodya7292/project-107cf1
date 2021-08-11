@@ -115,7 +115,7 @@ impl Game {
             let renderer = self.renderer.lock().unwrap();
             let entity = renderer.get_active_camera();
             let camera_comps = renderer.scene().storage::<component::Camera>();
-            let mut camera_comps = camera_comps.write().unwrap();
+            let mut camera_comps = camera_comps.write();
             let camera = camera_comps.get_mut(entity).unwrap();
 
             let ms = Self::MOVEMENT_SPEED * delta_time as f32;

@@ -1,11 +1,25 @@
 use crate::utils::HashMap;
 use bit_set::BitSet;
+use index_pool::IndexPool;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU32;
-use std::sync::{atomic, Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{atomic, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{mem, ptr};
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Entity {
+    id: u32,
+    gen: u64,
+}
+
+impl Entity {
+    pub const NULL: Entity = Entity {
+        id: u32::MAX,
+        gen: u64::MAX,
+    };
+}
 
 pub struct RawComponentStorage {
     data: Vec<u8>,
@@ -13,17 +27,19 @@ pub struct RawComponentStorage {
     drop_func: fn(*mut u8),
     needs_drop: bool,
     entity_allocated_count: Arc<AtomicU32>,
+    emit_events: bool,
     available: BitSet,
-    created: BitSet,
-    modified: BitSet,
-    removed: BitSet,
+    aval_count: u32,
+    created: HashMap<u32, u64>,
+    modified: HashMap<u32, u64>,
+    removed: HashMap<u32, u64>,
 }
 
 #[derive(Copy, Clone)]
 pub enum Event {
-    Created(u32),
-    Modified(u32),
-    Removed(u32),
+    Created(Entity),
+    Modified(Entity),
+    Removed(Entity),
 }
 
 impl RawComponentStorage {
@@ -41,7 +57,9 @@ impl RawComponentStorage {
             drop_func,
             needs_drop: mem::needs_drop::<T>(),
             entity_allocated_count: Arc::clone(entity_allocated_count),
+            emit_events: false,
             available: Default::default(),
+            aval_count: 0,
             created: Default::default(),
             modified: Default::default(),
             removed: Default::default(),
@@ -58,8 +76,8 @@ impl RawComponentStorage {
     /// # Safety:
     ///
     /// T must match the type of component.
-    pub unsafe fn set<T>(&mut self, index: u32, v: T) {
-        let index = index as usize;
+    pub unsafe fn set<T>(&mut self, entity: Entity, v: T) {
+        let index = entity.id as usize;
         let index_b = index * self.elem_size;
 
         let len = self.data.len();
@@ -78,15 +96,17 @@ impl RawComponentStorage {
             if self.needs_drop {
                 (self.drop_func)(ptr as *mut u8);
             }
-            if !self.created.contains(index) {
-                self.modified.insert(index);
-            }
         } else {
-            let was_removed = self.removed.remove(index);
-            if was_removed {
-                self.modified.insert(index);
+            self.aval_count += 1;
+        }
+
+        if self.emit_events {
+            if already_present {
+                if !self.created.contains_key(&entity.id) {
+                    self.modified.insert(entity.id, entity.gen);
+                }
             } else {
-                self.created.insert(index);
+                self.created.insert(entity.id, entity.gen);
             }
         }
 
@@ -94,14 +114,14 @@ impl RawComponentStorage {
     }
 
     /// Removes a component.
-    pub fn remove(&mut self, index: u32) {
+    pub fn remove(&mut self, entity: Entity) {
         #[cold]
         #[inline(never)]
         fn assert_failed(index: usize, len: usize) -> ! {
             panic!("index (is {}) should be < len (is {})", index, len);
         }
 
-        let index = index as usize;
+        let index = entity.id as usize;
         let index_b = index * self.elem_size;
 
         let len = self.data.len();
@@ -110,14 +130,23 @@ impl RawComponentStorage {
         }
 
         let was_present = self.available.remove(index);
-        let just_created = self.created.remove(index);
-        self.modified.remove(index);
-        if !just_created {
-            self.removed.insert(index);
+
+        if self.emit_events {
+            let just_created = self.created.remove(&entity.id).is_some();
+            self.modified.remove(&entity.id);
+
+            if !just_created {
+                if let hash_map::Entry::Vacant(e) = self.removed.entry(entity.id) {
+                    e.insert(entity.gen);
+                }
+            }
         }
 
-        if was_present && self.needs_drop {
-            (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
+        if was_present {
+            self.aval_count -= 1;
+            if self.needs_drop {
+                (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
+            }
         }
     }
 
@@ -141,12 +170,14 @@ impl RawComponentStorage {
     /// # Safety:
     ///
     /// T must match the type of component.
-    pub unsafe fn get_mut<T>(&mut self, index: u32) -> Option<&mut T> {
-        let index = index as usize;
+    pub unsafe fn get_mut<T>(&mut self, entity: Entity) -> Option<&mut T> {
+        let index = entity.id as usize;
 
         if self.available.contains(index) {
-            if !self.created.contains(index) {
-                self.modified.insert(index);
+            if self.emit_events {
+                if !self.created.contains_key(&entity.id) {
+                    self.modified.insert(entity.id, entity.gen);
+                }
             }
             Some(&mut *(self.data.as_mut_ptr() as *mut T).add(index))
         } else {
@@ -155,7 +186,7 @@ impl RawComponentStorage {
     }
 
     /// Returns a mutable reference to the component without emitting a modification event
-    pub unsafe fn get_mut_unchecked<T>(&mut self, index: u32) -> Option<&mut T> {
+    pub unsafe fn get_mut_unmarked<T>(&mut self, index: u32) -> Option<&mut T> {
         let index = index as usize;
 
         if self.available.contains(index) {
@@ -164,136 +195,264 @@ impl RawComponentStorage {
             None
         }
     }
+}
 
-    pub fn entries(&self) -> &BitSet {
-        &self.available
+pub struct Entries<'a> {
+    set: BitSet,
+    entities: &'a Entities,
+    estimate_len: u32,
+}
+
+impl Entries<'_> {
+    pub fn intersection<T>(mut self, other: &impl ComponentStorageImpl<T>) -> Self {
+        self.set.intersect_with(other.available());
+        self.estimate_len = self.estimate_len.min(other.raw().aval_count);
+        self
     }
 
-    /// Returns events and clears them internally
-    pub fn events(&mut self) -> Vec<Event> {
-        let mut events = Vec::with_capacity(self.created.len() + self.modified.len() + self.removed.len());
+    pub fn difference<T>(mut self, other: &impl ComponentStorageImpl<T>) -> Self {
+        self.set.difference_with(other.available());
+        self
+    }
 
-        for index in &self.removed {
-            events.push(Event::Removed(index as u32));
+    pub fn iter(&self) -> EntriesIter {
+        EntriesIter {
+            set_iter: self.set.iter(),
+            entities: self.entities,
+            estimate_len: self.estimate_len,
         }
-        for index in &self.created {
-            events.push(Event::Created(index as u32));
-        }
-        for index in &self.modified {
-            events.push(Event::Modified(index as u32));
-        }
+    }
+}
 
-        self.created.clear();
-        self.modified.clear();
-        self.removed.clear();
+pub struct EntriesIter<'a> {
+    set_iter: bit_set::Iter<'a, u32>,
+    entities: &'a Entities,
+    estimate_len: u32,
+}
 
-        events
+impl Iterator for EntriesIter<'_> {
+    type Item = Entity;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.set_iter.next().map(|id| Entity {
+            id: id as u32,
+            gen: self.entities.generations[id],
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.estimate_len as usize, Some(self.estimate_len as usize))
+    }
+}
+
+mod private {
+    use crate::render_engine::scene::{Entities, RawComponentStorage};
+    use bit_set::BitSet;
+
+    pub trait RawComponentStorageImpl {
+        fn raw(&self) -> &RawComponentStorage;
+        fn entities(&self) -> &Entities;
+        fn available(&self) -> &BitSet;
+    }
+}
+
+pub trait ComponentStorageImpl<T>: private::RawComponentStorageImpl {
+    fn contains(&self, entity: Entity) -> bool {
+        self.entities().is_alive(entity) && self.raw().contains(entity.id)
+    }
+
+    fn get(&self, entity: Entity) -> Option<&T> {
+        if self.entities().is_alive(entity) {
+            unsafe { self.raw().get::<T>(entity.id) }
+        } else {
+            None
+        }
+    }
+
+    fn entries(&self) -> Entries {
+        Entries {
+            set: self.raw().available.clone(),
+            entities: self.entities(),
+            estimate_len: self.raw().aval_count,
+        }
     }
 }
 
 pub struct ComponentStorage<'a, T> {
     raw: RwLockReadGuard<'a, RawComponentStorage>,
+    entities: RwLockReadGuard<'a, Entities>,
     ty: PhantomData<T>,
 }
 
-impl<'a, T> ComponentStorage<'a, T> {
-    pub fn contains(&self, index: u32) -> bool {
-        self.raw.contains(index)
+impl<'a, T> private::RawComponentStorageImpl for ComponentStorage<'a, T> {
+    fn raw(&self) -> &RawComponentStorage {
+        &self.raw
     }
 
-    pub fn get(&self, index: u32) -> Option<&T> {
-        unsafe { self.raw.get::<T>(index) }
+    fn entities(&self) -> &Entities {
+        &self.entities
     }
 
-    pub fn entries(&self) -> &BitSet {
-        self.raw.entries()
+    fn available(&self) -> &BitSet {
+        &self.raw.available
     }
 }
+
+impl<'a, T> ComponentStorageImpl<T> for ComponentStorage<'a, T> {}
 
 pub struct ComponentStorageMut<'a, T> {
     raw: RwLockWriteGuard<'a, RawComponentStorage>,
+    entities: RwLockReadGuard<'a, Entities>,
     ty: PhantomData<T>,
 }
 
+impl<'a, T> private::RawComponentStorageImpl for ComponentStorageMut<'a, T> {
+    fn raw(&self) -> &RawComponentStorage {
+        &self.raw
+    }
+
+    fn entities(&self) -> &Entities {
+        &self.entities
+    }
+
+    fn available(&self) -> &BitSet {
+        &self.raw.available
+    }
+}
+
+impl<'a, T> ComponentStorageImpl<T> for ComponentStorageMut<'a, T> {}
+
 impl<'a, T> ComponentStorageMut<'a, T> {
     #[inline]
-    pub fn set(&mut self, index: u32, v: T) {
-        unsafe { self.raw.set(index, v) };
+    pub fn set(&mut self, entity: Entity, v: T) {
+        if self.entities.is_alive(entity) {
+            unsafe { self.raw.set(entity, v) };
+        } else {
+            panic!("Entity is not alive!");
+        }
     }
 
     #[inline]
-    pub fn remove(&mut self, index: u32) {
-        self.raw.remove(index);
+    pub fn remove(&mut self, entity: Entity) {
+        if self.entities.is_alive(entity) {
+            self.raw.remove(entity);
+        } else {
+            panic!("Entity is not alive!");
+        }
     }
 
     #[inline]
-    pub fn get(&self, index: u32) -> Option<&T> {
-        unsafe { self.raw.get::<T>(index) }
+    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut T> {
+        if self.entities.is_alive(entity) {
+            unsafe { self.raw.get_mut::<T>(entity) }
+        } else {
+            None
+        }
     }
 
     #[inline]
-    pub fn get_mut(&mut self, index: u32) -> Option<&mut T> {
-        unsafe { self.raw.get_mut::<T>(index) }
+    pub fn get_mut_unmarked(&mut self, entity: Entity) -> Option<&mut T> {
+        if self.entities.is_alive(entity) {
+            unsafe { self.raw.get_mut_unmarked(entity.id) }
+        } else {
+            None
+        }
     }
 
-    #[inline]
-    pub fn get_mut_unchecked(&mut self, index: u32) -> Option<&mut T> {
-        unsafe { self.raw.get_mut_unchecked(index) }
+    pub fn emit_events(&mut self, enable: bool) {
+        self.raw.emit_events = enable;
     }
 
-    #[inline]
+    /// Returns events and clears them internally
     pub fn events(&mut self) -> Vec<Event> {
-        self.raw.events()
-    }
+        let mut events =
+            Vec::with_capacity(self.raw.created.len() + self.raw.modified.len() + self.raw.removed.len());
 
-    #[inline]
-    pub fn contains(&self, index: u32) -> bool {
-        self.raw.contains(index)
-    }
+        for (id, gen) in &self.raw.removed {
+            events.push(Event::Removed(Entity {
+                id: *id as u32,
+                gen: *gen,
+            }));
+        }
+        for (id, gen) in &self.raw.created {
+            events.push(Event::Created(Entity {
+                id: *id as u32,
+                gen: *gen,
+            }));
+        }
+        for (id, gen) in &self.raw.modified {
+            events.push(Event::Modified(Entity {
+                id: *id as u32,
+                gen: *gen,
+            }));
+        }
 
-    #[inline]
-    pub fn entries(&self) -> &BitSet {
-        self.raw.entries()
+        self.raw.created.clear();
+        self.raw.modified.clear();
+        self.raw.removed.clear();
+
+        events
     }
 }
 
 pub struct LockedStorage<T> {
     raw: Arc<RwLock<RawComponentStorage>>,
+    entities: Arc<RwLock<Entities>>,
     _ty: PhantomData<T>,
 }
 
 impl<T> LockedStorage<T> {
-    pub fn read(&self) -> Result<ComponentStorage<T>, PoisonError<RwLockReadGuard<RawComponentStorage>>> {
-        self.raw.read().map(|v| ComponentStorage {
-            raw: v,
+    pub fn read(&self) -> ComponentStorage<T> {
+        let raw = self.raw.read().unwrap();
+        let entities = self.entities.read().unwrap();
+
+        ComponentStorage {
+            raw,
+            entities,
             ty: Default::default(),
-        })
+        }
     }
 
-    pub fn write(
-        &self,
-    ) -> Result<ComponentStorageMut<T>, PoisonError<RwLockWriteGuard<RawComponentStorage>>> {
-        self.raw.write().map(|v| ComponentStorageMut {
-            raw: v,
+    pub fn write(&self) -> ComponentStorageMut<T> {
+        let raw = self.raw.write().unwrap();
+        let entities = self.entities.read().unwrap();
+
+        ComponentStorageMut {
+            raw,
+            entities,
             ty: Default::default(),
-        })
+        }
     }
 }
 
 pub struct Entities {
-    free_indices: BitSet,
+    indices: IndexPool,
     entity_allocated_count: Arc<AtomicU32>,
+    generations: Vec<u64>,
 }
 
 impl Entities {
-    pub fn create(&mut self) -> u32 {
-        if let Some(index) = self.free_indices.iter().next() {
-            self.free_indices.remove(index);
-            index as u32
-        } else {
+    pub fn create(&mut self) -> Entity {
+        assert!(self.indices.in_use() < u32::MAX as usize - 1);
+        let id = self.indices.new_id();
+
+        if id >= self.entity_allocated_count.load(atomic::Ordering::Relaxed) as usize {
             self.entity_allocated_count
-                .fetch_add(1, atomic::Ordering::Relaxed) as u32
+                .fetch_add(1, atomic::Ordering::Relaxed);
+            self.generations.push(0);
         }
+        self.generations[id] += 1;
+
+        Entity {
+            id: id as u32,
+            gen: self.generations[id],
+        }
+    }
+
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        self.generations
+            .get(entity.id as usize)
+            .map_or(false, |gen| *gen == entity.gen)
     }
 }
 
@@ -309,10 +468,10 @@ impl Resources {
 }
 
 pub struct Scene {
-    entities: Arc<Mutex<Entities>>,
-    entity_allocated_count: Arc<AtomicU32>,
+    entities: Arc<RwLock<Entities>>,
     resources: Arc<RwLock<Resources>>,
     comp_storages: Mutex<HashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
+    entity_allocated_count: Arc<AtomicU32>,
 }
 
 impl Scene {
@@ -320,13 +479,14 @@ impl Scene {
         let entity_count = Arc::new(AtomicU32::new(0));
 
         Scene {
-            entities: Arc::new(Mutex::new(Entities {
-                free_indices: Default::default(),
+            entities: Arc::new(RwLock::new(Entities {
+                indices: Default::default(),
                 entity_allocated_count: Arc::clone(&entity_count),
+                generations: vec![],
             })),
-            entity_allocated_count: entity_count,
             resources: Default::default(),
             comp_storages: Mutex::new(Default::default()),
+            entity_allocated_count: entity_count,
         }
     }
 
@@ -342,23 +502,28 @@ impl Scene {
             .unwrap();
     }
 
-    pub fn create_entity(&self) -> u32 {
-        self.entities.lock().unwrap().create()
+    /// When creating multiple entities, prefer doing it through `self.entities()`.
+    pub fn create_entity(&self) -> Entity {
+        self.entities.write().unwrap().create()
     }
 
-    pub fn remove_entities(&self, indices: &[u32]) {
-        self.entities
-            .lock()
-            .unwrap()
-            .free_indices
-            .extend(indices.iter().map(|&v| v as usize));
+    pub fn remove_entities(&self, entities: &[Entity]) {
+        let mut all_entities = self.entities.write().unwrap();
+
+        for entity in entities {
+            all_entities.indices.return_id(entity.id as usize).unwrap();
+        }
 
         for comps in self.comp_storages.lock().unwrap().values() {
             let mut comps = comps.write().unwrap();
 
-            for &index in indices {
-                if comps.contains(index) {
-                    comps.remove(index);
+            for &entity in entities {
+                if all_entities.is_alive(entity) {
+                    if comps.contains(entity.id) {
+                        comps.remove(entity);
+                    }
+                } else {
+                    panic!("Entity is not alive!");
                 }
             }
         }
@@ -368,7 +533,7 @@ impl Scene {
         Arc::clone(&self.resources)
     }
 
-    pub fn entities(&self) -> &Arc<Mutex<Entities>> {
+    pub fn entities(&self) -> &Arc<RwLock<Entities>> {
         &self.entities
     }
 
@@ -385,6 +550,7 @@ impl Scene {
 
         LockedStorage {
             raw: raw_storage,
+            entities: Arc::clone(&self.entities),
             _ty: Default::default(),
         }
     }

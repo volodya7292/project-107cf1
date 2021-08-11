@@ -6,7 +6,7 @@ mod transform;
 mod vertex_mesh;
 mod world_transform;
 
-use crate::render_engine::scene::{ComponentStorage, ComponentStorageMut};
+use crate::render_engine::scene::{ComponentStorage, ComponentStorageImpl, ComponentStorageMut, Entity};
 use crate::render_engine::Scene;
 pub use camera::Camera;
 pub use model_transform::ModelTransform;
@@ -17,7 +17,7 @@ pub use transform::Transform;
 pub use vertex_mesh::VertexMesh;
 pub use world_transform::WorldTransform;
 
-fn collect_children(children: &mut Vec<u32>, child_comps: &ComponentStorage<Children>, entity: u32) {
+fn collect_children(children: &mut Vec<Entity>, child_comps: &ComponentStorage<Children>, entity: Entity) {
     if let Some(childred_comp) = child_comps.get(entity) {
         for &child in &childred_comp.0 {
             collect_children(children, child_comps, child);
@@ -27,9 +27,9 @@ fn collect_children(children: &mut Vec<u32>, child_comps: &ComponentStorage<Chil
 }
 
 /// Remove entities and their children from the scene recursively.
-pub fn remove_entities(scene: &Scene, entities: &[u32]) {
+pub fn remove_entities(scene: &Scene, entities: &[Entity]) {
     let child_comps = scene.storage::<Children>();
-    let child_comps = child_comps.read().unwrap();
+    let child_comps = child_comps.read();
     let mut total_entites = entities.to_vec();
 
     for &entity in entities {
@@ -41,8 +41,8 @@ pub fn remove_entities(scene: &Scene, entities: &[u32]) {
 }
 
 pub fn set_children(
-    parent: u32,
-    children: &[u32],
+    parent: Entity,
+    children: &[Entity],
     parent_comps: &mut ComponentStorageMut<Parent>,
     children_comps: &mut ComponentStorageMut<Children>,
 ) {

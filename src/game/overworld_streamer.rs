@@ -1,7 +1,7 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::{cluster, OverworldCluster, LOD_LEVELS};
 use crate::game::overworld::{generator, Overworld};
-use crate::render_engine::{component, RenderEngine};
+use crate::render_engine::{component, scene, RenderEngine};
 use crate::utils::{HashMap, HashSet};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
@@ -39,7 +39,7 @@ struct SideOcclusionWorkSync {
 }
 
 struct RenderCluster {
-    entity: u32,
+    entity: scene::Entity,
     available: AtomicBool,
     changed: AtomicBool,
     // TODO OPTIMIZE: specify which side needs to be filled
@@ -49,7 +49,7 @@ struct RenderCluster {
 
 struct ClusterToRemove {
     cluster_pos: ClusterPos,
-    entity: u32,
+    entity: scene::Entity,
 }
 
 struct ClusterPosD {
@@ -356,7 +356,7 @@ impl OverworldStreamer {
                         self.clusters[i].insert(
                             pos,
                             RenderCluster {
-                                entity: u32::MAX,
+                                entity: scene::Entity::NULL,
                                 available: AtomicBool::new(false),
                                 changed: AtomicBool::new(false),
                                 needs_occlusion_fill: AtomicBool::new(true),
@@ -543,19 +543,24 @@ impl OverworldStreamer {
                 .clusters_to_remove
                 .iter()
                 .map(|v| v.entity)
-                .collect::<Vec<u32>>(),
+                .collect::<Vec<_>>(),
         );
 
-        let entities = scene.entities();
         let transform_comps = scene.storage::<component::Transform>();
         let renderer_comps = scene.storage::<component::Renderer>();
         let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let mut entities = entities.lock().unwrap();
-        let mut transform_comps = transform_comps.write().unwrap();
-        let mut renderer_comps = renderer_comps.write().unwrap();
-        let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
+        let mut entities = {
+            let entities = scene.entities();
+            let mut entities = entities.write().unwrap();
+            (0..self.clusters_to_add.len())
+                .map(|_| entities.create())
+                .collect::<Vec<_>>()
+        };
+        let mut transform_comps = transform_comps.write();
+        let mut renderer_comps = renderer_comps.write();
+        let mut vertex_mesh_comps = vertex_mesh_comps.write();
 
-        for cluster_pos in &self.clusters_to_add {
+        for (i, cluster_pos) in self.clusters_to_add.iter().enumerate() {
             let pos = &cluster_pos.pos;
             let transform_comp = component::Transform::new(
                 Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
@@ -564,7 +569,7 @@ impl OverworldStreamer {
             );
             let renderer_comp = component::Renderer::new(&renderer, self.cluster_mat_pipeline, false);
 
-            let entity = entities.create();
+            let entity = entities[i];
             transform_comps.set(entity, transform_comp);
             renderer_comps.set(entity, renderer_comp);
             self.clusters[cluster_pos.level].get_mut(pos).unwrap().entity = entity;

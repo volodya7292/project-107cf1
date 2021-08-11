@@ -1,7 +1,6 @@
 use nalgebra as na;
 use nalgebra_glm::Vec3;
 use std::marker::PhantomData;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;

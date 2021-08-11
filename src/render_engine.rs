@@ -9,6 +9,7 @@ pub mod scene;
 mod systems;
 
 use crate::render_engine::material_pipeline::UniformStruct;
+use crate::render_engine::scene::{ComponentStorageImpl, Entity};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
@@ -125,15 +126,15 @@ pub struct RenderEngine {
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
 
-    active_camera_desc: u32,
+    active_camera_desc: Entity,
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
     vertex_mesh_updates: VecDeque<VMBufferUpdate>,
     vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
-    renderables: HashMap<u32, Renderable>,
-    vertex_meshes: HashMap<u32, Arc<RawVertexMesh>>,
+    renderables: HashMap<Entity, Renderable>,
+    vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
     material_pipelines: Vec<MaterialPipeline>,
     uniform_buffer_basic: DeviceBuffer,
     device_buffers: SlotVec<DeviceBuffer>,
@@ -177,7 +178,7 @@ struct BufferUpdate1 {
 }
 
 struct VMBufferUpdate {
-    entity: u32,
+    entity: Entity,
     mesh: Arc<RawVertexMesh>,
 }
 
@@ -328,11 +329,11 @@ impl RenderEngine {
         &self.scene
     }
 
-    pub fn get_active_camera(&self) -> u32 {
+    pub fn get_active_camera(&self) -> Entity {
         self.active_camera_desc
     }
 
-    pub fn set_active_camera(&mut self, entity: u32) {
+    pub fn set_active_camera(&mut self, entity: Entity) {
         self.active_camera_desc = entity;
     }
 
@@ -517,7 +518,7 @@ impl RenderEngine {
         let t0 = Instant::now();
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
-            let camera_comps = camera_comps.read().unwrap();
+            let camera_comps = camera_comps.read();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
         let mut buffer_updates = vec![];
@@ -693,7 +694,7 @@ impl RenderEngine {
 
     fn record_depth_cmd_lists(
         &mut self,
-        renderable_ids: &[u32],
+        renderable_ids: &[Entity],
         camera: &component::Camera,
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
@@ -789,7 +790,7 @@ impl RenderEngine {
 
     fn record_g_cmd_lists(
         &self,
-        renderable_ids: &[u32],
+        renderable_ids: &[Entity],
         renderer_comps: &ComponentStorage<component::Renderer>,
     ) {
         let mat_pipelines = &self.material_pipelines;
@@ -867,18 +868,18 @@ impl RenderEngine {
 
         let camera = {
             let camera_comps = self.scene.storage::<component::Camera>();
-            let camera_comps = camera_comps.read().unwrap();
+            let camera_comps = camera_comps.read();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
         let world_transform_comp = self.scene.storage::<component::WorldTransform>();
-        let world_transform_comps = world_transform_comp.read().unwrap();
+        let world_transform_comps = world_transform_comp.read();
         let renderer_comp = self.scene.storage::<component::Renderer>();
-        let renderer_comps = renderer_comp.read().unwrap();
+        let renderer_comps = renderer_comp.read();
         // let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
-        // let vertex_mesh_comps = vertex_mesh_comp.read().unwrap();
+        // let vertex_mesh_comps = vertex_mesh_comp.read();
 
-        let renderable_ids: Vec<u32> = renderer_comps.entries().iter().map(|v| v as u32).collect();
+        let renderable_ids: Vec<Entity> = renderer_comps.entries().iter().collect();
         let object_count = renderable_ids.len() as u32;
 
         let frustum_visible_objects =
@@ -1260,7 +1261,7 @@ impl RenderEngine {
         {
             let entity = self.get_active_camera();
             let camera_comps = self.scene.storage::<component::Camera>();
-            let mut camera_comps = camera_comps.write().unwrap();
+            let mut camera_comps = camera_comps.write();
             let camera = camera_comps.get_mut(entity).unwrap();
             camera.set_aspect(new_size.0, new_size.1);
         }
@@ -1503,11 +1504,18 @@ pub fn new(
     max_texture_count: u32,
 ) -> Arc<Mutex<RenderEngine>> {
     let scene = Scene::new();
+    scene.storage::<component::Transform>().write().emit_events(true);
+    scene
+        .storage::<component::WorldTransform>()
+        .write()
+        .emit_events(true);
+    scene.storage::<component::Renderer>().write().emit_events(true);
+    scene.storage::<component::VertexMesh>().write().emit_events(true);
 
     // TODO: pipeline cache management
 
     let active_camera = scene.create_entity();
-    scene.storage::<component::Camera>().write().unwrap().set(
+    scene.storage::<component::Camera>().write().set(
         active_camera,
         component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
     );

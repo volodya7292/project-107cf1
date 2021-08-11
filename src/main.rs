@@ -169,15 +169,13 @@ fn main() {
     {
         let renderer = renderer.lock().unwrap();
         let scene = renderer.scene();
-        let mut entities = scene.entities().lock().unwrap();
+        let ent0 = scene.create_entity();
         let transform_comps = scene.storage::<component::Transform>();
-        let mut transform_comps = transform_comps.write().unwrap();
+        let mut transform_comps = transform_comps.write();
         let renderer_comps = scene.storage::<component::Renderer>();
-        let mut renderer_comps = renderer_comps.write().unwrap();
+        let mut renderer_comps = renderer_comps.write();
         let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let mut vertex_mesh_comps = vertex_mesh_comps.write().unwrap();
-
-        let ent0 = entities.create();
+        let mut vertex_mesh_comps = vertex_mesh_comps.write();
 
         transform_comps.set(ent0, component::Transform::default());
         renderer_comps.set(

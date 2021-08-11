@@ -1,10 +1,12 @@
-pub struct Parent(pub(in crate::render_engine) u32);
+use crate::render_engine::scene::Entity;
+
+pub struct Parent(pub(in crate::render_engine) Entity);
 
 #[derive(Default)]
-pub struct Children(pub(super) Vec<u32>);
+pub struct Children(pub(super) Vec<Entity>);
 
 impl Children {
-    pub fn get(&self) -> &[u32] {
+    pub fn get(&self) -> &[Entity] {
         &self.0
     }
 }
