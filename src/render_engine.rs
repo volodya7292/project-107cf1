@@ -13,9 +13,9 @@ use crate::render_engine::scene::{ComponentStorageImpl, Entity};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
-use crate::utils::index_alloc::IndexAlloc;
 use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, UInteger};
+use index_pool::IndexPool;
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
@@ -138,7 +138,7 @@ pub struct RenderEngine {
     material_pipelines: Vec<MaterialPipeline>,
     uniform_buffer_basic: DeviceBuffer,
     device_buffers: SlotVec<DeviceBuffer>,
-    uniform_buffer_offsets: IndexAlloc,
+    uniform_buffer_offsets: IndexPool,
 }
 
 #[derive(Copy, Clone)]
@@ -1984,7 +1984,7 @@ pub fn new(
         vertex_meshes: Default::default(),
         vertex_mesh_updates: Default::default(),
         vertex_mesh_pending_updates: vec![],
-        uniform_buffer_offsets: IndexAlloc::new(MAX_OBJECT_COUNT as usize),
+        uniform_buffer_offsets: IndexPool::new(),
     };
     renderer.on_resize(size);
 

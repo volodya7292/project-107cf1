@@ -3,8 +3,8 @@ use crate::render_engine::material_pipeline::MaterialPipeline;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity, Event};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Renderable, VMBufferUpdate};
-use crate::utils::index_alloc::IndexAlloc;
 use crate::utils::HashMap;
+use index_pool::IndexPool;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
 use std::collections::VecDeque;
@@ -22,7 +22,7 @@ pub(super) struct RendererCompEventsSystem<'a> {
     pub renderables: &'a mut HashMap<Entity, Renderable>,
     pub buffer_updates: &'a mut Vec<BufferUpdate>,
     pub material_pipelines: &'a [MaterialPipeline],
-    pub uniform_buffer_offsets: &'a mut IndexAlloc,
+    pub uniform_buffer_offsets: &'a mut IndexPool,
 }
 
 impl RendererCompEventsSystem<'_> {
@@ -103,7 +103,7 @@ impl RendererCompEventsSystem<'_> {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
                     let signature = &self.material_pipelines[renderer_comp.mat_pipeline as usize].signature;
 
-                    let uniform_buf_index = self.uniform_buffer_offsets.alloc().unwrap();
+                    let uniform_buf_index = self.uniform_buffer_offsets.new_id();
                     let mut renderable = Renderable {
                         buffers: smallvec![],
                         material_pipe: renderer_comp.mat_pipeline,
@@ -157,7 +157,9 @@ impl RendererCompEventsSystem<'_> {
                         self.g_per_pipeline_pools,
                         self.material_pipelines,
                     );
-                    self.uniform_buffer_offsets.free(renderable.uniform_buf_index);
+                    self.uniform_buffer_offsets
+                        .return_id(renderable.uniform_buf_index)
+                        .unwrap();
                     self.renderables.remove(&entity);
                 }
             }

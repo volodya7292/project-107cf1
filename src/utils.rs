@@ -1,4 +1,3 @@
-pub mod index_alloc;
 pub mod mesh_simplifier;
 pub mod noise;
 pub mod ordered_hashmap;
