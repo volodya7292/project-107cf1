@@ -18,7 +18,8 @@ use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::CString;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc, Mutex};
 use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
@@ -91,9 +92,17 @@ impl Drop for DeviceWrapper {
     }
 }
 
+pub struct NativeMemPool(pub(crate) vk_mem::AllocatorPool);
+
+unsafe impl Send for NativeMemPool {}
+unsafe impl Sync for NativeMemPool {}
+
 pub struct Device {
     pub(crate) wrapper: Arc<DeviceWrapper>,
     pub(crate) allocator: vk_mem::Allocator,
+    pub(crate) dev_pool: NativeMemPool,
+    pub(crate) host_pool: NativeMemPool,
+    pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Arc<Queue>>,
     pub(crate) pipeline_cache: Mutex<vk::PipelineCache>,
@@ -147,6 +156,10 @@ impl Device {
         &self.queues[queue_type.0 as usize]
     }
 
+    pub fn calc_real_device_mem_usage(&self) -> u64 {
+        self.total_used_dev_memory.load(atomic::Ordering::Relaxed) as u64
+    }
+
     fn create_buffer(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
@@ -170,10 +183,10 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .size(bytesize as vk::DeviceSize);
 
-        let preferred_flags = if mem_usage == vk_mem::MemoryUsage::CpuOnly {
-            vk::MemoryPropertyFlags::HOST_CACHED
+        let (pool, preferred_flags, used_dev_memory) = if mem_usage == vk_mem::MemoryUsage::CpuOnly {
+            (self.host_pool.0.clone(), vk::MemoryPropertyFlags::HOST_CACHED, 0)
         } else {
-            Default::default()
+            (self.dev_pool.0.clone(), Default::default(), bytesize)
         };
 
         let allocation_create_info = vk_mem::AllocationCreateInfo {
@@ -182,7 +195,7 @@ impl Device {
             required_flags: Default::default(),
             preferred_flags,
             memory_type_bits: 0,
-            pool: None,
+            pool: Some(pool),
             user_data: None,
         };
 
@@ -190,11 +203,16 @@ impl Device {
             .allocator
             .create_buffer(&buffer_info, &allocation_create_info)?;
 
+        self.total_used_dev_memory
+            .fetch_add(used_dev_memory as usize, atomic::Ordering::Relaxed);
+
         Ok((
             Arc::new(Buffer {
                 device: Arc::clone(self),
                 native: buffer,
                 allocation: alloc,
+                total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
+                used_dev_memory,
                 elem_size,
                 aligned_elem_size: aligned_elem_size as u64,
                 size,
@@ -302,7 +320,7 @@ impl Device {
             required_flags: Default::default(),
             preferred_flags: Default::default(),
             memory_type_bits: 0,
-            pool: None,
+            pool: Some(self.dev_pool.0.clone()),
             user_data: None,
         };
 
@@ -355,11 +373,16 @@ impl Device {
             vk::Sampler::default()
         };
 
+        self.total_used_dev_memory
+            .fetch_add(_alloc_info.get_size(), atomic::Ordering::Relaxed);
+
         let image_wrapper = Arc::new(ImageWrapper {
             device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
             allocation: alloc,
+            bytesize: _alloc_info.get_size() as u64,
+            total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
             owned_handle: true,
             ty: image_type,
             format,
@@ -572,6 +595,8 @@ impl Device {
                 _swapchain_wrapper: Some(Arc::clone(&swapchain_wrapper)),
                 native: native_image,
                 allocation: vk_mem::Allocation::null(),
+                bytesize: 0,
+                total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
                 owned_handle: false,
                 ty: Image::TYPE_2D,
                 format: Format(s_format.format),
@@ -1307,6 +1332,8 @@ impl Drop for Device {
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
         unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
 
+        self.allocator.destroy_pool(&self.host_pool.0).unwrap();
+        self.allocator.destroy_pool(&self.dev_pool.0).unwrap();
         self.allocator.destroy();
     }
 }

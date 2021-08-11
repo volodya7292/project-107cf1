@@ -1421,25 +1421,25 @@ impl RenderEngine {
                 .unwrap(),
         );
 
-        self.translucency_head_image = Some(
-            self.device
-                .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
-                .unwrap(),
-        );
+        // self.translucency_head_image = Some(
+        //     self.device
+        //         .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
+        //         .unwrap(),
+        // );
 
-        self.translucency_texel_image = Some(
-            self.device
-                .create_image_3d(
-                    Format::RG32_UINT, // color & depth
-                    ImageUsageFlags::STORAGE,
-                    (
-                        new_size.0,
-                        new_size.1,
-                        self.settings.translucency_max_depth as u32,
-                    ),
-                )
-                .unwrap(),
-        );
+        // self.translucency_texel_image = Some(
+        //     self.device
+        //         .create_image_3d(
+        //             Format::RG32_UINT, // color & depth
+        //             ImageUsageFlags::STORAGE,
+        //             (
+        //                 new_size.0,
+        //                 new_size.1,
+        //                 self.settings.translucency_max_depth as u32,
+        //             ),
+        //         )
+        //         .unwrap(),
+        // );
     }
 
     fn create_main_framebuffers(&mut self) {

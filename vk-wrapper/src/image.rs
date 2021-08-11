@@ -2,7 +2,8 @@ use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
 use ash::version::DeviceV1_0;
 use ash::vk;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImageUsageFlags(pub(crate) vk::ImageUsageFlags);
@@ -98,6 +99,8 @@ pub(crate) struct ImageWrapper {
     pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
     pub(crate) allocation: vk_mem::Allocation,
+    pub(crate) bytesize: u64,
+    pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) owned_handle: bool,
     pub(crate) ty: ImageType,
     pub(crate) format: Format,
@@ -239,6 +242,8 @@ impl Drop for ImageWrapper {
                 .allocator
                 .destroy_image(self.native, &self.allocation)
                 .unwrap();
+            self.total_used_dev_memory
+                .fetch_sub(self.bytesize as usize, atomic::Ordering::Relaxed);
         }
     }
 }

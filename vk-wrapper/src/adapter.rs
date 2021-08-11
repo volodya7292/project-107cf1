@@ -1,4 +1,4 @@
-use crate::device::DeviceWrapper;
+use crate::device::{DeviceWrapper, NativeMemPool};
 use crate::{
     device::{self, Device},
     surface::Surface,
@@ -115,6 +115,44 @@ impl Adapter {
         };
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
+        let (dev_pool, host_pool) = {
+            let dev_alloc_info = vk_mem::AllocationCreateInfo {
+                usage: vk_mem::MemoryUsage::GpuOnly,
+                ..Default::default()
+            };
+            let host_alloc_info = vk_mem::AllocationCreateInfo {
+                usage: vk_mem::MemoryUsage::CpuOnly,
+                flags: vk_mem::AllocationCreateFlags::MAPPED,
+                required_flags: vk::MemoryPropertyFlags::HOST_CACHED,
+                ..Default::default()
+            };
+            let dev_pool_info = vk_mem::AllocatorPoolCreateInfo {
+                memory_type_index: allocator
+                    .find_memory_type_index(u32::MAX, &dev_alloc_info)
+                    .unwrap(),
+                flags: vk_mem::AllocatorPoolCreateFlags::NONE,
+                // block_size: reserved_memory_size as usize,
+                block_size: 1024 * 1024 * 16,
+                min_block_count: 0,
+                max_block_count: 0,
+                frame_in_use_count: 0,
+            };
+            let host_pool_info = vk_mem::AllocatorPoolCreateInfo {
+                memory_type_index: allocator
+                    .find_memory_type_index(u32::MAX, &host_alloc_info)
+                    .unwrap(),
+                flags: vk_mem::AllocatorPoolCreateFlags::NONE,
+                block_size: 1024 * 1024 * 16,
+                // block_size: reserved_memory_size as usize,
+                min_block_count: 0,
+                max_block_count: 0,
+                frame_in_use_count: 0,
+            };
+            let dev_pool = allocator.create_pool(&dev_pool_info).unwrap();
+            let host_pool = allocator.create_pool(&host_pool_info).unwrap();
+            (dev_pool, host_pool)
+        };
+
         let pipeline_cache_info = vk::PipelineCacheCreateInfo::builder();
         let pipeline_cache = unsafe {
             device_wrapper
@@ -125,6 +163,9 @@ impl Adapter {
         Ok(Arc::new(Device {
             wrapper: device_wrapper,
             allocator,
+            dev_pool: NativeMemPool(dev_pool),
+            host_pool: NativeMemPool(host_pool),
+            total_used_dev_memory: Arc::new(Default::default()),
             swapchain_khr,
             queues,
             pipeline_cache: Mutex::new(pipeline_cache),

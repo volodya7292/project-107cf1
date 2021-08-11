@@ -2,7 +2,8 @@ use crate::{AccessFlags, Device, Queue};
 use ash::vk;
 use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc};
 use std::{marker::PhantomData, mem, ptr};
 
 #[derive(Copy, Clone)]
@@ -22,6 +23,8 @@ pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
     pub(crate) allocation: vk_mem::Allocation,
+    pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
+    pub(crate) used_dev_memory: u64,
     pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
@@ -48,6 +51,8 @@ impl Drop for Buffer {
             .allocator
             .destroy_buffer(self.native, &self.allocation)
             .unwrap();
+        self.total_used_dev_memory
+            .fetch_sub(self.used_dev_memory as usize, atomic::Ordering::Relaxed);
     }
 }
 
