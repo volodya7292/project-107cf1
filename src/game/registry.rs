@@ -4,6 +4,7 @@ use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::TexturedBlockModel;
 use entity_data::EntityStorageLayout;
+use std::convert::TryInto;
 
 pub struct Registry {
     structures: Vec<Structure>,
@@ -34,14 +35,14 @@ impl Registry {
         &mut self.cluster_layout
     }
 
-    pub fn register_block_model(&mut self, block_model: BlockModel) -> u32 {
+    pub fn register_block_model(&mut self, block_model: BlockModel) -> u16 {
         self.models.push(block_model);
-        (self.models.len() - 1) as u32
+        (self.models.len() - 1).try_into().unwrap()
     }
 
-    pub fn register_textured_block_model(&mut self, textured_block_model: TexturedBlockModel) -> u32 {
+    pub fn register_textured_block_model(&mut self, textured_block_model: TexturedBlockModel) -> u16 {
         self.textured_models.push(textured_block_model);
-        (self.textured_models.len() - 1) as u32
+        (self.textured_models.len() - 1).try_into().unwrap()
     }
 
     pub fn register_block(&mut self, block: Block) -> u32 {
@@ -54,11 +55,11 @@ impl Registry {
         (self.structures.len() - 1) as u32
     }
 
-    pub fn get_block_model(&self, id: u32) -> Option<&BlockModel> {
+    pub fn get_block_model(&self, id: u16) -> Option<&BlockModel> {
         self.models.get(id as usize)
     }
 
-    pub fn get_textured_block_model(&self, id: u32) -> Option<&TexturedBlockModel> {
+    pub fn get_textured_block_model(&self, id: u16) -> Option<&TexturedBlockModel> {
         self.textured_models.get(id as usize)
     }
 

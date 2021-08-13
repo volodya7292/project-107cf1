@@ -454,6 +454,10 @@ impl Entities {
             .get(entity.id as usize)
             .map_or(false, |gen| *gen == entity.gen)
     }
+
+    pub fn len(&self) -> u32 {
+        self.indices.in_use() as u32
+    }
 }
 
 #[derive(Default)]
@@ -511,7 +515,11 @@ impl Scene {
         let mut all_entities = self.entities.write().unwrap();
 
         for entity in entities {
-            all_entities.indices.return_id(entity.id as usize).unwrap();
+            if all_entities.is_alive(*entity) {
+                all_entities.indices.return_id(entity.id as usize).unwrap();
+            } else {
+                panic!("Entity is not alive!");
+            }
         }
 
         for comps in self.comp_storages.lock().unwrap().values() {

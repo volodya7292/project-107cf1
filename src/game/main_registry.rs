@@ -47,7 +47,7 @@ impl MainRegistry {
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(tex_default, Default::default()); 6],
             ));
-            Block::new(arch, tex_model)
+            Block::new(arch as u16, tex_model)
         };
 
         // Structures

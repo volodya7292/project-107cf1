@@ -1,6 +1,6 @@
 use std::iter::Filter;
 use std::slice::Iter;
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{atomic, Arc, Mutex, RwLock};
 
 use nalgebra_glm as glm;
 use nalgebra_glm::{I64Vec3, Vec3};
@@ -41,7 +41,7 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
 }
 
 pub struct OverworldCluster {
-    pub cluster: Mutex<Cluster>,
+    pub cluster: RwLock<Cluster>,
     pub creation_time_secs: u64,
     pub generated: AtomicBool,
     pub generating: AtomicBool,

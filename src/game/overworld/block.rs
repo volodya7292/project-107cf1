@@ -9,39 +9,39 @@ use crate::utils::{AllSame, AllSameBy};
 
 #[derive(Copy, Clone)]
 pub struct Block {
-    archetype: u32,
-    textured_model: u32,
-    is_none: bool,
+    archetype: u16,
+    textured_model: u16,
+    is_empty: bool,
 }
 
 impl Default for Block {
     fn default() -> Self {
         Block {
-            archetype: u32::MAX,
-            textured_model: u32::MAX,
-            is_none: true,
+            archetype: u16::MAX,
+            textured_model: u16::MAX,
+            is_empty: true,
         }
     }
 }
 
 impl Block {
-    pub fn new(archetype: u32, textured_model: u32) -> Block {
+    pub fn new(archetype: u16, textured_model: u16) -> Block {
         Block {
             archetype,
             textured_model,
-            is_none: false,
+            is_empty: false,
         }
     }
 
-    pub fn archetype(&self) -> u32 {
+    pub fn archetype(&self) -> u16 {
         self.archetype
     }
 
-    pub fn textured_model(&self) -> u32 {
+    pub fn textured_model(&self) -> u16 {
         self.textured_model
     }
 
-    pub fn is_none(&self) -> bool {
-        self.is_none
+    pub fn is_empty(&self) -> bool {
+        self.is_empty
     }
 }

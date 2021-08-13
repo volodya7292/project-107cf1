@@ -31,15 +31,18 @@ impl Facing {
         unsafe { mem::transmute(v) }
     }
 
-    pub fn from_direction(dir: I32Vec3) -> Facing {
-        assert_eq!(dir.sum().abs(), 1);
-        Self::from_u8(
-            (dir.x == 1) as u8
-                + dir.y.abs() as u8 * 2
-                + (dir.y == 1) as u8
-                + dir.z.abs() as u8 * 4
-                + (dir.z == 1) as u8,
-        )
+    pub fn from_direction(dir: I32Vec3) -> Option<Facing> {
+        if dir.sum().abs() != 1 {
+            None
+        } else {
+            Some(Self::from_u8(
+                (dir.x == 1) as u8
+                    + dir.y.abs() as u8 * 2
+                    + (dir.y == 1) as u8
+                    + dir.z.abs() as u8 * 4
+                    + (dir.z == 1) as u8,
+            ))
+        }
     }
 
     pub fn mirror(&self) -> Facing {

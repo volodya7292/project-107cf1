@@ -115,6 +115,8 @@ impl Adapter {
         };
         let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
 
+        // TODO: use `reserved_memory_size` to reduce stutters due to lots of vkAllocateMemory
+
         let (dev_pool, host_pool) = {
             let dev_alloc_info = vk_mem::AllocationCreateInfo {
                 usage: vk_mem::MemoryUsage::GpuOnly,

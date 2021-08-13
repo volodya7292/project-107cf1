@@ -12,10 +12,22 @@ pub struct Vertex {
     pub position: Vec3,
     pub normal: Vec3,
     pub tex_uv: Vec2,
+    // pub data: u32,
     pub ao: f32,
     pub material_id: u32,
 }
 vertex_impl!(Vertex, position, normal, tex_uv, ao, material_id);
+
+impl Vertex {
+    // pub fn new(pos: Vec3, tex_uv: Vec2, ao: bool, material_id: u16) -> Self {
+    //     Vertex {
+    //         position: pos,
+    //         tex_uv,
+    //         ao: 0.0,
+    //         material_id: 0,
+    //     }
+    // }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Quad {
