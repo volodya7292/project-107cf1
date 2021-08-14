@@ -18,8 +18,8 @@ use std::time::Instant;
 use vk_wrapper::Device;
 use winit::event::VirtualKeyCode::A;
 
-pub const LOD0_RANGE: usize = 128;
-pub const INVISIBLE_LOAD_RANGE: usize = 0;
+pub const LOD0_RANGE: usize = 256;
+pub const INVISIBLE_LOAD_RANGE: usize = 128;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct ClusterPos {
@@ -44,6 +44,8 @@ struct SideOcclusionWorkSync {
 
 struct AbstractCluster {
     occluded: bool,
+    occluded_new: bool,
+    occlusion_outdated: bool,
     empty: AtomicBool,
     ready: AtomicBool,
 }
@@ -104,11 +106,11 @@ fn look_cube_directions(dir: DVec3) -> [I32Vec3; 3] {
     ]
 }
 
-fn get_side_clusters_by_facing(cluster_pos: ClusterPos, facing: Facing) -> SmallVec<[ClusterPos; 24]> {
+fn get_side_clusters_by_facing(cluster_pos: ClusterPos, facing: Facing) -> SmallVec<[ClusterPos; 6]> {
     let level = cluster_pos.level;
     let pos = cluster_pos.pos;
     let dir = facing.direction();
-    let mut neighbours = SmallVec::<[ClusterPos; 24]>::new();
+    let mut neighbours = SmallVec::<[ClusterPos; 6]>::new();
 
     let cluster_size1 = cluster_size(level as u32) as i64;
     let cluster_size2 = cluster_size(level as u32 + 1) as i64;
@@ -177,12 +179,6 @@ fn check_cluster_vis_occlusion(
         return false;
     }
 
-    // if let Some(acluster) = aclusters[level as usize].get(&pos) {
-    //     if acluster.empty.load(atomic::Ordering::Relaxed) {
-    //         return true;
-    //     }
-    // }
-
     let look_dirs = look_cube_directions(dir_to_cluster_unnorm);
     let mut edges_occluded = true;
 
@@ -201,17 +197,9 @@ fn check_cluster_vis_occlusion(
                     ((rcluster.edge_occlusion.load(atomic::Ordering::Relaxed) >> (facing.mirror() as u8)) & 1)
                         == 1
                 } else {
-                    let acluster = aclusters[p.level as usize].get(&p.pos);
-
-                    if let Some(acluster) = acluster {
-                        let empty = acluster.empty.load(atomic::Ordering::Relaxed);
-                        let ready = acluster.ready.load(atomic::Ordering::Relaxed);
-                        let occluded = acluster.occluded;
-                        occluded
-                        // aclusters[p.level].contains_key(&p.pos) //&& !empty
-                    } else {
-                        false
-                    }
+                    aclusters[p.level].get(&p.pos).map_or(false, |acluster| {
+                        acluster.occluded && !acluster.occlusion_outdated
+                    })
                 };
                 edges_occluded &= edge_occluded;
 
@@ -237,6 +225,12 @@ impl OverworldStreamer {
         self.render_distance = render_distance
             .min(Self::MAX_RENDER_DISTANCE)
             .max(Self::MIN_RENDER_DISTANCE);
+
+        for i in 0..LOD_LEVELS {
+            for (_, cl) in &mut self.aclusters[i] {
+                cl.occlusion_outdated = true;
+            }
+        }
     }
 
     fn find_side_clusters(
@@ -466,27 +460,10 @@ impl OverworldStreamer {
             self.clusters_to_remove.clear();
             self.clusters_to_add.clear();
 
-            let mut occlusions = vec![HashMap::<I64Vec3, bool>::new(); LOD_LEVELS];
-
-            for i in 0..LOD_LEVELS {
-                for lpos in &cluster_layout[i] {
-                    let pos = lpos * cluster_size(i as u32) as i64;
-                    let occluded = check_cluster_vis_occlusion(
-                        &self.clusters,
-                        &self.aclusters,
-                        &cluster_layout,
-                        i as u32,
-                        pos,
-                        self.stream_pos,
-                    );
-                    occlusions[i].insert(pos, occluded);
-                }
-            }
-
             for i in 0..LOD_LEVELS {
                 // Remove unnecessary clusters
-
                 let clusters = &self.clusters;
+                let aclusters = &mut self.aclusters;
                 let clusters_to_remove = &mut self.clusters_to_remove;
 
                 // TODO: remove code duplicates
@@ -496,27 +473,29 @@ impl OverworldStreamer {
                     //     || cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64)))
 
                     let lpos = pos / cluster_size(i as u32) as i64;
-                    let in_layout = cluster_layout[i].contains(&lpos);
+                    let inside_layout = cluster_layout[i].contains(&lpos);
 
-                    if !in_layout {
+                    if !inside_layout {
                         clusters_to_remove.push(ClusterToRemove {
                             cluster_pos: ClusterPos { level: i, pos: *pos },
                             entity: clusters[i][pos].entity,
                         });
                     }
-                    in_layout
+                    inside_layout
                 });
 
-                self.aclusters[i].retain(|pos, ocluster| {
+                aclusters[i].retain(|pos, acluster| {
                     let lpos = pos / cluster_size(i as u32) as i64;
-                    let occluded = *occlusions[i].get(&pos).unwrap_or(&false);
-                    let in_layout = cluster_layout[i].contains(&lpos);
+                    let occluded = acluster.occluded_new;
+                    let inside_layout = cluster_layout[i].contains(&lpos);
+                    let empty = acluster.empty.load(atomic::Ordering::Relaxed);
+                    let ready = acluster.ready.load(atomic::Ordering::Relaxed);
 
                     // TODO: add this check
                     // if (curr_time_secs - ocluster.creation_time_secs) < 5
                     //     || cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64)))
 
-                    if !in_layout || occluded {
+                    if !inside_layout || occluded || (empty && ready) {
                         if overworld.loaded_clusters[i].remove(pos).is_some() {
                             clusters_to_remove.push(ClusterToRemove {
                                 cluster_pos: ClusterPos { level: i, pos: *pos },
@@ -524,7 +503,7 @@ impl OverworldStreamer {
                             });
                         }
                     }
-                    in_layout
+                    inside_layout
                 });
 
                 // Add missing clusters
@@ -535,13 +514,21 @@ impl OverworldStreamer {
                     if let hash_map::Entry::Vacant(entry) = self.aclusters[i].entry(pos) {
                         entry.insert(AbstractCluster {
                             occluded: false,
+                            occluded_new: false,
+                            occlusion_outdated: false,
                             empty: AtomicBool::new(true),
                             ready: AtomicBool::new(false),
                         });
                     }
-                    self.aclusters[i].get_mut(&pos).unwrap().occluded = occlusions[i][&pos];
 
-                    if occlusions[i][&pos] {
+                    let acluster = self.aclusters[i].get_mut(&pos).unwrap();
+                    acluster.occluded = acluster.occluded_new;
+                    acluster.occlusion_outdated = false;
+
+                    if acluster.occluded
+                        || (acluster.empty.load(atomic::Ordering::Relaxed)
+                            && acluster.ready.load(atomic::Ordering::Relaxed))
+                    {
                         continue;
                     }
 
@@ -568,6 +555,21 @@ impl OverworldStreamer {
                         );
                         self.clusters_to_add.push(ClusterPos::new(i, pos));
                     }
+                }
+            }
+
+            for i in 0..LOD_LEVELS {
+                for lpos in &cluster_layout[i] {
+                    let pos = lpos * cluster_size(i as u32) as i64;
+                    let occluded = check_cluster_vis_occlusion(
+                        &self.clusters,
+                        &self.aclusters,
+                        &cluster_layout,
+                        i as u32,
+                        pos,
+                        self.stream_pos,
+                    );
+                    self.aclusters[i].get_mut(&pos).unwrap().occluded_new = occluded;
                 }
             }
         }

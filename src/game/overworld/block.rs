@@ -11,7 +11,6 @@ use crate::utils::{AllSame, AllSameBy};
 pub struct Block {
     archetype: u16,
     textured_model: u16,
-    is_empty: bool,
 }
 
 impl Default for Block {
@@ -19,7 +18,6 @@ impl Default for Block {
         Block {
             archetype: u16::MAX,
             textured_model: u16::MAX,
-            is_empty: true,
         }
     }
 }
@@ -29,7 +27,6 @@ impl Block {
         Block {
             archetype,
             textured_model,
-            is_empty: false,
         }
     }
 
@@ -42,6 +39,6 @@ impl Block {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.is_empty
+        self.textured_model == u16::MAX
     }
 }

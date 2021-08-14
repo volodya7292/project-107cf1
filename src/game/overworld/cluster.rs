@@ -155,7 +155,10 @@ impl Sector {
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
 
-        self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = Occluder::new(true, true, true, true, true, true); // TODO
+        if !block.is_empty() {
+            self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] =
+                Occluder::new(true, true, true, true, true, true); // TODO
+        }
 
         let mut side_changed = self.side_changed;
         side_changed[0] |= pos.x == 0;

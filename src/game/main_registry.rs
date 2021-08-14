@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub struct MainRegistry {
     registry: Arc<Registry>,
     structure_world: u32,
+    block_empty: Block,
     block_default: Block,
 }
 
@@ -41,6 +42,10 @@ impl MainRegistry {
 
         // Blocks
         // ----------------------------------------------------------------------------------------------------
+        let block_empty = {
+            let arch = cluster_layout.add_archetype().build();
+            Block::new(arch as u16, u16::MAX)
+        };
         let block_default = {
             let arch = cluster_layout.add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
@@ -62,6 +67,7 @@ impl MainRegistry {
         Arc::new(MainRegistry {
             registry: Arc::new(reg),
             structure_world,
+            block_empty,
             block_default,
         })
     }
@@ -71,5 +77,5 @@ impl MainRegistry {
     }
 
     add_getters! { u32, structure_world }
-    add_getters! { Block, block_default }
+    add_getters! { Block, block_empty block_default }
 }

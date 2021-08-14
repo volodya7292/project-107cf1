@@ -157,7 +157,7 @@ impl Game {
                         println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
                     }
 
-                    let p = DVec3::new(self.player_pos.x, 0.0, self.player_pos.z);
+                    let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
                     // let p = DVec3::new(43.0, 0.0, -44.0);
 
                     if self.change_stream_pos {

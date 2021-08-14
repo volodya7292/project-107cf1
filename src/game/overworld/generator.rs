@@ -1,4 +1,5 @@
 use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::block::Block;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
 use crate::utils::noise::ParamNoise;
@@ -7,6 +8,8 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U32Vec3, Vec3};
 use noise::Seedable;
 use simdnoise::NoiseBuilder;
+
+// Note: always set empty blocks to potentially mark the whole cluster as empty
 
 pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos: I64Vec3) {
     let entry_size = cluster.entry_size();
@@ -25,6 +28,7 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
     // .with_freq(1.0 / 50.0 * entry_size as f32)
     // .generate();
 
+    let block_empty = main_registry.block_empty();
     let block_default = main_registry.block_default();
 
     let sample = |point: DVec3, freq: f64| -> f64 { noise.sample(point, freq, 1.0, 0.5) };
@@ -41,6 +45,8 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
 
                 if n < 0.5 {
                     cluster.set_block(xyz, block_default).build();
+                } else {
+                    cluster.set_block(xyz, block_empty).build();
                 }
 
                 // if posf.x.abs().max(posf.z.abs()) < posf.y {
