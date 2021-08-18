@@ -340,6 +340,8 @@ impl OverworldStreamer {
                 if lock0.is_ok() && lock1.is_ok() {
                     let cluster = lock0.unwrap();
                     let mut side_cluster = lock1.unwrap();
+                    let cluster = cluster.as_ref().unwrap();
+                    let side_cluster = side_cluster.as_mut().unwrap();
 
                     let offset = pair.0.pos - pair.1.pos;
                     side_cluster.paste_outer_side_occlusion(&cluster, glm::convert(offset));
@@ -508,8 +510,7 @@ impl OverworldStreamer {
 
                 // Add missing clusters
                 for lpos in &cluster_layout[i] {
-                    let node_size = 2_u32.pow(i as u32);
-                    let pos = lpos * (cluster::SIZE as i64) * (node_size as i64);
+                    let pos = lpos * cluster_size(i as u32) as i64;
 
                     if let hash_map::Entry::Vacant(entry) = self.aclusters[i].entry(pos) {
                         entry.insert(AbstractCluster {
@@ -533,10 +534,8 @@ impl OverworldStreamer {
                     }
 
                     if let hash_map::Entry::Vacant(entry) = overworld.loaded_clusters[i].entry(pos) {
-                        let cluster = cluster::new(&self.registry.registry(), &self.device, node_size);
-
                         entry.insert(Arc::new(OverworldCluster {
-                            cluster: RwLock::new(cluster),
+                            cluster: RwLock::new(None),
                             creation_time_secs: curr_time_secs,
                             generated: AtomicBool::new(false),
                             generating: AtomicBool::new(false),
@@ -599,7 +598,9 @@ impl OverworldStreamer {
 
         // Generate clusters
         {
-            let max_clusters_in_process = num_cpus::get().saturating_sub(2).max(1) as u32;
+            // TODO: utilize maximum amount of available cpu resources in this threadpool
+            // TODO: reduce stalls (by waiting for some clusters generation?) before update()
+            let max_clusters_in_process = rayon::current_num_threads() as u32;
 
             'l: for (i, level) in sorted_layout.iter().enumerate() {
                 for lpos in level {
@@ -616,16 +617,22 @@ impl OverworldStreamer {
                         break 'l;
                     }
 
-                    if !ocluster.generated.load(atomic::Ordering::Acquire) {
+                    if !ocluster.generating.load(atomic::Ordering::Relaxed)
+                        && !ocluster.generated.load(atomic::Ordering::Acquire)
+                    {
                         let ocluster = Arc::clone(ocluster);
                         let pos = lpos.pos;
+                        let node_size = 2_u32.pow(i as u32);
                         let main_registry = Arc::clone(&self.registry);
+                        let device = Arc::clone(&self.device);
 
                         ocluster.generating.store(true, atomic::Ordering::Relaxed);
                         clusters_in_process.fetch_add(1, atomic::Ordering::Relaxed);
                         rayon::spawn(move || {
-                            let mut cluster = ocluster.cluster.write().unwrap();
+                            let mut cluster = cluster::new(main_registry.registry(), &device, node_size);
                             generator::generate_cluster(&mut cluster, &main_registry, pos);
+                            *ocluster.cluster.write().unwrap() = Some(cluster);
+
                             ocluster.generating.store(false, atomic::Ordering::Release);
                             ocluster.generated.store(true, atomic::Ordering::Release);
                             clusters_in_process.fetch_sub(1, atomic::Ordering::Release);
@@ -654,6 +661,10 @@ impl OverworldStreamer {
 
                         let cluster_pos = ClusterPos::new(i, *pos);
                         let cluster = ocluster.cluster.read().unwrap();
+                        if cluster.is_none() {
+                            return;
+                        }
+                        let cluster = cluster.as_ref().unwrap();
                         let cluster_changed = cluster.changed();
 
                         if cluster_changed {
@@ -693,9 +704,11 @@ impl OverworldStreamer {
 
             // Collect changes
             for (i, level) in overworld.loaded_clusters.iter().enumerate() {
-                for (pos, _) in level {
+                for (pos, ocluster) in level {
                     let rcluster = &self.clusters[i][pos];
-                    if !rcluster.available.load(atomic::Ordering::Relaxed) {
+                    if !rcluster.available.load(atomic::Ordering::Relaxed)
+                        || ocluster.cluster.read().unwrap().is_none()
+                    {
                         continue;
                     }
 
@@ -756,7 +769,7 @@ impl OverworldStreamer {
                         {
                             let mut cluster = ocluster.cluster.write().unwrap();
 
-                            cluster.update_mesh();
+                            cluster.as_mut().unwrap().update_mesh();
                             rcluster.mesh_changed.store(true, atomic::Ordering::Relaxed);
                             rcluster.changed.store(false, atomic::Ordering::Relaxed);
 
@@ -771,8 +784,8 @@ impl OverworldStreamer {
 
         let c = overworld.loaded_clusters.iter().fold(0, |i, v| {
             i + v.iter().fold(0, |i, v| {
-                i + if v.1.cluster.read().unwrap().vertex_mesh().vertex_count() > 0 {
-                    1
+                i + if let Some(cl) = v.1.cluster.read().unwrap().as_ref() {
+                    (cl.vertex_mesh().vertex_count() > 0) as u32
                 } else {
                     0
                 }
@@ -838,10 +851,8 @@ impl OverworldStreamer {
                 let render_cluster = &self.clusters[i][pos];
                 if render_cluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
                     let cluster = overworld_cluster.cluster.read().unwrap();
-                    vertex_mesh_comps.set(
-                        render_cluster.entity,
-                        component::VertexMesh::new(&cluster.vertex_mesh().raw()),
-                    );
+                    let mesh = cluster.as_ref().unwrap().vertex_mesh();
+                    vertex_mesh_comps.set(render_cluster.entity, component::VertexMesh::new(&mesh.raw()));
                 }
             }
         }

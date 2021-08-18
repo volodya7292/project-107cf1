@@ -197,6 +197,17 @@ impl RawComponentStorage {
     }
 }
 
+impl Drop for RawComponentStorage {
+    fn drop(&mut self) {
+        if self.needs_drop {
+            for index in &self.available {
+                let index_b = index * self.elem_size;
+                (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
+            }
+        }
+    }
+}
+
 pub struct Entries<'a> {
     set: BitSet,
     entities: &'a Entities,
@@ -257,6 +268,10 @@ mod private {
 }
 
 pub trait ComponentStorageImpl<T>: private::RawComponentStorageImpl {
+    fn len(&self) -> usize {
+        self.raw().aval_count as usize
+    }
+
     fn contains(&self, entity: Entity) -> bool {
         self.entities().is_alive(entity) && self.raw().contains(entity.id)
     }

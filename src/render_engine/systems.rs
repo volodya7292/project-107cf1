@@ -3,7 +3,7 @@ use crate::render_engine::material_pipeline::MaterialPipeline;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity, Event};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Renderable, VMBufferUpdate};
-use crate::utils::HashMap;
+use crate::utils::{HashMap, LruCache};
 use index_pool::IndexPool;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
@@ -175,20 +175,17 @@ impl RendererCompEventsSystem<'_> {
 pub(super) struct VertexMeshCompEventsSystem<'a> {
     pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub vertex_mesh_comps: scene::LockedStorage<component::VertexMesh>,
-    pub buffer_updates: &'a mut VecDeque<VMBufferUpdate>,
+    pub buffer_updates: &'a mut LruCache<Entity, Arc<RawVertexMesh>>,
 }
 
 impl VertexMeshCompEventsSystem<'_> {
     fn vertex_mesh_comp_modified(
         entity: Entity,
         vertex_mesh_comp: &component::VertexMesh,
-        buffer_updates: &mut VecDeque<VMBufferUpdate>,
+        buffer_updates: &mut LruCache<Entity, Arc<RawVertexMesh>>,
     ) {
         let vertex_mesh = &vertex_mesh_comp.0;
-        buffer_updates.push_back(VMBufferUpdate {
-            entity,
-            mesh: Arc::clone(vertex_mesh),
-        });
+        buffer_updates.put(entity, Arc::clone(vertex_mesh));
     }
 
     pub fn run(&mut self) {
@@ -439,7 +436,7 @@ pub(super) struct BufferUpdateSystem<'a> {
     pub device: Arc<vkw::Device>,
     pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
-    pub buffer_updates: &'a mut VecDeque<VMBufferUpdate>,
+    pub buffer_updates: &'a mut LruCache<Entity, Arc<RawVertexMesh>>,
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
 }
 
@@ -465,11 +462,10 @@ impl BufferUpdateSystem<'_> {
             let mut graphics_barriers = Vec::with_capacity(transfer_barriers.len());
 
             for _ in 0..self.buffer_updates.len() {
-                let update = self.buffer_updates.pop_front().unwrap();
-                let mesh = &update.mesh;
+                let (entity, mesh) = self.buffer_updates.pop_lru().unwrap();
 
                 if mesh.staging_buffer.is_none() {
-                    self.pending_buffer_updates.push(update);
+                    self.pending_buffer_updates.push(VMBufferUpdate { entity, mesh });
                     continue;
                 }
 
@@ -493,7 +489,7 @@ impl BufferUpdateSystem<'_> {
                 );
 
                 total_copy_size += src_buffer.size();
-                self.pending_buffer_updates.push(update);
+                self.pending_buffer_updates.push(VMBufferUpdate { entity, mesh });
 
                 if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
                     break;

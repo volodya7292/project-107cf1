@@ -41,7 +41,7 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
 }
 
 pub struct OverworldCluster {
-    pub cluster: RwLock<Cluster>,
+    pub cluster: RwLock<Option<Cluster>>,
     pub creation_time_secs: u64,
     pub generated: AtomicBool,
     pub generating: AtomicBool,

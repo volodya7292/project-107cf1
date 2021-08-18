@@ -13,6 +13,7 @@ pub use slice_split::SliceSplitImpl;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
+pub type LruCache<K, V> = lru::LruCache<K, V, ahash::RandomState>;
 
 pub const fn is_pow_of_2(n: u64) -> bool {
     n != 0 && ((n & (n - 1)) == 0)

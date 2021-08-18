@@ -14,7 +14,7 @@ use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use crate::utils::slot_vec::SlotVec;
-use crate::utils::{HashMap, UInteger};
+use crate::utils::{HashMap, LruCache, UInteger};
 use index_pool::IndexPool;
 use ktx::KtxInfo;
 use lazy_static::lazy_static;
@@ -130,7 +130,7 @@ pub struct RenderEngine {
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
-    vertex_mesh_updates: VecDeque<VMBufferUpdate>,
+    vertex_mesh_updates: LruCache<Entity, Arc<RawVertexMesh>>,
     vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
     renderables: HashMap<Entity, Renderable>,
@@ -1982,7 +1982,7 @@ pub fn new(
         uniform_buffer_basic,
         device_buffers: SlotVec::new(),
         vertex_meshes: Default::default(),
-        vertex_mesh_updates: Default::default(),
+        vertex_mesh_updates: LruCache::unbounded(),
         vertex_mesh_pending_updates: vec![],
         uniform_buffer_offsets: IndexPool::new(),
     };
