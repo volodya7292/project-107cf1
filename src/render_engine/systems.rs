@@ -7,7 +7,6 @@ use crate::utils::{HashMap, LruCache};
 use index_pool::IndexPool;
 use nalgebra as na;
 use smallvec::{smallvec, SmallVec};
-use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::{mem, slice};

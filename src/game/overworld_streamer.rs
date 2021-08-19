@@ -357,7 +357,7 @@ impl OverworldStreamer {
         }
     }
 
-    // TODO: make output positions real; don't forget to change that in usage of layout
+    // TODO: make output positions in real units; don't forget to change that in usage of layout
     fn calc_cluster_layout(&self) -> [HashSet<I64Vec3>; LOD_LEVELS] {
         const R: i64 = (LOD0_RANGE / cluster::SIZE) as i64;
         const D: i64 = R * 2 + 1;
@@ -365,6 +365,18 @@ impl OverworldStreamer {
         let mut cluster_layout = vec![HashSet::with_capacity(512); LOD_LEVELS];
         let mut occupancy_masks = [[[DenseBitSet::new(); D as usize]; D as usize]; D as usize];
         let mut fill_masks = [[[DenseBitSet::new(); D as usize]; D as usize]; D as usize];
+
+        fn min_dist(cpos: ClusterPos, spos: DVec3) -> f64 {
+            let size = cluster_size(cpos.level as u32) as i64;
+            let center: DVec3 = glm::convert(cpos.pos.add_scalar(size / 2));
+            let halfsize = (size / 2) as f64;
+            let xyz = spos - center;
+
+            ((xyz.x.abs() - halfsize).max(0.0).powi(2)
+                + (xyz.y.abs() - halfsize).max(0.0).powi(2)
+                + (xyz.z.abs() - halfsize).max(0.0).powi(2))
+            .sqrt()
+        }
 
         for i in 0..LOD_LEVELS {
             let cluster_size = cluster_size(i as u32) as i64;
@@ -378,8 +390,7 @@ impl OverworldStreamer {
                     for z in 0..D {
                         let xyz = I64Vec3::new(x, y, z);
                         let pos = stream_pos_i0 + xyz.add_scalar(-R);
-                        let center = (pos * cluster_size).add_scalar(cluster_size / 2);
-                        let dist = glm::distance(&self.stream_pos, &glm::convert(center));
+                        let dist = min_dist(ClusterPos::new(i, pos * cluster_size), self.stream_pos);
 
                         if dist <= r
                             && dist <= (self.render_distance as f64)
@@ -391,12 +402,10 @@ impl OverworldStreamer {
                             for j in (i + 1)..LOD_LEVELS {
                                 let stream_pos_n = cluster_aligned_pos(self.stream_pos, j as u32 - 1);
                                 let n = stream_pos_n.map(|v| v.rem_euclid(2));
-                                p = (p.add_scalar(R) + n) / 2;
 
-                                if p >= I64Vec3::from_element(0) && p < I64Vec3::from_element(D) {
-                                    occupancy_masks[p[0] as usize][p[1] as usize][p[2] as usize]
-                                        .set_bit(j, true);
-                                }
+                                p = (p.add_scalar(R) + n) / 2;
+                                occupancy_masks[p[0] as usize][p[1] as usize][p[2] as usize].set_bit(j, true);
+
                                 if j == i + 1 {
                                     fill_masks[p[0] as usize][p[1] as usize][p[2] as usize].set_bit(j, true);
                                 }
@@ -429,7 +438,7 @@ impl OverworldStreamer {
                                     if p[0] < D as usize
                                         && p[1] < D as usize
                                         && p[2] < D as usize
-                                        && fill_masks[p[0]][p[1]][p[2]].get_bit(i)
+                                        && (occupancy_masks[p[0]][p[1]][p[2]].get_bit(i))
                                     {
                                         continue;
                                     }
