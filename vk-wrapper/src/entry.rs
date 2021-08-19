@@ -1,4 +1,3 @@
-use ash::version::EntryV1_0;
 use ash::vk;
 use log::{error, info, warn};
 use std::ffi::{CStr, CString};
@@ -102,7 +101,7 @@ impl Entry {
         let app_info = vk::ApplicationInfo::builder()
             .application_name(c_app_name.as_c_str())
             .engine_name(c_engine_name.as_c_str())
-            .api_version(vk::make_version(1, 2, 0));
+            .api_version(vk::API_VERSION_1_2);
 
         let required_extensions = enumerate_required_window_extensions(window)?;
         let available_layers = self.enumerate_instance_layer_names()?;

@@ -1,6 +1,4 @@
 use crate::device::DeviceWrapper;
-use ash::version::DeviceV1_0;
-use ash::version::DeviceV1_2;
 use ash::vk;
 use std::slice;
 use std::sync::{Arc, Mutex};

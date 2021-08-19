@@ -1,5 +1,4 @@
 use crate::{Device, Image, ImageView, RenderPass};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::Arc;
 

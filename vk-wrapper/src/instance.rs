@@ -1,7 +1,6 @@
 use crate::adapter::Adapter;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
-use ash::version::{InstanceV1_0, InstanceV1_1};
 use ash::vk;
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
@@ -131,7 +130,7 @@ impl Instance {
                 let props = props2.properties;
 
                 let api_version = props2.properties.api_version;
-                if vk::version_major(api_version) != 1 || vk::version_minor(api_version) < 2 {
+                if vk::api_version_major(api_version) != 1 || vk::api_version_minor(api_version) < 2 {
                     return None;
                 }
 

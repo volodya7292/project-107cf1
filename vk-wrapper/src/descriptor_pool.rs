@@ -1,5 +1,4 @@
 use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use bit_set::BitSet;
 use smallvec::SmallVec;

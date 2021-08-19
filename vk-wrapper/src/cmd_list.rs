@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
-use ash::{version::DeviceV1_0, vk};
+use ash::vk;
 use smallvec::SmallVec;
 use std::sync::{Arc, Mutex};
 use std::{mem, ptr, slice};

@@ -4,10 +4,7 @@ use crate::{
     surface::Surface,
     Instance, Queue,
 };
-use ash::{
-    version::{DeviceV1_0, InstanceV1_0},
-    vk,
-};
+use ash::vk;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
 
@@ -106,8 +103,8 @@ impl Adapter {
         // Create allocator
         let allocator_info = vk_mem::AllocatorCreateInfo {
             physical_device: self.native,
-            device: device_wrapper.native.clone(),
-            instance: self.instance.native.clone(),
+            device: &device_wrapper.native,
+            instance: &self.instance.native,
             flags: Default::default(),
             preferred_large_heap_block_size: 0,
             frame_in_use_count: 0,

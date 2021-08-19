@@ -12,7 +12,6 @@ use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
@@ -1332,8 +1331,8 @@ impl Drop for Device {
         let pipeline_cache = self.pipeline_cache.lock().unwrap();
         unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
 
-        self.allocator.destroy_pool(&self.host_pool.0).unwrap();
-        self.allocator.destroy_pool(&self.dev_pool.0).unwrap();
+        self.allocator.destroy_pool(&self.host_pool.0);
+        self.allocator.destroy_pool(&self.dev_pool.0);
         self.allocator.destroy();
     }
 }

@@ -3,7 +3,6 @@ use crate::{
     device::DeviceError, AccessFlags, Device, Format, Framebuffer, Image, ImageLayout, ImageUsageFlags,
     ImageView, PipelineStageFlags,
 };
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};

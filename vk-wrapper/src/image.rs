@@ -1,6 +1,5 @@
 use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
@@ -238,10 +237,7 @@ impl Image {
 impl Drop for ImageWrapper {
     fn drop(&mut self) {
         if self.owned_handle {
-            self.device
-                .allocator
-                .destroy_image(self.native, &self.allocation)
-                .unwrap();
+            self.device.allocator.destroy_image(self.native, &self.allocation);
             self.total_used_dev_memory
                 .fetch_sub(self.bytesize as usize, atomic::Ordering::Relaxed);
         }

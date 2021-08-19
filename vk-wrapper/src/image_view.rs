@@ -1,5 +1,4 @@
 use crate::ImageWrapper;
-use ash::version::DeviceV1_0;
 use ash::vk;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;

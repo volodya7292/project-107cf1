@@ -1,7 +1,6 @@
 use crate::device::DeviceWrapper;
 use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
-use ash::version::DeviceV1_0;
 use ash::vk;
 use ash::vk::Handle;
 use smallvec::SmallVec;

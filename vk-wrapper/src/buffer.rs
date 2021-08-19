@@ -49,8 +49,7 @@ impl Drop for Buffer {
     fn drop(&mut self) {
         self.device
             .allocator
-            .destroy_buffer(self.native, &self.allocation)
-            .unwrap();
+            .destroy_buffer(self.native, &self.allocation);
         self.total_used_dev_memory
             .fetch_sub(self.used_dev_memory as usize, atomic::Ordering::Relaxed);
     }
