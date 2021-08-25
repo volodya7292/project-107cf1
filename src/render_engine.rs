@@ -436,6 +436,16 @@ impl RenderEngine {
         self.material_updates.insert(id, info);
     }
 
+    /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
+    pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
+        self.vertex_mesh_updates.contains(&entity)
+            || self
+                .vertex_mesh_pending_updates
+                .iter()
+                .find(|v| v.entity == entity)
+                .is_some()
+    }
+
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
     unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
         if updates.is_empty() {

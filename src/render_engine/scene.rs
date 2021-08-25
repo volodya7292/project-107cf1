@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{mem, ptr};
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Entity {
     id: u32,
     gen: u64,
@@ -136,9 +136,7 @@ impl RawComponentStorage {
             self.modified.remove(&entity.id);
 
             if !just_created {
-                if let hash_map::Entry::Vacant(e) = self.removed.entry(entity.id) {
-                    e.insert(entity.gen);
-                }
+                self.removed.insert(entity.id, entity.gen);
             }
         }
 
@@ -456,12 +454,19 @@ impl Entities {
                 .fetch_add(1, atomic::Ordering::Relaxed);
             self.generations.push(0);
         }
-        self.generations[id] += 1;
 
         Entity {
             id: id as u32,
             gen: self.generations[id],
         }
+    }
+
+    fn free(&mut self, entity: Entity) {
+        assert!(self.is_alive(entity));
+
+        let id = entity.id as usize;
+        self.indices.return_id(id).unwrap();
+        self.generations[id] += 1;
     }
 
     pub fn is_alive(&self, entity: Entity) -> bool {
@@ -530,23 +535,16 @@ impl Scene {
         let mut all_entities = self.entities.write().unwrap();
 
         for entity in entities {
-            if all_entities.is_alive(*entity) {
-                all_entities.indices.return_id(entity.id as usize).unwrap();
-            } else {
-                panic!("Entity is not alive!");
-            }
+            all_entities.free(*entity);
         }
 
         for comps in self.comp_storages.lock().unwrap().values() {
             let mut comps = comps.write().unwrap();
 
             for &entity in entities {
-                if all_entities.is_alive(entity) {
-                    if comps.contains(entity.id) {
-                        comps.remove(entity);
-                    }
-                } else {
-                    panic!("Entity is not alive!");
+                // Safety: `is_alive(entity)` check is done above in `all_entities.free`
+                if comps.contains(entity.id) {
+                    comps.remove(entity);
                 }
             }
         }

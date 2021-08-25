@@ -9,6 +9,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, Vec3};
 use rayon::prelude::*;
 use rust_dense_bitset::{BitSet, DenseBitSet};
+use smallvec::smallvec;
 use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::convert::TryInto;
@@ -16,12 +17,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::{atomic, Arc, Mutex, RwLock};
 use std::time::Instant;
 use vk_wrapper::Device;
-use winit::event::VirtualKeyCode::A;
 
 pub const LOD0_RANGE: usize = 256;
 pub const INVISIBLE_LOAD_RANGE: usize = 128;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 struct ClusterPos {
     level: usize,
     pos: I64Vec3,
@@ -29,6 +29,9 @@ struct ClusterPos {
 
 impl ClusterPos {
     pub fn new(level: usize, pos: I64Vec3) -> ClusterPos {
+        let s = cluster_size(level as u32) as i64;
+        assert!(glm::all(&pos.map(|v| v.rem_euclid(s) == 0)));
+
         ClusterPos { level, pos }
     }
 }
@@ -58,12 +61,7 @@ struct RenderCluster {
     needs_occlusion_fill: AtomicBool,
     mesh_changed: AtomicBool,
     edge_occlusion: AtomicU8,
-    temp_visible: bool,
-}
-
-struct ClusterToRemove {
-    cluster_pos: ClusterPos,
-    entity: scene::Entity,
+    mesh_available: AtomicBool,
 }
 
 struct ClusterPosD {
@@ -82,7 +80,7 @@ pub struct OverworldStreamer {
     clusters: [HashMap<I64Vec3, RenderCluster>; LOD_LEVELS],
     aclusters: [HashMap<I64Vec3, AbstractCluster>; LOD_LEVELS],
     side_occlusion_work: SideOcclusionWorkSync,
-    clusters_to_remove: Vec<ClusterToRemove>,
+    clusters_to_remove: HashMap<ClusterPos, bool>,
     clusters_to_add: Vec<ClusterPos>,
     clusters_in_process: Arc<AtomicU32>,
 }
@@ -149,13 +147,15 @@ fn get_side_clusters_by_facing(cluster_pos: ClusterPos, facing: Facing) -> Small
     // Higher level
     if level + 1 < LOD_LEVELS {
         let d: I64Vec3 = glm::convert(dir);
-        let pos2 = pos
-            + d * cluster_size2
-            + d.zip_map(&pos, |d, p| {
-                (-cluster_size1 * (d > 0) as i64) - (p.rem_euclid(cluster_size2) * (d == 0) as i64)
-            });
+        let align = pos.map(|v| v.rem_euclid(cluster_size2));
+        let align_pos = pos - align;
+        let align_pos2 = pos + align;
+        let pos2 = align_pos + d * cluster_size2;
 
-        if !glm::all(&pos2.map(|v| v % cluster_size2 != 0)) {
+        if glm::all(&glm::equal(
+            &(pos2 + align.zip_map(&d, |a, v| (v < 0 || (v == 0 && a > 0)) as i64) * cluster_size2),
+            &align_pos2,
+        )) {
             neighbours.push(ClusterPos::new(level + 1, pos2));
         }
     }
@@ -211,6 +211,121 @@ fn check_cluster_vis_occlusion(
     }
 
     edges_occluded
+}
+
+/// Returns `true` if cluster can be replaced by lower or higher lod clusters or if cluster's replacement is itself.
+fn cluster_replacement(
+    rclusters: &[HashMap<I64Vec3, RenderCluster>; LOD_LEVELS],
+    aclusters: &[HashMap<I64Vec3, AbstractCluster>; LOD_LEVELS],
+    p: ClusterPos,
+) -> SmallVec<[ClusterPos; 8]> {
+    // Higher lod
+    if p.level < LOD_LEVELS - 1 {
+        let size1 = cluster_size(p.level as u32 + 1) as i64;
+        let pos1 = p.pos - p.pos.map(|v| v.rem_euclid(size1));
+
+        if let Some(acluster) = aclusters[p.level + 1].get(&pos1) {
+            return if rclusters[p.level + 1]
+                .get(&pos1)
+                .map_or(false, |v| v.mesh_available.load(atomic::Ordering::Relaxed))
+                || acluster.occluded
+                || (acluster.ready.load(atomic::Ordering::Relaxed)
+                    && acluster.empty.load(atomic::Ordering::Relaxed))
+            {
+                smallvec![ClusterPos::new(p.level + 1, pos1)]
+            } else {
+                smallvec![]
+            };
+        }
+    }
+
+    if p.level == 0 {
+        return smallvec![p];
+    }
+
+    let mut out = SmallVec::<[ClusterPos; 8]>::new();
+    let size0 = cluster_size(p.level as u32 - 1) as i64;
+
+    // Lower lod
+    let mut state = true;
+    let mut state_n = 0;
+
+    for x in 0..2 {
+        for y in 0..2 {
+            for z in 0..2 {
+                let pos0 = p.pos + glm::vec3(x, y, z) * size0;
+
+                if let Some(acluster) = aclusters[p.level - 1].get(&pos0) {
+                    state_n += 1;
+
+                    if rclusters[p.level - 1]
+                        .get(&pos0)
+                        .map_or(false, |v| v.mesh_available.load(atomic::Ordering::Relaxed))
+                        || acluster.occluded
+                        || (acluster.ready.load(atomic::Ordering::Relaxed)
+                            && acluster.empty.load(atomic::Ordering::Relaxed))
+                    {
+                        out.push(ClusterPos::new(p.level - 1, pos0));
+                    } else {
+                        state = false;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if state {
+        if state_n > 0 {
+            out
+        } else {
+            smallvec![p]
+        }
+    } else {
+        smallvec![]
+    }
+}
+
+/// Returns `true` if cluster can be replaced by lower or higher lod clusters or if cluster's replacement is itself.
+fn is_cluster_replacement_exists(layout: &[HashSet<I64Vec3>; LOD_LEVELS], p: ClusterPos) -> bool {
+    // Higher lod
+    if p.level < LOD_LEVELS - 1 {
+        let size1 = cluster_size(p.level as u32 + 1) as i64;
+        let lpos1 = (p.pos - p.pos.map(|v| v.rem_euclid(size1))) / size1;
+
+        if layout[p.level + 1].contains(&lpos1) {
+            return true;
+        }
+    }
+    if p.level == 0 {
+        return false;
+    }
+
+    // Lower lod
+    let size0 = cluster_size(p.level as u32 - 1) as i64;
+    let mut state = true;
+
+    for x in 0..2 {
+        for y in 0..2 {
+            for z in 0..2 {
+                let lpos0 = p.pos / size0 + glm::vec3(x, y, z);
+
+                if !layout[p.level - 1].contains(&lpos0) {
+                    state = false;
+                    break;
+                }
+            }
+        }
+    }
+    if state {
+        return true;
+    }
+
+    // Current lod
+    let size = cluster_size(p.level as u32) as i64;
+    let lpos = p.pos / size;
+
+    layout[p.level].contains(&lpos)
 }
 
 impl OverworldStreamer {
@@ -445,6 +560,7 @@ impl OverworldStreamer {
 
                                     let pos = pos + xyz2;
 
+                                    // TODO: remove
                                     if cluster_layout[i].contains(&pos) {
                                         panic!("CONTAINS");
                                     }
@@ -487,31 +603,40 @@ impl OverworldStreamer {
                     let inside_layout = cluster_layout[i].contains(&lpos);
 
                     if !inside_layout {
-                        clusters_to_remove.push(ClusterToRemove {
-                            cluster_pos: ClusterPos { level: i, pos: *pos },
-                            entity: clusters[i][pos].entity,
-                        });
+                        let p = ClusterPos::new(i, *pos);
+                        clusters_to_remove.insert(p, is_cluster_replacement_exists(&cluster_layout, p));
                     }
                     inside_layout
                 });
+
+                // Account for non-removed clusters due to no replacement upon previous remove attempt
+                for (pos, _) in &self.clusters[i] {
+                    let lpos = pos / cluster_size(i as u32) as i64;
+
+                    if !cluster_layout[i].contains(&lpos) {
+                        let p = ClusterPos::new(i, *pos);
+                        clusters_to_remove.insert(p, is_cluster_replacement_exists(&cluster_layout, p));
+                    }
+                }
 
                 aclusters[i].retain(|pos, acluster| {
                     let lpos = pos / cluster_size(i as u32) as i64;
                     let occluded = acluster.occluded_new;
                     let inside_layout = cluster_layout[i].contains(&lpos);
-                    let empty = acluster.empty.load(atomic::Ordering::Relaxed);
                     let ready = acluster.ready.load(atomic::Ordering::Relaxed);
+                    let empty = acluster.empty.load(atomic::Ordering::Relaxed);
 
                     // TODO: add this check
                     // if (curr_time_secs - ocluster.creation_time_secs) < 5
                     //     || cluster_layout[i].contains(&(pos / (cluster_size(i as u32) as i64)))
 
-                    if !inside_layout || occluded || (empty && ready) {
+                    let optimized = occluded || (ready && empty);
+
+                    if !inside_layout || optimized {
                         if overworld.loaded_clusters[i].remove(pos).is_some() {
-                            clusters_to_remove.push(ClusterToRemove {
-                                cluster_pos: ClusterPos { level: i, pos: *pos },
-                                entity: clusters[i][pos].entity,
-                            });
+                            let p = ClusterPos::new(i, *pos);
+                            clusters_to_remove
+                                .insert(p, !optimized && is_cluster_replacement_exists(&cluster_layout, p));
                         }
                     }
                     inside_layout
@@ -549,16 +674,23 @@ impl OverworldStreamer {
                             generated: AtomicBool::new(false),
                             generating: AtomicBool::new(false),
                         }));
+
+                        // Previous entity may exist if entry from `self.clusters`
+                        // wasn't removed due to loading of lower/higher lod of clusters.
+                        let prev_entity = self.clusters[i]
+                            .get(&pos)
+                            .map_or(scene::Entity::NULL, |v| v.entity);
+
                         self.clusters[i].insert(
                             pos,
                             RenderCluster {
-                                entity: scene::Entity::NULL,
+                                entity: prev_entity,
                                 available: AtomicBool::new(false),
                                 changed: AtomicBool::new(false),
                                 needs_occlusion_fill: AtomicBool::new(true),
                                 mesh_changed: AtomicBool::new(false),
                                 edge_occlusion: AtomicU8::new(0),
-                                temp_visible: false,
+                                mesh_available: AtomicBool::new(false),
                             },
                         );
                         self.clusters_to_add.push(ClusterPos::new(i, pos));
@@ -812,36 +944,55 @@ impl OverworldStreamer {
 
         println!("R {}, entities {}", c, ent_c);
 
-        for v in &self.clusters_to_remove {
-            self.clusters[v.cluster_pos.level].remove(&v.cluster_pos.pos);
-        }
+        let aclusters = &self.aclusters;
+        let rclusters = &self.clusters;
 
-        // TODO: remove renderer of a cluster only if lower/higher-lod replacement clusters are already generated
+        self.clusters_to_remove.retain(|k, &mut v| {
+            let repl = cluster_replacement(rclusters, aclusters, *k);
+
+            !v || (repl.iter().all(|p| {
+                if let Some(cl) = rclusters[p.level].get(&p.pos) {
+                    !renderer.is_vertex_mesh_updating(cl.entity)
+                } else {
+                    true
+                }
+            }) && !repl.is_empty())
+        });
+
         component::remove_entities(
             scene,
             &self
                 .clusters_to_remove
                 .iter()
-                .map(|v| v.entity)
+                .map(|(v, _)| self.clusters[v.level][&v.pos].entity)
                 .collect::<Vec<_>>(),
         );
+        for (v, _) in &self.clusters_to_remove {
+            self.clusters[v.level].remove(&v.pos);
+        }
+
+        // Reserve entities from scene
+        {
+            let mut entities = scene.entities().write().unwrap();
+
+            for p in &self.clusters_to_add {
+                let rcluster = self.clusters[p.level].get_mut(&p.pos).unwrap();
+
+                if rcluster.entity == scene::Entity::NULL {
+                    rcluster.entity = entities.create();
+                }
+            }
+        }
 
         let transform_comps = scene.storage::<component::Transform>();
         let renderer_comps = scene.storage::<component::Renderer>();
         let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let mut entities = {
-            let entities = scene.entities();
-            let mut entities = entities.write().unwrap();
-            (0..self.clusters_to_add.len())
-                .map(|_| entities.create())
-                .collect::<Vec<_>>()
-        };
         let mut transform_comps = transform_comps.write();
         let mut renderer_comps = renderer_comps.write();
         let mut vertex_mesh_comps = vertex_mesh_comps.write();
 
-        for (i, cluster_pos) in self.clusters_to_add.iter().enumerate() {
-            let pos = &cluster_pos.pos;
+        for p in &self.clusters_to_add {
+            let pos = &p.pos;
             let transform_comp = component::Transform::new(
                 Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
                 Vec3::new(0.0, 0.0, 0.0),
@@ -849,19 +1000,19 @@ impl OverworldStreamer {
             );
             let renderer_comp = component::Renderer::new(&renderer, self.cluster_mat_pipeline, false);
 
-            let entity = entities[i];
+            let entity = self.clusters[p.level][&p.pos].entity;
             transform_comps.set(entity, transform_comp);
             renderer_comps.set(entity, renderer_comp);
-            self.clusters[cluster_pos.level].get_mut(pos).unwrap().entity = entity;
         }
 
         for (i, level) in overworld.loaded_clusters.iter().enumerate() {
-            for (pos, overworld_cluster) in level {
-                let render_cluster = &self.clusters[i][pos];
-                if render_cluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
-                    let cluster = overworld_cluster.cluster.read().unwrap();
+            for (pos, ocluster) in level {
+                let rcluster = &self.clusters[i][pos];
+                if rcluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
+                    let cluster = ocluster.cluster.read().unwrap();
                     let mesh = cluster.as_ref().unwrap().vertex_mesh();
-                    vertex_mesh_comps.set(render_cluster.entity, component::VertexMesh::new(&mesh.raw()));
+                    vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
+                    rcluster.mesh_available.store(true, atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -889,7 +1040,7 @@ pub fn new(
             receiver: occ_r,
             process_count: Default::default(),
         },
-        clusters_to_remove: vec![],
+        clusters_to_remove: Default::default(),
         clusters_to_add: vec![],
         clusters_in_process: Arc::new(AtomicU32::new(0)),
     }
