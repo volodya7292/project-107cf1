@@ -61,6 +61,7 @@ pub struct Renderer {
     /// binding id -> Resource
     pub(in crate::render_engine) resources: SmallVec<[(u32, Resource); 4]>,
     pub(in crate::render_engine) translucent: bool,
+    pub(in crate::render_engine) visible: bool,
 }
 
 impl Renderer {
@@ -72,7 +73,16 @@ impl Renderer {
             uniform_buffer_offset_model: pipe.uniform_buffer_offset_model(),
             resources: Default::default(),
             translucent,
+            visible: true,
         }
+    }
+
+    pub fn visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
     }
 
     pub fn resources_mut(&mut self) -> &mut SmallVec<[(u32, Resource); 4]> {

@@ -759,7 +759,7 @@ impl RenderEngine {
                     let center = sphere.center() + transform.position;
                     let radius = sphere.radius() * glm::comp_max(&transform.scale);
 
-                    if !camera.is_sphere_visible(&center, radius) {
+                    if !renderer.visible || !camera.is_sphere_visible(&center, radius) {
                         continue;
                     }
 
@@ -843,7 +843,7 @@ impl RenderEngine {
                     }
 
                     // Check query_pool occlusion results
-                    if self.visibility_host_buffer[entity_index] == 0 {
+                    if !renderer.visible || self.visibility_host_buffer[entity_index] == 0 {
                         continue;
                     }
 

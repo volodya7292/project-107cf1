@@ -945,7 +945,7 @@ impl OverworldStreamer {
         println!("R {}, entities {}", c, ent_c);
 
         let aclusters = &self.aclusters;
-        let rclusters = &self.clusters;
+        let rclusters = &mut self.clusters;
 
         self.clusters_to_remove.retain(|k, &mut v| {
             let repl = cluster_replacement(rclusters, aclusters, *k);
@@ -964,11 +964,53 @@ impl OverworldStreamer {
             &self
                 .clusters_to_remove
                 .iter()
-                .map(|(v, _)| self.clusters[v.level][&v.pos].entity)
+                .map(|(v, _)| rclusters[v.level][&v.pos].entity)
                 .collect::<Vec<_>>(),
         );
         for (v, _) in &self.clusters_to_remove {
-            self.clusters[v.level].remove(&v.pos);
+            rclusters[v.level].remove(&v.pos);
+        }
+
+        // Enable visibility of loaded clusters
+        // Note: must be called between 'removing clusters' and 'creating new ones'.
+        {
+            let renderer_comps = scene.storage::<component::Renderer>();
+            let mut renderer_comps = renderer_comps.write();
+
+            for (i, level) in rclusters.iter().enumerate() {
+                for (p, rcluster) in level {
+                    if rcluster.entity == scene::Entity::NULL {
+                        continue;
+                    }
+                    if renderer_comps.get_mut(rcluster.entity).unwrap().visible() {
+                        continue;
+                    }
+
+                    let size1 = cluster_size(i as u32 + 1) as i64;
+                    let pos1 = p - p.map(|v| v.rem_euclid(size1));
+                    let mut state = true;
+
+                    if i + 1 < LOD_LEVELS {
+                        if let Some(rcl) = rclusters[i + 1].get(&pos1) {
+                            if renderer_comps.get_mut(rcl.entity).map_or(false, |v| v.visible()) {
+                                let repl =
+                                    cluster_replacement(rclusters, aclusters, ClusterPos::new(i + 1, pos1));
+
+                                state = repl.iter().all(|p| {
+                                    if let Some(cl) = rclusters[p.level].get(&p.pos) {
+                                        !renderer.is_vertex_mesh_updating(cl.entity)
+                                    } else {
+                                        true
+                                    }
+                                }) && !repl.is_empty();
+                            }
+                        }
+                    }
+                    if state {
+                        renderer_comps.get_mut(rcluster.entity).unwrap().set_visible(true);
+                    }
+                }
+            }
         }
 
         // Reserve entities from scene
@@ -976,7 +1018,7 @@ impl OverworldStreamer {
             let mut entities = scene.entities().write().unwrap();
 
             for p in &self.clusters_to_add {
-                let rcluster = self.clusters[p.level].get_mut(&p.pos).unwrap();
+                let rcluster = rclusters[p.level].get_mut(&p.pos).unwrap();
 
                 if rcluster.entity == scene::Entity::NULL {
                     rcluster.entity = entities.create();
@@ -991,6 +1033,7 @@ impl OverworldStreamer {
         let mut renderer_comps = renderer_comps.write();
         let mut vertex_mesh_comps = vertex_mesh_comps.write();
 
+        // Set components
         for p in &self.clusters_to_add {
             let pos = &p.pos;
             let transform_comp = component::Transform::new(
@@ -998,16 +1041,18 @@ impl OverworldStreamer {
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
-            let renderer_comp = component::Renderer::new(&renderer, self.cluster_mat_pipeline, false);
+            let mut renderer_comp = component::Renderer::new(&renderer, self.cluster_mat_pipeline, false);
+            renderer_comp.set_visible(false);
 
-            let entity = self.clusters[p.level][&p.pos].entity;
+            let entity = rclusters[p.level][&p.pos].entity;
             transform_comps.set(entity, transform_comp);
             renderer_comps.set(entity, renderer_comp);
         }
 
+        // Update meshes
         for (i, level) in overworld.loaded_clusters.iter().enumerate() {
             for (pos, ocluster) in level {
-                let rcluster = &self.clusters[i][pos];
+                let rcluster = &rclusters[i][pos];
                 if rcluster.mesh_changed.swap(false, atomic::Ordering::Relaxed) {
                     let cluster = ocluster.cluster.read().unwrap();
                     let mesh = cluster.as_ref().unwrap().vertex_mesh();
