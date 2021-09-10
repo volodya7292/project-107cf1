@@ -10,10 +10,15 @@ pub mod value_noise;
 use crate::render_engine::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra as na;
 pub use slice_split::SliceSplitImpl;
+use std::sync::atomic;
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 pub type LruCache<K, V> = lru::LruCache<K, V, ahash::RandomState>;
+
+pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
+pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
+pub const MO_RELEASE: atomic::Ordering = atomic::Ordering::Release;
 
 pub const fn is_pow_of_2(n: u64) -> bool {
     n != 0 && ((n & (n - 1)) == 0)
@@ -34,26 +39,27 @@ pub const fn make_mul_of(n: u32, m: u32) -> u32 {
 
 /// log2(8) = 3  
 /// log2(5) = 2
-pub trait UInteger {
+pub trait UInt {
     fn log2(&self) -> Self;
 }
 
-pub trait Integer {
+pub trait Int {
     fn div_floor(&self, other: Self) -> Self;
 }
 
-macro_rules! u_integer_impl {
+macro_rules! uint_impl {
     ($($t: ty)*) => ($(
-        impl UInteger for $t {
+        impl UInt for $t {
+            // TODO: remove when std log2 is stable
             fn log2(&self) -> Self {
                 <$t>::BITS as $t - self.leading_zeros() as $t - 1
             }
         }
     )*)
 }
-macro_rules! integer_impl {
+macro_rules! int_impl {
     ($($t: ty)*) => ($(
-        impl Integer for $t {
+        impl Int for $t {
             #[inline]
             fn div_floor(&self, other: Self) -> Self {
                 let d = self / other;
@@ -68,8 +74,8 @@ macro_rules! integer_impl {
     )*)
 }
 
-u_integer_impl! { u8 u16 u32 u64 }
-integer_impl! { i8 i16 i32 i64 }
+uint_impl! { u8 u16 u32 u64 }
+int_impl! { i8 i16 i32 i64 }
 
 pub trait AllSame {
     fn all_same(&mut self) -> bool;

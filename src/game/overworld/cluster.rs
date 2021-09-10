@@ -31,6 +31,10 @@ pub const VOLUME: usize = SIZE * SIZE * SIZE;
 const SECTOR_VOLUME: usize = SECTOR_SIZE * SECTOR_SIZE * SECTOR_SIZE;
 const ALIGNED_SECTOR_VOLUME: usize = ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE * ALIGNED_SECTOR_SIZE;
 
+pub fn size(level: u32) -> u64 {
+    SIZE as u64 * 2_u64.pow(level)
+}
+
 fn index_1d_to_3d(i: usize, ds: usize) -> [usize; 3] {
     let ds_sqr = ds * ds;
     let i_2d = i % ds_sqr;
@@ -162,11 +166,11 @@ impl Sector {
 
         let mut side_changed = self.side_changed;
         side_changed[0] |= pos.x == 0;
-        side_changed[1] |= pos.x == 15;
+        side_changed[1] |= pos.x == SECTOR_SIZE - 1;
         side_changed[2] |= pos.y == 0;
-        side_changed[3] |= pos.y == 15;
+        side_changed[3] |= pos.y == SECTOR_SIZE - 1;
         side_changed[4] |= pos.z == 0;
-        side_changed[5] |= pos.z == 15;
+        side_changed[5] |= pos.z == SECTOR_SIZE - 1;
 
         self.occupied_cells.set(
             pos.z * SECTOR_SIZE * SECTOR_SIZE + pos.y * SECTOR_SIZE + pos.z,
@@ -364,11 +368,27 @@ pub struct Cluster {
     sectors: [Sector; VOLUME_IN_SECTORS],
     entry_size: u32,
     changed: bool,
+    side_changed: [bool; 6],
     device: Arc<vkw::Device>,
     vertex_mesh: render_engine::VertexMesh<Vertex, ()>,
 }
 
 impl Cluster {
+    pub fn new(registry: &Arc<Registry>, device: &Arc<vkw::Device>) -> Self {
+        let layout = registry.cluster_layout();
+        let sectors: Vec<Sector> = (0..VOLUME_IN_SECTORS).map(|_| Sector::new(&layout)).collect();
+
+        Self {
+            registry: Arc::clone(registry),
+            sectors: sectors.try_into().ok().unwrap(),
+            entry_size: 1,
+            changed: false,
+            side_changed: [false; 6],
+            device: Arc::clone(device),
+            vertex_mesh: Default::default(),
+        }
+    }
+
     pub fn entry_size(&self) -> u32 {
         self.entry_size
     }
@@ -376,6 +396,14 @@ impl Cluster {
     /// Returns whether the cluster has been changed since the previous `Cluster::update_mesh()` call.
     pub fn changed(&self) -> bool {
         self.changed
+    }
+
+    /// Returns a mask of `Facing` of changed cluster sides since the previous `Cluster::update_mesh()` call.
+    pub fn changed_sides(&self) -> u8 {
+        self.side_changed
+            .iter()
+            .enumerate()
+            .fold(0_u8, |mask, (i, b)| mask | ((*b as u8) << i))
     }
 
     pub fn vertex_mesh(&self) -> &render_engine::VertexMesh<Vertex, ()> {
@@ -428,8 +456,12 @@ impl Cluster {
         let pos = pos.map(|v| v % (SECTOR_SIZE as u32));
 
         self.changed = true;
-        // self.sides_changed |=
-        //     glm::any(&pos.map(|v| v == 0)) || glm::any(&pos.map(|v| v == (SIZE as u32 - 1)));
+        self.side_changed[0] |= pos.x == 0;
+        self.side_changed[1] |= pos.x == (SIZE - 1) as u32;
+        self.side_changed[2] |= pos.y == 0;
+        self.side_changed[3] |= pos.y == (SIZE - 1) as u32;
+        self.side_changed[4] |= pos.z == 0;
+        self.side_changed[5] |= pos.z == (SIZE - 1) as u32;
 
         sector.set_block(pos, block)
     }
@@ -987,6 +1019,7 @@ impl Cluster {
             if self.sectors[i].changed {
                 self.triangulate(i);
                 self.sectors[i].changed = false;
+                self.sectors[i].side_changed = [false; 6];
             }
         }
 
@@ -1017,19 +1050,5 @@ impl Cluster {
 
     pub fn is_empty(&self) -> bool {
         self.sectors.iter().find(|sector| !sector.is_empty()).is_none()
-    }
-}
-
-pub fn new(registry: &Arc<Registry>, device: &Arc<vkw::Device>, node_size: u32) -> Cluster {
-    let layout = registry.cluster_layout();
-    let sectors: Vec<Sector> = (0..VOLUME_IN_SECTORS).map(|_| Sector::new(&layout)).collect();
-
-    Cluster {
-        registry: Arc::clone(registry),
-        sectors: sectors.try_into().ok().unwrap(),
-        entry_size: node_size,
-        changed: false,
-        device: Arc::clone(device),
-        vertex_mesh: Default::default(),
     }
 }

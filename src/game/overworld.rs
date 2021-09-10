@@ -1,20 +1,3 @@
-use std::iter::Filter;
-use std::slice::Iter;
-use std::sync::{atomic, Arc, Mutex, RwLock};
-
-use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, Vec3};
-use rand::Rng;
-
-use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::structure::world::World;
-use crate::game::overworld::structure::Structure;
-use crate::game::overworld_streamer;
-use crate::utils::value_noise::ValueNoise;
-use crate::utils::{HashMap, Integer};
-use std::sync::atomic::AtomicBool;
-
 pub mod block;
 pub mod block_component;
 pub mod block_model;
@@ -22,6 +5,22 @@ pub mod cluster;
 pub mod generator;
 pub mod structure;
 pub mod textured_block_model;
+
+use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::structure::world::World;
+use crate::game::overworld::structure::Structure;
+use crate::utils::value_noise::ValueNoise;
+use crate::utils::{HashMap, Int, MO_ACQUIRE};
+use nalgebra_glm as glm;
+use nalgebra_glm::{I32Vec3, I64Vec3, Vec3};
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+use rand::Rng;
+use std::iter::Filter;
+use std::slice::Iter;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
+use std::sync::{atomic, Arc, Mutex, RwLock};
 
 // TODO Main world - 'The Origin'
 
@@ -40,16 +39,22 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
     AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, FromPrimitive)]
+#[repr(u8)]
+pub enum ClusterState {
+    UNLOADED = 0,
+    LOADING = 1,
+    LOADED = 2,
+}
+
 pub struct OverworldCluster {
-    pub cluster: RwLock<Option<Cluster>>,
-    pub creation_time_secs: u64,
-    pub generated: AtomicBool,
-    pub generating: AtomicBool,
+    pub cluster: RwLock<Cluster>,
+    pub state: AtomicU8,
 }
 
 impl OverworldCluster {
-    pub fn is_generating(&self) -> bool {
-        self.generating.load(atomic::Ordering::Acquire)
+    pub fn state(&self) -> ClusterState {
+        FromPrimitive::from_u8(self.state.load(MO_ACQUIRE)).unwrap()
     }
 }
 
@@ -57,7 +62,7 @@ pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
     value_noise: ValueNoise<u64>,
-    pub loaded_clusters: [HashMap<I64Vec3, Arc<OverworldCluster>>; LOD_LEVELS],
+    pub loaded_clusters: HashMap<I64Vec3, Arc<OverworldCluster>>,
 }
 
 impl Overworld {
@@ -99,7 +104,7 @@ impl Overworld {
     ///
     /// `cluster_pos` is a cluster position of level `self.cluster_level`.
     pub fn gen_structure_pos(&self, structure: &Structure, cluster_pos: I64Vec3) -> (I64Vec3, bool) {
-        let structure_fit_size = overworld_streamer::cluster_size(structure.cluster_level());
+        let structure_fit_size = cluster::size(structure.cluster_level());
         let octant_pos = cluster_pos.map(|v| v.div_floor(structure.avg_spacing() as i64));
         let octant_pos_u64 = octant_pos.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
         let octant_size = structure.avg_spacing() * structure_fit_size;
@@ -139,8 +144,7 @@ impl Overworld {
     ) -> Option<I64Vec3> {
         use std::f32::consts::PI;
 
-        let octant_size =
-            (structure.avg_spacing() * overworld_streamer::cluster_size(structure.cluster_level())) as i64;
+        let octant_size = (structure.avg_spacing() * cluster::size(structure.cluster_level())) as i64;
         let phi_units = max_search_radius * 4;
         let theta_units = phi_units * 2;
 

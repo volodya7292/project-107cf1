@@ -5,9 +5,8 @@ use nalgebra_glm::{I64Vec3, U64Vec3};
 use rand::Rng;
 
 use crate::game::overworld::Overworld;
-use crate::game::overworld_streamer;
 use crate::utils;
-use crate::utils::{Integer, UInteger};
+use crate::utils::{Int, UInt};
 
 pub mod world;
 
@@ -28,7 +27,7 @@ impl Structure {
     pub fn new(max_size: U64Vec3, min_spacing: u64, avg_spacing: u64, gen_fn: GenPosFn) -> Structure {
         assert!(avg_spacing > min_spacing);
 
-        let cluster_level = max_size.max().next_power_of_two().log2() as u32;
+        let cluster_level = UInt::log2(&max_size.max().next_power_of_two()) as u32;
 
         Structure {
             max_size,

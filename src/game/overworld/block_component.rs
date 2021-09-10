@@ -32,7 +32,7 @@ impl Facing {
     }
 
     pub fn from_direction(dir: I32Vec3) -> Option<Facing> {
-        if dir.sum().abs() != 1 {
+        if dir.abs().sum() != 1 {
             None
         } else {
             Some(Self::from_u8(

@@ -1,6 +1,7 @@
 use crate::render_engine::vertex_mesh;
 use crate::render_engine::vertex_mesh::VertexMeshCreate;
 use nalgebra as na;
+use nalgebra_glm::I32Vec3;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 
@@ -14,13 +15,54 @@ vertex_impl!(Vertex, position, tex_coord);
 #[test]
 fn test_with_device() {
     let vke = vk_wrapper::Entry::new().unwrap();
-    let instance = vke.create_instance("GOVNO!", &[]).unwrap();
+    // let instance = vke.create_instance("GOVNO!", &[]).unwrap();
 
-    let adapters = instance.enumerate_adapters(None).unwrap();
-    let adapter = adapters.first().unwrap();
-    let device = adapter.create_device().unwrap();
+    // let adapters = instance.enumerate_adapters(None).unwrap();
+    // let adapter = adapters.first().unwrap();
+    // let device = adapter.create_device().unwrap();
 
     // test_vertex_mesh(&device);
+}
+
+#[test]
+fn cluster_facing() {
+    use crate::game::overworld::block_component::Facing;
+
+    assert!(Facing::from_direction(I32Vec3::new(-1, 0, 1)).is_none());
+    assert!(Facing::from_direction(I32Vec3::new(1, 0, 1)).is_none());
+    assert!(Facing::from_direction(I32Vec3::new(0, 0, 0)).is_none());
+
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(-1, 0, 0)).unwrap(),
+        Facing::NegativeX
+    );
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(1, 0, 0)).unwrap(),
+        Facing::PositiveX
+    );
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(0, -1, 0)).unwrap(),
+        Facing::NegativeY
+    );
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(0, 1, 0)).unwrap(),
+        Facing::PositiveY
+    );
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(0, 0, -1)).unwrap(),
+        Facing::NegativeZ
+    );
+    assert_eq!(
+        Facing::from_direction(I32Vec3::new(0, 0, 1)).unwrap(),
+        Facing::PositiveZ
+    );
+
+    assert_eq!(Facing::NegativeX.mirror(), Facing::PositiveX);
+    assert_eq!(Facing::PositiveX.mirror(), Facing::NegativeX);
+    assert_eq!(Facing::NegativeY.mirror(), Facing::PositiveY);
+    assert_eq!(Facing::PositiveY.mirror(), Facing::NegativeY);
+    assert_eq!(Facing::NegativeZ.mirror(), Facing::PositiveZ);
+    assert_eq!(Facing::PositiveZ.mirror(), Facing::NegativeZ);
 }
 
 // fn test_vertex_mesh(device: &Arc<vkw::Device>) {

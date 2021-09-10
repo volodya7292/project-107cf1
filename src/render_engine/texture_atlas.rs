@@ -1,4 +1,4 @@
-use crate::utils::UInteger;
+use crate::utils::UInt;
 use std::sync::{Arc, Mutex};
 use vk_wrapper as vkw;
 
@@ -146,7 +146,7 @@ pub fn new(
     let width_in_tiles = (tile_count as f64).sqrt().ceil() as u32;
     let width = width_in_tiles * max_tile_width;
     let max_mip_levels = if mipmaps {
-        max_tile_width.log2().max(3) - 2 // Account for BC block size (4x4)
+        UInt::log2(&max_tile_width).max(3) - 2 // Account for BC block size (4x4)
     } else {
         1
     };

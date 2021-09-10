@@ -1,5 +1,5 @@
-mod main_registry;
-mod overworld;
+pub mod main_registry;
+pub mod overworld;
 pub mod overworld_streamer;
 pub mod registry;
 
@@ -35,7 +35,6 @@ pub struct Game {
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
 
-    loaded_overworld: Option<Arc<Mutex<Overworld>>>,
     overworld_streamer: Arc<Mutex<OverworldStreamer>>,
 
     player_pos: DVec3,
@@ -143,52 +142,45 @@ impl Game {
         }
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
-            if let Some(overworld) = self.loaded_overworld.clone() {
-                let streamer = Arc::clone(&self.overworld_streamer);
-                let game_tick_finished = Arc::clone(&self.game_tick_finished);
+            let streamer = Arc::clone(&self.overworld_streamer);
+            let game_tick_finished = Arc::clone(&self.game_tick_finished);
 
-                {
-                    let mut streamer = streamer.lock().unwrap();
-                    let t0 = Instant::now();
-                    streamer.update_renderer(&mut overworld.lock().unwrap());
-                    let t1 = Instant::now();
-                    let el = (t1 - t0).as_secs_f64();
-                    if el > 0.001 {
-                        println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
-                    }
-
-                    let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
-                    // let p = DVec3::new(43.0, 0.0, -44.0);
-
-                    if self.change_stream_pos {
-                        streamer.set_stream_pos(p);
-                    }
+            {
+                let mut streamer = streamer.lock().unwrap();
+                let t0 = Instant::now();
+                streamer.update_renderer();
+                let t1 = Instant::now();
+                let el = (t1 - t0).as_secs_f64();
+                if el > 0.001 {
+                    println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
                 }
 
-                thread_pool.spawn(|| game_tick(streamer, overworld, game_tick_finished));
-                println!(
-                    "as {}",
-                    self.renderer
-                        .lock()
-                        .unwrap()
-                        .device()
-                        .calc_real_device_mem_usage()
-                );
+                let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
+                // let p = DVec3::new(43.0, 0.0, -44.0);
+
+                if self.change_stream_pos {
+                    streamer.set_stream_pos(p);
+                }
             }
+
+            thread_pool.spawn_fifo(|| game_tick(streamer, game_tick_finished));
+            println!(
+                "as {}",
+                self.renderer
+                    .lock()
+                    .unwrap()
+                    .device()
+                    .calc_real_device_mem_usage()
+            );
         }
     }
 }
 
-pub fn game_tick(
-    streamer: Arc<Mutex<OverworldStreamer>>,
-    overworld: Arc<Mutex<Overworld>>,
-    finished: Arc<AtomicBool>,
-) {
+pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
     let mut streamer = streamer.lock().unwrap();
-    let mut overworld = overworld.lock().unwrap();
 
     let t0 = Instant::now();
-    streamer.update(&mut overworld);
+    streamer.update();
     let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
@@ -236,9 +228,10 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
     let main_registry = MainRegistry::init();
     let game_tick_finished = Arc::new(AtomicBool::new(true));
     let mut overworld = Overworld::new(&main_registry, 0);
-    let mut overworld_streamer = overworld_streamer::new(&main_registry, renderer, mat_pipelines.cluster());
+    let mut overworld_streamer =
+        OverworldStreamer::new(&main_registry, renderer, mat_pipelines.cluster(), overworld);
 
-    overworld_streamer.set_render_distance(512);
+    overworld_streamer.set_render_distance(256);
     // overworld_streamer.update(&mut overworld);
     // overworld_streamer.update_renderer(&mut overworld);
 
@@ -247,7 +240,6 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
         pressed_keys: Default::default(),
         cursor_rel: (0, 0),
         game_tick_finished: Arc::clone(&game_tick_finished),
-        loaded_overworld: Some(Arc::new(Mutex::new(overworld))),
         overworld_streamer: Arc::new(Mutex::new(overworld_streamer)),
         player_pos: Default::default(),
         change_stream_pos: true,
