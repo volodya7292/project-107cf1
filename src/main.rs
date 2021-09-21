@@ -75,7 +75,7 @@ fn noise_test() {
 fn main() {
     simple_logger::SimpleLogger::new().init().unwrap();
 
-    let thread_count = num_cpus::get_physical().max(2);
+    let thread_count = num_cpus::get().max(2);
     // Note: use safe thread pools to account for proper destruction of Vulkan objects.
     let render_thread_pool = ThreadPool::new(thread_count / 2).unwrap();
     let update_thread_pool = ThreadPool::new(thread_count / 2).unwrap();

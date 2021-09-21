@@ -56,10 +56,10 @@ fn cluster_aligned_pos(pos: DVec3) -> I64Vec3 {
 }
 
 fn calc_cluster_layout(stream_pos: DVec3, render_distance: u64) -> HashSet<I64Vec3> {
-    let mut layout = HashSet::with_capacity(render_distance.pow(3) as usize);
     let cr = (render_distance / cluster::SIZE as u64 / 2) as i64;
     let cl_size = cluster::SIZE as i64;
     let c_stream_pos = cluster_aligned_pos(stream_pos);
+    let mut layout = HashSet::with_capacity((cr * 2 + 1).pow(3) as usize);
 
     for x in -cr..(cr + 1) {
         for y in -cr..(cr + 1) {
