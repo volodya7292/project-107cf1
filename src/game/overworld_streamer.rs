@@ -23,7 +23,8 @@ pub struct OverworldStreamer {
     cluster_mat_pipeline: u32,
     re: Arc<Mutex<RenderEngine>>,
     stream_pos: DVec3,
-    render_distance: u64,
+    xz_render_distance: u64,
+    y_render_distance: u64,
     overworld: Overworld,
     rclusters: HashMap<I64Vec3, RCluster>,
     clusters_to_remove: Vec<scene::Entity>,
@@ -55,8 +56,12 @@ fn cluster_aligned_pos(pos: DVec3) -> I64Vec3 {
     glm::try_convert(glm::floor(&(pos / cluster::SIZE as f64))).unwrap()
 }
 
-fn calc_cluster_layout(stream_pos: DVec3, render_distance: u64) -> HashSet<I64Vec3> {
-    let cr = (render_distance / cluster::SIZE as u64 / 2) as i64;
+fn calc_cluster_layout(
+    stream_pos: DVec3,
+    xz_render_distance: u64,
+    y_render_distance: u64,
+) -> HashSet<I64Vec3> {
+    let cr = (xz_render_distance / cluster::SIZE as u64 / 2) as i64;
     let cl_size = cluster::SIZE as i64;
     let c_stream_pos = cluster_aligned_pos(stream_pos);
     let mut layout = HashSet::with_capacity((cr * 2 + 1).pow(3) as usize);
@@ -66,9 +71,13 @@ fn calc_cluster_layout(stream_pos: DVec3, render_distance: u64) -> HashSet<I64Ve
             for z in -cr..(cr + 1) {
                 let cp = c_stream_pos + glm::vec3(x, y, z);
                 let center = (cp * cl_size).add_scalar(cl_size / 2);
-                let d = glm::distance2(&stream_pos, &glm::convert(center));
+                let d = stream_pos - glm::convert::<I64Vec3, DVec3>(center);
 
-                if d <= (render_distance.pow(2) as f64) {
+                if (d.x / xz_render_distance as f64).powi(2)
+                    + (d.y / y_render_distance as f64).powi(2)
+                    + (d.z / xz_render_distance as f64).powi(2)
+                    <= 1.0
+                {
                     layout.insert(cp * cl_size);
                 }
             }
@@ -194,8 +203,10 @@ fn cluster_update_worker(
 }
 
 impl OverworldStreamer {
-    const MIN_RENDER_DISTANCE: u64 = 128;
-    const MAX_RENDER_DISTANCE: u64 = 1024;
+    const MIN_XZ_RENDER_DISTANCE: u64 = 128;
+    const MAX_XZ_RENDER_DISTANCE: u64 = 1024;
+    const MIN_Y_RENDER_DISTANCE: u64 = 128;
+    const MAX_Y_RENDER_DISTANCE: u64 = 512;
 
     pub fn new(
         registry: &Arc<MainRegistry>,
@@ -209,7 +220,8 @@ impl OverworldStreamer {
             cluster_mat_pipeline,
             re: Arc::clone(re),
             stream_pos: Default::default(),
-            render_distance: 128,
+            xz_render_distance: 128,
+            y_render_distance: 128,
             overworld,
             rclusters: Default::default(),
             clusters_to_remove: Default::default(),
@@ -218,8 +230,16 @@ impl OverworldStreamer {
         }
     }
 
-    pub fn set_render_distance(&mut self, dist: u64) {
-        self.render_distance = dist.min(Self::MAX_RENDER_DISTANCE).max(Self::MIN_RENDER_DISTANCE);
+    pub fn set_xz_render_distance(&mut self, dist: u64) {
+        self.xz_render_distance = dist
+            .min(Self::MAX_XZ_RENDER_DISTANCE)
+            .max(Self::MIN_XZ_RENDER_DISTANCE);
+    }
+
+    pub fn set_y_render_distance(&mut self, dist: u64) {
+        self.y_render_distance = dist
+            .min(Self::MAX_Y_RENDER_DISTANCE)
+            .max(Self::MIN_Y_RENDER_DISTANCE);
     }
 
     pub fn set_stream_pos(&mut self, pos: DVec3) {
@@ -228,7 +248,7 @@ impl OverworldStreamer {
 
     /// Generates new clusters and their content.
     pub fn update(&mut self) {
-        let layout = calc_cluster_layout(self.stream_pos, self.render_distance);
+        let layout = calc_cluster_layout(self.stream_pos, self.xz_render_distance, self.y_render_distance);
         let curr_t = Instant::now();
         let device = &self.device;
         let stream_pos = self.stream_pos;
