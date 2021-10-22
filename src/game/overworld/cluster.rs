@@ -1,26 +1,21 @@
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::block_model::{Quad, Vertex};
+use crate::game::overworld::block_model::Vertex;
 use crate::game::registry::Registry;
-use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine;
 use crate::render_engine::vertex_mesh::VertexMeshCreate;
-use crate::render_engine::{component, scene};
-use crate::utils::{mesh_simplifier, HashMap, SliceSplitImpl};
-use crate::{render_engine, utils};
+use crate::utils::SliceSplitImpl;
 use bit_vec::BitVec;
 use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
-use glm::{BVec3, I32Vec3, U32Vec3, Vec3};
+use glm::{I32Vec3, U32Vec3, Vec3};
 use nalgebra_glm as glm;
-use nalgebra_glm::{I32Vec2, TVec, TVec3, U32Vec2};
+use nalgebra_glm::{I32Vec2, TVec3};
 use rand_distr::num_traits::real::Real;
-use smallvec::smallvec;
-use std::collections::hash_map;
+
 use std::convert::TryInto;
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+use std::ops::{BitAnd, BitAndAssign};
 use std::sync::Arc;
-use std::{iter, mem, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::PrimitiveTopology;
 
 const SECTOR_SIZE: usize = 16;
 const ALIGNED_SECTOR_SIZE: usize = SECTOR_SIZE + 2;
@@ -992,7 +987,7 @@ impl Cluster {
 
         sector.cache_vertices.shrink_to_fit();
 
-        let mut indices = &mut sector.cache_indices;
+        let indices = &mut sector.cache_indices;
         indices.resize(sector.cache_vertices.len() / 4 * 6, 0);
 
         for i in (0..indices.len()).step_by(6) {

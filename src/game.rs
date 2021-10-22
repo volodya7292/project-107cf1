@@ -8,22 +8,16 @@ use crate::game::overworld_streamer::OverworldStreamer;
 use crate::render_engine;
 use crate::render_engine::material_pipelines::MaterialPipelines;
 use crate::render_engine::{component, RenderEngine};
-use crate::utils::{HashMap, HashSet};
-use entity_data::EntityStorageLayout;
-use futures::FutureExt;
+use crate::utils::HashSet;
 use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, Vec3};
+use nalgebra_glm::DVec3;
 use overworld::Overworld;
 use rayon::prelude::*;
 use rayon::ThreadPool;
-use registry::Registry;
-use simdnoise::NoiseBuilder;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc, Mutex};
-use std::thread;
-use std::thread::Thread;
 use std::time::Instant;
 use winit::event::VirtualKeyCode;
 
@@ -179,9 +173,9 @@ impl Game {
 pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
     let mut streamer = streamer.lock().unwrap();
 
-    let t0 = Instant::now();
+    let _t0 = Instant::now();
     streamer.update();
-    let t1 = Instant::now();
+    let _t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
     finished.store(true, atomic::Ordering::Relaxed);
@@ -227,7 +221,7 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
 
     let main_registry = MainRegistry::init();
     let game_tick_finished = Arc::new(AtomicBool::new(true));
-    let mut overworld = Overworld::new(&main_registry, 0);
+    let overworld = Overworld::new(&main_registry, 0);
     let mut overworld_streamer =
         OverworldStreamer::new(&main_registry, renderer, mat_pipelines.cluster(), overworld);
 

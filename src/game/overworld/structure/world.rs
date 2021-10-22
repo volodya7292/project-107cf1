@@ -5,8 +5,7 @@ use crate::utils::noise::ParamNoise;
 use crate::utils::value_noise::ValueNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
-use noise::{NoiseFn, Seedable};
-use simdnoise::NoiseBuilder;
+use noise::Seedable;
 
 pub struct World {
     seed: u64,
@@ -34,6 +33,6 @@ impl World {
     }
 }
 
-fn gen_fn(structure: &Structure, overworld: &Overworld, cluster_pos: I64Vec3) -> Option<I64Vec3> {
+fn gen_fn(_structure: &Structure, _overworld: &Overworld, _cluster_pos: I64Vec3) -> Option<I64Vec3> {
     todo!()
 }

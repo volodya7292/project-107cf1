@@ -1,4 +1,4 @@
-use nalgebra_glm::{I32Vec3, U32Vec3};
+use nalgebra_glm::{I32Vec3};
 use std::mem;
 
 #[repr(u8)]

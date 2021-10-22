@@ -1,13 +1,10 @@
 use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::block::Block;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
 use crate::utils::noise::ParamNoise;
-use nalgebra as na;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U32Vec3, Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use noise::Seedable;
-use simdnoise::NoiseBuilder;
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 

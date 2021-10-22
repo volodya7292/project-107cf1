@@ -26,7 +26,6 @@ use rayon::prelude::*;
 use scene::ComponentStorage;
 pub use scene::Scene;
 use smallvec::SmallVec;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{iter, mem, slice};
@@ -544,7 +543,7 @@ impl RenderEngine {
             unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
         }
 
-        let mut t00 = Instant::now();
+        let t00 = Instant::now();
 
         let mut renderer_events_system = systems::RendererCompEventsSystem {
             device: &self.device,
@@ -570,7 +569,7 @@ impl RenderEngine {
             s.spawn(|_| transform_events_system.run());
         });
 
-        let mut t11 = Instant::now();
+        let t11 = Instant::now();
         let systems_t = (t11 - t00).as_secs_f64();
 
         let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {

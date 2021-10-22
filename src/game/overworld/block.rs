@@ -1,12 +1,3 @@
-use std::ops::Range;
-
-use approx::AbsDiffEq;
-use nalgebra_glm as glm;
-use nalgebra_glm::{BVec3, Vec2, Vec3};
-
-use crate::game::overworld::block_component::Facing;
-use crate::utils::{AllSame, AllSameBy};
-
 #[derive(Copy, Clone)]
 pub struct Block {
     archetype: u16,

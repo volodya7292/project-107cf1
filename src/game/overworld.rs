@@ -13,14 +13,12 @@ use crate::game::overworld::structure::Structure;
 use crate::utils::value_noise::ValueNoise;
 use crate::utils::{HashMap, Int, MO_ACQUIRE};
 use nalgebra_glm as glm;
-use nalgebra_glm::{I32Vec3, I64Vec3, Vec3};
+use nalgebra_glm::{I64Vec3, Vec3};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use rand::Rng;
-use std::iter::Filter;
-use std::slice::Iter;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
-use std::sync::{atomic, Arc, Mutex, RwLock};
+use std::sync::atomic::AtomicU8;
+use std::sync::{Arc, RwLock};
 
 // TODO Main world - 'The Origin'
 
@@ -93,7 +91,7 @@ impl Overworld {
         let st = reg.get_structure(self.main_registry.structure_world()).unwrap();
 
         let p = self.gen_structure_pos(st, I64Vec3::from_element(0)).0;
-        let world = self.get_world(p);
+        let _world = self.get_world(p);
 
         todo!()
     }

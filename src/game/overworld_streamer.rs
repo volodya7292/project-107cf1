@@ -6,12 +6,12 @@ use crate::render_engine::{component, scene, RenderEngine};
 use crate::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, Mat3, TMat3, U32Vec3, U8Vec3, Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
-use std::sync::{atomic, Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use vk_wrapper as vkw;
 
@@ -271,7 +271,7 @@ impl OverworldStreamer {
                 }
                 preserve
             });
-            oclusters.retain(|p, ocl| {
+            oclusters.retain(|p, _ocl| {
                 let in_layout = rclusters.contains_key(p);
                 if !in_layout {
                     return false;

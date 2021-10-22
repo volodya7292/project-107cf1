@@ -1,9 +1,5 @@
-use crate::render_engine::vertex_mesh;
-use crate::render_engine::vertex_mesh::VertexMeshCreate;
 use nalgebra as na;
 use nalgebra_glm::I32Vec3;
-use std::sync::Arc;
-use vk_wrapper as vkw;
 
 #[derive(Default, Copy, Clone, PartialEq)]
 struct Vertex {
@@ -14,7 +10,7 @@ vertex_impl!(Vertex, position, tex_coord);
 
 #[test]
 fn test_with_device() {
-    let vke = vk_wrapper::Entry::new().unwrap();
+    let _vke = vk_wrapper::Entry::new().unwrap();
     // let instance = vke.create_instance("GOVNO!", &[]).unwrap();
 
     // let adapters = instance.enumerate_adapters(None).unwrap();

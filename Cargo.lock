@@ -91,15 +91,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1382,7 +1373,6 @@ dependencies = [
  "rand_xoshiro",
  "raw-window-handle",
  "rayon",
- "res-encoder",
  "rust-dense-bitset",
  "serde",
  "serde_yaml",
@@ -1571,14 +1561,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8383f39639269cde97d255a32bdb68c047337295414940c68bdd30c2e13203ff"
 dependencies = [
  "bitflags",
-]
-
-[[package]]
-name = "res-encoder"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "byteorder",
 ]
 
 [[package]]

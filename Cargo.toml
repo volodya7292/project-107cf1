@@ -2,7 +2,7 @@
 name = "project-107cf1"
 version = "0.1.0"
 authors = ["a7292969 <a7292969@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -43,4 +43,3 @@ vk-wrapper = { path = "vk-wrapper" }
 serde = { version = "1.0.130", features = ["derive"] }
 serde_yaml = "0.8.21"
 glob = "0.3.0"
-res-encoder = { path = "res-encoder" }

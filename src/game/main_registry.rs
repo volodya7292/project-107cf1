@@ -5,7 +5,6 @@ use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
-use entity_data as ed;
 use nalgebra_glm::{U64Vec3, Vec3};
 use std::sync::Arc;
 
