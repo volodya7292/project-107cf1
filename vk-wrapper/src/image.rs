@@ -40,7 +40,6 @@ pub struct ImageType(pub(crate) vk::ImageType);
 #[derive(Clone)]
 pub struct ImageBarrier {
     pub(crate) native: vk::ImageMemoryBarrier,
-    pub(crate) image: Arc<Image>,
 }
 
 impl ImageBarrier {
@@ -229,7 +228,6 @@ impl Image {
                         .build(),
                 )
                 .build(),
-            image: Arc::clone(self),
         }
     }
 }
