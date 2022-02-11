@@ -20,7 +20,6 @@ crossbeam-channel = "0.5.1"
 futures = "0.3.17"
 tokio = { version = "1.12.0", features = ["rt-multi-thread", "time", "macros"] }
 num_cpus = "1.13.0"
-simdnoise = "3.1.6"
 noise = "0.7.0"
 bit-set = "0.5.2"
 bit-vec = "0.6.3"
