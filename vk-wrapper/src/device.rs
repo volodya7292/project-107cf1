@@ -1,3 +1,4 @@
+use crate::ImageWrapper;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
@@ -7,7 +8,6 @@ use crate::{
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
-use crate::{ImageWrapper, SamplerReduction};
 use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
@@ -427,34 +427,6 @@ impl Device {
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size)
-    }
-
-    pub fn create_reduction_sampler(
-        self: &Arc<Self>,
-        mode: SamplerReduction,
-    ) -> Result<Arc<Sampler>, DeviceError> {
-        let mut reduction_info = vk::SamplerReductionModeCreateInfo::builder()
-            .reduction_mode(mode.0)
-            .build();
-
-        let sampler_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .anisotropy_enable(false)
-            .compare_enable(false)
-            .min_lod(0.0)
-            .max_lod(vk::LOD_CLAMP_NONE)
-            .unnormalized_coordinates(false)
-            .push_next(&mut reduction_info);
-
-        Ok(Arc::new(Sampler {
-            device: Arc::clone(self),
-            native: unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? },
-        }))
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {

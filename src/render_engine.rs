@@ -97,7 +97,6 @@ pub struct RenderEngine {
     depth_pyramid_signature: Arc<PipelineSignature>,
     depth_pyramid_pool: Option<DescriptorPool>,
     depth_pyramid_descs: Vec<DescriptorSet>,
-    depth_pyramid_sampler: Arc<Sampler>,
 
     cull_pipeline: Arc<Pipeline>,
     cull_signature: Arc<PipelineSignature>,
@@ -232,7 +231,7 @@ pub struct MaterialInfo {
 
 #[repr(C)]
 struct DepthPyramidConstants {
-    size: na::Vector2<f32>,
+    in_size_scale: na::Vector2<f32>,
 }
 
 #[repr(C)]
@@ -930,19 +929,21 @@ impl RenderEngine {
 
             cl.bind_pipeline(&self.depth_pyramid_pipeline);
 
-            for i in 0..(depth_pyramid_image.mip_levels() as usize) {
-                let size = depth_pyramid_image.size_2d();
-                let level_width = (size.0 >> i).max(1);
-                let level_height = (size.1 >> i).max(1);
+            let mut input_size = depth_image.size_2d();
+            let mut out_size = depth_pyramid_image.size_2d();
 
+            for i in 0..(depth_pyramid_image.mip_levels() as usize) {
                 cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
 
                 let constants = DepthPyramidConstants {
-                    size: na::Vector2::new(level_width as f32, level_height as f32),
+                    in_size_scale: na::Vector2::new(
+                        input_size.0 as f32 / out_size.0 as f32,
+                        input_size.1 as f32 / out_size.1 as f32,
+                    ),
                 };
                 cl.push_constants(&self.depth_pyramid_signature, &constants);
 
-                cl.dispatch(calc_group_count(level_width), calc_group_count(level_height), 1);
+                cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
 
                 cl.barrier_image(
                     PipelineStageFlags::COMPUTE,
@@ -955,6 +956,9 @@ impl RenderEngine {
                         .new_layout(ImageLayout::GENERAL)
                         .mip_levels(i as u32, 1)],
                 );
+
+                input_size = out_size;
+                out_size = (out_size.0 >> 1, out_size.0 >> 1);
             }
 
             cl.barrier_image(
@@ -965,7 +969,7 @@ impl RenderEngine {
                     .src_access_mask(AccessFlags::SHADER_READ)
                     .dst_access_mask(Default::default())
                     .old_layout(ImageLayout::SHADER_READ)
-                    .new_layout(ImageLayout::DEPTH_READ)],
+                    .new_layout(ImageLayout::DEPTH_STENCIL_READ)],
             );
 
             // Compute visibilities
@@ -1301,12 +1305,11 @@ impl RenderEngine {
                 )
                 .unwrap(),
         );
-        let depth_pyramid_levels = self.depth_pyramid_image.as_ref().unwrap().mip_levels();
+        let depth_pyramid_image = self.depth_pyramid_image.as_ref().unwrap();
+        let depth_pyramid_levels = depth_pyramid_image.mip_levels();
         self.depth_pyramid_views = (0..depth_pyramid_levels)
             .map(|i| {
-                self.depth_pyramid_image
-                    .as_ref()
-                    .unwrap()
+                depth_pyramid_image
                     .create_view()
                     .base_mip_level(i)
                     .mip_level_count(1)
@@ -1320,7 +1323,6 @@ impl RenderEngine {
             .create_pool(0, depth_pyramid_levels)
             .unwrap();
         self.depth_pyramid_descs = {
-            let sampler = &self.depth_pyramid_sampler;
             let pool = &mut depth_pyramid_pool;
 
             (0..depth_pyramid_levels as usize)
@@ -1336,13 +1338,13 @@ impl RenderEngine {
                                     if i == 0 {
                                         BindingRes::ImageViewSampler(
                                             Arc::clone(depth_image.view()),
-                                            Arc::clone(&sampler),
+                                            Arc::clone(depth_image.sampler()),
                                             ImageLayout::SHADER_READ,
                                         )
                                     } else {
                                         BindingRes::ImageViewSampler(
                                             Arc::clone(&self.depth_pyramid_views[i - 1]),
-                                            Arc::clone(&sampler),
+                                            Arc::clone(depth_pyramid_image.sampler()),
                                             ImageLayout::GENERAL,
                                         )
                                     },
@@ -1350,8 +1352,9 @@ impl RenderEngine {
                                 pool.create_binding(
                                     1,
                                     0,
-                                    BindingRes::ImageView(
+                                    BindingRes::ImageViewSampler(
                                         Arc::clone(&self.depth_pyramid_views[i]),
+                                        Arc::clone(depth_pyramid_image.sampler()),
                                         ImageLayout::GENERAL,
                                     ),
                                 ),
@@ -1371,11 +1374,7 @@ impl RenderEngine {
                     self.cull_pool.create_binding(
                         0,
                         0,
-                        BindingRes::ImageViewSampler(
-                            Arc::clone(self.depth_pyramid_image.as_ref().unwrap().view()),
-                            Arc::clone(&self.depth_pyramid_sampler),
-                            ImageLayout::GENERAL,
-                        ),
+                        BindingRes::Image(Arc::clone(depth_pyramid_image), ImageLayout::GENERAL),
                     ),
                     self.cull_pool
                         .create_binding(1, 0, BindingRes::Buffer(self.per_frame_ub.handle())),
@@ -1649,7 +1648,6 @@ pub fn new(
         .create_pipeline_signature(&[depth_pyramid_compute], &[])
         .unwrap();
     let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
-    let depth_pyramid_sampler = device.create_reduction_sampler(Sampler::REDUCTION_MAX).unwrap();
 
     // Cull pipeline
     // -----------------------------------------------------------------------------------------------------------------
@@ -1744,8 +1742,8 @@ pub fn new(
                 // Depth (read)
                 Attachment {
                     format: Format::D32_FLOAT,
-                    init_layout: ImageLayout::DEPTH_READ,
-                    final_layout: ImageLayout::DEPTH_READ,
+                    init_layout: ImageLayout::DEPTH_STENCIL_READ,
+                    final_layout: ImageLayout::DEPTH_STENCIL_READ,
                     load_store: LoadStore::InitSave,
                 },
                 Attachment {
@@ -1960,7 +1958,6 @@ pub fn new(
         depth_pyramid_signature,
         depth_pyramid_pool: None,
         depth_pyramid_descs: vec![],
-        depth_pyramid_sampler,
         cull_pipeline,
         cull_signature,
         cull_pool,

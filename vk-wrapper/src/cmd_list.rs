@@ -344,6 +344,11 @@ impl CmdList {
     }
 
     pub fn dispatch(&mut self, group_count_x: u32, group_count_y: u32, group_count_z: u32) {
+        // Metal on MoltenVK requires this check
+        if group_count_x == 0 || group_count_y == 0 || group_count_z == 0 {
+            return;
+        }
+
         unsafe {
             self.device_wrapper
                 .native

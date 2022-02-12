@@ -68,7 +68,7 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                 cmd = cmd
                     .arg("--spirv-val")
                     .arg("--target-env")
-                    .arg("vulkan1.2")
+                    .arg("vulkan1.1")
                     .arg("-o")
                     .arg(dst_path_s.clone())
                     .arg("-V")
@@ -92,8 +92,7 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
                         .arg(dst_path_s.clone())
                         .arg("-o")
                         .arg(dst_path_s.clone())
-                        .arg("--target-env=vulkan1.2")
-                        .arg("--upgrade-memory-model")
+                        .arg("--target-env=vulkan1.1")
                         .arg("--skip-validation")
                         .arg("--preserve-bindings")
                         .arg("-O");
@@ -114,7 +113,9 @@ fn compile_shaders(src_dir: &Path, dst_dir: &Path) {
 }
 
 fn build_resources(src_dir: &Path, dst_file: &Path) {
-    let output = Command::new("bin/res-encoder")
+    let target = env::var("TARGET").unwrap();
+    println!("{}", target);
+    let output = Command::new(format!("bin/res-encoder-{}", target))
         .arg(src_dir.to_str().unwrap())
         .arg(dst_file.to_str().unwrap())
         .output()

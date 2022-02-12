@@ -16,7 +16,10 @@ pub struct Adapter {
     pub(crate) _props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
     pub(crate) features: vk::PhysicalDeviceFeatures,
-    pub(crate) features12: vk::PhysicalDeviceVulkan12Features,
+    pub(crate) desc_features: vk::PhysicalDeviceDescriptorIndexingFeaturesEXT,
+    pub(crate) ts_features: vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR,
+    pub(crate) storage8bit_features: vk::PhysicalDevice8BitStorageFeaturesKHR,
+    pub(crate) shader_float16_int8_features: vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR,
     pub(crate) queue_family_indices: [[u32; 2]; QUEUE_TYPE_COUNT],
     pub(crate) formats_props: HashMap<vk::Format, vk::FormatProperties>,
 }
@@ -49,7 +52,11 @@ impl Adapter {
             queue_infos.push(queue_info.build());
         }
 
-        let mut features12 = self.features12;
+        let mut desc_features = self.desc_features;
+        let mut ts_features = self.ts_features;
+        let mut storage8bit_features = self.storage8bit_features;
+        let mut shader_float16_int8_features = self.shader_float16_int8_features;
+
         let enabled_extensions_raw: Vec<*const c_char> =
             self.enabled_extensions.iter().map(|name| name.as_ptr()).collect();
 
@@ -57,7 +64,10 @@ impl Adapter {
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&enabled_extensions_raw)
             .enabled_features(&self.features)
-            .push_next(&mut features12);
+            .push_next(&mut desc_features)
+            .push_next(&mut ts_features)
+            .push_next(&mut storage8bit_features)
+            .push_next(&mut shader_float16_int8_features);
 
         let device_wrapper = Arc::new(DeviceWrapper {
             native: unsafe {

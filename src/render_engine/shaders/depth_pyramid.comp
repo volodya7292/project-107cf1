@@ -6,14 +6,19 @@ layout(binding = 0) uniform sampler2D inDepth;
 layout(binding = 1, r32f) uniform writeonly image2D outDepth;
 
 layout(push_constant) uniform PushConstants {
-    vec2 imageSize;
+    vec2 inSizeScale;
 };
 
 void main() {
-    uvec2 pos = gl_GlobalInvocationID.xy;
+    ivec2 outCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 inCoord = ivec2(vec2(outCoord) * inSizeScale);
 
-    // Sampler is set up to do min reduction, so this computes the minimum depth of a 2x2 texel quad
-    float depth = texture(inDepth, (vec2(pos) + vec2(0.5)) / imageSize).x;
+    float depth00 = texelFetch(inDepth, inCoord, 0).x;
+    float depth10 = texelFetch(inDepth, inCoord + ivec2(1, 0), 0).x;
+    float depth01 = texelFetch(inDepth, inCoord + ivec2(0, 1), 0).x;
+    float depth11 = texelFetch(inDepth, inCoord + ivec2(1, 1), 0).x;
 
-    imageStore(outDepth, ivec2(pos), vec4(depth));
+    float depth = max(max(depth00, depth11), max(depth01, depth10));
+
+    imageStore(outDepth, outCoord, vec4(depth));
 }

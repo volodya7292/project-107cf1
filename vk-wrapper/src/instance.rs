@@ -46,6 +46,12 @@ impl Instance {
         let mut adapters = Vec::<Arc<Adapter>>::new();
 
         'g: for p_device in physical_devices {
+            let props = unsafe { self.native.get_physical_device_properties(p_device) };
+
+            if vk::api_version_major(props.api_version) != 1 || vk::api_version_minor(props.api_version) < 1 {
+                continue;
+            }
+
             // Check queue families
             // ------------------------------------------------------------------------------------
             let queue_families = unsafe { self.native.get_physical_device_queue_family_properties(p_device) };
@@ -107,8 +113,14 @@ impl Instance {
             // Check extensions
             // ------------------------------------------------------------------------------------
             let available_extensions = self.enumerate_device_extension_names(p_device).unwrap();
-            let required_extensions = ["VK_KHR_swapchain"];
-            let preferred_extensions = [""];
+            let required_extensions = [
+                "VK_KHR_swapchain",
+                "VK_KHR_timeline_semaphore",
+                "VK_EXT_descriptor_indexing",
+                "VK_KHR_8bit_storage",
+                "VK_KHR_shader_float16_int8",
+            ];
+            let preferred_extensions = ["VK_KHR_portability_subset"];
 
             let enabled_extensions_res =
                 utils::filter_names(&available_extensions, &required_extensions, true);
@@ -119,13 +131,29 @@ impl Instance {
             enabled_extensions
                 .extend(utils::filter_names(&available_extensions, &preferred_extensions, false).unwrap());
 
-            let props = unsafe { self.native.get_physical_device_properties(p_device) };
-
             // Check features
             // ------------------------------------------------------------------------------------
-            let mut available_features12 = vk::PhysicalDeviceVulkan12Features::builder().build();
+            let mut available_shader_float16_int8_features =
+                vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR::default();
+
+            let mut available_8bit_storage_features = vk::PhysicalDevice8BitStorageFeaturesKHR::default();
+            available_8bit_storage_features.p_next = &mut available_shader_float16_int8_features
+                as *mut vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR
+                as *mut c_void;
+
+            let mut available_desc_features = vk::PhysicalDeviceDescriptorIndexingFeaturesEXT::default();
+            available_desc_features.p_next = &mut available_8bit_storage_features
+                as *mut vk::PhysicalDevice8BitStorageFeaturesKHR
+                as *mut c_void;
+
+            let mut available_ts_features = vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR::default();
+            available_ts_features.p_next = &mut available_desc_features
+                as *mut vk::PhysicalDeviceDescriptorIndexingFeaturesEXT
+                as *mut c_void;
+
             let mut available_features2 = vk::PhysicalDeviceFeatures2 {
-                p_next: &mut available_features12 as *mut vk::PhysicalDeviceVulkan12Features as *mut c_void,
+                p_next: &mut available_ts_features as *mut vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR
+                    as *mut c_void,
                 ..Default::default()
             };
             unsafe {
@@ -134,49 +162,52 @@ impl Instance {
             };
             let available_features = available_features2.features;
 
-            let mut enabled_features12 = vk::PhysicalDeviceVulkan12Features::default();
             let mut enabled_features = vk::PhysicalDeviceFeatures::default();
+            let mut enabled_shader_float16_int8_features =
+                vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR::default();
+            let mut enabled_8bit_storage_features = vk::PhysicalDevice8BitStorageFeaturesKHR::default();
+            let mut enabled_desc_features = vk::PhysicalDeviceDescriptorIndexingFeaturesEXT::default();
+            let mut enabled_ts_features = vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR::default();
 
-            macro_rules! require_feature {
-                ($name:ident) => {
-                    if available_features.$name == 0 {
-                        continue;
-                    } else {
-                        enabled_features.$name = available_features.$name;
-                    }
+            macro_rules! require_features {
+                ($available: ident, $to_set: ident, $($name: ident),+) => {
+                    $(
+                        if $available.$name == 0 {
+                            continue;
+                        } else {
+                            $to_set.$name = vk::TRUE;
+                        }
+                    )*
                 };
             }
-            macro_rules! require_feature12 {
-                ($name:ident) => {
-                    if available_features12.$name == 0 {
-                        continue;
-                    } else {
-                        enabled_features12.$name = available_features12.$name;
-                    }
-                };
-            }
 
-            require_feature!(sampler_anisotropy);
-            require_feature!(shader_uniform_buffer_array_dynamic_indexing);
-            require_feature!(shader_sampled_image_array_dynamic_indexing);
-            require_feature!(shader_storage_buffer_array_dynamic_indexing);
-            require_feature!(shader_storage_image_array_dynamic_indexing);
-            require_feature!(texture_compression_bc);
-
-            require_feature12!(descriptor_indexing);
-            require_feature12!(descriptor_binding_partially_bound);
-            require_feature12!(runtime_descriptor_array);
-            require_feature12!(separate_depth_stencil_layouts);
-            require_feature12!(timeline_semaphore);
-            require_feature12!(sampler_filter_minmax);
-            require_feature12!(storage_buffer8_bit_access);
-            require_feature12!(shader_int8);
-
-            enabled_features12.vulkan_memory_model = available_features12.vulkan_memory_model;
-            enabled_features12.vulkan_memory_model_device_scope =
-                available_features12.vulkan_memory_model_device_scope;
-            enabled_features12.vulkan_memory_model_availability_visibility_chains =
-                available_features12.vulkan_memory_model_availability_visibility_chains;
+            require_features!(
+                available_features,
+                enabled_features,
+                sampler_anisotropy,
+                shader_uniform_buffer_array_dynamic_indexing,
+                shader_sampled_image_array_dynamic_indexing,
+                shader_storage_buffer_array_dynamic_indexing,
+                shader_storage_image_array_dynamic_indexing,
+                texture_compression_bc
+            );
+            require_features!(available_ts_features, enabled_ts_features, timeline_semaphore);
+            require_features!(
+                available_desc_features,
+                enabled_desc_features,
+                descriptor_binding_partially_bound,
+                runtime_descriptor_array
+            );
+            require_features!(
+                available_8bit_storage_features,
+                enabled_8bit_storage_features,
+                storage_buffer8_bit_access
+            );
+            require_features!(
+                available_shader_float16_int8_features,
+                enabled_shader_float16_int8_features,
+                shader_int8
+            );
 
             // Check formats
             // ------------------------------------------------------------------------------------
@@ -209,8 +240,7 @@ impl Instance {
                 | vk::FormatFeatureFlags::BLIT_SRC
                 | vk::FormatFeatureFlags::BLIT_DST
                 | vk::FormatFeatureFlags::TRANSFER_SRC
-                | vk::FormatFeatureFlags::TRANSFER_DST
-                | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_MINMAX;
+                | vk::FormatFeatureFlags::TRANSFER_DST;
 
             // Image formats
             for format in format::IMAGE_FORMATS.iter() {
@@ -251,7 +281,10 @@ impl Instance {
                 _props: props,
                 enabled_extensions,
                 features: enabled_features,
-                features12: enabled_features12,
+                desc_features: enabled_desc_features,
+                ts_features: enabled_ts_features,
+                storage8bit_features: enabled_8bit_storage_features,
+                shader_float16_int8_features: enabled_shader_float16_int8_features,
                 queue_family_indices: queue_fam_indices,
                 formats_props,
             }));
