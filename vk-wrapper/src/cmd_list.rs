@@ -181,7 +181,7 @@ impl CmdList {
                 0,
                 &[vk::Viewport {
                     x: 0f32,
-                    y: size.1 as f32 - 1f32,
+                    y: size.1 as f32,
                     width: size.0 as f32,
                     height: -(size.1 as f32),
                     min_depth: 0f32,

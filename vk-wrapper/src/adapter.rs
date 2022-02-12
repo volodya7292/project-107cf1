@@ -69,6 +69,10 @@ impl Adapter {
             .push_next(&mut storage8bit_features)
             .push_next(&mut shader_float16_int8_features);
 
+        let ts_khr = ash::extensions::khr::TimelineSemaphore::new(
+            &self.instance.entry.ash_entry,
+            &self.instance.native,
+        );
         let device_wrapper = Arc::new(DeviceWrapper {
             native: unsafe {
                 self.instance
@@ -76,6 +80,7 @@ impl Adapter {
                     .create_device(self.native, &create_info, None)?
             },
             adapter: Arc::clone(self),
+            ts_khr,
         });
         let swapchain_khr =
             ash::extensions::khr::Swapchain::new(&self.instance.native, &device_wrapper.native);

@@ -54,6 +54,7 @@ impl From<spirv_cross::ErrorCode> for DeviceError {
 pub(crate) struct DeviceWrapper {
     pub(crate) native: ash::Device,
     pub(crate) adapter: Arc<Adapter>,
+    pub(crate) ts_khr: ash::extensions::khr::TimelineSemaphore,
 }
 
 impl DeviceWrapper {
