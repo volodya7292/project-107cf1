@@ -1,12 +1,16 @@
-use crate::device::{DeviceWrapper, NativeMemPool};
+use crate::device::DeviceWrapper;
+use crate::instance::VK_API_VERSION;
 use crate::{
     device::{self, Device},
     surface::Surface,
     Instance, Queue,
 };
 use ash::vk;
-use std::sync::{Arc, Mutex, RwLock};
+use parking_lot::{Mutex, RwLock};
+use std::sync::Arc;
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
+
+pub(crate) type MemoryBlock = gpu_alloc::MemoryBlock<vk::DeviceMemory>;
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
@@ -69,21 +73,20 @@ impl Adapter {
             .push_next(&mut storage8bit_features)
             .push_next(&mut shader_float16_int8_features);
 
-        let ts_khr = ash::extensions::khr::TimelineSemaphore::new(
-            &self.instance.entry.ash_entry,
-            &self.instance.native,
-        );
+        let native_device = unsafe {
+            self.instance
+                .native
+                .create_device(self.native, &create_info, None)?
+        };
+
+        let ts_khr = ash::extensions::khr::TimelineSemaphore::new(&self.instance.native, &native_device);
+        let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
+
         let device_wrapper = Arc::new(DeviceWrapper {
-            native: unsafe {
-                self.instance
-                    .native
-                    .create_device(self.native, &create_info, None)?
-            },
+            native: native_device,
             adapter: Arc::clone(self),
             ts_khr,
         });
-        let swapchain_khr =
-            ash::extensions::khr::Swapchain::new(&self.instance.native, &device_wrapper.native);
 
         // Get queues
         let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
@@ -114,57 +117,40 @@ impl Adapter {
             ));
         }
 
-        // Create allocator
-        let allocator_info = vk_mem::AllocatorCreateInfo {
-            physical_device: self.native,
-            device: &device_wrapper.native,
-            instance: &self.instance.native,
-            flags: Default::default(),
-            preferred_large_heap_block_size: 0,
-            frame_in_use_count: 0,
-            heap_size_limits: None,
-        };
-        let allocator = vk_mem::Allocator::new(&allocator_info).unwrap();
+        let memory_props =
+            unsafe { gpu_alloc_ash::device_properties(&self.instance.native, VK_API_VERSION, self.native)? };
 
-        // TODO: use `reserved_memory_size` to reduce stutters due to lots of vkAllocateMemory
+        let allowed_memory_types = memory_props
+            .memory_types
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                // HOST_VISIBLE memory types must also be HOST_COHERENT
+                // to avoid explicit flushing/invalidating after mapping and alignment issues
+                if !v.props.contains(gpu_alloc::MemoryPropertyFlags::HOST_VISIBLE)
+                    || v.props.contains(gpu_alloc::MemoryPropertyFlags::HOST_COHERENT)
+                {
+                    Some(i as u32)
+                } else {
+                    None
+                }
+            })
+            .fold(0_u32, |acc, v| acc | (1 << v));
 
-        let (dev_pool, host_pool) = {
-            let dev_alloc_info = vk_mem::AllocationCreateInfo {
-                usage: vk_mem::MemoryUsage::GpuOnly,
-                ..Default::default()
-            };
-            let host_alloc_info = vk_mem::AllocationCreateInfo {
-                usage: vk_mem::MemoryUsage::CpuOnly,
-                flags: vk_mem::AllocationCreateFlags::MAPPED,
-                required_flags: vk::MemoryPropertyFlags::HOST_CACHED,
-                ..Default::default()
-            };
-            let dev_pool_info = vk_mem::AllocatorPoolCreateInfo {
-                memory_type_index: allocator
-                    .find_memory_type_index(u32::MAX, &dev_alloc_info)
-                    .unwrap(),
-                flags: vk_mem::AllocatorPoolCreateFlags::NONE,
-                // block_size: reserved_memory_size as usize,
-                block_size: 1024 * 1024 * 16,
-                min_block_count: 0,
-                max_block_count: 0,
-                frame_in_use_count: 0,
-            };
-            let host_pool_info = vk_mem::AllocatorPoolCreateInfo {
-                memory_type_index: allocator
-                    .find_memory_type_index(u32::MAX, &host_alloc_info)
-                    .unwrap(),
-                flags: vk_mem::AllocatorPoolCreateFlags::NONE,
-                block_size: 1024 * 1024 * 16,
-                // block_size: reserved_memory_size as usize,
-                min_block_count: 0,
-                max_block_count: 0,
-                frame_in_use_count: 0,
-            };
-            let dev_pool = allocator.create_pool(&dev_pool_info).unwrap();
-            let host_pool = allocator.create_pool(&host_pool_info).unwrap();
-            (dev_pool, host_pool)
-        };
+        let allocator = gpu_alloc::GpuAllocator::<vk::DeviceMemory>::new(
+            gpu_alloc::Config {
+                dedicated_threshold: 32 * 1024 * 1024,
+                preferred_dedicated_threshold: 32 * 1024 * 1024,
+                transient_dedicated_threshold: 128 * 1024 * 1024,
+                starting_free_list_chunk: 16 * 1024 * 1024,
+                final_free_list_chunk: 128 * 1024 * 1024,
+                minimal_buddy_size: 1 * 256,
+                initial_buddy_dedicated_size: 32 * 1024 * 1024,
+            },
+            memory_props,
+        );
+
+        // TODO: use reserved memory to reduce stutters due to lots of vkAllocateMemory
 
         let pipeline_cache_info = vk::PipelineCacheCreateInfo::builder();
         let pipeline_cache = unsafe {
@@ -175,9 +161,8 @@ impl Adapter {
 
         Ok(Arc::new(Device {
             wrapper: device_wrapper,
-            allocator,
-            dev_pool: NativeMemPool(dev_pool),
-            host_pool: NativeMemPool(host_pool),
+            allocator: Mutex::new(allocator),
+            allowed_memory_types,
             total_used_dev_memory: Arc::new(Default::default()),
             swapchain_khr,
             queues,

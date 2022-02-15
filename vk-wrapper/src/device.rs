@@ -13,17 +13,22 @@ use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
 use ash::vk;
+use gpu_alloc::GpuAllocator;
+use gpu_alloc_ash::AshMemoryDevice;
+use parking_lot::Mutex;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::CString;
+use std::mem::ManuallyDrop;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{atomic, Arc};
 use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
-    VmaError(vk_mem::Error),
+    MemoryAllocationError(gpu_alloc::AllocationError),
+    MemoryMapError(gpu_alloc::MapError),
     VkError(vk::Result),
     ZeroBufferElementSize,
     ZeroBufferSize,
@@ -33,9 +38,15 @@ pub enum DeviceError {
     InvalidSignature(&'static str),
 }
 
-impl From<vk_mem::Error> for DeviceError {
-    fn from(err: vk_mem::Error) -> Self {
-        DeviceError::VmaError(err)
+impl From<gpu_alloc::AllocationError> for DeviceError {
+    fn from(err: gpu_alloc::AllocationError) -> Self {
+        DeviceError::MemoryAllocationError(err)
+    }
+}
+
+impl From<gpu_alloc::MapError> for DeviceError {
+    fn from(err: gpu_alloc::MapError) -> Self {
+        DeviceError::MemoryMapError(err)
     }
 }
 
@@ -92,16 +103,10 @@ impl Drop for DeviceWrapper {
     }
 }
 
-pub struct NativeMemPool(pub(crate) vk_mem::AllocatorPool);
-
-unsafe impl Send for NativeMemPool {}
-unsafe impl Sync for NativeMemPool {}
-
 pub struct Device {
     pub(crate) wrapper: Arc<DeviceWrapper>,
-    pub(crate) allocator: vk_mem::Allocator,
-    pub(crate) dev_pool: NativeMemPool,
-    pub(crate) host_pool: NativeMemPool,
+    pub(crate) allocator: Mutex<GpuAllocator<vk::DeviceMemory>>,
+    pub(crate) allowed_memory_types: u32,
     pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Arc<Queue>>,
@@ -165,8 +170,8 @@ impl Device {
         usage: BufferUsageFlags,
         elem_size: u64,
         size: u64,
-        mem_usage: vk_mem::MemoryUsage,
-    ) -> Result<(Arc<Buffer>, vk_mem::AllocationInfo), DeviceError> {
+        mem_usage: gpu_alloc::UsageFlags,
+    ) -> Result<Buffer, DeviceError> {
         if elem_size == 0 {
             return Err(DeviceError::ZeroBufferElementSize);
         }
@@ -183,43 +188,45 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .size(bytesize as vk::DeviceSize);
 
-        let (pool, preferred_flags, used_dev_memory) = if mem_usage == vk_mem::MemoryUsage::CpuOnly {
-            (self.host_pool.0.clone(), vk::MemoryPropertyFlags::HOST_CACHED, 0)
-        } else {
-            (self.dev_pool.0.clone(), Default::default(), bytesize)
-        };
+        let used_dev_memory =
+            bytesize * (mem_usage.contains(gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS) as u64);
 
-        let allocation_create_info = vk_mem::AllocationCreateInfo {
-            usage: mem_usage,
-            flags: vk_mem::AllocationCreateFlags::MAPPED,
-            required_flags: Default::default(),
-            preferred_flags,
-            memory_type_bits: 0,
-            pool: Some(pool),
-            user_data: None,
-        };
+        let (buffer, memory_block) = unsafe {
+            let native_buffer = self.wrapper.native.create_buffer(&buffer_info, None)?;
+            let req = self.wrapper.native.get_buffer_memory_requirements(native_buffer);
 
-        let (buffer, alloc, alloc_info) = self
-            .allocator
-            .create_buffer(&buffer_info, &allocation_create_info)?;
+            let memory_block = self.allocator.lock().alloc(
+                AshMemoryDevice::wrap(&self.wrapper.native),
+                gpu_alloc::Request {
+                    size: req.size,
+                    align_mask: req.alignment,
+                    usage: mem_usage,
+                    memory_types: self.allowed_memory_types & req.memory_type_bits,
+                },
+            )?;
+
+            self.wrapper.native.bind_buffer_memory(
+                native_buffer,
+                *memory_block.memory(),
+                memory_block.offset(),
+            )?;
+
+            (native_buffer, memory_block)
+        };
 
         self.total_used_dev_memory
             .fetch_add(used_dev_memory as usize, atomic::Ordering::Relaxed);
 
-        Ok((
-            Arc::new(Buffer {
-                device: Arc::clone(self),
-                native: buffer,
-                allocation: alloc,
-                total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
-                used_dev_memory,
-                elem_size,
-                aligned_elem_size: aligned_elem_size as u64,
-                size,
-                _bytesize: bytesize as u64,
-            }),
-            alloc_info,
-        ))
+        Ok(Buffer {
+            device: Arc::clone(self),
+            native: buffer,
+            allocation: ManuallyDrop::new(memory_block),
+            used_dev_memory,
+            elem_size,
+            aligned_elem_size: aligned_elem_size as u64,
+            size,
+            bytesize: bytesize as u64,
+        })
     }
 
     pub fn create_host_buffer<T>(
@@ -227,17 +234,29 @@ impl Device {
         usage: BufferUsageFlags,
         size: u64,
     ) -> Result<HostBuffer<T>, DeviceError> {
-        let (buffer, alloc_info) = self.create_buffer(
+        let mut buffer = self.create_buffer(
             usage,
             mem::size_of::<T>() as u64,
             size,
-            vk_mem::MemoryUsage::CpuOnly,
+            gpu_alloc::UsageFlags::HOST_ACCESS
+                | gpu_alloc::UsageFlags::DOWNLOAD
+                | gpu_alloc::UsageFlags::UPLOAD,
         )?;
+        let p_data = unsafe {
+            buffer
+                .allocation
+                .map(
+                    AshMemoryDevice::wrap(&self.wrapper.native),
+                    0,
+                    buffer.bytesize as usize,
+                )?
+                .as_ptr()
+        };
 
         Ok(HostBuffer {
             _type_marker: PhantomData,
-            buffer,
-            p_data: alloc_info.get_mapped_data(),
+            buffer: Arc::new(buffer),
+            p_data,
         })
     }
 
@@ -247,8 +266,15 @@ impl Device {
         element_size: u64,
         size: u64,
     ) -> Result<DeviceBuffer, DeviceError> {
-        let (buffer, _) = self.create_buffer(usage, element_size, size, vk_mem::MemoryUsage::GpuOnly)?;
-        Ok(DeviceBuffer { buffer })
+        let buffer = self.create_buffer(
+            usage,
+            element_size,
+            size,
+            gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+        )?;
+        Ok(DeviceBuffer {
+            buffer: Arc::new(buffer),
+        })
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
@@ -314,19 +340,27 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let allocation_create_info = vk_mem::AllocationCreateInfo {
-            usage: vk_mem::MemoryUsage::GpuOnly,
-            flags: vk_mem::AllocationCreateFlags::MAPPED,
-            required_flags: Default::default(),
-            preferred_flags: Default::default(),
-            memory_type_bits: 0,
-            pool: Some(self.dev_pool.0.clone()),
-            user_data: None,
-        };
+        let (image, memory_block) = unsafe {
+            let native_image = self.wrapper.native.create_image(&image_info, None)?;
+            let req = self.wrapper.native.get_image_memory_requirements(native_image);
 
-        let (image, alloc, _alloc_info) = self
-            .allocator
-            .create_image(&image_info, &allocation_create_info)?;
+            let memory_block = self.allocator.lock().alloc(
+                AshMemoryDevice::wrap(&self.wrapper.native),
+                gpu_alloc::Request {
+                    size: req.size,
+                    align_mask: req.alignment,
+                    usage: gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+                    memory_types: self.allowed_memory_types & req.memory_type_bits,
+                },
+            )?;
+
+            self.wrapper
+                .native
+                .bind_image_memory(native_image, *memory_block.memory(), 0)?;
+
+            (native_image, memory_block)
+        };
+        let bytesize = memory_block.size();
 
         let aspect = if format == format::DEPTH_FORMAT {
             vk::ImageAspectFlags::DEPTH
@@ -374,15 +408,14 @@ impl Device {
         };
 
         self.total_used_dev_memory
-            .fetch_add(_alloc_info.get_size(), atomic::Ordering::Relaxed);
+            .fetch_add(memory_block.size() as usize, atomic::Ordering::Relaxed);
 
         let image_wrapper = Arc::new(ImageWrapper {
             device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
-            allocation: alloc,
-            bytesize: _alloc_info.get_size() as u64,
-            total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
+            allocation: Some(memory_block),
+            bytesize,
             owned_handle: true,
             ty: image_type,
             format,
@@ -534,7 +567,7 @@ impl Device {
                     ));
                 }
             }
-            create_info = create_info.old_swapchain(*old_swapchain.wrapper.native.lock().unwrap());
+            create_info = create_info.old_swapchain(*old_swapchain.wrapper.native.lock());
         }
 
         let swapchain_wrapper = Arc::new(SwapchainWrapper {
@@ -544,7 +577,7 @@ impl Device {
         });
 
         let images: Result<Vec<Arc<Image>>, DeviceError> = unsafe {
-            let native_swapchain = swapchain_wrapper.native.lock().unwrap();
+            let native_swapchain = swapchain_wrapper.native.lock();
             self.swapchain_khr.get_swapchain_images(*native_swapchain)?
         }
         .iter()
@@ -566,9 +599,8 @@ impl Device {
                 device: Arc::clone(self),
                 _swapchain_wrapper: Some(Arc::clone(&swapchain_wrapper)),
                 native: native_image,
-                allocation: vk_mem::Allocation::null(),
+                allocation: None,
                 bytesize: 0,
-                total_used_dev_memory: Arc::clone(&self.total_used_dev_memory),
                 owned_handle: false,
                 ty: Image::TYPE_2D,
                 format: Format(s_format.format),
@@ -1066,7 +1098,7 @@ impl Device {
     }
 
     pub fn load_pipeline_cache(&self, data: &[u8]) -> Result<(), vk::Result> {
-        let mut pipeline_cache = self.pipeline_cache.lock().unwrap();
+        let mut pipeline_cache = self.pipeline_cache.lock();
 
         unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
         let create_info = vk::PipelineCacheCreateInfo::builder().initial_data(data);
@@ -1076,7 +1108,7 @@ impl Device {
     }
 
     pub fn get_pipeline_cache(&self) -> Result<Vec<u8>, vk::Result> {
-        let pipeline_cache = self.pipeline_cache.lock().unwrap();
+        let pipeline_cache = self.pipeline_cache.lock();
         unsafe { self.wrapper.native.get_pipeline_cache_data(*pipeline_cache) }
     }
 
@@ -1224,7 +1256,7 @@ impl Device {
             .render_pass(render_pass.native)
             .subpass(subpass_index);
 
-        let pipeline_cache = self.pipeline_cache.lock().unwrap();
+        let pipeline_cache = self.pipeline_cache.lock();
         let native_pipeline = unsafe {
             self.wrapper.native.create_graphics_pipelines(
                 *pipeline_cache,
@@ -1261,7 +1293,7 @@ impl Device {
             .stage(stage_info)
             .layout(signature.pipeline_layout);
 
-        let pipeline_cache = self.pipeline_cache.lock().unwrap();
+        let pipeline_cache = self.pipeline_cache.lock();
         let native_pipeline = unsafe {
             self.wrapper
                 .native
@@ -1301,11 +1333,13 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        let pipeline_cache = self.pipeline_cache.lock().unwrap();
-        unsafe { self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None) };
+        let pipeline_cache = self.pipeline_cache.lock();
 
-        self.allocator.destroy_pool(&self.host_pool.0);
-        self.allocator.destroy_pool(&self.dev_pool.0);
-        self.allocator.destroy();
+        unsafe {
+            self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None);
+            self.allocator
+                .lock()
+                .cleanup(AshMemoryDevice::wrap(&self.wrapper.native));
+        }
     }
 }

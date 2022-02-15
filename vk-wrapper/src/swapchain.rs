@@ -1,6 +1,7 @@
 use crate::{Device, Image, Semaphore, Surface};
 use ash::vk;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -26,7 +27,7 @@ impl Drop for SwapchainWrapper {
         unsafe {
             self.device
                 .swapchain_khr
-                .destroy_swapchain(*self.native.lock().unwrap(), None);
+                .destroy_swapchain(*self.native.lock(), None);
         }
     }
 }
@@ -44,7 +45,7 @@ impl Swapchain {
 
     pub fn acquire_image(&self) -> Result<(SwapchainImage, bool), Error> {
         let result = unsafe {
-            let native = self.wrapper.native.lock().unwrap();
+            let native = self.wrapper.native.lock();
             self.wrapper.device.swapchain_khr.acquire_next_image(
                 *native,
                 u64::MAX,

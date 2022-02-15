@@ -1,8 +1,10 @@
+use crate::adapter::MemoryBlock;
 use crate::{AccessFlags, Device, Queue};
 use ash::vk;
+use gpu_alloc_ash::AshMemoryDevice;
 use std::hash::{Hash, Hasher};
+use std::mem::ManuallyDrop;
 use std::ops::{Index, IndexMut};
-use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
 use std::{marker::PhantomData, mem, ptr};
 
@@ -22,13 +24,12 @@ impl BufferHandleImpl for BufferHandle {
 pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
-    pub(crate) allocation: vk_mem::Allocation,
-    pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
+    pub(crate) allocation: ManuallyDrop<MemoryBlock>,
     pub(crate) used_dev_memory: u64,
     pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
-    pub(crate) _bytesize: u64,
+    pub(crate) bytesize: u64,
 }
 
 impl PartialEq for Buffer {
@@ -47,10 +48,17 @@ impl Hash for Buffer {
 
 impl Drop for Buffer {
     fn drop(&mut self) {
+        unsafe {
+            self.device.wrapper.native.destroy_buffer(self.native, None);
+
+            self.device.allocator.lock().dealloc(
+                AshMemoryDevice::wrap(&self.device.wrapper.native),
+                ManuallyDrop::take(&mut self.allocation),
+            )
+        }
+
         self.device
-            .allocator
-            .destroy_buffer(self.native, &self.allocation);
-        self.total_used_dev_memory
+            .total_used_dev_memory
             .fetch_sub(self.used_dev_memory as usize, atomic::Ordering::Relaxed);
     }
 }

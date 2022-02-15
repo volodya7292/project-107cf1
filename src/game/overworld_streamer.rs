@@ -7,11 +7,12 @@ use crate::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use crossbeam_channel as cb;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use vk_wrapper as vkw;
 
@@ -215,7 +216,7 @@ impl OverworldStreamer {
         overworld: Overworld,
     ) -> Self {
         Self {
-            device: Arc::clone(re.lock().unwrap().device()),
+            device: Arc::clone(re.lock().device()),
             main_registry: Arc::clone(registry),
             cluster_mat_pipeline,
             re: Arc::clone(re),
@@ -476,7 +477,7 @@ impl OverworldStreamer {
 
     /// Creates/removes new render entities.
     pub fn update_renderer(&mut self) {
-        let re = self.re.lock().unwrap();
+        let re = self.re.lock();
         let scene = re.scene();
 
         component::remove_entities(scene, &self.clusters_to_remove);

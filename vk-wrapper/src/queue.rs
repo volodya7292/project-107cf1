@@ -3,8 +3,9 @@ use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
 use ash::vk;
 use ash::vk::Handle;
+use parking_lot::{Mutex, RwLock};
 use smallvec::SmallVec;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::{ptr, slice};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -103,7 +104,7 @@ impl Queue {
             }
             let cmd_buffer_index = command_buffers.len();
             for cmd_buffer in &info.cmd_lists {
-                command_buffers.push(cmd_buffer.lock().unwrap().native);
+                command_buffers.push(cmd_buffer.lock().native);
             }
 
             native_sp_submit_infos.push(
@@ -133,7 +134,7 @@ impl Queue {
             );
         }
 
-        let queue = self.native.write().unwrap();
+        let queue = self.native.write();
 
         fence.reset()?;
 
@@ -153,7 +154,7 @@ impl Queue {
             return Ok(());
         }
 
-        let mut sp_last_signal_value = self.timeline_sp.last_signal_value.lock().unwrap();
+        let mut sp_last_signal_value = self.timeline_sp.last_signal_value.lock();
         let mut new_last_signal_value = *sp_last_signal_value;
 
         for info in &mut packet.infos {
@@ -185,7 +186,7 @@ impl Queue {
     }
 
     pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
-        let queue = self.native.write().unwrap();
+        let queue = self.native.write();
         let swapchain = sw_image
             .image
             .wrapper
@@ -193,8 +194,7 @@ impl Queue {
             .as_ref()
             .unwrap()
             .native
-            .lock()
-            .unwrap();
+            .lock();
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&self.semaphore.native))
@@ -218,14 +218,14 @@ impl Queue {
     }
 
     pub fn wait_idle(&self) -> Result<(), vk::Result> {
-        let queue = self.native.write().unwrap();
+        let queue = self.native.write();
         unsafe { self.device_wrapper.native.queue_wait_idle(*queue) }
     }
 }
 
 impl PartialEq for Queue {
     fn eq(&self, other: &Self) -> bool {
-        *self.native.read().unwrap() == *other.native.read().unwrap()
+        *self.native.read() == *other.native.read()
     }
 }
 
@@ -304,7 +304,7 @@ impl SubmitPacket {
 
         for info in &self.infos {
             for cmd_list in &info.cmd_lists {
-                let mut cmd_list = cmd_list.lock().unwrap();
+                let mut cmd_list = cmd_list.lock();
                 if cmd_list.one_time_exec {
                     cmd_list.clear_resources();
                 }

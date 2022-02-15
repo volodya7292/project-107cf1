@@ -55,10 +55,6 @@ macro_rules! vk_bitflags_impl {
                 $name(<$flag_type>::empty())
             }
             #[inline]
-            pub const fn all() -> $name {
-                $name(<$flag_type>::all())
-            }
-            #[inline]
             pub const fn from_raw(x: $flag_type) -> Self {
                 $name(x)
             }
@@ -69,10 +65,6 @@ macro_rules! vk_bitflags_impl {
             #[inline]
             pub fn is_empty(self) -> bool {
                 self == $name::empty()
-            }
-            #[inline]
-            pub fn is_all(self) -> bool {
-                self & $name::all() == $name::all()
             }
             #[inline]
             pub fn intersects(self, other: $name) -> bool {
@@ -139,7 +131,7 @@ macro_rules! vk_bitflags_impl {
             type Output = $name;
             #[inline]
             fn not(self) -> $name {
-                self ^ $name::all()
+                Self(!self.0)
             }
         }
     };

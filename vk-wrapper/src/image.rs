@@ -1,7 +1,8 @@
+use crate::adapter::MemoryBlock;
 use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
 use ash::vk;
-use std::sync::atomic::AtomicUsize;
+use gpu_alloc_ash::AshMemoryDevice;
 use std::sync::{atomic, Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -95,9 +96,8 @@ pub(crate) struct ImageWrapper {
     pub(crate) device: Arc<Device>,
     pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
-    pub(crate) allocation: vk_mem::Allocation,
+    pub(crate) allocation: Option<MemoryBlock>,
     pub(crate) bytesize: u64,
-    pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) owned_handle: bool,
     pub(crate) ty: ImageType,
     pub(crate) format: Format,
@@ -237,9 +237,21 @@ impl Image {
 
 impl Drop for ImageWrapper {
     fn drop(&mut self) {
-        if self.owned_handle {
-            self.device.allocator.destroy_image(self.native, &self.allocation);
-            self.total_used_dev_memory
+        if !self.owned_handle {
+            return;
+        }
+        unsafe {
+            self.device.wrapper.native.destroy_image(self.native, None);
+
+            if let Some(memory_block) = self.allocation.take() {
+                self.device
+                    .allocator
+                    .lock()
+                    .dealloc(AshMemoryDevice::wrap(&self.device.wrapper.native), memory_block);
+            }
+
+            self.device
+                .total_used_dev_memory
                 .fetch_sub(self.bytesize as usize, atomic::Ordering::Relaxed);
         }
     }

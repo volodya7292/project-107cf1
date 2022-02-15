@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum InstanceError {
-    AshError(ash::InstanceError),
+    AshError(ash::LoadingError),
     VkError(vk::Result),
 }
 
-impl From<ash::InstanceError> for InstanceError {
-    fn from(err: ash::InstanceError) -> Self {
+impl From<ash::LoadingError> for InstanceError {
+    fn from(err: ash::LoadingError) -> Self {
         InstanceError::AshError(err)
     }
 }
@@ -57,7 +57,7 @@ unsafe extern "system" fn vk_debug_callback(
 }
 
 pub fn enumerate_required_window_extensions(
-    window_handle: &impl raw_window_handle::HasRawWindowHandle,
+    window_handle: &dyn raw_window_handle::HasRawWindowHandle,
 ) -> Result<Vec<String>, vk::Result> {
     let names = ash_window::enumerate_required_extensions(window_handle)?;
     Ok(names
@@ -69,7 +69,7 @@ pub fn enumerate_required_window_extensions(
 impl Entry {
     pub fn new() -> Result<Arc<Entry>, ash::LoadingError> {
         Ok(Arc::new(Entry {
-            ash_entry: unsafe { ash::Entry::new()? },
+            ash_entry: unsafe { ash::Entry::load()? },
         }))
     }
 

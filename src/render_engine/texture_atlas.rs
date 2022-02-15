@@ -1,5 +1,6 @@
 use crate::utils::UInt;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use vk_wrapper as vkw;
 
 #[derive(Debug)]
@@ -64,7 +65,7 @@ impl TextureAtlas {
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
 
         {
-            let mut cl = self.cmd_list.lock().unwrap();
+            let mut cl = self.cmd_list.lock();
             cl.begin(true).unwrap();
             cl.barrier_image(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
@@ -167,7 +168,7 @@ pub fn new(
 
     // Change image initial layout
     {
-        let mut cl = cmd_list.lock().unwrap();
+        let mut cl = cmd_list.lock();
         cl.begin(true)?;
         cl.barrier_image(
             vkw::PipelineStageFlags::TOP_OF_PIPE,

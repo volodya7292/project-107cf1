@@ -22,11 +22,12 @@ use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use scene::ComponentStorage;
 pub use scene::Scene;
 use smallvec::SmallVec;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use std::{iter, mem, slice};
 use texture_atlas::TextureAtlas;
@@ -38,8 +39,8 @@ use vk_wrapper::{
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
     HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
     PipelineDepthStencil, PipelineRasterization, PipelineSignature, PipelineStageFlags, PrimitiveTopology,
-    Queue, RenderPass, Sampler, Shader, ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore,
-    SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    Queue, RenderPass, Shader, ShaderBinding, ShaderBindingMod, ShaderStage, SignalSemaphore, SubmitInfo,
+    SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 // Notes
@@ -459,7 +460,7 @@ impl RenderEngine {
 
         while i < update_count {
             {
-                let mut cl = self.staging_cl.lock().unwrap();
+                let mut cl = self.staging_cl.lock();
                 cl.begin(true).unwrap();
 
                 while i < update_count {
@@ -717,7 +718,7 @@ impl RenderEngine {
             .for_each(|(i, cmd_list)| {
                 let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
 
-                let mut cl = cmd_list.lock().unwrap();
+                let mut cl = cmd_list.lock();
 
                 cl.begin_secondary_graphics(
                     true,
@@ -787,10 +788,10 @@ impl RenderEngine {
 
                 cl.end().unwrap();
 
-                cull_objects.lock().unwrap().extend(curr_cull_objects);
+                cull_objects.lock().extend(curr_cull_objects);
             });
 
-        let cull_objects = cull_objects.into_inner().unwrap();
+        let cull_objects = cull_objects.into_inner();
         self.cull_host_buffer.write(0, &cull_objects);
 
         cull_objects.len() as u32
@@ -815,7 +816,7 @@ impl RenderEngine {
             .par_iter()
             .enumerate()
             .for_each(|(i, cmd_list)| {
-                let mut cl = cmd_list.lock().unwrap();
+                let mut cl = cmd_list.lock();
 
                 cl.begin_secondary_graphics(
                     true,
@@ -894,7 +895,7 @@ impl RenderEngine {
             self.record_depth_cmd_lists(&renderable_ids, &camera, &world_transform_comps, &renderer_comps);
 
         {
-            let mut cl = self.staging_cl.lock().unwrap();
+            let mut cl = self.staging_cl.lock();
             cl.begin(true).unwrap();
             cl.begin_render_pass(
                 &self.depth_render_pass,
@@ -1056,7 +1057,7 @@ impl RenderEngine {
         {
             // Note: Do not render anything in final cl except copying some image into swapchain image.
             // Uniform/vertex  may be being updated at this moment.
-            let mut cl = self.final_cl[0].lock().unwrap();
+            let mut cl = self.final_cl[0].lock();
             cl.begin(true).unwrap();
 
             // let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
@@ -1141,7 +1142,7 @@ impl RenderEngine {
 
             if graphics_queue != present_queue {
                 {
-                    let mut cl = self.final_cl[1].lock().unwrap();
+                    let mut cl = self.final_cl[1].lock();
                     cl.begin(true).unwrap();
                     cl.barrier_image(
                         PipelineStageFlags::TOP_OF_PIPE,

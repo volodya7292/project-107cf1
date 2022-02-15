@@ -1,7 +1,8 @@
 use crate::device::DeviceWrapper;
 use ash::vk;
+use parking_lot::Mutex;
 use std::slice;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub struct Semaphore {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -15,7 +16,7 @@ impl Semaphore {
         unsafe {
             self.device_wrapper
                 .ts_khr
-                .get_semaphore_counter_value(self.device_wrapper.native.handle(), self.native)
+                .get_semaphore_counter_value(self.native)
         }
     }
 
@@ -27,13 +28,8 @@ impl Semaphore {
         let wait_info = vk::SemaphoreWaitInfoKHR::builder()
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
-        unsafe {
-            self.device_wrapper.ts_khr.wait_semaphores(
-                self.device_wrapper.native.handle(),
-                &wait_info,
-                u64::MAX,
-            )
-        }
+
+        unsafe { self.device_wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX) }
     }
 
     pub fn signal(&self) -> Result<u64, vk::Result> {
@@ -41,19 +37,14 @@ impl Semaphore {
             panic!("Semaphore type is not TIMELINE!");
         }
 
-        let mut last_signal_value = self.last_signal_value.lock().unwrap();
+        let mut last_signal_value = self.last_signal_value.lock();
         *last_signal_value += 1;
 
         let signal_info = vk::SemaphoreSignalInfoKHR::builder()
             .semaphore(self.native)
             .value(*last_signal_value);
-        unsafe { self.device_wrapper.native.signal_semaphore(&signal_info)? };
 
-        unsafe {
-            self.device_wrapper
-                .ts_khr
-                .signal_semaphore(self.device_wrapper.native.handle(), &signal_info)?
-        };
+        unsafe { self.device_wrapper.ts_khr.signal_semaphore(&signal_info)? };
 
         Ok(*last_signal_value)
     }
@@ -62,7 +53,7 @@ impl Semaphore {
 impl Drop for Semaphore {
     fn drop(&mut self) {
         if self.semaphore_type == vk::SemaphoreTypeKHR::TIMELINE {
-            self.wait(*self.last_signal_value.lock().unwrap()).unwrap();
+            self.wait(*self.last_signal_value.lock()).unwrap();
         }
         unsafe { self.device_wrapper.native.destroy_semaphore(self.native, None) };
     }

@@ -13,11 +13,12 @@ use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::DVec3;
 use overworld::Overworld;
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
-use std::sync::{atomic, Arc, Mutex};
+use std::sync::{atomic, Arc};
 use std::time::Instant;
 use winit::event::VirtualKeyCode;
 
@@ -105,7 +106,7 @@ impl Game {
         }
 
         {
-            let renderer = self.renderer.lock().unwrap();
+            let renderer = self.renderer.lock();
             let entity = renderer.get_active_camera();
             let camera_comps = renderer.scene().storage::<component::Camera>();
             let mut camera_comps = camera_comps.write();
@@ -140,7 +141,7 @@ impl Game {
             let game_tick_finished = Arc::clone(&self.game_tick_finished);
 
             {
-                let mut streamer = streamer.lock().unwrap();
+                let mut streamer = streamer.lock();
                 let t0 = Instant::now();
                 streamer.update_renderer();
                 let t1 = Instant::now();
@@ -160,18 +161,14 @@ impl Game {
             thread_pool.spawn_fifo(|| game_tick(streamer, game_tick_finished));
             println!(
                 "as {}",
-                self.renderer
-                    .lock()
-                    .unwrap()
-                    .device()
-                    .calc_real_device_mem_usage()
+                self.renderer.lock().device().calc_real_device_mem_usage()
             );
         }
     }
 }
 
 pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
-    let mut streamer = streamer.lock().unwrap();
+    let mut streamer = streamer.lock();
 
     let _t0 = Instant::now();
     streamer.update();
@@ -194,7 +191,7 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
     //         emission: Default::default(),
     //     },
     // );
-    renderer.lock().unwrap().set_material(
+    renderer.lock().set_material(
         1,
         render_engine::MaterialInfo {
             diffuse_tex_id: u32::MAX,
@@ -206,7 +203,7 @@ pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipeline
             emission: Default::default(),
         },
     );
-    renderer.lock().unwrap().set_material(
+    renderer.lock().set_material(
         2,
         render_engine::MaterialInfo {
             diffuse_tex_id: u32::MAX,

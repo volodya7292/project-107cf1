@@ -1,22 +1,3 @@
-use std::path::Path;
-use std::time::Instant;
-
-use nalgebra_glm as glm;
-use utils::thread_pool::ThreadPool;
-use winit::dpi::PhysicalPosition;
-use winit::event::{VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::{Fullscreen, WindowBuilder};
-
-use crate::render_engine::vertex_mesh::VertexMeshCreate;
-use crate::render_engine::{component, TextureQuality, TranslucencyMaxDepth};
-use crate::render_engine::{material_pipeline, material_pipelines};
-use crate::resource_file::ResourceFile;
-use crate::utils::noise::ParamNoise;
-use nalgebra_glm::{DVec2, Vec2, Vec3};
-use noise::Seedable;
-
 mod utils;
 
 #[macro_use]
@@ -26,6 +7,23 @@ mod resource_file;
 
 #[cfg(test)]
 mod tests;
+
+use crate::render_engine::vertex_mesh::VertexMeshCreate;
+use crate::render_engine::{component, TextureQuality, TranslucencyMaxDepth};
+use crate::render_engine::{material_pipeline, material_pipelines};
+use crate::resource_file::ResourceFile;
+use crate::utils::noise::ParamNoise;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec2, Vec2, Vec3};
+use noise::Seedable;
+use std::path::Path;
+use std::time::Instant;
+use utils::thread_pool::ThreadPool;
+use winit::dpi::PhysicalPosition;
+use winit::event::{VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::{Fullscreen, WindowBuilder};
 
 #[derive(Copy, Clone, Default)]
 pub struct BasicVertex {
@@ -133,7 +131,7 @@ fn main() {
 
     let mat_pipelines;
     {
-        let mut renderer = renderer.lock().unwrap();
+        let mut renderer = renderer.lock();
         let index = renderer.add_texture(
             render_engine::TextureAtlasType::ALBEDO,
             resources.get("textures/test_texture.ktx").unwrap(),
@@ -167,7 +165,7 @@ fn main() {
         .unwrap();
 
     {
-        let renderer = renderer.lock().unwrap();
+        let renderer = renderer.lock();
         let scene = renderer.scene();
         let ent0 = scene.create_entity();
         let transform_comps = scene.storage::<component::Transform>();
@@ -247,7 +245,7 @@ fn main() {
             Event::WindowEvent { window_id, ref event } => match event {
                 WindowEvent::Resized(size) => {
                     if size.width != 0 && size.height != 0 {
-                        renderer.lock().unwrap().on_resize((size.width, size.height));
+                        renderer.lock().on_resize((size.width, size.height));
                     }
                 }
                 WindowEvent::KeyboardInput {
@@ -290,7 +288,7 @@ fn main() {
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
-                render_thread_pool.install(|| renderer.lock().unwrap().on_draw());
+                render_thread_pool.install(|| renderer.lock().on_draw());
             }
             Event::RedrawEventsCleared => {
                 let end_t = Instant::now();

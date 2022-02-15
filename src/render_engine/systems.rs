@@ -6,9 +6,10 @@ use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Render
 use crate::utils::{HashMap, LruCache};
 use index_pool::IndexPool;
 use nalgebra as na;
+use parking_lot::Mutex;
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
@@ -450,8 +451,8 @@ impl BufferUpdateSystem<'_> {
         self.transfer_submit[1].wait().unwrap();
 
         {
-            let mut t_cl = self.transfer_cl[0].lock().unwrap();
-            let mut g_cl = self.transfer_cl[1].lock().unwrap();
+            let mut t_cl = self.transfer_cl[0].lock();
+            let mut g_cl = self.transfer_cl[1].lock();
 
             t_cl.begin(true).unwrap();
             g_cl.begin(true).unwrap();

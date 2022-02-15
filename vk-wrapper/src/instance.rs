@@ -5,6 +5,8 @@ use ash::vk;
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
 
+pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_0;
+
 pub struct Instance {
     pub(crate) entry: Arc<Entry>,
     pub(crate) native: ash::Instance,
@@ -48,7 +50,9 @@ impl Instance {
         'g: for p_device in physical_devices {
             let props = unsafe { self.native.get_physical_device_properties(p_device) };
 
-            if vk::api_version_major(props.api_version) != 1 || vk::api_version_minor(props.api_version) < 1 {
+            if vk::api_version_major(props.api_version) != vk::api_version_major(VK_API_VERSION)
+                || vk::api_version_minor(props.api_version) < vk::api_version_minor(VK_API_VERSION)
+            {
                 continue;
             }
 

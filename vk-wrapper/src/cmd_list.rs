@@ -7,8 +7,9 @@ use crate::{
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
 use ash::vk;
+use parking_lot::Mutex;
 use smallvec::SmallVec;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{mem, ptr, slice};
 
 pub struct CmdList {
@@ -767,10 +768,8 @@ impl CmdList {
     }
 
     pub fn execute_secondary(&mut self, cmd_lists: &[Arc<Mutex<CmdList>>]) {
-        let native_cmd_lists: SmallVec<[vk::CommandBuffer; 64]> = cmd_lists
-            .iter()
-            .map(|cmd_list| cmd_list.lock().unwrap().native)
-            .collect();
+        let native_cmd_lists: SmallVec<[vk::CommandBuffer; 64]> =
+            cmd_lists.iter().map(|cmd_list| cmd_list.lock().native).collect();
 
         unsafe {
             self.device_wrapper
