@@ -113,6 +113,20 @@ impl<I: Iterator> AllSameBy<I> for I {
     }
 }
 
+pub fn find_largest_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::monitor::VideoMode {
+    let modes: Vec<_> = monitor.video_modes().collect();
+    let mut largest_mode = modes[0].clone();
+
+    for mode in &modes {
+        if mode.size().width > largest_mode.size().width {
+            largest_mode = mode.clone();
+        }
+        println!("{:?}", mode);
+    }
+
+    largest_mode
+}
+
 pub fn calc_triangle_normal(
     v0: &na::Vector3<f32>,
     v1: &na::Vector3<f32>,

@@ -94,8 +94,8 @@ fn main() {
     // Center the window
     {
         let win_size = window.outer_size();
-        let mode = window.current_monitor().unwrap().video_modes().next().unwrap();
-        let mon_size = mode.size();
+        let mon_size = window.current_monitor().unwrap().size();
+
         window.set_outer_position(PhysicalPosition {
             x: (mon_size.width as i32 - win_size.width as i32) / 2,
             y: (mon_size.height as i32 - win_size.height as i32) / 2,
@@ -263,8 +263,9 @@ fn main() {
                                     if let Some(_) = window.fullscreen() {
                                         window.set_fullscreen(None);
                                     } else {
-                                        let mode =
-                                            window.current_monitor().unwrap().video_modes().next().unwrap();
+                                        let mode = utils::find_largest_video_mode(
+                                            &window.current_monitor().unwrap(),
+                                        );
                                         window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
                                     }
                                 }
