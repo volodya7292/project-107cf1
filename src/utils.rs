@@ -121,7 +121,6 @@ pub fn find_largest_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit
         if mode.size().width > largest_mode.size().width {
             largest_mode = mode.clone();
         }
-        println!("{:?}", mode);
     }
 
     largest_mode
