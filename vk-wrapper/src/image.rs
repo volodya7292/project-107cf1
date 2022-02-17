@@ -2,6 +2,7 @@ use crate::adapter::MemoryBlock;
 use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
 use ash::vk;
+use ash::vk::Handle;
 use gpu_alloc_ash::AshMemoryDevice;
 use std::sync::{atomic, Arc};
 
@@ -102,10 +103,11 @@ pub(crate) struct ImageWrapper {
     pub(crate) ty: ImageType,
     pub(crate) format: Format,
     pub(crate) aspect: vk::ImageAspectFlags,
+    pub(crate) name: String,
 }
 
 impl ImageWrapper {
-    pub fn create_view(self: &Arc<Self>) -> ImageViewBuilder {
+    pub fn create_view(self: &Arc<Self>, name: &str) -> ImageViewBuilder {
         let ty = match self.ty {
             ImageType(vk::ImageType::TYPE_2D) => vk::ImageViewType::TYPE_2D,
             ImageType(vk::ImageType::TYPE_3D) => vk::ImageViewType::TYPE_3D,
@@ -113,6 +115,7 @@ impl ImageWrapper {
                 unreachable!()
             }
         };
+        let name = format!("{}-{}", self.name, name);
 
         ImageViewBuilder {
             image_wrapper: Arc::clone(self),
@@ -134,6 +137,7 @@ impl ImageWrapper {
                     layer_count: vk::REMAINING_ARRAY_LAYERS,
                 })
                 .build(),
+            name,
         }
     }
 }
@@ -149,6 +153,7 @@ pub struct Image {
 pub struct ImageViewBuilder {
     image_wrapper: Arc<ImageWrapper>,
     info: vk::ImageViewCreateInfo,
+    name: String,
 }
 
 impl ImageViewBuilder {
@@ -169,11 +174,20 @@ impl ImageViewBuilder {
 
     pub fn build(self) -> Result<Arc<ImageView>, DeviceError> {
         let native = unsafe {
-            self.image_wrapper
+            let view = self
+                .image_wrapper
                 .device
                 .wrapper
                 .native
-                .create_image_view(&self.info, None)?
+                .create_image_view(&self.info, None)?;
+
+            self.image_wrapper.device.wrapper.debug_set_object_name(
+                vk::ObjectType::IMAGE_VIEW,
+                view.as_raw(),
+                &self.name,
+            )?;
+
+            view
         };
 
         Ok(Arc::new(ImageView {
@@ -212,7 +226,11 @@ impl Image {
     }
 
     pub fn create_view(&self) -> ImageViewBuilder {
-        self.wrapper.create_view()
+        self.wrapper.create_view(&self.wrapper.name)
+    }
+
+    pub fn create_view_named(&self, name: &str) -> ImageViewBuilder {
+        self.wrapper.create_view(name)
     }
 
     pub fn barrier(self: &Arc<Self>) -> ImageBarrier {
@@ -225,7 +243,7 @@ impl Image {
                     vk::ImageSubresourceRange::builder()
                         .aspect_mask(self.wrapper.aspect)
                         .base_mip_level(0)
-                        .level_count(vk::REMAINING_MIP_LEVELS)
+                        .level_count(self.mip_levels)
                         .base_array_layer(0)
                         .layer_count(vk::REMAINING_ARRAY_LAYERS)
                         .build(),

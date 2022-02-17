@@ -13,6 +13,7 @@ use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
 use ash::vk;
+use ash::vk::Handle;
 use gpu_alloc::GpuAllocator;
 use gpu_alloc_ash::AshMemoryDevice;
 use parking_lot::Mutex;
@@ -286,6 +287,7 @@ impl Device {
         max_anisotropy: f32,
         usage: ImageUsageFlags,
         mut size: (u32, u32, u32),
+        name: &str,
     ) -> Result<Arc<Image>, DeviceError> {
         if !IMAGE_FORMATS.contains(&format) && !BC_IMAGE_FORMATS.contains(&format) && format != DEPTH_FORMAT {
             panic!("Image format {:?} is not supported!", format);
@@ -358,6 +360,9 @@ impl Device {
                 .native
                 .bind_image_memory(native_image, *memory_block.memory(), 0)?;
 
+            self.wrapper
+                .debug_set_object_name(vk::ObjectType::IMAGE, native_image.as_raw(), name)?;
+
             (native_image, memory_block)
         };
         let bytesize = memory_block.size();
@@ -402,7 +407,15 @@ impl Device {
                 .max_lod(mip_levels as f32 - 1.0)
                 .unnormalized_coordinates(false);
 
-            unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? }
+            unsafe {
+                let native_sampler = self.wrapper.native.create_sampler(&sampler_info, None)?;
+                self.wrapper.debug_set_object_name(
+                    vk::ObjectType::SAMPLER,
+                    native_sampler.as_raw(),
+                    &format!("{}-sampler", name),
+                )?;
+                native_sampler
+            }
         } else {
             vk::Sampler::default()
         };
@@ -420,8 +433,9 @@ impl Device {
             ty: image_type,
             format,
             aspect,
+            name: name.to_owned(),
         });
-        let view = image_wrapper.create_view().build()?;
+        let view = image_wrapper.create_view("view").build()?;
 
         Ok(Arc::new(Image {
             wrapper: image_wrapper,
@@ -451,6 +465,28 @@ impl Device {
             max_anisotropy,
             usage,
             (preferred_size.0, preferred_size.1, 1),
+            "",
+        )
+    }
+
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
+    pub fn create_image_2d_named(
+        self: &Arc<Self>,
+        format: Format,
+        max_mip_levels: u32,
+        max_anisotropy: f32,
+        usage: ImageUsageFlags,
+        preferred_size: (u32, u32),
+        name: &str,
+    ) -> Result<Arc<Image>, DeviceError> {
+        self.create_image(
+            Image::TYPE_2D,
+            format,
+            max_mip_levels,
+            max_anisotropy,
+            usage,
+            (preferred_size.0, preferred_size.1, 1),
+            name,
         )
     }
 
@@ -460,7 +496,7 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size)
+        self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size, "")
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
@@ -581,7 +617,8 @@ impl Device {
             self.swapchain_khr.get_swapchain_images(*native_swapchain)?
         }
         .iter()
-        .map(|&native_image| {
+        .enumerate()
+        .map(|(i, &native_image)| {
             let sampler_info = vk::SamplerCreateInfo::builder()
                 .mag_filter(vk::Filter::NEAREST)
                 .min_filter(vk::Filter::NEAREST)
@@ -595,6 +632,12 @@ impl Device {
                 .max_lod(0f32)
                 .unnormalized_coordinates(false);
 
+            let name = format!("swapchain-img{}", i);
+            unsafe {
+                self.wrapper
+                    .debug_set_object_name(vk::ObjectType::IMAGE, native_image.as_raw(), &name)?
+            };
+
             let image_wrapper = Arc::new(ImageWrapper {
                 device: Arc::clone(self),
                 _swapchain_wrapper: Some(Arc::clone(&swapchain_wrapper)),
@@ -605,8 +648,9 @@ impl Device {
                 ty: Image::TYPE_2D,
                 format: Format(s_format.format),
                 aspect: vk::ImageAspectFlags::COLOR,
+                name,
             });
-            let view = image_wrapper.create_view().build()?;
+            let view = image_wrapper.create_view("view").build()?;
 
             Ok(Arc::new(Image {
                 wrapper: image_wrapper,

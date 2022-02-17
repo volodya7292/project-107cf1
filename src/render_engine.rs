@@ -1292,7 +1292,7 @@ impl RenderEngine {
             .unwrap();
         self.depth_pyramid_image = Some(
             self.device
-                .create_image_2d(
+                .create_image_2d_named(
                     Format::R32_FLOAT,
                     0,
                     1.0,
@@ -1303,6 +1303,7 @@ impl RenderEngine {
                         utils::prev_power_of_two(new_size.0),
                         utils::prev_power_of_two(new_size.1),
                     ),
+                    "depth_pyramid",
                 )
                 .unwrap(),
         );
@@ -1311,7 +1312,7 @@ impl RenderEngine {
         self.depth_pyramid_views = (0..depth_pyramid_levels)
             .map(|i| {
                 depth_pyramid_image
-                    .create_view()
+                    .create_view_named(&format!("view-mip{}", i))
                     .base_mip_level(i)
                     .mip_level_count(1)
                     .build()
@@ -1353,9 +1354,8 @@ impl RenderEngine {
                                 pool.create_binding(
                                     1,
                                     0,
-                                    BindingRes::ImageViewSampler(
+                                    BindingRes::ImageView(
                                         Arc::clone(&self.depth_pyramid_views[i]),
-                                        Arc::clone(depth_pyramid_image.sampler()),
                                         ImageLayout::GENERAL,
                                     ),
                                 ),
