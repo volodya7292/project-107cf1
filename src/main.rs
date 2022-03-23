@@ -17,8 +17,9 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
 use noise::Seedable;
 use std::path::Path;
+use std::thread;
 use std::time::Instant;
-use utils::thread_pool::ThreadPool;
+use utils::thread_pool::SafeThreadPool;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -71,12 +72,18 @@ fn noise_test() {
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().init().unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Debug)
+        .init()
+        .unwrap();
 
-    let thread_count = num_cpus::get().max(2);
+    let n_threads = thread::available_parallelism().unwrap().get().max(2);
+    let n_render_threads = (n_threads / 2).max(4);
+    let n_update_threads = n_threads - n_render_threads;
+
     // Note: use safe thread pools to account for proper destruction of Vulkan objects.
-    let render_thread_pool = ThreadPool::new(thread_count / 2).unwrap();
-    let update_thread_pool = ThreadPool::new(thread_count / 2).unwrap();
+    let render_thread_pool = SafeThreadPool::new(n_render_threads).unwrap();
+    let update_thread_pool = SafeThreadPool::new(n_update_threads).unwrap();
 
     let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
 
@@ -129,102 +136,7 @@ fn main() {
         4,
     );
 
-    let mat_pipelines;
-    {
-        let mut renderer = renderer.lock();
-        let index = renderer.add_texture(
-            render_engine::TextureAtlasType::ALBEDO,
-            resources.get("textures/test_texture.ktx").unwrap(),
-        );
-
-        renderer.load_texture(index);
-
-        mat_pipelines = material_pipelines::create(&resources, &mut renderer);
-    }
-
-    let mut program = game::new(&renderer, &mat_pipelines);
-
-    let triangle_mesh = device
-        .create_vertex_mesh::<BasicVertex>(
-            &[
-                BasicVertex {
-                    position: Vec3::new(0.0, -0.5, -3.0),
-                    tex_coord: Vec2::new(1.0, 2.0),
-                },
-                BasicVertex {
-                    position: Vec3::new(-0.5, 0.5, -3.0),
-                    tex_coord: Vec2::new(0.0, 0.0),
-                },
-                BasicVertex {
-                    position: Vec3::new(0.5, 0.5, -3.0),
-                    tex_coord: Vec2::new(2.0, 0.0),
-                },
-            ],
-            None,
-        )
-        .unwrap();
-
-    {
-        let renderer = renderer.lock();
-        let scene = renderer.scene();
-        let ent0 = scene.create_entity();
-        let transform_comps = scene.storage::<component::Transform>();
-        let mut transform_comps = transform_comps.write();
-        let renderer_comps = scene.storage::<component::Renderer>();
-        let mut renderer_comps = renderer_comps.write();
-        let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let mut vertex_mesh_comps = vertex_mesh_comps.write();
-
-        transform_comps.set(ent0, component::Transform::default());
-        renderer_comps.set(
-            ent0,
-            component::Renderer::new(&renderer, mat_pipelines.triag(), false),
-        );
-        vertex_mesh_comps.set(ent0, component::VertexMesh::new(&triangle_mesh.raw()));
-
-        // let ent1 = entities.create();
-        //
-        // transform_comps.set(
-        //     ent1,
-        //     component::Transform::new(
-        //         na::Vector3::new(0.0, 0.0, 1.0),
-        //         na::Vector3::default(),
-        //         na::Vector3::new(1.0, 1.0, 1.0),
-        //     ),
-        // );
-        // renderer_comps.set(
-        //     ent1,
-        //     component::Renderer::new(&device, &mat_pipelines.triag(), false),
-        // );
-        // vertex_mesh_comps.set(ent1, component::VertexMesh::new(&triangle_mesh.raw()));
-    }
-
-    /*{
-        let mut comps = render_engine.scene().world.write_component::<component::Transform>();
-        let mut trans = comps.get_mut(entity).unwrap();
-        *trans = component::Transform::default();
-    }*/
-
-    //let graph = device.get_queue(Queue::TYPE_GRAPHICS);
-
-    //adapters.iter_mut()
-
-    let mut buf = device
-        .create_host_buffer::<u32>(vk_wrapper::buffer::BufferUsageFlags::UNIFORM, 5)
-        .unwrap();
-    buf[0] = 1u32;
-    buf[1] = 2u32;
-    buf[2] = 3u32;
-    buf[3] = 4u32;
-    buf[4] = 5u32;
-
-    //let mut buf2: HostBuffer<u8> = buf;
-
-    // for a in buf.into_iter() {
-    //     println!("{}", a);
-    // }
-    //println!("ITE {:?}", &buf[0..5]);
-
+    let mut program = game::new(&renderer, &resources);
     let mut cursor_grab = true;
     let mut start_t = Instant::now();
     let mut delta_time = 0.0;

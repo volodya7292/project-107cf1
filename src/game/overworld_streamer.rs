@@ -249,6 +249,8 @@ impl OverworldStreamer {
 
     /// Generates new clusters and their content.
     pub fn update(&mut self) {
+        // Available threads in the update thread pool
+        let available_threads = rayon::current_num_threads();
         let layout = calc_cluster_layout(self.stream_pos, self.xz_render_distance, self.y_render_distance);
         let curr_t = Instant::now();
         let device = &self.device;
@@ -345,7 +347,7 @@ impl OverworldStreamer {
                 ocluster.state.store(ClusterState::LOADING as u8, MO_RELAXED);
                 curr_loading_clusters_n.fetch_add(1, MO_ACQUIRE);
 
-                rayon::spawn_fifo(move || {
+                rayon::spawn(move || {
                     generator::generate_cluster(&mut ocluster.cluster.write().unwrap(), &main_registry, pos);
 
                     ocluster.state.store(ClusterState::LOADED as u8, MO_RELEASE);
@@ -449,7 +451,7 @@ impl OverworldStreamer {
             // Update cluster outer side occlusions
             let side_pair_count = side_occlusion_work.0.len();
             let process_count = Arc::new(AtomicU32::new(side_pair_count as u32));
-            (0..num_cpus::get()).into_par_iter().for_each(|_| {
+            (0..available_threads).into_par_iter().for_each(|_| {
                 let process_count = Arc::clone(&process_count);
                 let receiver = side_occlusion_work.1.clone();
                 let sender = side_occlusion_work.0.clone();

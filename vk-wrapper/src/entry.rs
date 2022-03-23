@@ -85,7 +85,7 @@ impl Entry {
     fn enumerate_instance_extension_names(&self) -> Result<Vec<String>, vk::Result> {
         Ok(self
             .ash_entry
-            .enumerate_instance_extension_properties()?
+            .enumerate_instance_extension_properties(None)?
             .iter()
             .map(|ext| unsafe { utils::c_ptr_to_string(ext.extension_name.as_ptr()) })
             .collect())

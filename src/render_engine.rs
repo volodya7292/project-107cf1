@@ -15,8 +15,8 @@ use crate::resource_file::{ResourceFile, ResourceRef};
 use crate::utils;
 use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, LruCache, UInt};
+use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
-use ktx::KtxInfo;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipeline, PipelineMapping};
 use nalgebra as na;
@@ -29,7 +29,7 @@ pub use scene::Scene;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{iter, mem, slice};
+use std::{fs, iter, mem, slice};
 use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
@@ -51,9 +51,8 @@ use vk_wrapper::{
 //
 // Swapchain creation error cause may be *out of device memory*.
 
-// TODO: Incorporate new version of VMA
-// TODO: Defragment VMA memory (every frame?).
-// TODO: Reallocate memory from CPU (that was allocated there due to out of device-local memory) to GPU.
+// TODO: Defragment VK memory (every frame?).
+// TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
 
 pub struct RenderEngine {
     scene: Scene,
@@ -170,6 +169,17 @@ pub enum TextureAtlasType {
     NORMAL = 3,
 }
 
+impl TextureAtlasType {
+    fn basis_decode_type(&self) -> TranscoderTextureFormat {
+        match self {
+            TextureAtlasType::ALBEDO | TextureAtlasType::SPECULAR | TextureAtlasType::EMISSION => {
+                TranscoderTextureFormat::BC7_RGBA
+            }
+            TextureAtlasType::NORMAL => TranscoderTextureFormat::BC5_RG,
+        }
+    }
+}
+
 struct BufferUpdate1 {
     buffer: BufferHandle,
     offset: u64,
@@ -219,6 +229,7 @@ struct PerFrameInfo {
     atlas_info: na::Vector4<u32>,
 }
 
+#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct MaterialInfo {
     pub(crate) diffuse_tex_id: u32,
@@ -228,6 +239,41 @@ pub struct MaterialInfo {
     pub(crate) diffuse: na::Vector4<f32>,
     pub(crate) specular: na::Vector4<f32>,
     pub(crate) emission: na::Vector4<f32>,
+}
+
+pub enum MatComponent {
+    Texture(u16),
+    Color(na::Vector4<f32>),
+}
+
+impl MaterialInfo {
+    pub fn new(
+        diffuse: MatComponent,
+        specular: MatComponent,
+        normal_tex_id: u16,
+        emission: na::Vector4<f32>,
+    ) -> MaterialInfo {
+        let mut info = MaterialInfo {
+            diffuse_tex_id: 0,
+            specular_tex_id: 0,
+            normal_tex_id: normal_tex_id as u32,
+            _pad: 0,
+            diffuse: Default::default(),
+            specular: Default::default(),
+            emission,
+        };
+
+        match diffuse {
+            MatComponent::Texture(id) => info.diffuse_tex_id = id as u32,
+            MatComponent::Color(col) => info.diffuse = col,
+        }
+        match specular {
+            MatComponent::Texture(id) => info.specular_tex_id = id as u32,
+            MatComponent::Color(col) => info.specular = col,
+        }
+
+        info
+    }
 }
 
 #[repr(C)]
@@ -248,13 +294,21 @@ struct CullConstants {
     object_count: u32,
 }
 
+pub const TEXTURE_ID_NONE: u16 = u16::MAX;
+
 const MAX_OBJECT_COUNT: u32 = 65535;
 const MAX_MATERIAL_COUNT: u32 = 4096;
 const COMPUTE_LOCAL_THREADS: u32 = 32;
 const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
 
 lazy_static! {
-static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]); 3] = [
+    static ref PIPELINE_CACHE_FILENAME: &'static str = if cfg!(debug_assertions) {
+        "pipeline_cache-debug"
+    } else {
+        "pipeline_cache"
+    };
+
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]); 3] = [
     (
         ShaderStage::VERTEX | ShaderStage::PIXEL,
         &[
@@ -342,7 +396,7 @@ impl RenderEngine {
         self.texture_resources.len() - 1
     }
 
-    /// Texture must be loaded before use in a shader
+    /// Texture must be loaded before being used in a shader
     pub fn load_texture(&mut self, index: usize) {
         let (res_ref, atlas_type, tex_index) = &mut self.texture_resources[index];
 
@@ -358,9 +412,19 @@ impl RenderEngine {
         if let Some(tex_index) = tex_index {
             let res_data = res_ref.read().unwrap();
 
-            let decoder = ktx::Decoder::new(res_data.as_slice()).unwrap();
-            let width = decoder.pixel_width();
-            let height = decoder.pixel_height();
+            // let t = basis_universal::transcoding::Transcoder::new();
+            // basis_universal::transcoder_init();
+
+            let mut t = basis_universal::Transcoder::new();
+            t.prepare_transcoding(&res_data).unwrap();
+
+            let img_info = t.image_info(&res_data, 0).unwrap();
+            let width = img_info.m_width;
+            let height = img_info.m_height;
+
+            // let decoder = ktx::Decoder::new(res_data.as_slice()).unwrap();
+            // let width = decoder.pixel_width();
+            // let height = decoder.pixel_height();
 
             if !utils::is_pow_of_2(width as u64)
                 || width != height
@@ -369,7 +433,26 @@ impl RenderEngine {
                 return;
             }
 
-            let mip_maps: Vec<Vec<u8>> = decoder.read_textures().collect();
+            let mipmaps: Vec<_> = (0..img_info.m_total_levels)
+                .map(|i| {
+                    t.transcode_image_level(
+                        &res_data,
+                        atlas_type.basis_decode_type(),
+                        TranscodeParameters {
+                            image_index: 0,
+                            level_index: i,
+                            decode_flags: None,
+                            output_row_pitch_in_blocks_or_pixels: None,
+                            output_rows_in_pixels: None,
+                        },
+                    )
+                    .unwrap()
+                })
+                .collect();
+
+            t.end_transcoding();
+
+            // let mip_maps: Vec<Vec<u8>> = decoder.read_textures().collect();
 
             let first_level = UInt::log2(&(width / (self.settings.texture_quality as u32)));
             let last_level = UInt::log2(&(width / 4)); // BC block size = 4x4
@@ -377,7 +460,7 @@ impl RenderEngine {
             self.texture_atlases[*atlas_type as usize]
                 .set_texture(
                     *tex_index,
-                    &mip_maps[(first_level as usize)..(last_level as usize + 1)],
+                    &mipmaps[(first_level as usize)..(last_level as usize + 1)],
                 )
                 .unwrap();
         }
@@ -1512,6 +1595,11 @@ pub fn new(
     resources: &Arc<ResourceFile>,
     max_texture_count: u32,
 ) -> Arc<Mutex<RenderEngine>> {
+    // Load pipeline cache
+    if let Ok(res) = fs::read(*PIPELINE_CACHE_FILENAME) {
+        device.load_pipeline_cache(&res).unwrap();
+    }
+
     let scene = Scene::new();
     scene.storage::<component::Transform>().write().emit_events(true);
     scene
@@ -1520,8 +1608,6 @@ pub fn new(
         .emit_events(true);
     scene.storage::<component::Renderer>().write().emit_events(true);
     scene.storage::<component::VertexMesh>().write().emit_events(true);
-
-    // TODO: pipeline cache management
 
     let active_camera = scene.create_entity();
     scene.storage::<component::Camera>().write().set(
@@ -1532,7 +1618,8 @@ pub fn new(
     let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
     let present_queue = device.get_queue(Queue::TYPE_PRESENT);
-    let phys_cores = num_cpus::get_physical();
+    // Available threads in the render thread pool
+    let available_threads = rayon::current_num_threads();
 
     let staging_buffer = device
         .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
@@ -1629,7 +1716,7 @@ pub fn new(
             .create_secondary_cmd_list("depth_secondary")
             .unwrap()
     })
-    .take(phys_cores)
+    .take(available_threads)
     .collect();
 
     // Depth pyramid pipeline
@@ -1790,7 +1877,7 @@ pub fn new(
     let g_dyn_in = g_dyn_pool.alloc().unwrap();
     let g_secondary_cls =
         iter::repeat_with(|| graphics_queue.create_secondary_cmd_list("g_secondary").unwrap())
-            .take(phys_cores)
+            .take(available_threads)
             .collect();
 
     let tile_count = max_texture_count;
@@ -2000,6 +2087,10 @@ pub fn new(
 
 impl Drop for RenderEngine {
     fn drop(&mut self) {
+        // Safe pipeline cache
+        let pl_cache = self.device.get_pipeline_cache().unwrap();
+        fs::write(*PIPELINE_CACHE_FILENAME, pl_cache).unwrap();
+
         self.device.wait_idle().unwrap();
     }
 }

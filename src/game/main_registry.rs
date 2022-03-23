@@ -5,7 +5,10 @@ use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
+use crate::render_engine::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
+use crate::ResourceFile;
 use nalgebra_glm::{U64Vec3, Vec3};
+use std::default::Default;
 use std::sync::Arc;
 
 pub struct MainRegistry {
@@ -24,11 +27,22 @@ macro_rules! add_getters {
 }
 
 impl MainRegistry {
-    pub fn init() -> Arc<MainRegistry> {
+    pub fn init(resources: &Arc<ResourceFile>) -> Arc<MainRegistry> {
         let mut reg = Registry::new();
 
         // Textures
-        let tex_default = 0;
+        let tex_default = reg.register_texture(
+            TextureAtlasType::ALBEDO,
+            resources.get("textures/test_texture.basis").unwrap(),
+        );
+
+        // Materials
+        let material_default = reg.register_material(MaterialInfo::new(
+            MatComponent::Texture(tex_default),
+            MatComponent::Color(Default::default()),
+            TEXTURE_ID_NONE,
+            Default::default(),
+        ));
 
         // Block models
         // ----------------------------------------------------------------------------------------------------
@@ -49,7 +63,7 @@ impl MainRegistry {
             let arch = cluster_layout.add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(tex_default, Default::default()); 6],
+                &[QuadMaterial::new(material_default, Default::default()); 6],
             ));
             Block::new(arch as u16, tex_model)
         };

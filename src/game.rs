@@ -5,10 +5,10 @@ pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::render_engine;
 use crate::render_engine::material_pipelines::MaterialPipelines;
 use crate::render_engine::{component, RenderEngine};
 use crate::utils::HashSet;
+use crate::{material_pipelines, render_engine, ResourceFile};
 use nalgebra as na;
 use nalgebra_glm as glm;
 use nalgebra_glm::DVec3;
@@ -158,7 +158,7 @@ impl Game {
                 }
             }
 
-            thread_pool.spawn_fifo(|| game_tick(streamer, game_tick_finished));
+            thread_pool.spawn(|| game_tick(streamer, game_tick_finished));
             println!(
                 "as {}",
                 self.renderer.lock().device().calc_real_device_mem_usage()
@@ -178,45 +178,24 @@ pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBo
     finished.store(true, atomic::Ordering::Relaxed);
 }
 
-pub fn new(renderer: &Arc<Mutex<RenderEngine>>, mat_pipelines: &MaterialPipelines) -> Game {
-    // render_engine.lock().unwrap().set_material(
-    //     0,
-    //     render_engine::MaterialInfo {
-    //         diffuse_tex_id: u32::MAX,
-    //         specular_tex_id: u32::MAX,
-    //         normal_tex_id: u32::MAX,
-    //         _pad: 0,
-    //         diffuse: na::Vector4::new(0.7, 0.3, 0.5, 1.0),
-    //         specular: Default::default(),
-    //         emission: Default::default(),
-    //     },
-    // );
-    renderer.lock().set_material(
-        1,
-        render_engine::MaterialInfo {
-            diffuse_tex_id: u32::MAX,
-            specular_tex_id: u32::MAX,
-            normal_tex_id: u32::MAX,
-            _pad: 0,
-            diffuse: na::Vector4::new(0.3, 0.5, 0.9, 1.0),
-            specular: Default::default(),
-            emission: Default::default(),
-        },
-    );
-    renderer.lock().set_material(
-        2,
-        render_engine::MaterialInfo {
-            diffuse_tex_id: u32::MAX,
-            specular_tex_id: u32::MAX,
-            normal_tex_id: u32::MAX,
-            _pad: 0,
-            diffuse: na::Vector4::new(1.0, 1.0, 0.0, 1.0),
-            specular: Default::default(),
-            emission: Default::default(),
-        },
-    );
+pub fn new(renderer: &Arc<Mutex<RenderEngine>>, resources: &Arc<ResourceFile>) -> Game {
+    let main_registry = MainRegistry::init(resources);
+    let mat_pipelines;
+    {
+        let mut renderer = renderer.lock();
 
-    let main_registry = MainRegistry::init();
+        mat_pipelines = material_pipelines::create(&resources, &mut renderer);
+
+        for (ty, res_ref) in main_registry.registry().textures() {
+            let id = renderer.add_texture(*ty, res_ref.clone());
+            renderer.load_texture(id);
+        }
+
+        for (id, info) in main_registry.registry().materials().iter().enumerate() {
+            renderer.set_material(id as u32, *info);
+        }
+    }
+
     let game_tick_finished = Arc::new(AtomicBool::new(true));
     let overworld = Overworld::new(&main_registry, 0);
     let mut overworld_streamer =
