@@ -356,9 +356,11 @@ impl Device {
                 },
             )?;
 
-            self.wrapper
-                .native
-                .bind_image_memory(native_image, *memory_block.memory(), 0)?;
+            self.wrapper.native.bind_image_memory(
+                native_image,
+                *memory_block.memory(),
+                memory_block.offset(),
+            )?;
 
             self.wrapper
                 .debug_set_object_name(vk::ObjectType::IMAGE, native_image.as_raw(), name)?;
