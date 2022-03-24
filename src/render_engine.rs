@@ -278,7 +278,7 @@ impl MaterialInfo {
 
 #[repr(C)]
 struct DepthPyramidConstants {
-    in_size_scale: na::Vector2<f32>,
+    out_size: na::Vector2<f32>,
 }
 
 #[repr(C)]
@@ -291,6 +291,7 @@ struct CullObject {
 #[repr(C)]
 struct CullConstants {
     pyramid_size: na::Vector2<f32>,
+    max_pyramid_levels: u32,
     object_count: u32,
 }
 
@@ -1020,10 +1021,7 @@ impl RenderEngine {
                 cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
 
                 let constants = DepthPyramidConstants {
-                    in_size_scale: na::Vector2::new(
-                        input_size.0 as f32 / out_size.0 as f32,
-                        input_size.1 as f32 / out_size.1 as f32,
-                    ),
+                    out_size: na::Vector2::new(out_size.0 as f32, out_size.1 as f32),
                 };
                 cl.push_constants(&self.depth_pyramid_signature, &constants);
 
@@ -1042,7 +1040,7 @@ impl RenderEngine {
                 );
 
                 input_size = out_size;
-                out_size = (out_size.0 >> 1, out_size.1 >> 1);
+                out_size = ((out_size.0 >> 1).max(1), (out_size.1 >> 1).max(1));
             }
 
             cl.barrier_image(
@@ -1088,6 +1086,7 @@ impl RenderEngine {
             let pyramid_size = depth_pyramid_image.size_2d();
             let constants = CullConstants {
                 pyramid_size: na::Vector2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
+                max_pyramid_levels: depth_pyramid_image.mip_levels(),
                 object_count: frustum_visible_objects,
             };
             cl.push_constants(&self.cull_signature, &constants);

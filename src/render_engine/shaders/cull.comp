@@ -26,6 +26,7 @@ layout(std430, binding = 3) writeonly buffer VisibilityBuffer {
 
 layout(push_constant) uniform PushConstants {
     vec2 pyramid_size;
+    uint max_pyramid_levels;
     uint object_count;
 } data;
 
@@ -67,15 +68,25 @@ void main() {
         bool visible = true;
 
         if (project_sphere(center, radius, z_near, p00, p11, proj_aabb)) {
-            float width = (proj_aabb.z - proj_aabb.x) * data.pyramid_size.x;
-            float height = (proj_aabb.w - proj_aabb.y) * data.pyramid_size.y;
-            float level = floor(log2(max(width, height)));
-
-            // Sampler is set up to do min reduction, so this computes the minimum depth of a 2x2 texel quad
-            float depth = textureLod(depthPyramid, (proj_aabb.xy + proj_aabb.zw) * 0.5, level).x;
             float depth_sphere = 1.0 - z_near / (center.z - radius);
+            vec2 aabb_size = (proj_aabb.zw - proj_aabb.xy) * data.pyramid_size;
 
-            visible = depth_sphere <= depth;
+            int level = int(ceil(log2(max(aabb_size.x, aabb_size.y))));
+            level = clamp(level, 0, int(data.max_pyramid_levels) - 1);
+
+            ivec2 level_size = max(ivec2(1), ivec2(data.pyramid_size) >> level);
+
+            vec2 depth_uv = clamp((proj_aabb.xy + proj_aabb.zw) * 0.5, 0, 1);
+            ivec2 depth_coord = ivec2(depth_uv * level_size - 0.5);
+
+            float depth00 = texelFetch(depthPyramid, depth_coord, level).r;
+            float depth01 = texelFetch(depthPyramid, depth_coord + ivec2(0, 1), level).r;
+            float depth10 = texelFetch(depthPyramid, depth_coord + ivec2(1, 0), level).r;
+            float depth11 = texelFetch(depthPyramid, depth_coord + ivec2(1, 1), level).r;
+
+            float max_depth = max(max(depth00, depth11), max(depth10, depth01));
+
+            visible = depth_sphere <= max_depth;
         }
 
         visibility[object.id] = uint(visible);
