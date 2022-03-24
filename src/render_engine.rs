@@ -1042,7 +1042,7 @@ impl RenderEngine {
                 );
 
                 input_size = out_size;
-                out_size = (out_size.0 >> 1, out_size.0 >> 1);
+                out_size = (out_size.0 >> 1, out_size.1 >> 1);
             }
 
             cl.barrier_image(
