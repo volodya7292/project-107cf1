@@ -1043,6 +1043,25 @@ impl Device {
                 let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
 
                 if read_bindings.contains(&(set as u32, binding.id)) {
+                    let existing = native_bindings[set]
+                        .iter_mut()
+                        .find(|v| v.binding == binding.id)
+                        .unwrap();
+
+                    if existing.descriptor_type != binding.binding_type.0 {
+                        panic!(
+                            "Conflicting binding types (set {}, binding {}) in the shader and additional_bindings",
+                            set, binding.id
+                        );
+                    }
+                    if existing.descriptor_count != binding.count {
+                        panic!(
+                            "Conflicting number of descriptors (set {}, binding {}) in the shader and additional_bindings",
+                            set, binding.id
+                        );
+                    }
+
+                    existing.stage_flags |= stage.0;
                     continue;
                 }
 

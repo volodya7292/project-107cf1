@@ -23,39 +23,45 @@ pub trait VertexImpl {
 }
 
 pub trait VertexPositionImpl {
-    fn position(&self) -> &na::Vector3<f32>;
-    fn position_mut(&mut self) -> &mut na::Vector3<f32>;
+    fn position(&self) -> na::Vector3<f32>;
+
+    fn set_position(&self, _pos: na::Vector3<f32>) {
+        unimplemented!()
+    }
 }
 
 pub trait VertexNormalImpl {
-    fn normal(&self) -> &na::Vector3<f32>;
-    fn normal_mut(&mut self) -> &mut na::Vector3<f32>;
+    fn normal(&self) -> na::Vector3<f32>;
+
+    fn set_normal(&self, _normal: na::Vector3<f32>) {
+        unimplemented!()
+    }
 }
 
-macro_rules! __impl_position_methods {
+macro_rules! vertex_impl_position {
     ($vertex: ty, position) => {
         impl $crate::render_engine::vertex_mesh::VertexPositionImpl for $vertex {
             fn position(&self) -> &nalgebra::Vector3<f32> {
                 &self.position
             }
 
-            fn position_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
-                &mut self.position
+            fn set_position(&mut self, pos: nalgebra::Vector3<f32>) {
+                self.position = pos;
             }
         }
     };
     ($vertex: ty, $i:ident) => {};
 }
 
-macro_rules! __impl_normal_methods {
+macro_rules! vertex_impl_normal {
     ($vertex: ty, normal) => {
         impl $crate::render_engine::vertex_mesh::VertexNormalImpl for $vertex {
             fn normal(&self) -> &nalgebra::Vector3<f32> {
                 &self.normal
             }
 
-            fn normal_mut(&mut self) -> &mut nalgebra::Vector3<f32> {
-                &mut self.normal
+            fn normal_mut(&mut self, normal: nalgebra::Vector3<f32>) {
+                self.normal = normal;
             }
         }
     };
@@ -107,11 +113,6 @@ macro_rules! vertex_impl {
                 return None;
             }
         }
-
-        $(
-            __impl_position_methods!($vertex, $member_name);
-            __impl_normal_methods!($vertex, $member_name);
-        )*
     )
 }
 
@@ -329,17 +330,6 @@ impl VertexMeshCreate for vkw::Device {
     where
         VertexT: VertexImpl + VertexPositionImpl,
     {
-        const POS_FORMAT: vkw::Format = vkw::Format::RGB32_FLOAT;
-
-        let pos_info =
-            VertexT::member_info("position").ok_or(Error::VertexMemberNotFound("position".to_owned()))?;
-        if pos_info.1 != POS_FORMAT {
-            return Err(Error::IncorrectVertexMemberFormat(format!(
-                "{:?} != {:?}",
-                pos_info.1, POS_FORMAT
-            )));
-        }
-
         let indexed = indices.is_some();
         let indices = indices.unwrap_or(&[]);
 
@@ -434,11 +424,11 @@ impl VertexMeshCreate for vkw::Device {
                 }
                 aabb
             } else if !vertices.is_empty() {
-                let mut aabb = (*vertices[0].position(), *vertices[0].position());
+                let mut aabb = (vertices[0].position(), vertices[0].position());
 
                 for vertex in &vertices[1..] {
-                    aabb.0 = aabb.0.inf(vertex.position());
-                    aabb.1 = aabb.1.sup(vertex.position());
+                    aabb.0 = aabb.0.inf(&vertex.position());
+                    aabb.1 = aabb.1.sup(&vertex.position());
                 }
                 aabb
             } else {

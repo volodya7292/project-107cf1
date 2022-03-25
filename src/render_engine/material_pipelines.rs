@@ -58,13 +58,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut RenderEngine) -> Mat
         let vertex = create_vertex_shader(
             &device,
             &resources.get("shaders/cluster.vert.spv").unwrap().read().unwrap(),
-            &[
-                ("inPosition", vkw::Format::RGB32_FLOAT),
-                ("inNormal", vkw::Format::RGB32_FLOAT),
-                ("inTexUV", vkw::Format::RG32_FLOAT),
-                ("inAO", vkw::Format::R32_FLOAT),
-                ("inMaterialId", vkw::Format::R32_UINT),
-            ],
+            &[("inPack", vkw::Format::RGBA32_UINT)],
         )
         .unwrap();
         let pixel = device

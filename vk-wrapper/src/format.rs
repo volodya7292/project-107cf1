@@ -28,8 +28,7 @@ impl Format {
     pub const BC7_UNORM: Self = Self(vk::Format::BC7_UNORM_BLOCK);
 }
 
-// TODO
-pub const TEXEL_BUFFER_FORMATS: [Format; 0] = [];
+pub const BUFFER_FORMATS: [Format; 3] = [Format::R32_UINT, Format::RGB32_FLOAT, Format::RGBA32_UINT];
 // TODO
 pub const BC_IMAGE_FORMATS: [Format; 3] = [Format::BC3_RGBA_UNORM, Format::BC5_RG_UNORM, Format::BC7_UNORM];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;

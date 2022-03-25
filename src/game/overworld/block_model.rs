@@ -1,32 +1,55 @@
 use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster;
+use crate::render_engine::vertex_mesh::VertexPositionImpl;
 use approx::AbsDiffEq;
 use glm::BVec3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{Vec2, Vec3};
+use nalgebra_glm::{TVec3, TVec4, U16Vec2, U16Vec3, U32Vec2, U32Vec3, U8Vec3, UVec3, UVec4, Vec2, Vec3};
 use std::ops::Range;
 
-// TODO OPTIMIZE storage
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
+pub struct PackedVertex {
+    pack: UVec4,
+}
+vertex_impl!(PackedVertex, pack);
+
+impl VertexPositionImpl for PackedVertex {
+    fn position(&self) -> Vec3 {
+        Vec3::new(
+            ((self.pack[0] >> 16) & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
+            (self.pack[0] & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
+            ((self.pack[1] >> 16) & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
+        )
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Vertex {
     pub position: Vec3,
     pub normal: Vec3,
     pub tex_uv: Vec2,
-    // pub data: u32,
     pub ao: f32,
     pub material_id: u32,
 }
-vertex_impl!(Vertex, position, normal, tex_uv, ao, material_id);
 
 impl Vertex {
-    // pub fn new(pos: Vec3, tex_uv: Vec2, ao: bool, material_id: u16) -> Self {
-    //     Vertex {
-    //         position: pos,
-    //         tex_uv,
-    //         ao: 0.0,
-    //         material_id: 0,
-    //     }
-    // }
+    pub fn pack(&self) -> PackedVertex {
+        let enc_pos: U32Vec3 = glm::try_convert(self.position / (cluster::SIZE as f32) * 65535.0).unwrap();
+        let enc_normal: U32Vec3 =
+            glm::try_convert(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0)).unwrap();
+        let enc_tex_uv: U32Vec2 = glm::try_convert(self.tex_uv / 64.0 * 65535.0).unwrap();
+        let enc_ao = (self.ao * 255.0).min(255.0) as u32;
+
+        let pack0 = ((enc_pos[0] & 0xffff) << 16) | (enc_pos[1] & 0xffff);
+        let pack1 = ((enc_pos[2] & 0xffff) << 16) | ((enc_normal[0] & 0xff) << 8) | (enc_normal[1] & 0xff);
+        let pack2 = ((enc_normal[2] & 0xff) << 24) | ((enc_ao & 0xff) << 16) | (self.material_id & 0xffff);
+        let pack3 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
+
+        PackedVertex {
+            pack: UVec4::new(pack0, pack1, pack2, pack3),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

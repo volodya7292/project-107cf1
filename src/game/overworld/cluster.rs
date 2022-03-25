@@ -1,6 +1,6 @@
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::block_model::Vertex;
+use crate::game::overworld::block_model::{PackedVertex, Vertex};
 use crate::game::registry::Registry;
 use crate::render_engine;
 use crate::render_engine::vertex_mesh::VertexMeshCreate;
@@ -118,7 +118,7 @@ struct Sector {
     occupied_cells: BitVec,
     changed: bool,
     side_changed: [bool; 6],
-    cache_vertices: Vec<Vertex>,
+    cache_vertices: Vec<PackedVertex>,
     cache_indices: Vec<u32>,
 }
 
@@ -365,7 +365,7 @@ pub struct Cluster {
     changed: bool,
     side_changed: [bool; 6],
     device: Arc<vkw::Device>,
-    vertex_mesh: render_engine::VertexMesh<Vertex, ()>,
+    vertex_mesh: render_engine::VertexMesh<PackedVertex, ()>,
 }
 
 impl Cluster {
@@ -401,7 +401,7 @@ impl Cluster {
             .fold(0_u8, |mask, (i, b)| mask | ((*b as u8) << i))
     }
 
-    pub fn vertex_mesh(&self) -> &render_engine::VertexMesh<Vertex, ()> {
+    pub fn vertex_mesh(&self) -> &render_engine::VertexMesh<PackedVertex, ()> {
         &self.vertex_mesh
     }
 
@@ -910,13 +910,13 @@ impl Cluster {
         let sector_pos: TVec3<f32> = glm::convert(sector_pos(sector_index) * (SECTOR_SIZE as u32));
         let scale = self.entry_size as f32;
 
-        sector.cache_vertices = Vec::<Vertex>::with_capacity(SECTOR_VOLUME * 8);
+        sector.cache_vertices = Vec::<PackedVertex>::with_capacity(SECTOR_VOLUME * 8);
 
-        fn add_vertices(out: &mut Vec<Vertex>, pos: Vec3, scale: f32, vertices: &[Vertex]) {
+        fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, scale: f32, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
                 v.position += pos;
                 v.position *= scale;
-                v
+                v.pack()
             }));
         }
 
@@ -977,7 +977,7 @@ impl Cluster {
                                     v[j].position *= scale;
                                 }
 
-                                sector.cache_vertices.extend(v);
+                                sector.cache_vertices.extend(v.map(|v| v.pack()));
                             }
                         }
                     }
@@ -1024,7 +1024,7 @@ impl Cluster {
                 i_count + sector.cache_indices.len(),
             )
         });
-        let mut vertices = Vec::<Vertex>::with_capacity(v_count);
+        let mut vertices = Vec::<PackedVertex>::with_capacity(v_count);
         let mut indices = Vec::<u32>::with_capacity(i_count);
 
         for i in 0..VOLUME_IN_SECTORS {

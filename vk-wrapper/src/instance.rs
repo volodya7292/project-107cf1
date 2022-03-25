@@ -215,8 +215,9 @@ impl Instance {
 
             // Check formats
             // ------------------------------------------------------------------------------------
+
             // Buffer formats
-            for format in format::TEXEL_BUFFER_FORMATS.iter() {
+            for format in format::BUFFER_FORMATS.iter() {
                 let props = unsafe {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)

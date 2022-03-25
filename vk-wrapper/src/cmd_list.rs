@@ -208,7 +208,7 @@ impl CmdList {
         };
     }
 
-    /// Returns whether pipeline is already bound
+    /// Returns whether the specified pipeline is already bound
     pub fn bind_pipeline(&mut self, pipeline: &Arc<Pipeline>) -> bool {
         if Arc::as_ptr(pipeline) == self.last_pipeline {
             return true;

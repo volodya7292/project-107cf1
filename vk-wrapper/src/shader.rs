@@ -52,6 +52,12 @@ pub struct Shader {
     pub(crate) push_constants_size: u32,
 }
 
+impl Shader {
+    pub fn stage(&self) -> ShaderStage {
+        self.stage
+    }
+}
+
 impl Drop for Shader {
     fn drop(&mut self) {
         unsafe {

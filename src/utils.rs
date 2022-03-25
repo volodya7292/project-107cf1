@@ -1,4 +1,3 @@
-pub mod mesh_simplifier;
 pub mod noise;
 pub mod ordered_hashmap;
 mod qef;
@@ -148,17 +147,17 @@ where
     for i in (0..indices.len()).step_by(3) {
         let ind = &indices[i..(i + 3)];
         let normal = calc_triangle_normal(
-            vertices[ind[0] as usize].position(),
-            vertices[ind[1] as usize].position(),
-            vertices[ind[2] as usize].position(),
+            &vertices[ind[0] as usize].position(),
+            &vertices[ind[1] as usize].position(),
+            &vertices[ind[2] as usize].position(),
         );
 
         triangle_normals.push(normal);
     }
 
-    vertices
-        .iter_mut()
-        .for_each(|vertex| *vertex.normal_mut() = na::Vector3::from_element(0.0));
+    for v in vertices.iter_mut() {
+        v.set_normal(na::Vector3::from_element(0.0));
+    }
 
     for (i, normal) in triangle_normals.iter().enumerate() {
         let indices_i = i * 3;
@@ -166,9 +165,9 @@ where
 
         // Check for NaN
         if normal == normal {
-            *vertices[ind[0] as usize].normal_mut() += *normal;
-            *vertices[ind[1] as usize].normal_mut() += *normal;
-            *vertices[ind[2] as usize].normal_mut() += *normal;
+            vertices[ind[0] as usize].set_normal(vertices[ind[0] as usize].normal() + *normal);
+            vertices[ind[1] as usize].set_normal(vertices[ind[1] as usize].normal() + *normal);
+            vertices[ind[2] as usize].set_normal(vertices[ind[2] as usize].normal() + *normal);
 
             vertex_triangle_counts[ind[0] as usize] += 1;
             vertex_triangle_counts[ind[1] as usize] += 1;
@@ -177,6 +176,6 @@ where
     }
 
     for (i, v) in vertices.iter_mut().enumerate() {
-        *v.normal_mut() = (v.normal() / vertex_triangle_counts[i] as f32).normalize();
+        v.set_normal((v.normal() / vertex_triangle_counts[i] as f32).normalize());
     }
 }

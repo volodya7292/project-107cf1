@@ -1,5 +1,5 @@
 use crate::render_engine;
-use crate::render_engine::material_pipeline::MaterialPipeline;
+use crate::render_engine::material_pipeline::MaterialPipelineSet;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity, Event};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Renderable, VMBufferUpdate};
@@ -21,7 +21,7 @@ pub(super) struct RendererCompEventsSystem<'a> {
     pub g_per_pipeline_pools: &'a mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     pub renderables: &'a mut HashMap<Entity, Renderable>,
     pub buffer_updates: &'a mut Vec<BufferUpdate>,
-    pub material_pipelines: &'a [MaterialPipeline],
+    pub material_pipelines: &'a [MaterialPipelineSet],
     pub uniform_buffer_offsets: &'a mut IndexPool,
 }
 
@@ -83,10 +83,10 @@ impl RendererCompEventsSystem<'_> {
     fn renderer_comp_removed(
         renderable: &Renderable,
         g_per_pipeline_pools: &mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
-        mat_pipes: &[MaterialPipeline],
+        mat_pipes: &[MaterialPipelineSet],
     ) {
         g_per_pipeline_pools
-            .get_mut(&mat_pipes[renderable.material_pipe as usize].signature)
+            .get_mut(&mat_pipes[renderable.material_pipe as usize].main_signature)
             .unwrap()
             .free(renderable.descriptor_sets[0]);
     }
@@ -101,7 +101,8 @@ impl RendererCompEventsSystem<'_> {
             match event {
                 scene::Event::Created(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
-                    let signature = &self.material_pipelines[renderer_comp.mat_pipeline as usize].signature;
+                    let signature =
+                        &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;
 
                     let uniform_buf_index = self.uniform_buffer_offsets.new_id();
                     let mut renderable = Renderable {
@@ -125,7 +126,8 @@ impl RendererCompEventsSystem<'_> {
                 }
                 scene::Event::Modified(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
-                    let signature = &self.material_pipelines[renderer_comp.mat_pipeline as usize].signature;
+                    let signature =
+                        &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;
 
                     let mut renderable = self.renderables.remove(&entity).unwrap();
                     Self::renderer_comp_removed(

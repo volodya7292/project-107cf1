@@ -18,7 +18,7 @@ use crate::utils::{HashMap, LruCache, UInt};
 use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
-use material_pipeline::{MaterialPipeline, PipelineMapping};
+use material_pipeline::{MaterialPipelineSet, PipelineConfig};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
@@ -27,6 +27,7 @@ use rayon::prelude::*;
 use scene::ComponentStorage;
 pub use scene::Scene;
 use smallvec::SmallVec;
+use std::collections::hash_map;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, iter, mem, slice};
@@ -85,14 +86,6 @@ pub struct RenderEngine {
     depth_pyramid_image: Option<Arc<Image>>,
     depth_pyramid_views: Vec<Arc<ImageView>>,
     depth_framebuffer: Option<Arc<Framebuffer>>,
-    depth_signature: Arc<PipelineSignature>,
-    depth_pipeline_r: Arc<Pipeline>,
-    depth_pipeline_rw: Arc<Pipeline>,
-    depth_per_frame_pool: DescriptorPool,
-    depth_dyn_pool: DescriptorPool,
-    depth_per_frame_in: DescriptorSet,
-    depth_dyn_in: DescriptorSet,
-
     depth_pyramid_pipeline: Arc<Pipeline>,
     depth_pyramid_signature: Arc<PipelineSignature>,
     depth_pyramid_pool: Option<DescriptorPool>,
@@ -133,7 +126,7 @@ pub struct RenderEngine {
 
     renderables: HashMap<Entity, Renderable>,
     vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
-    material_pipelines: Vec<MaterialPipeline>,
+    material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
     device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
@@ -301,6 +294,11 @@ const MAX_OBJECT_COUNT: u32 = 65535;
 const MAX_MATERIAL_COUNT: u32 = 4096;
 const COMPUTE_LOCAL_THREADS: u32 = 32;
 const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
+
+const PIPELINE_DEPTH_READ: u32 = 0;
+const PIPELINE_DEPTH_READ_WRITE: u32 = 1;
+const PIPELINE_COLOR_SOLID: u32 = 2;
+const PIPELINE_COLOR_TRANSLUCENT: u32 = 3;
 
 lazy_static! {
     static ref PIPELINE_CACHE_FILENAME: &'static str = if cfg!(debug_assertions) {
@@ -481,37 +479,77 @@ impl RenderEngine {
     pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
         assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
 
-        let signature = self
+        let main_signature = self
             .device
             .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
 
-        let mut mat_pipeline = MaterialPipeline {
+        let vertex_shader = Arc::clone(shaders.iter().find(|v| v.stage() == ShaderStage::VERTEX).unwrap());
+        let depth_signature = self
+            .device
+            .create_pipeline_signature(&[vertex_shader], &*ADDITIONAL_PIPELINE_BINDINGS)
+            .unwrap();
+
+        let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
-            signature,
+            main_signature: Arc::clone(&main_signature),
             pipelines: Default::default(),
             uniform_buffer_size: mem::size_of::<T>() as u32,
             uniform_buffer_model_offset: T::model_offset(),
         };
-        mat_pipeline.prepare_pipeline(&PipelineMapping {
-            render_pass: Arc::clone(&self.g_render_pass),
-            subpass_index: 0,
-            cull_back_faces: false,
-        });
-        mat_pipeline.prepare_pipeline(&PipelineMapping {
-            render_pass: Arc::clone(&self.g_render_pass),
-            subpass_index: 0,
-            cull_back_faces: true,
-        });
 
-        let g_per_pipeline_pools = &mut self.g_per_pipeline_pools;
-        let signature = mat_pipeline.signature();
-        if !g_per_pipeline_pools.contains_key(signature) {
-            g_per_pipeline_pools.insert(Arc::clone(signature), signature.create_pool(1, 16).unwrap());
+        pipeline_set.prepare_pipeline(
+            PIPELINE_DEPTH_READ,
+            &PipelineConfig {
+                render_pass: &self.depth_render_pass,
+                signature: &depth_signature,
+                subpass_index: 0,
+                cull_back_faces: true,
+                depth_test: true,
+                depth_write: false,
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_DEPTH_READ_WRITE,
+            &PipelineConfig {
+                render_pass: &self.depth_render_pass,
+                signature: &depth_signature,
+                subpass_index: 0,
+                cull_back_faces: true,
+                depth_test: true,
+                depth_write: true,
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_COLOR_SOLID,
+            &PipelineConfig {
+                render_pass: &self.g_render_pass,
+                signature: &main_signature,
+                subpass_index: 0,
+                cull_back_faces: true,
+                depth_test: true,
+                depth_write: false,
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_COLOR_TRANSLUCENT,
+            &PipelineConfig {
+                render_pass: &self.g_render_pass,
+                signature: &main_signature,
+                subpass_index: 0,
+                cull_back_faces: false,
+                depth_test: true,
+                depth_write: false,
+            },
+        );
+
+        if let hash_map::Entry::Vacant(e) = self.g_per_pipeline_pools.entry(main_signature) {
+            let pool = e.key().create_pool(1, 16).unwrap();
+            e.insert(pool);
         }
 
         let mat_pipelines = &mut self.material_pipelines;
-        mat_pipelines.push(mat_pipeline);
+        mat_pipelines.push(pipeline_set);
         (mat_pipelines.len() - 1) as u32
     }
 
@@ -792,6 +830,7 @@ impl RenderEngine {
         world_transform_comps: &ComponentStorage<component::WorldTransform>,
         renderer_comps: &ComponentStorage<component::Renderer>,
     ) -> u32 {
+        let mat_pipelines = &self.material_pipelines;
         let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
@@ -811,8 +850,6 @@ impl RenderEngine {
                     Some(self.depth_framebuffer.as_ref().unwrap()),
                 )
                 .unwrap();
-
-                cl.bind_graphics_input(&self.depth_signature, 0, self.depth_per_frame_in, &[]);
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -852,21 +889,28 @@ impl RenderEngine {
                         _pad: [0; 3],
                     });
 
-                    if renderer.translucent {
-                        cl.bind_pipeline(&self.depth_pipeline_r);
-                    } else {
-                        cl.bind_pipeline(&self.depth_pipeline_rw);
-                    }
-
+                    let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let renderable = &self.renderables[&renderable_id];
 
+                    let pipeline = if renderer.translucent {
+                        mat_pipeline.get_pipeline(PIPELINE_DEPTH_READ).unwrap()
+                    } else {
+                        mat_pipeline.get_pipeline(PIPELINE_DEPTH_READ_WRITE).unwrap()
+                    };
+
+                    let already_bound = cl.bind_pipeline(pipeline);
+
+                    if !already_bound {
+                        cl.bind_graphics_input(pipeline.signature(), 0, self.g_per_frame_in, &[]);
+                    }
+
                     cl.bind_graphics_input(
-                        &self.depth_signature,
+                        pipeline.signature(),
                         1,
-                        self.depth_dyn_in,
+                        self.g_dyn_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
-                    // cl.bind_graphics_input(&self.depth_signature, 1, renderable.descriptor_sets[0]);
+
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -889,12 +933,6 @@ impl RenderEngine {
         let mat_pipelines = &self.material_pipelines;
         let object_count = renderable_ids.len();
         let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
-
-        let pipeline_mapping = PipelineMapping {
-            render_pass: Arc::clone(&self.g_render_pass),
-            subpass_index: 0,
-            cull_back_faces: true,
-        };
 
         self.g_secondary_cls
             .par_iter()
@@ -931,23 +969,24 @@ impl RenderEngine {
                     }
 
                     let vertex_mesh = vertex_mesh.unwrap();
-
                     let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
-                    let pipeline = mat_pipeline.get_pipeline(&pipeline_mapping).unwrap();
+                    let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
                     let signature = pipeline.signature();
                     let renderable = &self.renderables[&renderable_id];
 
                     let already_bound = cl.bind_pipeline(pipeline);
+
                     if !already_bound {
                         cl.bind_graphics_input(&signature, 0, self.g_per_frame_in, &[]);
                     }
+
                     cl.bind_graphics_input(
                         &signature,
                         1,
                         self.g_dyn_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
-                    // cl.bind_graphics_input(&signature, 1, renderable.descriptor_sets[1]);
+
                     cl.bind_and_draw_vertex_mesh(&vertex_mesh);
                 }
 
@@ -1677,39 +1716,6 @@ pub fn new(
             &[],
         )
         .unwrap();
-    let depth_vertex = device
-        .create_shader(
-            &resources.get("shaders/depth.vert.spv").unwrap().read().unwrap(),
-            &[("inPosition", Format::RGB32_FLOAT)],
-            &[("per_object_data", ShaderBindingMod::DYNAMIC_OFFSET)],
-        )
-        .unwrap();
-    let depth_signature = device.create_pipeline_signature(&[depth_vertex], &[]).unwrap();
-    let depth_pipeline_r = device
-        .create_graphics_pipeline(
-            &depth_render_pass,
-            0,
-            PrimitiveTopology::TRIANGLE_LIST,
-            PipelineDepthStencil::new().depth_test(true).depth_write(false),
-            PipelineRasterization::new().cull_back_faces(true),
-            &depth_signature,
-        )
-        .unwrap();
-    let depth_pipeline_rw = device
-        .create_graphics_pipeline(
-            &depth_render_pass,
-            0,
-            PrimitiveTopology::TRIANGLE_LIST,
-            PipelineDepthStencil::new().depth_test(true).depth_write(true),
-            PipelineRasterization::new().cull_back_faces(true),
-            &depth_signature,
-        )
-        .unwrap();
-    let mut depth_per_frame_pool = depth_signature.create_pool(0, 1).unwrap();
-    let mut depth_dyn_pool = depth_signature.create_pool(1, 1).unwrap();
-    let depth_per_frame_in = depth_per_frame_pool.alloc().unwrap();
-    let depth_dyn_in = depth_dyn_pool.alloc().unwrap();
-
     let depth_secondary_cls = iter::repeat_with(|| {
         graphics_queue
             .create_secondary_cmd_list("depth_secondary")
@@ -1926,22 +1932,6 @@ pub fn new(
     // Update pipeline inputs
     unsafe {
         device.update_descriptor_set(
-            depth_per_frame_in,
-            &[depth_per_frame_pool.create_binding(
-                0,
-                0,
-                BindingRes::Buffer(per_frame_uniform_buffer.handle()),
-            )],
-        );
-        device.update_descriptor_set(
-            depth_dyn_in,
-            &[depth_dyn_pool.create_binding(
-                0,
-                0,
-                BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
-            )],
-        );
-        device.update_descriptor_set(
             g_per_frame_in,
             &[
                 g_per_frame_pool.create_binding(0, 0, BindingRes::Buffer(per_frame_uniform_buffer.handle())),
@@ -2034,13 +2024,6 @@ pub fn new(
         depth_pyramid_image: None,
         depth_pyramid_views: vec![],
         depth_framebuffer: None,
-        depth_signature,
-        depth_pipeline_r,
-        depth_pipeline_rw,
-        depth_per_frame_pool,
-        depth_dyn_pool,
-        depth_per_frame_in,
-        depth_dyn_in,
         depth_pyramid_pipeline,
         depth_pyramid_signature,
         depth_pyramid_pool: None,

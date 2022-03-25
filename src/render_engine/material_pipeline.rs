@@ -19,36 +19,38 @@ macro_rules! uniform_struct_impl {
     };
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PipelineMapping {
-    pub render_pass: Arc<vkw::RenderPass>,
+pub struct PipelineConfig<'a> {
+    pub render_pass: &'a Arc<vkw::RenderPass>,
+    pub signature: &'a Arc<vkw::PipelineSignature>,
     pub subpass_index: u32,
     pub cull_back_faces: bool,
+    pub depth_test: bool,
+    pub depth_write: bool,
 }
 
-pub struct MaterialPipeline {
+pub struct MaterialPipelineSet {
     pub(super) device: Arc<vkw::Device>,
-    pub(super) signature: Arc<vkw::PipelineSignature>,
-    pub(super) pipelines: HashMap<PipelineMapping, Arc<vkw::Pipeline>>,
+    pub(super) main_signature: Arc<vkw::PipelineSignature>,
+    pub(super) pipelines: HashMap<u32, Arc<vkw::Pipeline>>,
     pub(super) uniform_buffer_size: u32,
     pub(super) uniform_buffer_model_offset: u32,
 }
 
-impl MaterialPipeline {
-    pub fn prepare_pipeline(&mut self, mapping: &PipelineMapping) {
-        match self.pipelines.entry(mapping.clone()) {
+impl MaterialPipelineSet {
+    pub fn prepare_pipeline(&mut self, id: u32, params: &PipelineConfig) {
+        match self.pipelines.entry(id) {
             hash_map::Entry::Vacant(entry) => {
                 let pipeline = self
                     .device
                     .create_graphics_pipeline(
-                        &mapping.render_pass,
-                        mapping.subpass_index,
+                        params.render_pass,
+                        params.subpass_index,
                         vkw::PrimitiveTopology::TRIANGLE_LIST,
                         vkw::PipelineDepthStencil::new()
-                            .depth_test(true)
-                            .depth_write(false),
-                        vkw::PipelineRasterization::new().cull_back_faces(mapping.cull_back_faces),
-                        &self.signature,
+                            .depth_test(params.depth_test)
+                            .depth_write(params.depth_write),
+                        vkw::PipelineRasterization::new().cull_back_faces(params.cull_back_faces),
+                        params.signature,
                     )
                     .unwrap();
                 entry.insert(Arc::clone(&pipeline));
@@ -57,12 +59,8 @@ impl MaterialPipeline {
         }
     }
 
-    pub fn signature(&self) -> &Arc<vkw::PipelineSignature> {
-        &self.signature
-    }
-
-    pub fn get_pipeline(&self, mapping: &PipelineMapping) -> Option<&Arc<vkw::Pipeline>> {
-        self.pipelines.get(mapping)
+    pub fn get_pipeline(&self, id: u32) -> Option<&Arc<vkw::Pipeline>> {
+        self.pipelines.get(&id)
     }
 
     pub fn uniform_buffer_size(&self) -> u32 {
