@@ -44,6 +44,7 @@ pub trait UInt {
 }
 
 pub trait Int {
+    // FIXME (unstable_name_collisions): remove this function when the standard one is stabilized
     fn div_floor(&self, other: Self) -> Self;
 }
 

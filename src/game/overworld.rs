@@ -11,7 +11,7 @@ use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::structure::world::World;
 use crate::game::overworld::structure::Structure;
 use crate::utils::value_noise::ValueNoise;
-use crate::utils::{HashMap, Int, MO_ACQUIRE};
+use crate::utils::{HashMap, Int, MO_ACQUIRE, MO_RELAXED};
 use nalgebra_glm as glm;
 use nalgebra_glm::{I64Vec3, Vec3};
 use num_derive::FromPrimitive;
@@ -37,23 +37,16 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
     AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, FromPrimitive)]
-#[repr(u8)]
-pub enum ClusterState {
-    UNLOADED = 0,
-    LOADING = 1,
-    LOADED = 2,
-}
+/// The cluster data is not yet loaded
+pub const CLUSTER_STATE_INITIAL: u8 = 0;
+/// The cluster is not needed anymore
+pub const CLUSTER_STATE_DISCARDED: u8 = 1;
+pub const CLUSTER_STATE_LOADING: u8 = 2;
+pub const CLUSTER_STATE_LOADED: u8 = 3;
 
 pub struct OverworldCluster {
     pub cluster: RwLock<Cluster>,
     pub state: AtomicU8,
-}
-
-impl OverworldCluster {
-    pub fn state(&self) -> ClusterState {
-        FromPrimitive::from_u8(self.state.load(MO_ACQUIRE)).unwrap()
-    }
 }
 
 pub struct Overworld {

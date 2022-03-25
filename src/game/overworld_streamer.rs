@@ -1,7 +1,10 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::{cluster, generator, ClusterState, Overworld, OverworldCluster};
+use crate::game::overworld::{
+    cluster, generator, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED, CLUSTER_STATE_INITIAL,
+    CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING,
+};
 use crate::render_engine::{component, scene, RenderEngine};
 use crate::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use crossbeam_channel as cb;
@@ -9,7 +12,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::collections::hash_map;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::{Arc, RwLock};
@@ -43,6 +46,12 @@ struct RCluster {
     edge_occlusion: AtomicU8,
     needs_occlusion_check_update: AtomicBool,
     mesh_changed: AtomicBool,
+}
+
+impl RCluster {
+    fn is_visible(&self) -> bool {
+        !self.empty.load(MO_RELAXED) && !self.occluded.load(MO_RELAXED)
+    }
 }
 
 struct ClusterPosD {
@@ -127,7 +136,8 @@ fn look_cube_directions(dir: DVec3) -> [I32Vec3; 3] {
     ]
 }
 
-fn check_cluster_vis_occlusion(
+/// Checks if cluster at `pos` is occluded by neighbour clusters when camera is at `stream_pos`
+fn is_cluster_visibly_occluded(
     rclusters: &HashMap<I64Vec3, RCluster>,
     pos: I64Vec3,
     stream_pos: DVec3,
@@ -265,29 +275,35 @@ impl OverworldStreamer {
             rclusters.retain(|p, rcl| {
                 let in_layout = layout.contains(p);
                 let timeout = (curr_t - rcl.creation_time).as_secs() >= 3;
-                let preserve = in_layout || !timeout;
+                let do_preserve = in_layout || !timeout;
 
-                if !preserve {
-                    if rcl.entity != scene::Entity::NULL {
-                        clusters_to_remove.push(rcl.entity);
-                    }
-                }
-                preserve
-            });
-            oclusters.retain(|p, _ocl| {
-                let in_layout = rclusters.contains_key(p);
-                if !in_layout {
-                    return false;
-                }
-                let rcl = rclusters.get_mut(p).unwrap();
-                let empty = rcl.empty.load(MO_RELAXED);
-                let occluded = rcl.occluded.load(MO_RELAXED);
-
-                if (empty || occluded) && rcl.entity != scene::Entity::NULL {
+                if !do_preserve && rcl.entity != scene::Entity::NULL {
                     clusters_to_remove.push(rcl.entity);
-                    rcl.entity = scene::Entity::NULL;
                 }
-                !empty && !occluded
+
+                do_preserve
+            });
+            oclusters.retain(|p, ocl| {
+                let in_layout = rclusters.contains_key(p);
+                let mut do_preserve = false;
+
+                if in_layout {
+                    let rcl = rclusters.get_mut(p).unwrap();
+                    let is_visible = rcl.is_visible();
+
+                    if !is_visible && rcl.entity != scene::Entity::NULL {
+                        clusters_to_remove.push(rcl.entity);
+                        rcl.entity = scene::Entity::NULL;
+                    }
+
+                    do_preserve = is_visible;
+                }
+
+                if !do_preserve {
+                    ocl.state.store(CLUSTER_STATE_DISCARDED, MO_RELAXED);
+                }
+
+                do_preserve
             });
 
             for p in &layout {
@@ -319,24 +335,27 @@ impl OverworldStreamer {
 
         // Generate clusters
         {
-            let max_clusters_in_process = (rayon::current_num_threads() - 1).max(1) as u32;
+            let max_clusters_in_process = 64;
             let registry = self.main_registry.registry();
 
             for p in &sorted_layout {
                 if self.curr_loading_clusters_n.load(MO_ACQUIRE) >= max_clusters_in_process {
                     break;
                 }
-                if rclusters[&p.pos].empty.load(MO_RELAXED) || rclusters[&p.pos].occluded.load(MO_RELAXED) {
+                if !rclusters[&p.pos].is_visible() {
                     continue;
                 }
 
                 let ocluster = Arc::clone(oclusters.entry(p.pos).or_insert_with(|| {
                     Arc::new(OverworldCluster {
                         cluster: RwLock::new(Cluster::new(registry, device)),
-                        state: AtomicU8::new(ClusterState::UNLOADED as u8),
+                        state: AtomicU8::new(CLUSTER_STATE_INITIAL),
                     })
                 }));
-                if matches!(ocluster.state(), ClusterState::LOADED | ClusterState::LOADING) {
+                if matches!(
+                    ocluster.state.load(MO_RELAXED),
+                    CLUSTER_STATE_LOADED | CLUSTER_STATE_LOADING
+                ) {
                     continue;
                 }
 
@@ -344,23 +363,39 @@ impl OverworldStreamer {
                 let main_registry = Arc::clone(&self.main_registry);
                 let pos = p.pos;
 
-                ocluster.state.store(ClusterState::LOADING as u8, MO_RELAXED);
+                ocluster.state.store(CLUSTER_STATE_LOADING, MO_RELAXED);
                 curr_loading_clusters_n.fetch_add(1, MO_ACQUIRE);
 
                 rayon::spawn(move || {
+                    if ocluster.state.load(MO_RELAXED) == CLUSTER_STATE_DISCARDED {
+                        curr_loading_clusters_n.fetch_sub(1, MO_RELAXED);
+                        return;
+                    }
+
                     generator::generate_cluster(&mut ocluster.cluster.write().unwrap(), &main_registry, pos);
 
-                    ocluster.state.store(ClusterState::LOADED as u8, MO_RELEASE);
+                    // Note: use CAS to account for DISCARDED state
+                    let _ = ocluster.state.compare_exchange(
+                        CLUSTER_STATE_LOADING,
+                        CLUSTER_STATE_LOADED,
+                        MO_RELEASE,
+                        MO_RELAXED,
+                    );
                     curr_loading_clusters_n.fetch_sub(1, MO_RELEASE);
                 });
             }
         }
 
+        let oclusters_states: HashMap<_, _> = oclusters
+            .iter()
+            .map(|(p, v)| (p, v.state.load(MO_RELAXED)))
+            .collect();
+
         // Generate meshes
         {
             // Mark changes
             oclusters.par_iter().for_each(|(pos, ocluster)| {
-                if ocluster.state() != ClusterState::LOADED {
+                if oclusters_states[pos] != CLUSTER_STATE_LOADED {
                     return;
                 }
                 let rcluster = &rclusters[pos];
@@ -372,6 +407,7 @@ impl OverworldStreamer {
                 }
                 rcluster.changed.store(true, MO_RELAXED);
 
+                // Set the need to update occlusions of sides of neighbour clusters
                 let changed_sides = cluster.changed_sides();
                 if changed_sides != 0 {
                     for p in get_side_clusters(*pos) {
@@ -383,6 +419,8 @@ impl OverworldStreamer {
                             .fetch_or(1 << facing_dir_index(p, *pos), MO_RELAXED);
                     }
                 }
+
+                // If needed, check occlusion of all 6 sides of this cluster and if it's empty
                 if rcluster.needs_occlusion_check_update.swap(false, MO_RELAXED) {
                     let mut edge_occlusion = 0_u8;
 
@@ -400,43 +438,40 @@ impl OverworldStreamer {
             // Collect changes
             let side_occlusion_work = cb::bounded::<ClusterSidePair>(oclusters.len() * 26);
 
-            for (pos, ocluster) in oclusters.iter() {
-                if ocluster.state() != ClusterState::LOADED {
+            for pos in oclusters.keys() {
+                if oclusters_states[pos] != CLUSTER_STATE_LOADED {
                     continue;
                 }
                 let rcluster = &rclusters[pos];
 
                 rcluster.occluded.store(
-                    check_cluster_vis_occlusion(rclusters, *pos, self.stream_pos),
+                    is_cluster_visibly_occluded(rclusters, *pos, self.stream_pos),
                     MO_RELAXED,
                 );
 
                 if rcluster.needs_occlusion_fill.load(MO_RELAXED) == 0 {
                     continue;
                 }
-                let side_clusters: SmallVec<[_; 26]> = get_side_clusters(*pos)
-                    .into_iter()
-                    .filter(|p| {
-                        let exists = rclusters.contains_key(p)
-                            && !rclusters[p].occluded.load(MO_RELAXED)
-                            && !rclusters[p].empty.load(MO_RELAXED);
-                        if !exists {
-                            rcluster
-                                .needs_occlusion_fill
-                                .fetch_and(!(1 << facing_dir_index(*pos, *p)), MO_RELAXED);
-                        }
-                        exists
-                    })
-                    .collect();
 
-                let mut ready_to_update = true;
+                let mut side_clusters: SmallVec<[_; 26]> = smallvec![];
 
-                for p in &side_clusters {
-                    if !oclusters.contains_key(p) || oclusters[p].state() != ClusterState::LOADED {
-                        ready_to_update = false;
-                        break;
+                // Collect valid side clusters
+                for p in get_side_clusters(*pos) {
+                    let exists = rclusters.contains_key(&p) && rclusters[&p].is_visible();
+
+                    if exists {
+                        side_clusters.push(p);
+                    } else {
+                        rcluster
+                            .needs_occlusion_fill
+                            .fetch_and(!(1 << facing_dir_index(*pos, p)), MO_RELAXED);
                     }
                 }
+
+                let ready_to_update = side_clusters
+                    .iter()
+                    .all(|p| oclusters.contains_key(p) && oclusters_states[p] == CLUSTER_STATE_LOADED);
+
                 if ready_to_update {
                     let mask = rcluster.needs_occlusion_fill.load(MO_RELAXED);
 
@@ -448,7 +483,7 @@ impl OverworldStreamer {
                 }
             }
 
-            // Update cluster outer side occlusions
+            // Update clusters outer side occlusions
             let side_pair_count = side_occlusion_work.0.len();
             let process_count = Arc::new(AtomicU32::new(side_pair_count as u32));
             (0..available_threads).into_par_iter().for_each(|_| {
@@ -458,11 +493,12 @@ impl OverworldStreamer {
                 cluster_update_worker(process_count, receiver, sender, rclusters, oclusters);
             });
 
+            // Finally, update clusters meshes
             oclusters.par_iter().for_each(|(pos, ocluster)| {
                 let rcluster = &rclusters[pos];
 
                 if rcluster.changed.load(MO_RELAXED)
-                    && ocluster.state() == ClusterState::LOADED
+                    && oclusters_states[pos] == CLUSTER_STATE_LOADED
                     && rcluster.needs_occlusion_fill.load(MO_RELAXED) == 0
                 {
                     let mut cluster = ocluster.cluster.write().unwrap();
