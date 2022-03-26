@@ -1,3 +1,4 @@
+use crate::format::BUFFER_FORMATS;
 use crate::ImageWrapper;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
@@ -769,6 +770,14 @@ impl Device {
             }
         };
 
+        if stage == ShaderStage::VERTEX {
+            for (_, f) in input_formats {
+                if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+                    panic!("Unsupported vertex format is used: {:?}", f);
+                }
+            }
+        }
+
         let input_formats: HashMap<&str, Format> = input_formats.iter().cloned().collect();
         let mut input_locations = HashMap::<u32, Format>::with_capacity(resources.stage_inputs.len());
 
@@ -1206,6 +1215,10 @@ impl Device {
 
         for (location, format) in &vertex_shader.input_locations {
             let buffer_index = *location;
+
+            if !BUFFER_FORMATS[&format].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+                panic!("Unsupported vertex format is used: {:?}", format);
+            }
 
             vertex_binding_descs[buffer_index as usize] = vk::VertexInputBindingDescription {
                 binding: buffer_index,

@@ -1,6 +1,7 @@
 use ahash::AHashMap;
 use ahash::AHashSet;
 use ash::vk;
+use ash::vk::FormatFeatureFlags;
 use lazy_static::lazy_static;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -28,12 +29,19 @@ impl Format {
     pub const BC7_UNORM: Self = Self(vk::Format::BC7_UNORM_BLOCK);
 }
 
-pub const BUFFER_FORMATS: [Format; 3] = [Format::R32_UINT, Format::RGB32_FLOAT, Format::RGBA32_UINT];
-// TODO
 pub const BC_IMAGE_FORMATS: [Format; 3] = [Format::BC3_RGBA_UNORM, Format::BC5_RG_UNORM, Format::BC7_UNORM];
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
 lazy_static! {
+    pub static ref BUFFER_FORMATS: AHashMap<Format, FormatFeatureFlags> = [
+        (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::RG32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::RGB32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::RGBA32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
+    ]
+    .iter()
+    .cloned()
+    .collect();
     pub static ref IMAGE_FORMATS: AHashSet<Format> = [
         Format::R32_UINT,
         Format::R32_FLOAT,

@@ -659,7 +659,7 @@ impl RenderEngine {
             regions: vec![],
         })];
 
-        // Submit buffer acquisition asynchronously
+        // Asynchronously acquire buffers from transfer queue to render queue
         if !self.vertex_mesh_pending_updates.is_empty() {
             let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
             unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };

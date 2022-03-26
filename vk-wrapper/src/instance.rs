@@ -217,18 +217,12 @@ impl Instance {
             // ------------------------------------------------------------------------------------
 
             // Buffer formats
-            for format in format::BUFFER_FORMATS.iter() {
+            for (format, usage_bits) in format::BUFFER_FORMATS.iter() {
                 let props = unsafe {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)
                 };
-                let flags = props.buffer_features;
-
-                if !flags.contains(
-                    vk::FormatFeatureFlags::VERTEX_BUFFER
-                        | vk::FormatFeatureFlags::TRANSFER_SRC
-                        | vk::FormatFeatureFlags::TRANSFER_DST,
-                ) {
+                if !props.buffer_features.intersects(*usage_bits) {
                     continue 'g;
                 }
             }
