@@ -681,25 +681,27 @@ impl RenderEngine {
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             buffer_updates: &mut self.vertex_mesh_updates,
         };
-        let mut transform_events_system = systems::TransformEventsSystem {
+        let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
+            parent_comps: self.scene.storage::<component::Parent>(),
+            children_comps: self.scene.storage::<component::Children>(),
             transform_comps: self.scene.storage::<component::Transform>(),
-            model_transform_comps: self.scene.storage::<component::ModelTransform>(),
+            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
         };
+
         rayon::scope(|s| {
             s.spawn(|_| renderer_events_system.run());
             s.spawn(|_| vertex_mesh_system.run());
-            s.spawn(|_| transform_events_system.run());
+            s.spawn(|_| hierarchy_propagation_system.run());
+
+            // Wait for previous transfers before committing them
+            if !self.vertex_mesh_pending_updates.is_empty() {
+                s.spawn(|_| self.transfer_submit[1].wait().unwrap());
+            }
         });
 
         let t11 = Instant::now();
         let systems_t = (t11 - t00).as_secs_f64();
 
-        let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
-            parent_comps: self.scene.storage::<component::Parent>(),
-            children_comps: self.scene.storage::<component::Children>(),
-            model_transform_comps: self.scene.storage::<component::ModelTransform>(),
-            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
-        };
         let mut world_transform_events_system = systems::WorldTransformEventsSystem {
             uniform_buffer_updates: &mut uniform_buffers_updates,
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
@@ -707,15 +709,11 @@ impl RenderEngine {
             renderables: &self.renderables,
         };
 
-        // Wait for previous transfers before committing them
-        if !self.vertex_mesh_pending_updates.is_empty() {
-            self.transfer_submit[1].wait().unwrap();
-        }
-
         let t00 = Instant::now();
 
         // Before updating new buffers, collect all the completed updates to commit them
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
+
         let mut buffer_update_system = systems::BufferUpdateSystem {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
@@ -728,11 +726,9 @@ impl RenderEngine {
             vertex_meshes: &mut self.vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
         };
+
         rayon::scope(|s| {
-            s.spawn(|_| {
-                hierarchy_propagation_system.run();
-                world_transform_events_system.run();
-            });
+            s.spawn(|_| world_transform_events_system.run());
             s.spawn(|_| buffer_update_system.run());
             s.spawn(|_| commit_buffer_updates_system.run())
         });
@@ -876,7 +872,7 @@ impl RenderEngine {
                     }
 
                     let sphere = vertex_mesh.sphere();
-                    let center = sphere.center() + transform.position;
+                    let center = sphere.center() + transform.position_f32();
                     let radius = sphere.radius() * glm::comp_max(&transform.scale);
 
                     if !renderer.visible || !camera.is_sphere_visible(&center, radius) {

@@ -37,6 +37,7 @@ pub struct RawComponentStorage {
 
 #[derive(Copy, Clone)]
 pub enum Event {
+    // TODO: Created event proved itself unnecessary, remove it
     Created(Entity),
     Modified(Entity),
     Removed(Entity),
@@ -289,6 +290,20 @@ pub trait ComponentStorageImpl<T>: private::RawComponentStorageImpl {
             estimate_len: self.raw().aval_count,
         }
     }
+
+    fn was_modified(&self, entity: Entity) -> bool {
+        self.raw()
+            .modified
+            .get(&entity.id)
+            .map(|gen| *gen == entity.gen)
+            .unwrap_or(false)
+            || self
+                .raw()
+                .created
+                .get(&entity.id)
+                .map(|gen| *gen == entity.gen)
+                .unwrap_or(false)
+    }
 }
 
 pub struct ComponentStorage<'a, T> {
@@ -363,6 +378,7 @@ impl<'a, T> ComponentStorageMut<'a, T> {
         }
     }
 
+    /// Returns a mutable reference to the component without emitting a modification event
     #[inline]
     pub fn get_mut_unmarked(&mut self, entity: Entity) -> Option<&mut T> {
         if self.entities.is_alive(entity) {
@@ -400,11 +416,14 @@ impl<'a, T> ComponentStorageMut<'a, T> {
             }));
         }
 
+        self.clear_events();
+        events
+    }
+
+    pub fn clear_events(&mut self) {
         self.raw.created.clear();
         self.raw.modified.clear();
         self.raw.removed.clear();
-
-        events
     }
 }
 

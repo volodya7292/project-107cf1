@@ -6,6 +6,7 @@ use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Render
 use crate::utils::{HashMap, LruCache};
 use index_pool::IndexPool;
 use nalgebra as na;
+use nalgebra_glm::Mat4;
 use parking_lot::Mutex;
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
@@ -199,14 +200,7 @@ impl VertexMeshCompEventsSystem<'_> {
         // ------------------------------------------------------------------------------------
         for event in &events {
             match event {
-                scene::Event::Created(i) => {
-                    Self::vertex_mesh_comp_modified(
-                        *i,
-                        vertex_mesh_comps.get(*i).unwrap(),
-                        self.buffer_updates,
-                    );
-                }
-                scene::Event::Modified(i) => {
+                scene::Event::Created(i) | scene::Event::Modified(i) => {
                     Self::vertex_mesh_comp_modified(
                         *i,
                         vertex_mesh_comps.get(*i).unwrap(),
@@ -216,50 +210,6 @@ impl VertexMeshCompEventsSystem<'_> {
                 Event::Removed(i) => {
                     self.vertex_meshes.remove(i);
                 }
-            }
-        }
-    }
-}
-
-// Updates model transform matrices
-pub(super) struct TransformEventsSystem {
-    pub transform_comps: scene::LockedStorage<component::Transform>,
-    pub model_transform_comps: scene::LockedStorage<component::ModelTransform>,
-}
-
-impl TransformEventsSystem {
-    fn transform_modified(transform: &component::Transform, model_transform: &mut component::ModelTransform) {
-        *model_transform = component::ModelTransform::from_transform(transform);
-    }
-
-    pub fn run(&mut self) {
-        let events = self.transform_comps.write().events();
-        let transform_comps = self.transform_comps.read();
-        let mut model_transform_comps = self.model_transform_comps.write();
-
-        for event in events {
-            match event {
-                Event::Created(entity) => {
-                    if !model_transform_comps.contains(entity) {
-                        model_transform_comps.set(entity, component::ModelTransform::default());
-                    }
-
-                    Self::transform_modified(
-                        transform_comps.get(entity).unwrap(),
-                        model_transform_comps.get_mut(entity).unwrap(),
-                    );
-                }
-                Event::Modified(entity) => {
-                    if !model_transform_comps.contains(entity) {
-                        model_transform_comps.set(entity, component::ModelTransform::default());
-                    }
-
-                    Self::transform_modified(
-                        transform_comps.get(entity).unwrap(),
-                        model_transform_comps.get_mut(entity).unwrap(),
-                    );
-                }
-                _ => {}
             }
         }
     }
@@ -282,12 +232,9 @@ impl WorldTransformEventsSystem<'_> {
         renderables: &HashMap<Entity, Renderable>,
     ) {
         if let Some(renderer) = renderer {
-            let matrix_bytes = unsafe {
-                slice::from_raw_parts(
-                    world_transform.matrix.as_ptr() as *const u8,
-                    mem::size_of::<na::Matrix4<f32>>(),
-                )
-            };
+            let matrix = world_transform.matrix_f32();
+            let matrix_bytes =
+                unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
             let renderable = &renderables[&entity];
 
             if let BufferUpdate::Type2(upd) = &mut buffer_updates[0] {
@@ -312,16 +259,7 @@ impl WorldTransformEventsSystem<'_> {
 
         for event in events {
             match event {
-                Event::Created(entity) => {
-                    Self::world_transform_modified(
-                        entity,
-                        world_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity),
-                        self.uniform_buffer_updates,
-                        self.renderables,
-                    );
-                }
-                Event::Modified(entity) => {
+                Event::Created(entity) | Event::Modified(entity) => {
                     Self::world_transform_modified(
                         entity,
                         world_transform_comps.get(entity).unwrap(),
@@ -340,7 +278,7 @@ impl WorldTransformEventsSystem<'_> {
 pub(super) struct HierarchyPropagationSystem {
     pub parent_comps: scene::LockedStorage<component::Parent>,
     pub children_comps: scene::LockedStorage<component::Children>,
-    pub model_transform_comps: scene::LockedStorage<component::ModelTransform>,
+    pub transform_comps: scene::LockedStorage<component::Transform>,
     pub world_transform_comps: scene::LockedStorage<component::WorldTransform>,
 }
 
@@ -352,18 +290,15 @@ impl HierarchyPropagationSystem {
         entity: Entity,
         parent_comps: &mut scene::ComponentStorageMut<component::Parent>,
         children_comps: &scene::ComponentStorage<component::Children>,
-        model_transform_comps: &mut scene::ComponentStorageMut<component::ModelTransform>,
+        transform_comps: &impl scene::ComponentStorageImpl<component::Transform>,
         world_transform_comps: &mut scene::ComponentStorageMut<component::WorldTransform>,
     ) {
-        let model_transform = model_transform_comps.get_mut_unmarked(entity).unwrap();
-        let world_transform_changed = parent_world_transform_changed || model_transform.changed;
-
-        if model_transform.changed {
-            model_transform.changed = false;
-        }
+        let model_transform = transform_comps.get(entity).unwrap();
+        let world_transform_changed = parent_world_transform_changed || transform_comps.was_modified(entity);
 
         let world_transform = if world_transform_changed {
-            let new_world_transform = parent_world_transform.combine(model_transform);
+            let new_world_transform: component::WorldTransform =
+                parent_world_transform.combine(model_transform).into();
             world_transform_comps.set(entity, new_world_transform);
             new_world_transform
         } else {
@@ -381,7 +316,7 @@ impl HierarchyPropagationSystem {
                     child,
                     parent_comps,
                     children_comps,
-                    model_transform_comps,
+                    transform_comps,
                     world_transform_comps,
                 );
             }
@@ -391,26 +326,25 @@ impl HierarchyPropagationSystem {
     pub fn run(&mut self) {
         let mut parent_comps = self.parent_comps.write();
         let children_comps = self.children_comps.read();
-        let mut model_transform_comps = self.model_transform_comps.write();
+        let mut transform_comps = self.transform_comps.write();
         let mut world_transform_comps = self.world_transform_comps.write();
 
         // Collect global parents
-        // !Parent & ModelTransform
-        let entities: Vec<_> = model_transform_comps
+        // !Parent & ModelTransform (global parent entity doesn't have a Parent component)
+        let entities: Vec<_> = transform_comps
             .entries()
             .difference(&parent_comps)
             .iter()
             .collect();
 
         for entity in entities {
-            let (model_transform_changed, world_transform) = {
-                let model_transform = model_transform_comps.get_mut_unmarked(entity).unwrap();
-                let world_transform = component::WorldTransform::from_model_transform(&model_transform);
-                let model_transform_changed = model_transform.changed;
+            let (transform_changed, world_transform) = {
+                let model_transform = transform_comps.get(entity).unwrap();
+                let world_transform: component::WorldTransform = (*model_transform).into();
+                let model_transform_changed = transform_comps.was_modified(entity);
 
                 if model_transform_changed {
                     world_transform_comps.set(entity, world_transform);
-                    model_transform.changed = false;
                 }
 
                 (model_transform_changed, world_transform)
@@ -420,17 +354,19 @@ impl HierarchyPropagationSystem {
                 for &child in children.get() {
                     Self::propagate_hierarchy(
                         world_transform,
-                        model_transform_changed,
+                        transform_changed,
                         entity,
                         child,
                         &mut parent_comps,
                         &children_comps,
-                        &mut model_transform_comps,
+                        &mut transform_comps,
                         &mut world_transform_comps,
                     );
                 }
             }
         }
+
+        transform_comps.clear_events();
     }
 }
 

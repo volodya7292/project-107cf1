@@ -539,7 +539,7 @@ impl OverworldStreamer {
         for pos in &self.clusters_to_add {
             let entity = entities.pop().unwrap();
             let transform_comp = component::Transform::new(
-                Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
+                glm::convert(*pos),
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );

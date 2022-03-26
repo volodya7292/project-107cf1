@@ -1,5 +1,4 @@
 mod camera;
-mod model_transform;
 mod relation;
 pub mod renderer;
 mod transform;
@@ -9,7 +8,6 @@ mod world_transform;
 use crate::render_engine::scene::{ComponentStorage, ComponentStorageImpl, ComponentStorageMut, Entity};
 use crate::render_engine::Scene;
 pub use camera::Camera;
-pub use model_transform::ModelTransform;
 pub use relation::Children;
 pub use relation::Parent;
 pub use renderer::Renderer;
