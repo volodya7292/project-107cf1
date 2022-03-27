@@ -1626,15 +1626,6 @@ pub fn new(
     }
 
     let mut scene = PublicSceneInterface::new();
-    scene.prepare_storage::<component::Parent>();
-    scene.prepare_storage::<component::Children>();
-    scene.prepare_storage::<component::Transform>().emit_events(true);
-    scene
-        .prepare_storage::<component::WorldTransform>()
-        .emit_events(true);
-    scene.prepare_storage::<component::Renderer>().emit_events(true);
-    scene.prepare_storage::<component::VertexMesh>().emit_events(true);
-    scene.prepare_storage::<component::Camera>();
 
     // TODO: Camera is not a component, nor an object,
     // TODO: so remove `Camera` component and make it just a variable in the RenderEngine

@@ -5,7 +5,6 @@ use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::render_engine::{component, scene, BufferUpdate, BufferUpdate1, Renderable, VMBufferUpdate};
 use crate::utils::{HashMap, LruCache};
 use index_pool::IndexPool;
-use nalgebra as na;
 use nalgebra_glm::Mat4;
 use parking_lot::Mutex;
 use smallvec::{smallvec, SmallVec};
@@ -291,7 +290,7 @@ struct StackEntry {
 
 impl HierarchyPropagationSystem<'_> {
     pub fn run(&mut self) {
-        let mut parent_comps = self.parent_comps.write();
+        let parent_comps = self.parent_comps.read();
         let children_comps = self.children_comps.read();
         let mut transform_comps = self.transform_comps.write();
         let mut world_transform_comps = self.world_transform_comps.write();
@@ -339,7 +338,7 @@ impl HierarchyPropagationSystem<'_> {
             if let Some(children) = children_comps.get(entity) {
                 // Because we're popping from the stack, insert in reversed order
                 // to preserve the right order of insertion to `ordered_entities`
-                stack.extend(children.get().iter().rev().map(|e| StackEntry {
+                stack.extend(children.children.iter().rev().map(|e| StackEntry {
                     entity: *e,
                     parent_world_transform_changed: world_transform_changed,
                     parent_world_transform: world_transform,

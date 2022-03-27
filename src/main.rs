@@ -8,7 +8,6 @@ mod resource_file;
 #[cfg(test)]
 mod tests;
 
-use crate::render_engine::vertex_mesh::VertexMeshCreate;
 use crate::render_engine::{component, TextureQuality, TranslucencyMaxDepth};
 use crate::render_engine::{material_pipeline, material_pipelines};
 use crate::resource_file::ResourceFile;

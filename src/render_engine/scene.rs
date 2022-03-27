@@ -195,6 +195,20 @@ impl RawComponentStorage {
             None
         }
     }
+
+    /// Modifies a component. Inserts specified value if component doesn't exist.
+    ///
+    /// # Safety:
+    ///
+    /// T must match the type of component.
+    pub unsafe fn get_or_insert<T>(&mut self, entity: Entity, default: T) -> &mut T {
+        let index = entity.id as usize;
+
+        if !self.available.contains(index) {
+            self.set(entity, default);
+        }
+        self.get_mut(entity).unwrap()
+    }
 }
 
 impl Drop for RawComponentStorage {
@@ -378,6 +392,19 @@ impl<'a, T> ComponentStorageMut<'a, T> {
             unsafe { self.raw.get_mut::<T>(entity) }
         } else {
             None
+        }
+    }
+
+    /// Inserts a new component if it doesn't exist and returns a reference to it
+    #[inline]
+    pub fn get_or_insert_default(&mut self, entity: Entity) -> &mut T
+    where
+        T: Default,
+    {
+        if self.entities.is_alive(entity) {
+            unsafe { self.raw.get_or_insert::<T>(entity, T::default()) }
+        } else {
+            panic!("Entity is not alive!");
         }
     }
 
