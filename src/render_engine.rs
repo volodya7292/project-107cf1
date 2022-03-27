@@ -5,10 +5,12 @@ pub mod material_pipelines;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
+mod public_scene_interface;
 pub mod scene;
 mod systems;
 
 use crate::render_engine::material_pipeline::UniformStruct;
+use crate::render_engine::public_scene_interface::PublicSceneInterface;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity};
 use crate::render_engine::vertex_mesh::RawVertexMesh;
 use crate::resource_file::{ResourceFile, ResourceRef};
@@ -56,7 +58,7 @@ use vk_wrapper::{
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
 
 pub struct RenderEngine {
-    scene: Scene,
+    scene: PublicSceneInterface,
 
     surface: Arc<Surface>,
     swapchain: Option<Swapchain>,
@@ -124,6 +126,9 @@ pub struct RenderEngine {
     vertex_mesh_updates: LruCache<Entity, Arc<RawVertexMesh>>,
     vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
+    /// Entities ordered in respect to children order inside `Children` components:
+    /// global parents are not in order, but all the children are.
+    ordered_entities: Vec<Entity>,
     renderables: HashMap<Entity, Renderable>,
     vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
     material_pipelines: Vec<MaterialPipelineSet>,
@@ -377,8 +382,12 @@ impl RenderEngine {
         &self.device
     }
 
-    pub fn scene(&self) -> &Scene {
+    pub fn scene(&self) -> &PublicSceneInterface {
         &self.scene
+    }
+
+    pub fn scene_mut(&mut self) -> &mut PublicSceneInterface {
+        &mut self.scene
     }
 
     pub fn get_active_camera(&self) -> Entity {
@@ -648,8 +657,7 @@ impl RenderEngine {
     fn on_update(&mut self) {
         let t0 = Instant::now();
         let camera = {
-            let camera_comps = self.scene.storage::<component::Camera>();
-            let camera_comps = camera_comps.read();
+            let camera_comps = self.scene.storage_read::<component::Camera>();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
         let mut buffer_updates = vec![];
@@ -686,6 +694,7 @@ impl RenderEngine {
             children_comps: self.scene.storage::<component::Children>(),
             transform_comps: self.scene.storage::<component::Transform>(),
             world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            ordered_entities: &mut self.ordered_entities,
         };
 
         rayon::scope(|s| {
@@ -819,15 +828,12 @@ impl RenderEngine {
         }
     }
 
-    fn record_depth_cmd_lists(
-        &mut self,
-        renderable_ids: &[Entity],
-        camera: &component::Camera,
-        world_transform_comps: &ComponentStorage<component::WorldTransform>,
-        renderer_comps: &ComponentStorage<component::Renderer>,
-    ) -> u32 {
+    fn record_depth_cmd_lists(&mut self, camera: &component::Camera) -> u32 {
+        let world_transform_comps = self.scene.storage_read::<component::WorldTransform>();
+        let renderer_comps = self.scene.storage_read::<component::Renderer>();
+
         let mat_pipelines = &self.material_pipelines;
-        let object_count = renderable_ids.len();
+        let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
@@ -853,13 +859,20 @@ impl RenderEngine {
                         break;
                     }
 
-                    let renderable_id = renderable_ids[entity_index];
+                    let renderable_id = self.ordered_entities[entity_index];
 
                     let transform = world_transform_comps.get(renderable_id);
-                    let renderer = renderer_comps.get(renderable_id);
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
+                    if transform.is_none() {
+                        continue;
+                    }
 
-                    if transform.is_none() || renderer.is_none() || vertex_mesh.is_none() {
+                    let renderer = renderer_comps.get(renderable_id);
+                    if renderer.is_none() {
+                        continue;
+                    }
+
+                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
+                    if vertex_mesh.is_none() {
                         continue;
                     }
 
@@ -895,7 +908,6 @@ impl RenderEngine {
                     };
 
                     let already_bound = cl.bind_pipeline(pipeline);
-
                     if !already_bound {
                         cl.bind_graphics_input(pipeline.signature(), 0, self.g_per_frame_in, &[]);
                     }
@@ -921,13 +933,11 @@ impl RenderEngine {
         cull_objects.len() as u32
     }
 
-    fn record_g_cmd_lists(
-        &self,
-        renderable_ids: &[Entity],
-        renderer_comps: &ComponentStorage<component::Renderer>,
-    ) {
+    fn record_g_cmd_lists(&self) {
+        let renderer_comps = self.scene.storage_read::<component::Renderer>();
+
         let mat_pipelines = &self.material_pipelines;
-        let object_count = renderable_ids.len();
+        let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
 
         self.g_secondary_cls
@@ -950,28 +960,21 @@ impl RenderEngine {
                         break;
                     }
 
-                    let renderable_id = renderable_ids[entity_index];
+                    if self.visibility_host_buffer[entity_index] == 0 {
+                        continue;
+                    }
+
+                    let renderable_id = self.ordered_entities[entity_index];
+                    let renderable = &self.renderables[&renderable_id];
 
                     let renderer = renderer_comps.get(renderable_id).unwrap();
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
+                    let vertex_mesh = self.vertex_meshes.get(&renderable_id).unwrap();
 
-                    if vertex_mesh.is_none() {
-                        continue;
-                    }
-
-                    // Check query_pool occlusion results
-                    if !renderer.visible || self.visibility_host_buffer[entity_index] == 0 {
-                        continue;
-                    }
-
-                    let vertex_mesh = vertex_mesh.unwrap();
                     let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
                     let signature = pipeline.signature();
-                    let renderable = &self.renderables[&renderable_id];
 
                     let already_bound = cl.bind_pipeline(pipeline);
-
                     if !already_bound {
                         cl.bind_graphics_input(&signature, 0, self.g_per_frame_in, &[]);
                     }
@@ -995,23 +998,12 @@ impl RenderEngine {
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
         let camera = {
-            let camera_comps = self.scene.storage::<component::Camera>();
-            let camera_comps = camera_comps.read();
+            let camera_comps = self.scene.storage_read::<component::Camera>();
             *camera_comps.get(self.get_active_camera()).unwrap()
         };
 
-        let world_transform_comp = self.scene.storage::<component::WorldTransform>();
-        let world_transform_comps = world_transform_comp.read();
-        let renderer_comp = self.scene.storage::<component::Renderer>();
-        let renderer_comps = renderer_comp.read();
-        // let vertex_mesh_comp = self.scene.storage::<component::VertexMesh>();
-        // let vertex_mesh_comps = vertex_mesh_comp.read();
-
-        let renderable_ids: Vec<Entity> = renderer_comps.entries().iter().collect();
-        let object_count = renderable_ids.len() as u32;
-
-        let frustum_visible_objects =
-            self.record_depth_cmd_lists(&renderable_ids, &camera, &world_transform_comps, &renderer_comps);
+        let object_count = self.ordered_entities.len() as u32;
+        let frustum_visible_objects = self.record_depth_cmd_lists(&camera);
 
         {
             let mut cl = self.staging_cl.lock();
@@ -1154,7 +1146,7 @@ impl RenderEngine {
             submit.wait().unwrap();
         }
 
-        self.record_g_cmd_lists(&renderable_ids, &renderer_comps);
+        self.record_g_cmd_lists();
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         unsafe {
@@ -1391,8 +1383,7 @@ impl RenderEngine {
         // Set camera aspect
         {
             let entity = self.get_active_camera();
-            let camera_comps = self.scene.storage::<component::Camera>();
-            let mut camera_comps = camera_comps.write();
+            let mut camera_comps = self.scene.storage_write::<component::Camera>();
             let camera = camera_comps.get_mut(entity).unwrap();
             camera.set_aspect(new_size.0, new_size.1);
         }
@@ -1634,17 +1625,25 @@ pub fn new(
         device.load_pipeline_cache(&res).unwrap();
     }
 
-    let scene = Scene::new();
-    scene.storage::<component::Transform>().write().emit_events(true);
+    let mut scene = PublicSceneInterface::new();
+    scene.prepare_storage::<component::Parent>();
+    scene.prepare_storage::<component::Children>();
+    scene.prepare_storage::<component::Transform>().emit_events(true);
     scene
-        .storage::<component::WorldTransform>()
-        .write()
+        .prepare_storage::<component::WorldTransform>()
         .emit_events(true);
-    scene.storage::<component::Renderer>().write().emit_events(true);
-    scene.storage::<component::VertexMesh>().write().emit_events(true);
+    scene.prepare_storage::<component::Renderer>().emit_events(true);
+    scene.prepare_storage::<component::VertexMesh>().emit_events(true);
+    scene.prepare_storage::<component::Camera>();
+
+    // TODO: Camera is not a component, nor an object,
+    // TODO: so remove `Camera` component and make it just a variable in the RenderEngine
+
+    // TODO: implement camera reset to origin (0, 0, 0) to save rendering precision
+    // TODO: when camera position is too far (distance ~ > 8192) from origin
 
     let active_camera = scene.create_entity();
-    scene.storage::<component::Camera>().write().set(
+    scene.storage_write::<component::Camera>().set(
         active_camera,
         component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
     );
@@ -2057,6 +2056,7 @@ pub fn new(
         vertex_mesh_updates: LruCache::unbounded(),
         vertex_mesh_pending_updates: vec![],
         uniform_buffer_offsets: IndexPool::new(),
+        ordered_entities: vec![],
     };
     renderer.on_resize(size);
 

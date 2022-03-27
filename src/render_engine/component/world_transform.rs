@@ -2,7 +2,7 @@ use crate::component::Transform;
 use nalgebra as na;
 use std::ops::Deref;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct WorldTransform(Transform);
 
 impl From<Transform> for WorldTransform {

@@ -1439,6 +1439,7 @@ dependencies = [
  "glob",
  "image 0.24.1",
  "index-pool",
+ "indexmap",
  "lazy_static",
  "log",
  "lru",

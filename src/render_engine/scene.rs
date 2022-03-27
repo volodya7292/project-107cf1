@@ -1,11 +1,12 @@
 use crate::utils::HashMap;
 use bit_set::BitSet;
 use index_pool::IndexPool;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU32;
-use std::sync::{atomic, Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{atomic, Arc};
 use std::{mem, ptr};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -306,6 +307,7 @@ pub trait ComponentStorageImpl<T>: private::RawComponentStorageImpl {
     }
 }
 
+/// A immutable component storage with shared read access
 pub struct ComponentStorage<'a, T> {
     raw: RwLockReadGuard<'a, RawComponentStorage>,
     entities: RwLockReadGuard<'a, Entities>,
@@ -328,6 +330,7 @@ impl<'a, T> private::RawComponentStorageImpl for ComponentStorage<'a, T> {
 
 impl<'a, T> ComponentStorageImpl<T> for ComponentStorage<'a, T> {}
 
+/// A mutable component storage with exclusive write access
 pub struct ComponentStorageMut<'a, T> {
     raw: RwLockWriteGuard<'a, RawComponentStorage>,
     entities: RwLockReadGuard<'a, Entities>,
@@ -427,16 +430,17 @@ impl<'a, T> ComponentStorageMut<'a, T> {
     }
 }
 
-pub struct LockedStorage<T> {
-    raw: Arc<RwLock<RawComponentStorage>>,
-    entities: Arc<RwLock<Entities>>,
+/// A component storage that can be locked in read or write mode
+pub struct LockedStorage<'a, T> {
+    raw: &'a Arc<RwLock<RawComponentStorage>>,
+    entities: &'a Arc<RwLock<Entities>>,
     _ty: PhantomData<T>,
 }
 
-impl<T> LockedStorage<T> {
-    pub fn read(&self) -> ComponentStorage<T> {
-        let raw = self.raw.read().unwrap();
-        let entities = self.entities.read().unwrap();
+impl<'a, T> LockedStorage<'a, T> {
+    pub fn read(&self) -> ComponentStorage<'a, T> {
+        let raw = self.raw.read();
+        let entities = self.entities.read();
 
         ComponentStorage {
             raw,
@@ -445,9 +449,9 @@ impl<T> LockedStorage<T> {
         }
     }
 
-    pub fn write(&self) -> ComponentStorageMut<T> {
-        let raw = self.raw.write().unwrap();
-        let entities = self.entities.read().unwrap();
+    pub fn write(&self) -> ComponentStorageMut<'a, T> {
+        let raw = self.raw.write();
+        let entities = self.entities.read();
 
         ComponentStorageMut {
             raw,
@@ -513,7 +517,7 @@ impl Resources {
 pub struct Scene {
     entities: Arc<RwLock<Entities>>,
     resources: Arc<RwLock<Resources>>,
-    comp_storages: Mutex<HashMap<TypeId, Arc<RwLock<RawComponentStorage>>>>,
+    comp_storages: HashMap<TypeId, Arc<RwLock<RawComponentStorage>>>,
     entity_allocated_count: Arc<AtomicU32>,
 }
 
@@ -528,7 +532,7 @@ impl Scene {
                 generations: vec![],
             })),
             resources: Default::default(),
-            comp_storages: Mutex::new(Default::default()),
+            comp_storages: Default::default(),
             entity_allocated_count: entity_count,
         }
     }
@@ -539,7 +543,6 @@ impl Scene {
     {
         self.resources
             .write()
-            .unwrap()
             .0
             .insert(TypeId::of::<T>(), Box::new(resource))
             .unwrap();
@@ -547,18 +550,18 @@ impl Scene {
 
     /// When creating multiple entities, prefer doing it through `self.entities()`.
     pub fn create_entity(&self) -> Entity {
-        self.entities.write().unwrap().create()
+        self.entities.write().create()
     }
 
     pub fn remove_entities(&self, entities: &[Entity]) {
-        let mut all_entities = self.entities.write().unwrap();
+        let mut all_entities = self.entities.write();
 
         for entity in entities {
             all_entities.free(*entity);
         }
 
-        for comps in self.comp_storages.lock().unwrap().values() {
-            let mut comps = comps.write().unwrap();
+        for comps in self.comp_storages.values() {
+            let mut comps = comps.write();
 
             for &entity in entities {
                 // Safety: `is_alive(entity)` check is done above in `all_entities.free`
@@ -577,21 +580,63 @@ impl Scene {
         &self.entities
     }
 
+    pub fn prepare_storage<T>(&mut self) -> ComponentStorageMut<T>
+    where
+        T: 'static + Send + Sync,
+    {
+        let raw_storage = match self.comp_storages.entry(TypeId::of::<T>()) {
+            hash_map::Entry::Occupied(_) => panic!("Storage already prepared"),
+            hash_map::Entry::Vacant(e) => e.insert(Arc::new(RwLock::new(RawComponentStorage::new::<T>(
+                &self.entity_allocated_count,
+            )))),
+        };
+
+        ComponentStorageMut {
+            raw: raw_storage.write(),
+            entities: self.entities.read(),
+            ty: Default::default(),
+        }
+    }
+
+    /// Get component storage without locking it
     pub fn storage<T>(&self) -> LockedStorage<T>
     where
         T: 'static + Send + Sync,
     {
-        let raw_storage = match self.comp_storages.lock().unwrap().entry(TypeId::of::<T>()) {
-            hash_map::Entry::Occupied(e) => Arc::clone(e.get()),
-            hash_map::Entry::Vacant(e) => Arc::clone(e.insert(Arc::new(RwLock::new(
-                RawComponentStorage::new::<T>(&self.entity_allocated_count),
-            )))),
-        };
+        let raw_storage = &self.comp_storages[&TypeId::of::<T>()];
 
         LockedStorage {
             raw: raw_storage,
-            entities: Arc::clone(&self.entities),
+            entities: &self.entities,
             _ty: Default::default(),
+        }
+    }
+
+    /// Get component storage locked in shared read mode
+    pub fn storage_read<T>(&self) -> ComponentStorage<T>
+    where
+        T: 'static + Send + Sync,
+    {
+        let raw_storage = &self.comp_storages[&TypeId::of::<T>()];
+
+        ComponentStorage {
+            raw: raw_storage.read(),
+            entities: self.entities.read(),
+            ty: Default::default(),
+        }
+    }
+
+    /// Get component storage locked in exclusive write mode
+    pub fn storage_write<T>(&self) -> ComponentStorageMut<T>
+    where
+        T: 'static + Send + Sync,
+    {
+        let raw_storage = &self.comp_storages[&TypeId::of::<T>()];
+
+        ComponentStorageMut {
+            raw: raw_storage.write(),
+            entities: self.entities.read(),
+            ty: Default::default(),
         }
     }
 }

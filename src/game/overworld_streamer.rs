@@ -515,25 +515,22 @@ impl OverworldStreamer {
 
     /// Creates/removes new render entities.
     pub fn update_renderer(&mut self) {
-        let re = self.re.lock();
+        let mut re = self.re.lock();
         let scene = re.scene();
 
-        component::remove_entities(scene, &self.clusters_to_remove);
+        scene.remove_entities(&self.clusters_to_remove);
 
         // Reserve entities from scene
         let mut entities: Vec<_> = {
-            let mut entities = scene.entities().write().unwrap();
+            let mut entities = scene.entities().write();
             (0..self.clusters_to_add.len())
                 .map(|_| entities.create())
                 .collect()
         };
 
-        let transform_comps = scene.storage::<component::Transform>();
-        let renderer_comps = scene.storage::<component::Renderer>();
-        let vertex_mesh_comps = scene.storage::<component::VertexMesh>();
-        let mut transform_comps = transform_comps.write();
-        let mut renderer_comps = renderer_comps.write();
-        let mut vertex_mesh_comps = vertex_mesh_comps.write();
+        let mut transform_comps = scene.storage_write::<component::Transform>();
+        let mut renderer_comps = scene.storage_write::<component::Renderer>();
+        let mut vertex_mesh_comps = scene.storage_write::<component::VertexMesh>();
 
         // Add components to the new entities
         for pos in &self.clusters_to_add {

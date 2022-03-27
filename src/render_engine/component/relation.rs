@@ -1,13 +1,24 @@
 use crate::render_engine::scene::Entity;
+use crate::utils::{HashSet, IndexSet};
 
 pub struct Parent(pub(in crate::render_engine) Entity);
 
 #[derive(Default)]
-pub struct Children(pub(super) Vec<Entity>);
+pub struct Children {
+    children: IndexSet<Entity>,
+    preserve_order: bool,
+}
 
 impl Children {
-    pub fn get(&self) -> &[Entity] {
-        &self.0
+    pub fn new(children: Vec<Entity>, preserve_order: bool) -> Self {
+        Children {
+            children: IndexSet::from_iter(children),
+            preserve_order,
+        }
+    }
+
+    pub fn get(&self) -> &IndexSet<Entity> {
+        &self.children
     }
 }
 
