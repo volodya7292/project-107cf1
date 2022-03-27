@@ -1,10 +1,10 @@
 use crate::component;
 use crate::component::Transform;
+use crate::render_engine::internal::component::{Children, Parent, WorldTransform};
 use crate::render_engine::scene::{
     ComponentStorage, ComponentStorageImpl, ComponentStorageMut, Entity, LockedStorage, Resources,
 };
 use crate::render_engine::Scene;
-use nalgebra_glm::DVec3;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -22,12 +22,10 @@ impl PublicSceneInterface {
     pub(super) fn new() -> Self {
         let mut scene = Scene::new();
 
-        scene.prepare_storage::<component::Parent>();
-        scene.prepare_storage::<component::Children>();
+        scene.prepare_storage::<Parent>();
+        scene.prepare_storage::<Children>();
         scene.prepare_storage::<component::Transform>().emit_events(true);
-        scene
-            .prepare_storage::<component::WorldTransform>()
-            .emit_events(true);
+        scene.prepare_storage::<WorldTransform>().emit_events(true);
         scene.prepare_storage::<component::Renderer>().emit_events(true);
         scene.prepare_storage::<component::VertexMesh>().emit_events(true);
 
@@ -123,15 +121,15 @@ impl PublicSceneInterface {
 
     pub fn relations_mut(&self) -> RelationInterfaceMut {
         RelationInterfaceMut {
-            parent_comps: self.scene.storage_write::<component::Parent>(),
-            children_comps: self.scene.storage_write::<component::Children>(),
+            parent_comps: self.scene.storage_write::<Parent>(),
+            children_comps: self.scene.storage_write::<Children>(),
         }
     }
 }
 
 pub struct RelationInterfaceMut<'a> {
-    parent_comps: ComponentStorageMut<'a, component::Parent>,
-    children_comps: ComponentStorageMut<'a, component::Children>,
+    parent_comps: ComponentStorageMut<'a, Parent>,
+    children_comps: ComponentStorageMut<'a, Children>,
 }
 
 impl RelationInterfaceMut<'_> {
@@ -154,7 +152,7 @@ impl RelationInterfaceMut<'_> {
             if self.parent_comps.contains(child) {
                 panic!("child already has a parent assigned");
             }
-            self.parent_comps.set(child, component::Parent(parent));
+            self.parent_comps.set(child, Parent(parent));
         }
 
         children_comp.children.extend(children);
@@ -164,7 +162,7 @@ impl RelationInterfaceMut<'_> {
     pub fn set_children(&mut self, parent: Entity, children: &[Entity]) {
         self.children_comps.set(
             parent,
-            component::Children {
+            Children {
                 children: children.iter().cloned().collect(),
             },
         );
@@ -173,7 +171,7 @@ impl RelationInterfaceMut<'_> {
             if self.parent_comps.contains(child) {
                 panic!("child already has a parent assigned");
             }
-            self.parent_comps.set(child, component::Parent(parent));
+            self.parent_comps.set(child, Parent(parent));
         }
     }
 }

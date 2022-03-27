@@ -1,17 +1,23 @@
-pub(crate) mod component;
-#[macro_use]
-pub(crate) mod material_pipeline;
-pub mod material_pipelines;
-mod texture_atlas;
-#[macro_use]
-pub(crate) mod vertex_mesh;
-pub mod camera;
 mod public_scene_interface;
+mod system;
+mod texture_atlas;
+
+pub mod component;
+#[macro_use]
+pub mod material_pipeline;
+pub mod material_pipelines;
+#[macro_use]
+pub mod vertex_mesh;
+pub mod camera;
+mod internal;
 pub mod scene;
-mod systems;
 
 use crate::component::Transform;
 use crate::render_engine::camera::Camera;
+use crate::render_engine::internal::component::{Children, Parent, WorldTransform};
+use crate::render_engine::internal::{
+    BufferUpdate, BufferUpdate1, BufferUpdate2, Renderable, VMBufferUpdate,
+};
 use crate::render_engine::material_pipeline::UniformStruct;
 use crate::render_engine::public_scene_interface::PublicSceneInterface;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity};
@@ -180,35 +186,6 @@ impl TextureAtlasType {
             TextureAtlasType::NORMAL => TranscoderTextureFormat::BC5_RG,
         }
     }
-}
-
-struct BufferUpdate1 {
-    buffer: BufferHandle,
-    offset: u64,
-    data: Vec<u8>,
-}
-
-struct VMBufferUpdate {
-    entity: Entity,
-    mesh: Arc<RawVertexMesh>,
-}
-
-struct BufferUpdate2 {
-    buffer: BufferHandle,
-    data: Vec<u8>,
-    regions: Vec<CopyRegion>,
-}
-
-enum BufferUpdate {
-    Type1(BufferUpdate1),
-    Type2(BufferUpdate2),
-}
-
-struct Renderable {
-    buffers: SmallVec<[DeviceBuffer; 4]>,
-    material_pipe: u32,
-    uniform_buf_index: usize,
-    descriptor_sets: SmallVec<[DescriptorSet; 4]>,
 }
 
 #[derive(Debug)]
@@ -688,7 +665,7 @@ impl RenderEngine {
 
         let t00 = Instant::now();
 
-        let mut renderer_events_system = systems::RendererCompEventsSystem {
+        let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
             renderer_comps: self.scene.storage::<component::Renderer>(),
             g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
@@ -697,16 +674,16 @@ impl RenderEngine {
             material_pipelines: &self.material_pipelines,
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
-        let mut vertex_mesh_system = systems::VertexMeshCompEventsSystem {
+        let mut vertex_mesh_system = system::VertexMeshCompEvents {
             vertex_meshes: &mut self.vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             buffer_updates: &mut self.vertex_mesh_updates,
         };
-        let mut hierarchy_propagation_system = systems::HierarchyPropagationSystem {
-            parent_comps: self.scene.storage::<component::Parent>(),
-            children_comps: self.scene.storage::<component::Children>(),
+        let mut hierarchy_propagation_system = system::HierarchyPropagation {
+            parent_comps: self.scene.storage::<Parent>(),
+            children_comps: self.scene.storage::<Children>(),
             transform_comps: self.scene.storage::<component::Transform>(),
-            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            world_transform_comps: self.scene.storage::<WorldTransform>(),
             ordered_entities: &mut self.ordered_entities,
         };
 
@@ -724,9 +701,9 @@ impl RenderEngine {
         let t11 = Instant::now();
         let systems_t = (t11 - t00).as_secs_f64();
 
-        let mut world_transform_events_system = systems::WorldTransformEventsSystem {
+        let mut world_transform_events_system = system::WorldTransformEvents {
             uniform_buffer_updates: &mut uniform_buffers_updates,
-            world_transform_comps: self.scene.storage::<component::WorldTransform>(),
+            world_transform_comps: self.scene.storage::<WorldTransform>(),
             renderer_comps: self.scene.storage::<component::Renderer>(),
             renderables: &self.renderables,
         };
@@ -736,14 +713,14 @@ impl RenderEngine {
         // Before updating new buffers, collect all the completed updates to commit them
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
 
-        let mut buffer_update_system = systems::BufferUpdateSystem {
+        let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
             transfer_submit: &mut self.transfer_submit,
             buffer_updates: &mut self.vertex_mesh_updates,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
         };
-        let commit_buffer_updates_system = systems::CommitBufferUpdatesSystem {
+        let commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
             vertex_meshes: &mut self.vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
@@ -842,7 +819,7 @@ impl RenderEngine {
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
-        let world_transform_comps = self.scene.storage_read::<component::WorldTransform>();
+        let world_transform_comps = self.scene.storage_read::<WorldTransform>();
         let renderer_comps = self.scene.storage_read::<component::Renderer>();
 
         let mat_pipelines = &self.material_pipelines;
