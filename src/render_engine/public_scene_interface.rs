@@ -4,17 +4,18 @@ use crate::render_engine::scene::{
     ComponentStorage, ComponentStorageImpl, ComponentStorageMut, Entity, LockedStorage, Resources,
 };
 use crate::render_engine::Scene;
+use nalgebra_glm::DVec3;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct PublicSceneInterface {
-    pub(super) scene: Scene,
+    scene: Scene,
     /// Global parent that encompasses all objects in the scene.
     /// It is needed to control global transformation of all the objects.
     /// To allow accurate rendering of distant objects beyond 32-bit float precision,
     /// camera is moved to (0, 0, 0) and all the objects are moved relatively to camera.
     /// So, camera position is always at the origin, and all the objects are placed relatively to camera.
-    pub(super) global_parent: Entity,
+    global_parent: Entity,
 }
 
 impl PublicSceneInterface {
@@ -29,7 +30,6 @@ impl PublicSceneInterface {
             .emit_events(true);
         scene.prepare_storage::<component::Renderer>().emit_events(true);
         scene.prepare_storage::<component::VertexMesh>().emit_events(true);
-        scene.prepare_storage::<component::Camera>();
 
         let global_parent = scene.create_entity();
         scene
@@ -37,6 +37,17 @@ impl PublicSceneInterface {
             .set(global_parent, Transform::default());
 
         Self { scene, global_parent }
+    }
+
+    pub(super) fn global_transform(&self) -> Transform {
+        *self.storage_read::<Transform>().get(self.global_parent).unwrap()
+    }
+
+    pub(super) fn set_global_transform(&self, transform: Transform) {
+        *self
+            .storage_write::<Transform>()
+            .get_mut(self.global_parent)
+            .unwrap() = transform;
     }
 
     pub fn add_resource<T: 'static + Send + Sync>(&self, resource: T) {
@@ -62,12 +73,10 @@ impl PublicSceneInterface {
 
     /// Remove entities and their children recursively.
     pub fn remove_entities(&self, entities: &[Entity]) {
-        let child_comps = self.storage_read::<component::Children>();
-        let mut total_entities = Vec::with_capacity(child_comps.len());
+        let relations = self.relations_mut();
+        let mut total_entities = Vec::with_capacity(relations.children_comps.len());
 
         total_entities.extend(entities);
-
-        let relations = self.relations_mut();
 
         for &entity in entities {
             relations.collect_children_recursively(&mut total_entities, entity);
@@ -76,7 +85,7 @@ impl PublicSceneInterface {
         // Note: entities are not removed from their parents Children components,
         // they are just becoming dead (not alive), and removed when new children are set
 
-        drop(child_comps);
+        drop(relations);
         self.scene.remove_entities(&total_entities);
     }
 

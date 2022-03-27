@@ -1,4 +1,3 @@
-mod camera;
 mod relation;
 pub mod renderer;
 mod transform;
@@ -8,7 +7,6 @@ mod world_transform;
 pub(super) use relation::Children;
 pub(super) use relation::Parent;
 
-pub use camera::Camera;
 pub use renderer::Renderer;
 pub use transform::Transform;
 pub use vertex_mesh::VertexMesh;

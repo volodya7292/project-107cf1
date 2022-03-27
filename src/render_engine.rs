@@ -5,10 +5,13 @@ pub mod material_pipelines;
 mod texture_atlas;
 #[macro_use]
 pub(crate) mod vertex_mesh;
+pub mod camera;
 mod public_scene_interface;
 pub mod scene;
 mod systems;
 
+use crate::component::Transform;
+use crate::render_engine::camera::Camera;
 use crate::render_engine::material_pipeline::UniformStruct;
 use crate::render_engine::public_scene_interface::PublicSceneInterface;
 use crate::render_engine::scene::{ComponentStorageImpl, Entity};
@@ -24,6 +27,7 @@ use material_pipeline::{MaterialPipelineSet, PipelineConfig};
 use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, Vec3};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use scene::ComponentStorage;
@@ -59,6 +63,7 @@ use vk_wrapper::{
 
 pub struct RenderEngine {
     scene: PublicSceneInterface,
+    active_camera: Camera,
 
     surface: Arc<Surface>,
     swapchain: Option<Swapchain>,
@@ -119,7 +124,6 @@ pub struct RenderEngine {
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
 
-    active_camera_desc: Entity,
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
@@ -390,12 +394,12 @@ impl RenderEngine {
         &mut self.scene
     }
 
-    pub fn get_active_camera(&self) -> Entity {
-        self.active_camera_desc
+    pub fn active_camera(&self) -> &Camera {
+        &self.active_camera
     }
 
-    pub fn set_active_camera(&mut self, entity: Entity) {
-        self.active_camera_desc = entity;
+    pub fn active_camera_mut(&mut self) -> &mut Camera {
+        &mut self.active_camera
     }
 
     /// Add texture to render_engine
@@ -650,16 +654,25 @@ impl RenderEngine {
     }
 
     pub fn set_settings(&mut self, settings: Settings) {
-        // TODO
+        // TODO: change rendering according to settings
         self.settings = settings;
     }
 
     fn on_update(&mut self) {
         let t0 = Instant::now();
-        let camera = {
-            let camera_comps = self.scene.storage_read::<component::Camera>();
-            *camera_comps.get(self.get_active_camera()).unwrap()
-        };
+        let mut camera = *self.active_camera();
+        let mut global_transform = self.scene.global_transform();
+
+        // Reset camera to origin (0, 0, 0) to save rendering precision
+        // when camera position is too far (distance > 4096) from origin
+        if camera.position().magnitude() >= 4096.0 {
+            global_transform.position -= glm::convert::<Vec3, DVec3>(camera.position());
+            self.scene.set_global_transform(global_transform);
+
+            camera.set_position(Vec3::default());
+            self.active_camera = camera;
+        }
+
         let mut buffer_updates = vec![];
         let mut uniform_buffers_updates = [BufferUpdate::Type2(BufferUpdate2 {
             buffer: self.uniform_buffer_basic.handle(),
@@ -828,7 +841,7 @@ impl RenderEngine {
         }
     }
 
-    fn record_depth_cmd_lists(&mut self, camera: &component::Camera) -> u32 {
+    fn record_depth_cmd_lists(&mut self) -> u32 {
         let world_transform_comps = self.scene.storage_read::<component::WorldTransform>();
         let renderer_comps = self.scene.storage_read::<component::Renderer>();
 
@@ -888,7 +901,7 @@ impl RenderEngine {
                     let center = sphere.center() + transform.position_f32();
                     let radius = sphere.radius() * glm::comp_max(&transform.scale);
 
-                    if !renderer.visible || !camera.is_sphere_visible(&center, radius) {
+                    if !renderer.visible || !self.active_camera.is_sphere_visible(&center, radius) {
                         continue;
                     }
 
@@ -997,13 +1010,9 @@ impl RenderEngine {
         let device = Arc::clone(&self.device);
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
-        let camera = {
-            let camera_comps = self.scene.storage_read::<component::Camera>();
-            *camera_comps.get(self.get_active_camera()).unwrap()
-        };
-
+        let camera = self.active_camera();
         let object_count = self.ordered_entities.len() as u32;
-        let frustum_visible_objects = self.record_depth_cmd_lists(&camera);
+        let frustum_visible_objects = self.record_depth_cmd_lists();
 
         {
             let mut cl = self.staging_cl.lock();
@@ -1381,12 +1390,7 @@ impl RenderEngine {
         self.device.wait_idle().unwrap();
 
         // Set camera aspect
-        {
-            let entity = self.get_active_camera();
-            let mut camera_comps = self.scene.storage_write::<component::Camera>();
-            let camera = camera_comps.get_mut(entity).unwrap();
-            camera.set_aspect(new_size.0, new_size.1);
-        }
+        self.active_camera.set_aspect(new_size.0, new_size.1);
 
         let depth_image = self
             .device
@@ -1626,18 +1630,7 @@ pub fn new(
     }
 
     let mut scene = PublicSceneInterface::new();
-
-    // TODO: Camera is not a component, nor an object,
-    // TODO: so remove `Camera` component and make it just a variable in the RenderEngine
-
-    // TODO: implement camera reset to origin (0, 0, 0) to save rendering precision
-    // TODO: when camera position is too far (distance ~ > 8192) from origin
-
-    let active_camera = scene.create_entity();
-    scene.storage_write::<component::Camera>().set(
-        active_camera,
-        component::Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01),
-    );
+    let active_camera = Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01);
 
     let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
     let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
@@ -1981,6 +1974,7 @@ pub fn new(
     // TODO: allocate buffers with capacity of MAX_OBJECTS
     let mut renderer = RenderEngine {
         scene,
+        active_camera,
         surface: Arc::clone(surface),
         swapchain: None,
         surface_changed: false,
@@ -2028,7 +2022,6 @@ pub fn new(
         g_per_pipeline_pools: Default::default(),
         translucency_head_image: None,
         translucency_texel_image: None,
-        active_camera_desc: active_camera,
         per_frame_ub: per_frame_uniform_buffer,
         visibility_host_buffer,
         sw_render_pass: None,

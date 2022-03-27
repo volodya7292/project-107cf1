@@ -1,19 +1,20 @@
-use nalgebra::{Isometry3, Matrix4, Rotation3, Translation3, Vector3, Vector4};
+use nalgebra::{Isometry3, Rotation3, Translation3};
 use nalgebra_glm as glm;
+use nalgebra_glm::{Mat4, Vec3, Vec4};
 
 #[derive(Copy, Clone)]
 pub struct Camera {
-    position: Vector3<f32>,
-    rotation: Vector3<f32>,
+    position: Vec3,
+    rotation: Vec3,
     aspect: f32,
     fovy: f32,
     z_near: f32,
-    frustum: [Vector4<f32>; 6],
+    frustum: [Vec4; 6],
 }
 
 impl Camera {
-    fn calc_frustum(proj_view_mat: &Matrix4<f32>) -> [Vector4<f32>; 6] {
-        let mut frustum = [Vector4::<f32>::default(); 6];
+    fn calc_frustum(proj_view_mat: &Mat4) -> [Vec4; 6] {
+        let mut frustum = [Vec4::default(); 6];
 
         for i in 0..6 {
             let plane = &mut frustum[i];
@@ -36,8 +37,8 @@ impl Camera {
         let frustum = Self::calc_frustum(&proj_view_mat);
 
         Camera {
-            position: Vector3::default(),
-            rotation: Vector3::new(0.0, 0.0, 0.0),
+            position: Vec3::default(),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
             aspect,
             fovy,
             z_near: near,
@@ -50,15 +51,15 @@ impl Camera {
         self.frustum = Self::calc_frustum(&proj_view_mat);
     }
 
-    pub fn projection(&self) -> Matrix4<f32> {
+    pub fn projection(&self) -> Mat4 {
         glm::infinite_perspective_rh_zo(self.aspect, self.fovy, self.z_near)
     }
 
-    pub fn view(&self) -> Matrix4<f32> {
-        let mut mat = Matrix4::<f32>::identity();
-        mat *= Rotation3::from_axis_angle(&Vector3::x_axis(), self.rotation.x).to_homogeneous();
-        mat *= Rotation3::from_axis_angle(&Vector3::y_axis(), self.rotation.y).to_homogeneous();
-        mat *= Rotation3::from_axis_angle(&Vector3::z_axis(), self.rotation.z).to_homogeneous();
+    pub fn view(&self) -> Mat4 {
+        let mut mat = Mat4::identity();
+        mat *= Rotation3::from_axis_angle(&Vec3::x_axis(), self.rotation.x).to_homogeneous();
+        mat *= Rotation3::from_axis_angle(&Vec3::y_axis(), self.rotation.y).to_homogeneous();
+        mat *= Rotation3::from_axis_angle(&Vec3::z_axis(), self.rotation.z).to_homogeneous();
         mat *= Translation3::from(-self.position).to_homogeneous();
         mat
     }
@@ -76,29 +77,29 @@ impl Camera {
         self.update_frustum();
     }
 
-    pub fn position(&self) -> Vector3<f32> {
-        self.position.clone()
+    pub fn position(&self) -> Vec3 {
+        self.position
     }
 
-    pub fn set_position(&mut self, position: Vector3<f32>) {
+    pub fn set_position(&mut self, position: Vec3) {
         self.position = position;
         self.update_frustum();
     }
 
-    pub fn rotation(&self) -> Vector3<f32> {
+    pub fn rotation(&self) -> Vec3 {
         self.rotation.clone()
     }
 
-    pub fn set_rotation(&mut self, rotation: Vector3<f32>) {
+    pub fn set_rotation(&mut self, rotation: Vec3) {
         self.rotation = rotation.map(|x| x % (std::f32::consts::PI * 2.0));
         self.update_frustum();
     }
 
-    pub fn direction(&self) -> Vector3<f32> {
+    pub fn direction(&self) -> Vec3 {
         let view = self.view();
-        let identity = Vector4::<f32>::new(0.0, 0.0, 1.0, 1.0);
+        let identity = Vec4::new(0.0, 0.0, 1.0, 1.0);
         let dir = view * identity;
-        Vector3::from(dir.fixed_rows::<3>(0))
+        Vec3::from(dir.fixed_rows::<3>(0))
     }
 
     pub fn fovy(&self) -> f32 {
@@ -106,13 +107,13 @@ impl Camera {
     }
 
     pub fn move2(&mut self, front_back: f32, left_right: f32) {
-        let d = Vector3::new((-self.rotation.y).sin(), 0.0, (-self.rotation.y).cos());
+        let d = Vec3::new((-self.rotation.y).sin(), 0.0, (-self.rotation.y).cos());
         self.position -= d * front_back;
-        self.position -= d.cross(&Vector3::new(0.0, 1.0, 0.0)).normalize() * left_right;
+        self.position -= d.cross(&Vec3::new(0.0, 1.0, 0.0)).normalize() * left_right;
         self.update_frustum();
     }
 
-    pub fn is_sphere_visible(&self, pos: &Vector3<f32>, radius: f32) -> bool {
+    pub fn is_sphere_visible(&self, pos: &Vec3, radius: f32) -> bool {
         for i in 0..6 {
             if self.frustum[i].x * pos.x
                 + self.frustum[i].y * pos.y
