@@ -1,10 +1,11 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster;
-use crate::render_engine::vertex_mesh::VertexPositionImpl;
 use approx::AbsDiffEq;
+use engine::renderer::vertex_mesh::VertexPositionImpl;
+use engine::vertex_impl;
 use glm::BVec3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{TVec3, TVec4, U16Vec2, U16Vec3, U32Vec2, U32Vec3, U8Vec3, UVec3, UVec4, Vec2, Vec3};
+use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, Default)]

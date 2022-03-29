@@ -3,8 +3,8 @@ use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::TexturedBlockModel;
-use crate::render_engine::{MaterialInfo, TextureAtlasType};
-use crate::resource_file::ResourceRef;
+use engine::renderer::{MaterialInfo, TextureAtlasType};
+use engine::resource_file::ResourceRef;
 use entity_data::EntityStorageLayout;
 use std::convert::TryInto;
 

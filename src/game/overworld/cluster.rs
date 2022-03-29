@@ -2,15 +2,14 @@ use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{PackedVertex, Vertex};
 use crate::game::registry::Registry;
-use crate::render_engine;
-use crate::render_engine::vertex_mesh::VertexMeshCreate;
-use crate::utils::SliceSplitImpl;
 use bit_vec::BitVec;
+use engine::renderer;
+use engine::renderer::vertex_mesh::VertexMeshCreate;
+use engine::utils::SliceSplitImpl;
 use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec2, TVec3};
-use rand_distr::num_traits::real::Real;
 
 use std::convert::TryInto;
 use std::ops::{BitAnd, BitAndAssign};
@@ -365,7 +364,7 @@ pub struct Cluster {
     changed: bool,
     side_changed: [bool; 6],
     device: Arc<vkw::Device>,
-    vertex_mesh: render_engine::VertexMesh<PackedVertex, ()>,
+    vertex_mesh: renderer::VertexMesh<PackedVertex, ()>,
 }
 
 impl Cluster {
@@ -401,7 +400,7 @@ impl Cluster {
             .fold(0_u8, |mask, (i, b)| mask | ((*b as u8) << i))
     }
 
-    pub fn vertex_mesh(&self) -> &render_engine::VertexMesh<PackedVertex, ()> {
+    pub fn vertex_mesh(&self) -> &renderer::VertexMesh<PackedVertex, ()> {
         &self.vertex_mesh
     }
 

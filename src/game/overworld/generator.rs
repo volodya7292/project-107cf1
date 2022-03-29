@@ -1,7 +1,7 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
-use crate::utils::noise::ParamNoise;
+use engine::utils::noise::ParamNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use noise::Seedable;

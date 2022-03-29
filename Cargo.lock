@@ -92,6 +92,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "2.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f609ceb2c41b0d0277314a789ef0e7eb14593d5485f7c67320bed3924ebb1b33"
+dependencies = [
+ "bincode_derive",
+ "serde",
+]
+
+[[package]]
+name = "bincode_derive"
+version = "2.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913287a8f3e00db4c7ae1b87e9b9b8cebd6b89217eaadfc281fa5c897da35dc3"
+dependencies = [
+ "virtue",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -219,6 +238,17 @@ dependencies = [
  "atty",
  "lazy_static",
  "winapi",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "byteorder",
+ "glob",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -443,6 +473,32 @@ name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
+
+[[package]]
+name = "engine"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "basis-universal",
+ "bit-set",
+ "byteorder",
+ "common",
+ "crossbeam-channel",
+ "index-pool",
+ "indexmap",
+ "lazy_static",
+ "lru",
+ "nalgebra",
+ "nalgebra-glm",
+ "noise",
+ "parking_lot 0.12.0",
+ "rand 0.8.5",
+ "rand_distr",
+ "rand_xoshiro",
+ "rayon",
+ "smallvec",
+ "vk-wrapper",
+]
 
 [[package]]
 name = "entity_data"
@@ -741,7 +797,7 @@ dependencies = [
  "color_quant",
  "exr",
  "gif",
- "jpeg-decoder 0.2.2",
+ "jpeg-decoder 0.2.3",
  "num-iter",
  "num-rational 0.4.0",
  "num-traits",
@@ -822,9 +878,9 @@ dependencies = [
 
 [[package]]
 name = "jpeg-decoder"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "105fb082d64e2100074587f59a74231f771750c664af903f1f9f76c9dedfc6f1"
+checksum = "a55ad40a2d27923f63b6fbde5934926176c69ac5e23da6ac05ebfaca984e163f"
 dependencies = [
  "rayon",
 ]
@@ -1158,17 +1214,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "num-integer"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1427,39 +1472,25 @@ dependencies = [
 name = "project-107cf1"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "approx",
- "basis-universal",
- "bit-set",
  "bit-vec",
- "byteorder",
+ "common",
  "crossbeam-channel",
+ "engine",
  "entity_data",
  "futures",
- "glob",
  "image 0.24.1",
- "index-pool",
- "indexmap",
- "lazy_static",
  "log",
- "lru",
  "nalgebra",
  "nalgebra-glm",
  "noise",
- "num-derive",
- "num-traits",
  "parking_lot 0.12.0",
  "rand 0.8.5",
  "rand_distr",
- "rand_xoshiro",
  "raw-window-handle 0.4.2",
  "rayon",
- "rust-dense-bitset",
- "serde",
- "serde_yaml",
  "simple_logger",
  "smallvec",
- "tokio",
  "vk-wrapper",
  "winit",
 ]
@@ -1642,12 +1673,6 @@ checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
 dependencies = [
  "bitflags",
 ]
-
-[[package]]
-name = "rust-dense-bitset"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32ce26bf673f429c3ed2f6cd59bf61df4a6e48300e5c36b15c355045111f3fbb"
 
 [[package]]
 name = "ryu"
@@ -1893,28 +1918,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
-name = "tokio"
-version = "1.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af73ac49756f3f7c01172e34a23e5d0216f6c32333757c2c61feb2bbff5a5ee"
-dependencies = [
- "num_cpus",
- "pin-project-lite",
- "tokio-macros",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b557f72f448c511a979e2564e55d74e6c4432fc96ff4f6241bc6bded342643b7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "toml"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1940,6 +1943,12 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "virtue"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "757cfbfe0d17ee6f22fe97e536d463047d451b47cf9d11e2b7d1398b0ef274dd"
 
 [[package]]
 name = "vk-wrapper"

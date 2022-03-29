@@ -1,5 +1,5 @@
 use crate::game::overworld::Overworld;
-use crate::utils::UInt;
+use engine::utils::UInt;
 use nalgebra_glm::{I64Vec3, U64Vec3};
 
 pub mod world;

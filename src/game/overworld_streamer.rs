@@ -5,9 +5,10 @@ use crate::game::overworld::{
     cluster, generator, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED, CLUSTER_STATE_INITIAL,
     CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING,
 };
-use crate::render_engine::{component, scene, RenderEngine};
-use crate::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use crossbeam_channel as cb;
+use engine::ecs::{component, scene};
+use engine::renderer::RenderEngine;
+use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::Mutex;
@@ -524,7 +525,7 @@ impl OverworldStreamer {
         let mut entities = scene.create_entities(self.clusters_to_add.len() as u32);
 
         let mut transform_comps = scene.storage_write::<component::Transform>();
-        let mut renderer_comps = scene.storage_write::<component::Renderer>();
+        let mut renderer_comps = scene.storage_write::<component::RenderConfig>();
         let mut vertex_mesh_comps = scene.storage_write::<component::VertexMesh>();
 
         // Add components to the new entities
@@ -535,7 +536,7 @@ impl OverworldStreamer {
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
-            let renderer_comp = component::Renderer::new(&re, self.cluster_mat_pipeline, false);
+            let renderer_comp = component::RenderConfig::new(&re, self.cluster_mat_pipeline, false);
 
             transform_comps.set(entity, transform_comp);
             renderer_comps.set(entity, renderer_comp);

@@ -1,0 +1,29 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+byteorder = "1.4"
+nalgebra = "0.30"
+nalgebra-glm = "0.16"
+basis-universal = "0.2"
+rayon = "1.5"
+crossbeam-channel = "0.5"
+noise = "0.7.0"
+bit-set = "0.5"
+index-pool = "1.0"
+smallvec = "1.6"
+ahash = "0.7"
+lru = "0.7"
+lazy_static = "1.4"
+rand = "0.8"
+rand_distr = "0.4"
+rand_xoshiro = "0.6"
+parking_lot = "0.12"
+indexmap = "1.8"
+vk-wrapper = { path = "../vk-wrapper" }
+
+[build-dependencies]
+common = { path = "../common" }
+

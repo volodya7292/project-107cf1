@@ -1,10 +1,11 @@
 use crate::game::overworld;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::Overworld;
-use crate::utils::noise::ParamNoise;
-use crate::utils::value_noise::ValueNoise;
+use engine::utils::noise::ParamNoise;
+use engine::utils::value_noise::ValueNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
+use noise;
 use noise::Seedable;
 
 pub struct World {

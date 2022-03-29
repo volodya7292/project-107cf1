@@ -1,24 +1,21 @@
 mod utils;
-
 #[macro_use]
-pub(crate) mod render_engine;
 mod game;
-mod resource_file;
-
+mod material_pipelines;
 #[cfg(test)]
 mod tests;
 
-use crate::render_engine::{component, TextureQuality, TranslucencyMaxDepth};
-use crate::render_engine::{material_pipeline, material_pipelines};
-use crate::resource_file::ResourceFile;
-use crate::utils::noise::ParamNoise;
+use engine::renderer::{RenderEngine, TextureQuality, TranslucencyMaxDepth};
+use engine::resource_file::ResourceFile;
+use engine::utils::noise::ParamNoise;
+use engine::utils::thread_pool::SafeThreadPool;
+use engine::{renderer, vertex_impl};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
 use noise::Seedable;
 use std::path::Path;
 use std::thread;
 use std::time::Instant;
-use utils::thread_pool::SafeThreadPool;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -84,7 +81,7 @@ fn main() {
     let render_thread_pool = SafeThreadPool::new(n_render_threads).unwrap();
     let update_thread_pool = SafeThreadPool::new(n_update_threads).unwrap();
 
-    let mut resources = ResourceFile::open(Path::new("resources")).unwrap();
+    let resources = ResourceFile::open(Path::new("resources")).unwrap();
 
     let mut event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -119,19 +116,18 @@ fn main() {
 
     let window_size = window.inner_size();
 
-    let renderer_settings = render_engine::Settings {
+    let renderer_settings = renderer::Settings {
         vsync: true,
         texture_quality: TextureQuality::STANDARD,
         translucency_max_depth: TranslucencyMaxDepth::LOW,
         textures_gen_mipmaps: true,
         textures_max_anisotropy: 1.0,
     };
-    let renderer = render_engine::new(
+    let renderer = RenderEngine::new(
         &surface,
         (window_size.width, window_size.height),
         renderer_settings,
         &device,
-        &mut resources,
         4,
     );
 

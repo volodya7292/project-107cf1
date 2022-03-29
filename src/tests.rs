@@ -1,3 +1,4 @@
+use engine::vertex_impl;
 use nalgebra as na;
 use nalgebra_glm::I32Vec3;
 

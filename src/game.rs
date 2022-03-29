@@ -5,11 +5,10 @@ pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::render_engine::material_pipelines::MaterialPipelines;
-use crate::render_engine::{component, RenderEngine};
-use crate::utils::HashSet;
-use crate::{material_pipelines, render_engine, ResourceFile};
-use nalgebra as na;
+use crate::material_pipelines;
+use engine::renderer::RenderEngine;
+use engine::resource_file::ResourceFile;
+use engine::utils::HashSet;
 use nalgebra_glm as glm;
 use nalgebra_glm::DVec3;
 use overworld::Overworld;

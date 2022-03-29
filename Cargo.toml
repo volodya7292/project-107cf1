@@ -4,46 +4,37 @@ version = "0.1.0"
 authors = ["a7292969 <a7292969@gmail.com>"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [
+    "vk-wrapper",
+    "engine",
+    "common",
+]
 
 [dependencies]
+engine = { path = "engine" }
+vk-wrapper = { path = "vk-wrapper" }
 log = "0.4"
 simple_logger = "2.1"
-winit = "0.26"
 raw-window-handle = "0.4"
-byteorder = "1.4"
 nalgebra = "0.30"
 nalgebra-glm = "0.16"
 image = "0.24"
-basis-universal = "0.2"
 rayon = "1.5"
 crossbeam-channel = "0.5"
 futures = "0.3"
-tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
 noise = "0.7.0"
-bit-set = "0.5"
-bit-vec = "0.6"
-rust-dense-bitset = "0.1"
-index-pool = "1.0"
-smallvec = "1.6"
-ahash = "0.7"
-lru = "0.7"
-lazy_static = "1.4"
-entity_data = "1.0"
-approx = "0.5"
 rand = "0.8"
 rand_distr = "0.4"
-rand_xoshiro = "0.6"
-num-traits = "0.2"
-num-derive = "0.3"
+bit-vec = "0.6"
+winit = "0.26"
+approx = "0.5"
+entity_data = "1.0"
+smallvec = "1.6"
 parking_lot = "0.12"
-indexmap = "1.8"
-vk-wrapper = { path = "vk-wrapper" }
 
 [build-dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
-glob = "0.3"
+common = { path = "common" }
 
 [profile.dev.package."basis-universal-sys"]
 opt-level = 3

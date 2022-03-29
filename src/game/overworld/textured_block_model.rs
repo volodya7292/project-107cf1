@@ -1,5 +1,5 @@
 use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::block_model::{BlockModel, ContentType, PackedVertex, Vertex};
+use crate::game::overworld::block_model::{BlockModel, ContentType, Vertex};
 use nalgebra_glm::Vec2;
 use std::ops::Range;
 
