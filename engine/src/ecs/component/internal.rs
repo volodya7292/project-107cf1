@@ -1,5 +1,5 @@
 use crate::ecs::component::Transform;
-use crate::ecs::scene::Entity;
+use crate::ecs::scene_storage::Entity;
 use crate::utils::IndexSet;
 use std::ops::Deref;
 

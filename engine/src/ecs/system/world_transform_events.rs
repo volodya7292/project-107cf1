@@ -1,6 +1,6 @@
 use crate::ecs::component::internal::WorldTransform;
-use crate::ecs::scene::{ComponentStorageImpl, Entity, Event};
-use crate::ecs::{component, scene};
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
+use crate::ecs::{component, scene_storage};
 use crate::renderer;
 use crate::renderer::{BufferUpdate, Renderable};
 use crate::utils::HashMap;
@@ -11,8 +11,8 @@ use vk_wrapper as vkw;
 // Updates world transform uniform buffers
 pub(crate) struct WorldTransformEvents<'a> {
     pub uniform_buffer_updates: &'a mut [BufferUpdate],
-    pub world_transform_comps: scene::LockedStorage<'a, WorldTransform>,
-    pub renderer_comps: scene::LockedStorage<'a, component::RenderConfig>,
+    pub world_transform_comps: scene_storage::LockedStorage<'a, WorldTransform>,
+    pub renderer_comps: scene_storage::LockedStorage<'a, component::RenderConfig>,
     pub renderables: &'a HashMap<Entity, Renderable>,
 }
 

@@ -1,6 +1,6 @@
 use crate::ecs::component;
-use crate::ecs::scene;
-use crate::ecs::scene::{Entity, Event};
+use crate::ecs::scene_storage;
+use crate::ecs::scene_storage::{Entity, Event};
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate, BufferUpdate1, Renderable};
 use crate::utils::HashMap;
@@ -15,7 +15,7 @@ use vk_wrapper::DescriptorSet;
 
 pub(crate) struct RendererComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
-    pub renderer_comps: scene::LockedStorage<'a, component::RenderConfig>,
+    pub renderer_comps: scene_storage::LockedStorage<'a, component::RenderConfig>,
     pub g_per_pipeline_pools: &'a mut HashMap<Arc<vkw::PipelineSignature>, vkw::DescriptorPool>,
     pub renderables: &'a mut HashMap<Entity, Renderable>,
     pub buffer_updates: &'a mut Vec<BufferUpdate>,
@@ -97,7 +97,7 @@ impl RendererComponentEvents<'_> {
 
         for event in events {
             match event {
-                scene::Event::Created(entity) => {
+                scene_storage::Event::Created(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
                     let signature =
                         &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;
@@ -122,7 +122,7 @@ impl RendererComponentEvents<'_> {
                     );
                     self.renderables.insert(entity, renderable);
                 }
-                scene::Event::Modified(entity) => {
+                scene_storage::Event::Modified(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
                     let signature =
                         &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;

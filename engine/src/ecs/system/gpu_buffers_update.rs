@@ -1,6 +1,6 @@
 use crate::ecs::component;
-use crate::ecs::scene;
-use crate::ecs::scene::{ComponentStorageImpl, Entity};
+use crate::ecs::scene_storage;
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::renderer::VMBufferUpdate;
 use crate::utils::{HashMap, LruCache};
@@ -107,7 +107,7 @@ impl GpuBuffersUpdate<'_> {
 pub(crate) struct CommitBufferUpdates<'a> {
     pub updates: Vec<VMBufferUpdate>,
     pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_mesh_comps: scene::LockedStorage<'a, component::VertexMesh>,
+    pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
 }
 
 impl CommitBufferUpdates<'_> {

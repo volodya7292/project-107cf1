@@ -1,4 +1,4 @@
-use crate::renderer::RenderEngine;
+use crate::renderer::Renderer;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
@@ -63,7 +63,7 @@ pub struct RenderConfig {
 }
 
 impl RenderConfig {
-    pub fn new(renderer: &RenderEngine, mat_pipeline: u32, translucent: bool) -> RenderConfig {
+    pub fn new(renderer: &Renderer, mat_pipeline: u32, translucent: bool) -> RenderConfig {
         let pipe = &renderer.material_pipelines[mat_pipeline as usize];
 
         RenderConfig {

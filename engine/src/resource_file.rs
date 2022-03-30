@@ -111,7 +111,7 @@ impl ResourceFile {
         Ok(())
     }
 
-    pub fn open(path: &Path) -> Result<Arc<ResourceFile>, Error> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Arc<ResourceFile>, Error> {
         let mut res_file = ResourceFile {
             buf_reader: Mutex::new(BufReader::new(File::open(path)?)),
             main_entry: ResourceEntry {

@@ -7,7 +7,7 @@ use crate::game::overworld::{
 };
 use crossbeam_channel as cb;
 use engine::ecs::{component, scene};
-use engine::renderer::RenderEngine;
+use engine::renderer::Renderer;
 use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
@@ -26,7 +26,6 @@ pub struct OverworldStreamer {
     device: Arc<vkw::Device>,
     main_registry: Arc<MainRegistry>,
     cluster_mat_pipeline: u32,
-    re: Arc<Mutex<RenderEngine>>,
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
@@ -222,15 +221,14 @@ impl OverworldStreamer {
 
     pub fn new(
         registry: &Arc<MainRegistry>,
-        re: &Arc<Mutex<RenderEngine>>,
+        re: &Renderer,
         cluster_mat_pipeline: u32,
         overworld: Overworld,
     ) -> Self {
         Self {
-            device: Arc::clone(re.lock().device()),
+            device: Arc::clone(re.device()),
             main_registry: Arc::clone(registry),
             cluster_mat_pipeline,
-            re: Arc::clone(re),
             stream_pos: Default::default(),
             xz_render_distance: 128,
             y_render_distance: 128,
@@ -515,8 +513,7 @@ impl OverworldStreamer {
     }
 
     /// Creates/removes new render entities.
-    pub fn update_renderer(&mut self) {
-        let re = self.re.lock();
+    pub fn update_renderer(&mut self, re: &Renderer) {
         let scene = re.scene();
 
         scene.remove_entities(&self.clusters_to_remove);

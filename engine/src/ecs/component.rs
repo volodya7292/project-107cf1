@@ -1,4 +1,6 @@
+pub mod collider;
 pub(crate) mod internal;
+pub mod physical_state;
 pub mod render_config;
 pub mod transform;
 pub mod vertex_mesh;

@@ -5,15 +5,18 @@ mod material_pipelines;
 #[cfg(test)]
 mod tests;
 
-use engine::renderer::{RenderEngine, TextureQuality, TranslucencyMaxDepth};
+use crate::game::Game;
+use engine::renderer::{Renderer, TextureQuality, TranslucencyMaxDepth};
 use engine::resource_file::ResourceFile;
 use engine::utils::noise::ParamNoise;
 use engine::utils::thread_pool::SafeThreadPool;
-use engine::{renderer, vertex_impl};
+use engine::{renderer, vertex_impl, Engine};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
 use noise::Seedable;
+use simple_logger::SimpleLogger;
 use std::path::Path;
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use winit::dpi::PhysicalPosition;
@@ -68,20 +71,10 @@ fn noise_test() {
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new()
+    SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
         .init()
         .unwrap();
-
-    let n_threads = thread::available_parallelism().unwrap().get().max(2);
-    let n_render_threads = (n_threads / 2).max(4);
-    let n_update_threads = n_threads - n_render_threads;
-
-    // Note: use safe thread pools to account for proper destruction of Vulkan objects.
-    let render_thread_pool = SafeThreadPool::new(n_render_threads).unwrap();
-    let update_thread_pool = SafeThreadPool::new(n_update_threads).unwrap();
-
-    let resources = ResourceFile::open(Path::new("resources")).unwrap();
 
     let mut event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -114,27 +107,11 @@ fn main() {
     let adapter = adapters.first().unwrap();
     let device = adapter.create_device().unwrap();
 
-    let window_size = window.inner_size();
+    let mut game = Box::new(Game::init());
+    let mut engine = Engine::init(&surface, &device, 4, game);
 
-    let renderer_settings = renderer::Settings {
-        vsync: true,
-        texture_quality: TextureQuality::STANDARD,
-        translucency_max_depth: TranslucencyMaxDepth::LOW,
-        textures_gen_mipmaps: true,
-        textures_max_anisotropy: 1.0,
-    };
-    let renderer = RenderEngine::new(
-        &surface,
-        (window_size.width, window_size.height),
-        renderer_settings,
-        &device,
-        4,
-    );
-
-    let mut program = game::new(&renderer, &resources);
     let mut cursor_grab = true;
     let mut start_t = Instant::now();
-    let mut delta_time = 0.0;
 
     window.set_cursor_grab(cursor_grab).unwrap();
     window.set_cursor_visible(!cursor_grab);
@@ -150,11 +127,6 @@ fn main() {
                 start_t = Instant::now();
             }
             Event::WindowEvent { window_id, ref event } => match event {
-                WindowEvent::Resized(size) => {
-                    if size.width != 0 && size.height != 0 {
-                        renderer.lock().on_resize((size.width, size.height));
-                    }
-                }
                 WindowEvent::KeyboardInput {
                     device_id: _,
                     input,
@@ -191,20 +163,9 @@ fn main() {
                 WindowEvent::CloseRequested if window_id == window.id() => *control_flow = ControlFlow::Exit,
                 _ => {}
             },
-            Event::MainEventsCleared => {
-                program.on_update(delta_time, &update_thread_pool);
-                window.request_redraw();
-            }
-            Event::RedrawRequested(_) => {
-                render_thread_pool.install(|| renderer.lock().on_draw());
-            }
-            Event::RedrawEventsCleared => {
-                let end_t = Instant::now();
-                delta_time = (end_t - start_t).as_secs_f64();
-            }
             _ => {}
         }
 
-        program.on_event(event);
+        engine.on_winit_event(event);
     });
 }

@@ -1,13 +1,13 @@
 use crate::ecs::component;
-use crate::ecs::scene;
-use crate::ecs::scene::{ComponentStorageImpl, Entity, Event};
+use crate::ecs::scene_storage;
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::utils::{HashMap, LruCache};
 use std::sync::Arc;
 
 pub(crate) struct VertexMeshCompEvents<'a> {
     pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_mesh_comps: scene::LockedStorage<'a, component::VertexMesh>,
+    pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
     pub buffer_updates: &'a mut LruCache<Entity, Arc<RawVertexMesh>>,
 }
 
@@ -30,7 +30,7 @@ impl VertexMeshCompEvents<'_> {
         // ------------------------------------------------------------------------------------
         for event in &events {
             match event {
-                scene::Event::Created(i) | scene::Event::Modified(i) => {
+                scene_storage::Event::Created(i) | scene_storage::Event::Modified(i) => {
                     Self::vertex_mesh_comp_modified(
                         *i,
                         vertex_mesh_comps.get(*i).unwrap(),

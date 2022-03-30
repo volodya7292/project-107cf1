@@ -1,14 +1,14 @@
 use crate::ecs::component;
 use crate::ecs::component::internal::{Children, Parent, WorldTransform};
-use crate::ecs::scene;
-use crate::ecs::scene::{ComponentStorageImpl, Entity};
+use crate::ecs::scene_storage;
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 
 // Propagates transform hierarchy and calculates world transforms
 pub(crate) struct HierarchyPropagation<'a> {
-    pub parent_comps: scene::LockedStorage<'a, Parent>,
-    pub children_comps: scene::LockedStorage<'a, Children>,
-    pub transform_comps: scene::LockedStorage<'a, component::Transform>,
-    pub world_transform_comps: scene::LockedStorage<'a, WorldTransform>,
+    pub parent_comps: scene_storage::LockedStorage<'a, Parent>,
+    pub children_comps: scene_storage::LockedStorage<'a, Children>,
+    pub transform_comps: scene_storage::LockedStorage<'a, component::Transform>,
+    pub world_transform_comps: scene_storage::LockedStorage<'a, WorldTransform>,
     pub ordered_entities: &'a mut Vec<Entity>,
 }
 

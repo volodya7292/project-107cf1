@@ -7,9 +7,9 @@ pub mod vertex_mesh;
 pub mod camera;
 
 use crate::ecs::component::internal::{Children, Parent, WorldTransform};
-use crate::ecs::public_scene_interface::PublicSceneInterface;
-pub use crate::ecs::scene::Scene;
-use crate::ecs::scene::{ComponentStorageImpl, Entity};
+use crate::ecs::scene::Scene;
+pub use crate::ecs::scene_storage::SceneStorage;
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
 use crate::renderer::camera::Camera;
 use crate::renderer::material_pipeline::UniformStruct;
@@ -57,8 +57,8 @@ use vk_wrapper::{
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
 
-pub struct RenderEngine {
-    scene: PublicSceneInterface,
+pub struct Renderer {
+    scene: Scene,
     active_camera: Camera,
 
     surface: Arc<Surface>,
@@ -153,10 +153,22 @@ pub enum TranslucencyMaxDepth {
 #[derive(Copy, Clone)]
 pub struct Settings {
     pub vsync: bool,
+    pub textures_mipmaps: bool,
     pub texture_quality: TextureQuality,
     pub translucency_max_depth: TranslucencyMaxDepth,
-    pub textures_gen_mipmaps: bool,
     pub textures_max_anisotropy: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            vsync: true,
+            textures_mipmaps: true,
+            texture_quality: TextureQuality::STANDARD,
+            translucency_max_depth: TranslucencyMaxDepth::LOW,
+            textures_max_anisotropy: 1.0,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -377,20 +389,20 @@ fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
-impl RenderEngine {
+impl Renderer {
     pub fn new(
         surface: &Arc<Surface>,
         size: (u32, u32),
         settings: Settings,
         device: &Arc<Device>,
         max_texture_count: u32,
-    ) -> Arc<Mutex<RenderEngine>> {
+    ) -> Renderer {
         // Load pipeline cache
         if let Ok(res) = fs::read(*PIPELINE_CACHE_FILENAME) {
             device.load_pipeline_cache(&res).unwrap();
         }
 
-        let scene = PublicSceneInterface::new();
+        let scene = Scene::new();
         let active_camera = Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01);
 
         let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
@@ -619,7 +631,7 @@ impl RenderEngine {
             texture_atlas::new(
                 &device,
                 Format::BC7_UNORM,
-                settings.textures_gen_mipmaps,
+                settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
@@ -629,7 +641,7 @@ impl RenderEngine {
             texture_atlas::new(
                 &device,
                 Format::BC7_UNORM,
-                settings.textures_gen_mipmaps,
+                settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
@@ -639,7 +651,7 @@ impl RenderEngine {
             texture_atlas::new(
                 &device,
                 Format::BC7_UNORM,
-                settings.textures_gen_mipmaps,
+                settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
@@ -649,7 +661,7 @@ impl RenderEngine {
             texture_atlas::new(
                 &device,
                 Format::BC5_RG_UNORM,
-                settings.textures_gen_mipmaps,
+                settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
@@ -725,7 +737,7 @@ impl RenderEngine {
         let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
 
         // TODO: allocate buffers with capacity of MAX_OBJECTS
-        let mut renderer = RenderEngine {
+        let mut renderer = Renderer {
             scene,
             active_camera,
             surface: Arc::clone(surface),
@@ -797,18 +809,18 @@ impl RenderEngine {
         };
         renderer.on_resize(size);
 
-        Arc::new(Mutex::new(renderer))
+        renderer
     }
 
     pub fn device(&self) -> &Arc<Device> {
         &self.device
     }
 
-    pub fn scene(&self) -> &PublicSceneInterface {
+    pub fn scene(&self) -> &Scene {
         &self.scene
     }
 
-    pub fn scene_mut(&mut self) -> &mut PublicSceneInterface {
+    pub fn scene_mut(&mut self) -> &mut Scene {
         &mut self.scene
     }
 
@@ -2031,7 +2043,7 @@ impl RenderEngine {
     }
 }
 
-impl Drop for RenderEngine {
+impl Drop for Renderer {
     fn drop(&mut self) {
         // Safe pipeline cache
         let pl_cache = self.device.get_pipeline_cache().unwrap();

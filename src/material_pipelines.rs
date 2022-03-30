@@ -1,4 +1,4 @@
-use engine::renderer::RenderEngine;
+use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::uniform_struct_impl;
 use nalgebra as na;
@@ -27,7 +27,7 @@ fn create_vertex_shader(
     )
 }
 
-pub fn create(resources: &Arc<ResourceFile>, renderer: &mut RenderEngine) -> MaterialPipelines {
+pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> MaterialPipelines {
     let device = Arc::clone(renderer.device());
 
     let cluster = {
