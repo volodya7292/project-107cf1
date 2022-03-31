@@ -2,6 +2,8 @@ mod utils;
 #[macro_use]
 mod game;
 mod material_pipelines;
+mod physics;
+mod scene_component;
 #[cfg(test)]
 mod tests;
 
@@ -17,7 +19,6 @@ use noise::Seedable;
 use simple_logger::SimpleLogger;
 use std::path::Path;
 use std::sync::Arc;
-use std::thread;
 use std::time::Instant;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};

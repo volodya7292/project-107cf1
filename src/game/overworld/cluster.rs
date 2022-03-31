@@ -317,27 +317,46 @@ impl Sector {
 
 pub struct BlockData<'a> {
     sector: &'a Sector,
+    block: Block,
     id: EntityId,
 }
 
-impl BlockData<'_> {
-    pub fn get<C: 'static>(&self) -> &C {
-        todo!()
+pub trait BlockDataImpl {
+    /// Returns specified block component
+    fn get<C: 'static>(&self) -> Option<&C>;
+
+    fn block(&self) -> Block;
+}
+
+impl BlockDataImpl for BlockData<'_> {
+    fn get<C: 'static>(&self) -> Option<&C> {
+        self.sector.block_storage.get::<C>(&self.id)
+    }
+
+    fn block(&self) -> Block {
+        self.block
     }
 }
 
 pub struct BlockDataMut<'a> {
     sector: &'a mut Sector,
+    block: Block,
     id: EntityId,
 }
 
-impl BlockDataMut<'_> {
-    pub fn get<C: 'static>(&self) -> &C {
-        todo!()
+impl BlockDataImpl for BlockDataMut<'_> {
+    fn get<C: 'static>(&self) -> Option<&C> {
+        self.sector.block_storage.get::<C>(&self.id)
     }
 
-    pub fn get_mut<C: 'static>(&mut self) -> &mut C {
-        todo!()
+    fn block(&self) -> Block {
+        self.block
+    }
+}
+
+impl BlockDataMut<'_> {
+    pub fn get_mut<C: 'static>(&mut self) -> Option<&mut C> {
+        self.sector.block_storage.get_mut::<C>(&self.id)
     }
 }
 
@@ -404,7 +423,8 @@ impl Cluster {
         &self.vertex_mesh
     }
 
-    pub fn get_block(&self, pos: U32Vec3) -> BlockData {
+    /// Returns block data at `pos`
+    pub fn get(&self, pos: U32Vec3) -> BlockData {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
@@ -415,12 +435,18 @@ impl Cluster {
         }
 
         let sector = self.sectors.get(block_pos_to_sector_index(pos)).unwrap();
+        let block = sector.blocks[pos.x as usize][pos.y as usize][pos.z as usize];
         let entity = sector.block_map[pos.x as usize][pos.y as usize][pos.z as usize];
 
-        BlockData { sector, id: entity }
+        BlockData {
+            sector,
+            block,
+            id: entity,
+        }
     }
 
-    pub fn get_block_mut(&mut self, pos: U32Vec3) -> BlockDataMut {
+    /// Returns mutable block data at `pos`
+    pub fn get_mut(&mut self, pos: U32Vec3) -> BlockDataMut {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
@@ -431,12 +457,18 @@ impl Cluster {
         }
 
         let sector = self.sectors.get_mut(block_pos_to_sector_index(pos)).unwrap();
+        let block = sector.blocks[pos.x as usize][pos.y as usize][pos.z as usize];
         let entity = sector.block_map[pos.x as usize][pos.y as usize][pos.z as usize];
 
-        BlockDataMut { sector, id: entity }
+        BlockDataMut {
+            sector,
+            block,
+            id: entity,
+        }
     }
 
-    pub fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
+    /// Sets specified block at `pos`
+    pub fn set(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {

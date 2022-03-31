@@ -41,9 +41,9 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
                 let n = (n + 2.0) * ((posf.y - 30.0) / 128.0);
 
                 if n < 0.5 {
-                    cluster.set_block(xyz, block_default).build();
+                    cluster.set(xyz, block_default).build();
                 } else {
-                    cluster.set_block(xyz, block_empty).build();
+                    cluster.set(xyz, block_empty).build();
                 }
 
                 // if posf.x.abs().max(posf.z.abs()) < posf.y {

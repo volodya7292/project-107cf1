@@ -1,18 +1,14 @@
 pub mod ecs;
-pub mod physics;
 pub mod renderer;
 pub mod resource_file;
 pub mod utils;
 
-use crate::ecs::scene::Scene;
 use crate::renderer::Renderer;
 use crate::utils::thread_pool::SafeThreadPool;
-use parking_lot::Mutex;
 use rayon::ThreadPool;
-use std::sync::atomic::AtomicBool;
-use std::sync::{atomic, Arc};
+use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use vk_wrapper as vkw;
 use vk_wrapper::Surface;
 use winit::event::{Event, WindowEvent};
@@ -23,7 +19,7 @@ pub struct Engine {
     update_tp: SafeThreadPool,
     frame_start_time: Instant,
     delta_time: f64,
-    app: Box<dyn Application>,
+    app: Box<dyn Application + Send>,
 }
 
 pub trait Application {
@@ -37,7 +33,7 @@ impl Engine {
         surface: &Arc<Surface>,
         device: &Arc<vkw::Device>,
         max_texture_count: u32,
-        mut app: Box<dyn Application>,
+        mut app: Box<dyn Application + Send>,
     ) -> Engine {
         let n_threads = thread::available_parallelism().unwrap().get().max(2);
         let n_render_threads = (n_threads / 2).max(4);
@@ -84,12 +80,12 @@ impl Engine {
                 _ => {}
             },
             Event::MainEventsCleared => {
-                self.app
-                    .on_update(self.delta_time as f32, &mut self.renderer, &self.update_tp);
-
-                // TODO: handle physics here
-
-                self.render_tp.install(|| self.renderer.on_draw());
+                self.render_tp.install(|| {
+                    self.app
+                        .on_update(self.delta_time as f32, &mut self.renderer, &self.update_tp);
+                    // TODO: handle physics here
+                    self.renderer.on_draw();
+                });
             }
             Event::RedrawEventsCleared => {
                 let end_dt = Instant::now();
