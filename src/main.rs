@@ -17,8 +17,6 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, Vec2, Vec3};
 use noise::Seedable;
 use simple_logger::SimpleLogger;
-use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 use winit::dpi::PhysicalPosition;
 use winit::event::{VirtualKeyCode, WindowEvent};

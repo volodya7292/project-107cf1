@@ -386,7 +386,8 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn new(registry: &Arc<Registry>, device: &Arc<vkw::Device>) -> Self {
+    /// Creating a new cluster is expensive due to its big size of memory
+    pub fn new(registry: &Arc<Registry>, device: Arc<vkw::Device>) -> Self {
         let layout = registry.cluster_layout();
         let sectors: Vec<Sector> = (0..VOLUME_IN_SECTORS).map(|_| Sector::new(&layout)).collect();
 
@@ -396,7 +397,7 @@ impl Cluster {
             entry_size: 1,
             changed: false,
             side_changed: [false; 6],
-            device: Arc::clone(device),
+            device,
             vertex_mesh: Default::default(),
         }
     }

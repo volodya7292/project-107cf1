@@ -20,7 +20,8 @@ use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::hash_map;
-use std::sync::atomic::AtomicU8;
+use std::hash::Hash;
+use std::sync::atomic::{AtomicBool, AtomicU8};
 use std::sync::Arc;
 
 // TODO Main world - 'The Origin'
@@ -49,7 +50,16 @@ pub const CLUSTER_STATE_LOADED: u8 = 3;
 
 pub struct OverworldCluster {
     pub cluster: RwLock<Cluster>,
+}
+
+pub struct ClusterState {
     pub state: AtomicU8,
+}
+
+impl ClusterState {
+    pub fn state(&self) -> u8 {
+        self.state.load(MO_RELAXED)
+    }
 }
 
 pub struct Overworld {
@@ -57,6 +67,7 @@ pub struct Overworld {
     main_registry: Arc<MainRegistry>,
     value_noise: ValueNoise<u64>,
     loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
+    clusters_states: Arc<RwLock<HashMap<I64Vec3, Arc<ClusterState>>>>,
 }
 
 pub struct BlockDataGuard {}
@@ -68,6 +79,7 @@ impl Overworld {
             main_registry: Arc::clone(registry),
             value_noise: ValueNoise::new(seed),
             loaded_clusters: Default::default(),
+            clusters_states: Default::default(),
         }
     }
 
@@ -77,6 +89,10 @@ impl Overworld {
 
     pub fn loaded_clusters(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>> {
         &self.loaded_clusters
+    }
+
+    pub fn clusters_states(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<ClusterState>>>> {
+        &self.clusters_states
     }
 
     fn get_world(&self, center_pos: I64Vec3) -> World {
@@ -186,18 +202,21 @@ impl Overworld {
     pub fn clusters(&self) -> OverworldClusters {
         OverworldClusters {
             loaded_clusters: self.loaded_clusters.read(),
+            clusters_states: self.clusters_states.read(),
         }
     }
 }
 
 pub struct OverworldClusters<'a> {
     loaded_clusters: RwLockReadGuard<'a, HashMap<I64Vec3, Arc<OverworldCluster>>>,
+    clusters_states: RwLockReadGuard<'a, HashMap<I64Vec3, Arc<ClusterState>>>,
 }
 
 impl OverworldClusters<'_> {
     pub fn access(&self) -> ClustersAccessCache {
         ClustersAccessCache {
             loaded_clusters: &self.loaded_clusters,
+            cluster_states: &self.clusters_states,
             clusters_cache: HashMap::with_capacity(32),
         }
     }
@@ -228,6 +247,7 @@ impl AccessGuard<'_> {
 
 pub struct ClustersAccessCache<'a> {
     loaded_clusters: &'a HashMap<I64Vec3, Arc<OverworldCluster>>,
+    cluster_states: &'a HashMap<I64Vec3, Arc<ClusterState>>,
     clusters_cache: HashMap<I64Vec3, AccessGuard<'a>>,
 }
 
@@ -241,7 +261,7 @@ impl<'a> ClustersAccessCache<'a> {
             hash_map::Entry::Vacant(e) => {
                 let cluster = self.loaded_clusters.get(&cluster_pos)?;
 
-                if cluster.state.load(MO_RELAXED) != CLUSTER_STATE_LOADED {
+                if self.cluster_states[&cluster_pos].state() != CLUSTER_STATE_LOADED {
                     return None;
                 }
 
@@ -260,7 +280,7 @@ impl<'a> ClustersAccessCache<'a> {
             hash_map::Entry::Vacant(e) => {
                 let cluster = self.loaded_clusters.get(&cluster_pos)?;
 
-                if cluster.state.load(MO_RELAXED) != CLUSTER_STATE_LOADED {
+                if self.cluster_states[&cluster_pos].state() != CLUSTER_STATE_LOADED {
                     return None;
                 }
 

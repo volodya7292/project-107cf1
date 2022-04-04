@@ -93,12 +93,8 @@ impl Application for Game {
             .active_camera_mut()
             .set_position(DVec3::new(0.0, 64.0, 0.0));
 
-        let mut overworld_streamer = OverworldStreamer::new(
-            &self.registry,
-            renderer,
-            mat_pipelines.cluster(),
-            self.overworld.loaded_clusters(),
-        );
+        let mut overworld_streamer =
+            OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
 
         overworld_streamer.set_xz_render_distance(1024);
         overworld_streamer.set_y_render_distance(256);

@@ -103,7 +103,6 @@ impl Overworld {
                         if !block.has_textured_model() {
                             continue;
                         }
-                        println!("FOUND {}", pos);
                         let model = reg.get_textured_block_model(block.textured_model()).unwrap();
 
                         let pos: DVec3 = glm::convert(pos);
