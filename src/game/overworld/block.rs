@@ -29,7 +29,7 @@ impl Block {
         self.textured_model
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.textured_model == u16::MAX
+    pub fn has_textured_model(&self) -> bool {
+        self.textured_model != u16::MAX
     }
 }

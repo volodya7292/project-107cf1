@@ -11,15 +11,15 @@ pub struct Children {
 }
 
 #[derive(Copy, Clone, Default)]
-pub struct WorldTransform(Transform);
+pub struct GlobalTransform(Transform);
 
-impl From<Transform> for WorldTransform {
+impl From<Transform> for GlobalTransform {
     fn from(transform: Transform) -> Self {
         Self(transform)
     }
 }
 
-impl Deref for WorldTransform {
+impl Deref for GlobalTransform {
     type Target = Transform;
 
     fn deref(&self) -> &Self::Target {

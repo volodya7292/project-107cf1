@@ -6,12 +6,12 @@ pub mod material_pipeline;
 pub mod vertex_mesh;
 pub mod camera;
 
-use crate::ecs::component::internal::{Children, Parent, WorldTransform};
+use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene::Scene;
 pub use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
-use crate::renderer::camera::Camera;
+use crate::renderer::camera::{Camera, Frustum};
 use crate::renderer::material_pipeline::UniformStruct;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::resource_file::ResourceRef;
@@ -22,10 +22,9 @@ use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipelineSet, PipelineConfig};
-use nalgebra as na;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, Vec3};
+use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::SmallVec;
@@ -60,6 +59,8 @@ use vk_wrapper::{
 pub struct Renderer {
     scene: Scene,
     active_camera: Camera,
+    prev_camera_pos: DVec3,
+    relative_camera_pos: DVec3,
 
     surface: Arc<Surface>,
     swapchain: Option<Swapchain>,
@@ -207,7 +208,7 @@ struct CameraInfo {
 #[repr(C)]
 struct PerFrameInfo {
     camera: CameraInfo,
-    atlas_info: na::Vector4<u32>,
+    atlas_info: U32Vec4,
 }
 
 pub(crate) struct Renderable {
@@ -246,14 +247,14 @@ pub struct MaterialInfo {
     pub(crate) specular_tex_id: u32,
     pub(crate) normal_tex_id: u32,
     pub _pad: u32,
-    pub(crate) diffuse: na::Vector4<f32>,
-    pub(crate) specular: na::Vector4<f32>,
-    pub(crate) emission: na::Vector4<f32>,
+    pub(crate) diffuse: Vec4,
+    pub(crate) specular: Vec4,
+    pub(crate) emission: Vec4,
 }
 
 pub enum MatComponent {
     Texture(u16),
-    Color(na::Vector4<f32>),
+    Color(Vec4),
 }
 
 impl MaterialInfo {
@@ -261,7 +262,7 @@ impl MaterialInfo {
         diffuse: MatComponent,
         specular: MatComponent,
         normal_tex_id: u16,
-        emission: na::Vector4<f32>,
+        emission: Vec4,
     ) -> MaterialInfo {
         let mut info = MaterialInfo {
             diffuse_tex_id: 0,
@@ -288,19 +289,19 @@ impl MaterialInfo {
 
 #[repr(C)]
 struct DepthPyramidConstants {
-    out_size: na::Vector2<f32>,
+    out_size: Vec2,
 }
 
 #[repr(C)]
 struct CullObject {
-    sphere: na::Vector4<f32>,
+    sphere: Vec4,
     id: u32,
     _pad: [u32; 3],
 }
 
 #[repr(C)]
 struct CullConstants {
-    pyramid_size: na::Vector2<f32>,
+    pyramid_size: Vec2,
     max_pyramid_levels: u32,
     object_count: u32,
 }
@@ -311,6 +312,8 @@ pub const MAX_OBJECT_COUNT: u32 = 65535;
 pub const MAX_MATERIAL_COUNT: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
 pub const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
+
+const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
 const PIPELINE_DEPTH_READ: u32 = 0;
 const PIPELINE_DEPTH_READ_WRITE: u32 = 1;
@@ -740,6 +743,8 @@ impl Renderer {
         let mut renderer = Renderer {
             scene,
             active_camera,
+            prev_camera_pos: Default::default(),
+            relative_camera_pos: Default::default(),
             surface: Arc::clone(surface),
             swapchain: None,
             surface_changed: false,
@@ -1090,17 +1095,20 @@ impl Renderer {
 
     fn on_update(&mut self) {
         let t0 = Instant::now();
-        let mut camera = *self.active_camera();
-        let mut global_transform = self.scene.global_transform();
+        let camera = *self.active_camera();
+        let camera_pos_diff = camera.position() - self.prev_camera_pos;
+
+        self.relative_camera_pos += camera_pos_diff;
+        self.prev_camera_pos = camera.position();
 
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
-        if camera.position().magnitude() >= 4096.0 {
-            global_transform.position -= glm::convert::<Vec3, DVec3>(camera.position());
+        if self.relative_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
+            let mut global_transform = self.scene.global_transform();
+            global_transform.position -= self.relative_camera_pos;
             self.scene.set_global_transform(global_transform);
 
-            camera.set_position(Vec3::default());
-            self.active_camera = camera;
+            self.relative_camera_pos = DVec3::default();
         }
 
         let mut buffer_updates = vec![];
@@ -1136,7 +1144,7 @@ impl Renderer {
             parent_comps: self.scene.storage::<Parent>(),
             children_comps: self.scene.storage::<Children>(),
             transform_comps: self.scene.storage::<component::Transform>(),
-            world_transform_comps: self.scene.storage::<WorldTransform>(),
+            global_transform_comps: self.scene.storage::<GlobalTransform>(),
             ordered_entities: &mut self.ordered_entities,
         };
 
@@ -1154,9 +1162,9 @@ impl Renderer {
         let t11 = Instant::now();
         let systems_t = (t11 - t00).as_secs_f64();
 
-        let mut world_transform_events_system = system::WorldTransformEvents {
+        let mut global_transform_events_system = system::GlobalTransformEvents {
             uniform_buffer_updates: &mut uniform_buffers_updates,
-            world_transform_comps: self.scene.storage::<WorldTransform>(),
+            global_transform_comps: self.scene.storage::<GlobalTransform>(),
             renderer_comps: self.scene.storage::<component::RenderConfig>(),
             renderables: &self.renderables,
         };
@@ -1180,7 +1188,7 @@ impl Renderer {
         };
 
         rayon::scope(|s| {
-            s.spawn(|_| world_transform_events_system.run());
+            s.spawn(|_| global_transform_events_system.run());
             s.spawn(|_| buffer_update_system.run());
             s.spawn(|_| commit_buffer_updates_system.run())
         });
@@ -1194,15 +1202,15 @@ impl Renderer {
         // -------------------------------------------------------------------------------------------------------------
         {
             let per_frame_info = {
-                let cam_pos = camera.position();
+                let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
                 let cam_dir = camera.direction();
                 let proj = camera.projection();
-                let view = camera.view();
+                let view = camera::create_view_matrix(glm::convert(cam_pos), camera.rotation());
 
                 PerFrameInfo {
                     camera: CameraInfo {
-                        pos: Vector4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
-                        dir: Vector4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                        pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                        dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
                         proj,
                         view,
                         proj_view: proj * view,
@@ -1210,7 +1218,7 @@ impl Renderer {
                         fovy: camera.fovy(),
                         _pad: [0.0; 2],
                     },
-                    atlas_info: na::Vector4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
+                    atlas_info: U32Vec4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
                 }
             };
 
@@ -1272,13 +1280,20 @@ impl Renderer {
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
-        let world_transform_comps = self.scene.storage_read::<WorldTransform>();
+        let global_transform_comps = self.scene.storage_read::<GlobalTransform>();
         let renderer_comps = self.scene.storage_read::<component::RenderConfig>();
 
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
+
+        let proj_mat = self.active_camera.projection();
+        let view_mat = camera::create_view_matrix(
+            glm::convert(self.relative_camera_pos),
+            self.active_camera.rotation(),
+        );
+        let frustum = Frustum::new(proj_mat * view_mat);
 
         self.depth_secondary_cls
             .par_iter()
@@ -1304,7 +1319,7 @@ impl Renderer {
 
                     let renderable_id = self.ordered_entities[entity_index];
 
-                    let transform = world_transform_comps.get(renderable_id);
+                    let transform = global_transform_comps.get(renderable_id);
                     if transform.is_none() {
                         continue;
                     }
@@ -1319,7 +1334,7 @@ impl Renderer {
                         continue;
                     }
 
-                    let transform = transform.unwrap();
+                    let global_transform = transform.unwrap();
                     let renderer = renderer.unwrap();
                     let vertex_mesh = vertex_mesh.unwrap();
 
@@ -1328,15 +1343,15 @@ impl Renderer {
                     }
 
                     let sphere = vertex_mesh.sphere();
-                    let center = sphere.center() + transform.position_f32();
-                    let radius = sphere.radius() * glm::comp_max(&transform.scale);
+                    let center = sphere.center() + global_transform.position_f32();
+                    let radius = sphere.radius() * global_transform.scale.max();
 
-                    if !renderer.visible || !self.active_camera.is_sphere_visible(&center, radius) {
+                    if !renderer.visible || !frustum.is_sphere_visible(&center, radius) {
                         continue;
                     }
 
                     curr_cull_objects.push(CullObject {
-                        sphere: na::Vector4::new(center.x, center.y, center.z, radius),
+                        sphere: Vec4::new(center.x, center.y, center.z, radius),
                         id: entity_index as u32,
                         _pad: [0; 3],
                     });
@@ -1485,7 +1500,7 @@ impl Renderer {
                 cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
 
                 let constants = DepthPyramidConstants {
-                    out_size: na::Vector2::new(out_size.0 as f32, out_size.1 as f32),
+                    out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
                 };
                 cl.push_constants(&self.depth_pyramid_signature, &constants);
 
@@ -1548,7 +1563,7 @@ impl Renderer {
 
             let pyramid_size = depth_pyramid_image.size_2d();
             let constants = CullConstants {
-                pyramid_size: na::Vector2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
+                pyramid_size: Vec2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
                 max_pyramid_levels: depth_pyramid_image.mip_levels(),
                 object_count: frustum_visible_objects,
             };

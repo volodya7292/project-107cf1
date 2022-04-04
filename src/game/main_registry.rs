@@ -5,9 +5,10 @@ use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
+use crate::physics::AABB;
 use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
 use engine::resource_file::ResourceFile;
-use nalgebra_glm::{U64Vec3, Vec3};
+use nalgebra_glm::{DVec3, U64Vec3, Vec3};
 use std::default::Default;
 use std::sync::Arc;
 
@@ -46,10 +47,10 @@ impl MainRegistry {
 
         // Block models
         // ----------------------------------------------------------------------------------------------------
-        let cube_model = reg.register_block_model(BlockModel::new(&block_model::cube_quads(
-            Vec3::from_element(0.0),
-            Vec3::from_element(1.0),
-        )));
+        let cube_model = reg.register_block_model(BlockModel::new(
+            &block_model::cube_quads(Vec3::from_element(0.0), Vec3::from_element(1.0)),
+            &[AABB::new(DVec3::from_element(0.0), DVec3::from_element(1.0))],
+        ));
 
         let cluster_layout = reg.cluster_layout_mut();
 

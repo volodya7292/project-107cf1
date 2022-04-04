@@ -1,21 +1,21 @@
 use crate::ecs::component;
-use crate::ecs::component::internal::{Children, Parent, WorldTransform};
+use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene_storage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 
-// Propagates transform hierarchy and calculates world transforms
+// Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {
     pub parent_comps: scene_storage::LockedStorage<'a, Parent>,
     pub children_comps: scene_storage::LockedStorage<'a, Children>,
     pub transform_comps: scene_storage::LockedStorage<'a, component::Transform>,
-    pub world_transform_comps: scene_storage::LockedStorage<'a, WorldTransform>,
+    pub global_transform_comps: scene_storage::LockedStorage<'a, GlobalTransform>,
     pub ordered_entities: &'a mut Vec<Entity>,
 }
 
 struct StackEntry {
     entity: Entity,
-    parent_world_transform_changed: bool,
-    parent_world_transform: WorldTransform,
+    parent_global_transform_changed: bool,
+    parent_global_transform: GlobalTransform,
 }
 
 impl HierarchyPropagation<'_> {
@@ -23,7 +23,7 @@ impl HierarchyPropagation<'_> {
         let parent_comps = self.parent_comps.read();
         let children_comps = self.children_comps.read();
         let mut transform_comps = self.transform_comps.write();
-        let mut world_transform_comps = self.world_transform_comps.write();
+        let mut global_transform_comps = self.global_transform_comps.write();
         let mut stack = Vec::<StackEntry>::with_capacity(transform_comps.len());
 
         // Collect global parents
@@ -31,8 +31,8 @@ impl HierarchyPropagation<'_> {
         let entities = transform_comps.entries().difference(&parent_comps);
         stack.extend(entities.iter().map(|e| StackEntry {
             entity: e,
-            parent_world_transform_changed: false,
-            parent_world_transform: Default::default(),
+            parent_global_transform_changed: false,
+            parent_global_transform: Default::default(),
         }));
 
         self.ordered_entities.clear();
@@ -40,8 +40,8 @@ impl HierarchyPropagation<'_> {
         // Recursion using loop
         while let Some(StackEntry {
             entity,
-            parent_world_transform_changed: parent_transform_changed,
-            parent_world_transform,
+            parent_global_transform_changed: parent_transform_changed,
+            parent_global_transform,
         }) = stack.pop()
         {
             // Maybe this entity is dead (was removed but not removed from parent's `Children` component)
@@ -51,18 +51,18 @@ impl HierarchyPropagation<'_> {
 
             self.ordered_entities.push(entity);
 
-            let world_transform_changed = parent_transform_changed || transform_comps.was_modified(entity);
+            let global_transform_changed = parent_transform_changed || transform_comps.was_modified(entity);
 
-            let world_transform = if world_transform_changed {
+            let global_transform = if global_transform_changed {
                 let model_transform = transform_comps.get(entity).unwrap();
 
-                let new_world_transform: WorldTransform =
-                    parent_world_transform.combine(model_transform).into();
+                let new_global_transform: GlobalTransform =
+                    parent_global_transform.combine(model_transform).into();
 
-                world_transform_comps.set(entity, new_world_transform);
-                new_world_transform
+                global_transform_comps.set(entity, new_global_transform);
+                new_global_transform
             } else {
-                *world_transform_comps.get(entity).unwrap()
+                *global_transform_comps.get(entity).unwrap()
             };
 
             if let Some(children) = children_comps.get(entity) {
@@ -70,8 +70,8 @@ impl HierarchyPropagation<'_> {
                 // to preserve the right order of insertion to `ordered_entities`
                 stack.extend(children.children.iter().rev().map(|e| StackEntry {
                     entity: *e,
-                    parent_world_transform_changed: world_transform_changed,
-                    parent_world_transform: world_transform,
+                    parent_global_transform_changed: global_transform_changed,
+                    parent_global_transform: global_transform,
                 }));
             }
         }

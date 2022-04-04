@@ -1,6 +1,8 @@
 pub mod ecs;
 pub mod renderer;
 pub mod resource_file;
+#[cfg(test)]
+mod tests;
 pub mod utils;
 
 use crate::renderer::Renderer;
@@ -24,7 +26,7 @@ pub struct Engine {
 
 pub trait Application {
     fn on_start(&mut self, renderer: &mut Renderer);
-    fn on_update(&mut self, delta_time: f32, renderer: &mut Renderer, background_thread_pool: &ThreadPool);
+    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, background_thread_pool: &ThreadPool);
     fn on_event(&mut self, event: winit::event::Event<()>);
 }
 
@@ -82,8 +84,7 @@ impl Engine {
             Event::MainEventsCleared => {
                 self.render_tp.install(|| {
                     self.app
-                        .on_update(self.delta_time as f32, &mut self.renderer, &self.update_tp);
-                    // TODO: handle physics here
+                        .on_update(self.delta_time, &mut self.renderer, &self.update_tp);
                     self.renderer.on_draw();
                 });
             }

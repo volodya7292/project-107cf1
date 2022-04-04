@@ -7,16 +7,21 @@ pub mod structure;
 pub mod textured_block_model;
 
 use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::block::Block;
+use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, Cluster};
 use crate::game::overworld::structure::world::World;
 use crate::game::overworld::structure::Structure;
+use crate::game::overworld_streamer;
 use engine::utils::value_noise::ValueNoise;
-use engine::utils::{HashMap, Int};
+use engine::utils::{HashMap, Int, MO_RELAXED};
 use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, Vec3};
+use nalgebra_glm::{I64Vec3, U32Vec3, Vec3};
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::Rng;
+use std::cell::RefCell;
+use std::collections::hash_map;
 use std::sync::atomic::AtomicU8;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 // TODO Main world - 'The Origin'
 
@@ -51,8 +56,10 @@ pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
     value_noise: ValueNoise<u64>,
-    pub loaded_clusters: HashMap<I64Vec3, Arc<OverworldCluster>>,
+    loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
 }
+
+pub struct BlockDataGuard {}
 
 impl Overworld {
     pub fn new(registry: &Arc<MainRegistry>, seed: u64) -> Overworld {
@@ -62,6 +69,14 @@ impl Overworld {
             value_noise: ValueNoise::new(seed),
             loaded_clusters: Default::default(),
         }
+    }
+
+    pub fn main_registry(&self) -> &Arc<MainRegistry> {
+        &self.main_registry
+    }
+
+    pub fn loaded_clusters(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>> {
+        &self.loaded_clusters
     }
 
     fn get_world(&self, center_pos: I64Vec3) -> World {
@@ -94,7 +109,7 @@ impl Overworld {
     /// `cluster_pos` is a cluster position of level `self.cluster_level`.
     pub fn gen_structure_pos(&self, structure: &Structure, cluster_pos: I64Vec3) -> (I64Vec3, bool) {
         let structure_fit_size = cluster::size(structure.cluster_level());
-        let octant_pos = cluster_pos.map(|v| v.div_floor(structure.avg_spacing() as i64));
+        let octant_pos = cluster_pos.map(|v| v.div_euclid(structure.avg_spacing() as i64));
         let octant_pos_u64 = octant_pos.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
         let octant_size = structure.avg_spacing() * structure_fit_size;
 
@@ -166,6 +181,96 @@ impl Overworld {
 
     pub fn load_cluster(&self) {
         todo!()
+    }
+
+    pub fn clusters(&self) -> OverworldClusters {
+        OverworldClusters {
+            loaded_clusters: self.loaded_clusters.read(),
+        }
+    }
+}
+
+pub struct OverworldClusters<'a> {
+    loaded_clusters: RwLockReadGuard<'a, HashMap<I64Vec3, Arc<OverworldCluster>>>,
+}
+
+impl OverworldClusters<'_> {
+    pub fn access(&self) -> ClustersAccessCache {
+        ClustersAccessCache {
+            loaded_clusters: &self.loaded_clusters,
+            clusters_cache: HashMap::with_capacity(32),
+        }
+    }
+}
+
+pub enum AccessGuard<'a> {
+    Read(RwLockReadGuard<'a, Cluster>),
+    Write(RwLockWriteGuard<'a, Cluster>),
+}
+
+impl AccessGuard<'_> {
+    #[inline]
+    pub fn get(&self, pos: U32Vec3) -> BlockData {
+        match self {
+            AccessGuard::Read(g) => g.get(pos),
+            AccessGuard::Write(g) => g.get(pos),
+        }
+    }
+
+    #[inline]
+    pub fn set(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
+        match self {
+            AccessGuard::Write(g) => g.set(pos, block),
+            _ => unreachable!(),
+        }
+    }
+}
+
+pub struct ClustersAccessCache<'a> {
+    loaded_clusters: &'a HashMap<I64Vec3, Arc<OverworldCluster>>,
+    clusters_cache: HashMap<I64Vec3, AccessGuard<'a>>,
+}
+
+impl<'a> ClustersAccessCache<'a> {
+    /// Returns block data or `None` if respective cluster is not loaded
+    pub fn get_block(&mut self, pos: I64Vec3) -> Option<BlockData> {
+        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
+        let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
+
+        match self.clusters_cache.entry(cluster_pos) {
+            hash_map::Entry::Vacant(e) => {
+                let cluster = self.loaded_clusters.get(&cluster_pos)?;
+
+                if cluster.state.load(MO_RELAXED) != CLUSTER_STATE_LOADED {
+                    return None;
+                }
+
+                Some(e.insert(AccessGuard::Read(cluster.cluster.read())).get(block_pos))
+            }
+            hash_map::Entry::Occupied(e) => Some(e.into_mut().get(block_pos)),
+        }
+    }
+
+    /// Returns block builder or `None` if respective cluster is not loaded
+    pub fn set_block(&mut self, pos: I64Vec3, block: Block) -> Option<BlockDataBuilder> {
+        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
+        let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
+
+        match self.clusters_cache.entry(cluster_pos) {
+            hash_map::Entry::Vacant(e) => {
+                let cluster = self.loaded_clusters.get(&cluster_pos)?;
+
+                if cluster.state.load(MO_RELAXED) != CLUSTER_STATE_LOADED {
+                    return None;
+                }
+
+                Some(
+                    e.insert(AccessGuard::Write(cluster.cluster.try_write()?))
+                        .set(block_pos, block),
+                )
+            }
+            hash_map::Entry::Occupied(e) => Some(e.into_mut().set(block_pos, block)),
+        }
     }
 }
 

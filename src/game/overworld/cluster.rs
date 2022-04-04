@@ -145,7 +145,7 @@ impl Sector {
         self.changed
     }
 
-    fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
+    fn set_block(&mut self, pos: U32Vec3, block: Block, occluder: Occluder) -> BlockDataBuilder {
         let pos: TVec3<usize> = glm::convert(pos);
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
         if *entity_id != EntityId::NULL {
@@ -153,9 +153,8 @@ impl Sector {
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
 
-        if !block.is_empty() {
-            self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] =
-                Occluder::new(true, true, true, true, true, true); // TODO
+        if block.has_textured_model() {
+            self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = occluder;
         }
 
         let mut side_changed = self.side_changed;
@@ -168,7 +167,7 @@ impl Sector {
 
         self.occupied_cells.set(
             pos.z * SECTOR_SIZE * SECTOR_SIZE + pos.y * SECTOR_SIZE + pos.z,
-            !block.is_empty(),
+            block.has_textured_model(),
         );
         self.blocks[pos.x][pos.y][pos.z] = block;
         self.side_changed = side_changed;
@@ -435,8 +434,10 @@ impl Cluster {
         }
 
         let sector = self.sectors.get(block_pos_to_sector_index(pos)).unwrap();
-        let block = sector.blocks[pos.x as usize][pos.y as usize][pos.z as usize];
-        let entity = sector.block_map[pos.x as usize][pos.y as usize][pos.z as usize];
+
+        let s_pos = pos.map(|v| v % (SECTOR_SIZE as u32));
+        let block = sector.blocks[s_pos.x as usize][s_pos.y as usize][s_pos.z as usize];
+        let entity = sector.block_map[s_pos.x as usize][s_pos.y as usize][s_pos.z as usize];
 
         BlockData {
             sector,
@@ -457,8 +458,10 @@ impl Cluster {
         }
 
         let sector = self.sectors.get_mut(block_pos_to_sector_index(pos)).unwrap();
-        let block = sector.blocks[pos.x as usize][pos.y as usize][pos.z as usize];
-        let entity = sector.block_map[pos.x as usize][pos.y as usize][pos.z as usize];
+
+        let s_pos = pos.map(|v| v % (SECTOR_SIZE as u32));
+        let block = sector.blocks[s_pos.x as usize][s_pos.y as usize][s_pos.z as usize];
+        let entity = sector.block_map[s_pos.x as usize][s_pos.y as usize][s_pos.z as usize];
 
         BlockDataMut {
             sector,
@@ -479,7 +482,6 @@ impl Cluster {
         }
 
         let sector = self.sectors.get_mut(block_pos_to_sector_index(pos)).unwrap();
-        let pos = pos.map(|v| v % (SECTOR_SIZE as u32));
 
         self.changed = true;
         self.side_changed[0] |= pos.x == 0;
@@ -489,7 +491,18 @@ impl Cluster {
         self.side_changed[4] |= pos.z == 0;
         self.side_changed[5] |= pos.z == (SIZE - 1) as u32;
 
-        sector.set_block(pos, block)
+        let occluder = if block.has_textured_model() {
+            let model = self
+                .registry
+                .get_textured_block_model(block.textured_model())
+                .unwrap();
+            model.occluder()
+        } else {
+            Occluder::default()
+        };
+
+        let s_pos = pos.map(|v| v % (SECTOR_SIZE as u32));
+        sector.set_block(s_pos, block, occluder)
     }
 
     pub fn clean_outer_side_occlusion(&mut self, facing: Facing) {
@@ -958,7 +971,7 @@ impl Cluster {
                     let posf: Vec3 = glm::convert(pos);
                     let block = &sector.blocks[x][y][z];
 
-                    if block.is_empty() {
+                    if !block.has_textured_model() {
                         continue;
                     }
 
@@ -984,10 +997,10 @@ impl Cluster {
                                 v[1].position += posf;
                                 v[2].position += posf;
                                 v[3].position += posf;
-                                v[0].normal = glm::vec3(1.0, 1.0, 0.0);
-                                v[1].normal = glm::vec3(0.0, 1.0, 1.0);
-                                v[2].normal = glm::vec3(1.0, 0.0, 1.0);
-                                v[3].normal = glm::vec3(1.0, 0.0, 0.0);
+                                // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
+                                // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
+                                // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
+                                // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
                                 v[0].ao = sector.calculate_ao(pos, v[0].position, facing);
                                 v[1].ao = sector.calculate_ao(pos, v[1].position, facing);
                                 v[2].ao = sector.calculate_ao(pos, v[2].position, facing);

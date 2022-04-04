@@ -8,7 +8,8 @@ use std::{fmt, io};
 
 use crate::utils::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -122,7 +123,7 @@ impl ResourceFile {
             },
         };
         {
-            let mut buf_reader = res_file.buf_reader.lock().unwrap();
+            let mut buf_reader = res_file.buf_reader.lock();
             let header_size = buf_reader.read_u32::<LittleEndian>()?;
             Self::read_entries_full(&mut buf_reader, header_size, &mut res_file.main_entry)?;
         }
@@ -143,7 +144,7 @@ impl ResourceFile {
     }
 
     fn read_range(&self, range: (u64, u64)) -> Result<Vec<u8>, Error> {
-        let mut buf_reader = self.buf_reader.lock().unwrap();
+        let mut buf_reader = self.buf_reader.lock();
 
         buf_reader.seek(SeekFrom::Start(range.0))?;
         let mut data = vec![0u8; range.1 as usize];

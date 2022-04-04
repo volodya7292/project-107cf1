@@ -4,8 +4,10 @@ pub mod overworld_streamer;
 pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld_streamer::OverworldStreamer;
 use crate::material_pipelines;
+use crate::physics::AABB;
 use engine::ecs::scene::Scene;
 use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
@@ -13,7 +15,7 @@ use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
 use engine::Application;
 use nalgebra_glm as glm;
-use nalgebra_glm::DVec3;
+use nalgebra_glm::{DVec3, I64Vec3};
 use overworld::Overworld;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -33,20 +35,23 @@ pub struct Game {
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
 
+    overworld: Overworld,
     overworld_streamer: Option<Arc<Mutex<OverworldStreamer>>>,
 
     player_pos: DVec3,
+    player_aabb: AABB,
     change_stream_pos: bool,
 }
 
 impl Game {
-    const MOVEMENT_SPEED: f32 = 32.0;
-    const MOUSE_SENSITIVITY: f32 = 0.003;
+    const MOVEMENT_SPEED: f64 = 4.0;
+    const MOUSE_SENSITIVITY: f64 = 0.003;
 
     pub fn init() -> Game {
         let resources = ResourceFile::open("resources").unwrap();
         let main_registry = MainRegistry::init(&resources);
         let game_tick_finished = Arc::new(AtomicBool::new(true));
+        let overworld = Overworld::new(&main_registry, 0);
 
         let program = Game {
             resources,
@@ -54,8 +59,10 @@ impl Game {
             pressed_keys: Default::default(),
             cursor_rel: (0, 0),
             game_tick_finished: Arc::clone(&game_tick_finished),
+            overworld,
             overworld_streamer: None,
             player_pos: Default::default(),
+            player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             change_stream_pos: true,
         };
         program
@@ -82,19 +89,24 @@ impl Application for Game {
             }
         }
 
-        let overworld = Overworld::new(&self.registry, 0);
-        let mut overworld_streamer =
-            OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), overworld);
+        renderer
+            .active_camera_mut()
+            .set_position(DVec3::new(0.0, 64.0, 0.0));
+
+        let mut overworld_streamer = OverworldStreamer::new(
+            &self.registry,
+            renderer,
+            mat_pipelines.cluster(),
+            self.overworld.loaded_clusters(),
+        );
 
         overworld_streamer.set_xz_render_distance(1024);
         overworld_streamer.set_y_render_distance(256);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
-        // overworld_streamer.update(&mut overworld);
-        // overworld_streamer.update_renderer(&mut overworld);
     }
 
-    fn on_update(&mut self, delta_time: f32, renderer: &mut Renderer, background_tp: &ThreadPool) {
+    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, background_tp: &ThreadPool) {
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
@@ -120,29 +132,71 @@ impl Application for Game {
 
         {
             let camera = renderer.active_camera_mut();
+            let ms = Self::MOVEMENT_SPEED * delta_time;
+            let mut motion_delta = DVec3::from_element(0.0);
 
-            let ms = Self::MOVEMENT_SPEED * delta_time as f32;
-
-            let mut pos = camera.position();
-            pos.y += vel_up_down as f32 * ms;
-
-            camera.set_position(pos);
-            camera.move2(vel_front_back as f32 * ms, vel_left_right as f32 * ms);
-
-            let mut rotation = camera.rotation();
+            // Handle rotation
             let cursor_offset = (
-                self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY,
-                self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY,
+                self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY as f32,
+                self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY as f32,
             );
 
+            let mut rotation = camera.rotation();
             rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
             rotation.y += cursor_offset.0;
 
             camera.set_rotation(rotation);
 
-            self.player_pos = glm::convert(pos);
+            // Handle translation
+            motion_delta.y += vel_up_down as f64 * ms;
+            motion_delta += engine::utils::camera_move_xz(
+                camera.rotation(),
+                vel_front_back as f64 * ms,
+                vel_left_right as f64 * ms,
+            );
+
+            let overworld = &self.overworld;
+            let new_pos = overworld.move_entity(camera.position(), motion_delta, &self.player_aabb);
+
+            camera.set_position(new_pos);
+
+            self.player_pos = camera.position();
             self.cursor_rel = (0, 0);
             // dbg!(self.player_pos);
+        }
+
+        // Physics
+        {
+            let camera = renderer.active_camera_mut();
+            let overworld = &self.overworld;
+
+            // let new_player_pos =
+
+            // let delta = overworld.calc_collision_delta(&self.player_aabb.translate(self.player_pos));
+
+            // println!("BEFORE DELTA: {}", camera.position());
+            // camera.set_position(camera.position() - delta);
+            // self.player_pos = camera.position();
+
+            // println!("{}", delta);
+            // println!("AFTER DELTA: {}", camera.position());
+
+            let clusters = overworld.clusters();
+            let mut a = clusters.access();
+
+            if let Some(a) = a.set_block(I64Vec3::new(0, 60, 0), self.registry.block_default()) {
+                a.build();
+            }
+            if let Some(a) = a.set_block(I64Vec3::new(1, 60, 0), self.registry.block_default()) {
+                a.build();
+            }
+
+            // let b = a.get_block(
+            //     glm::try_convert::<DVec3, I64Vec3>(camera.position().map(|v| v.div_euclid(1.0))).unwrap(),
+            // );
+            // if let Some(b) = b {
+            //     println!("{} {}", b.block().archetype(), b.block().has_texture_model());
+            // }
         }
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
@@ -151,6 +205,7 @@ impl Application for Game {
 
             {
                 let mut streamer = streamer.lock();
+
                 let t0 = Instant::now();
                 streamer.update_renderer(renderer);
                 let t1 = Instant::now();

@@ -7,6 +7,7 @@ pub mod value_noise;
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra as na;
+use nalgebra_glm::{DVec3, Vec3};
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
 
@@ -43,10 +44,7 @@ pub trait UInt {
     fn log2(&self) -> Self;
 }
 
-pub trait Int {
-    // FIXME (unstable_name_collisions): remove this function when the standard one is stabilized
-    fn div_floor(&self, other: Self) -> Self;
-}
+pub trait Int {}
 
 macro_rules! uint_impl {
     ($($t: ty)*) => ($(
@@ -61,16 +59,7 @@ macro_rules! uint_impl {
 macro_rules! int_impl {
     ($($t: ty)*) => ($(
         impl Int for $t {
-            #[inline]
-            fn div_floor(&self, other: Self) -> Self {
-                let d = self / other;
-                let r = self % other;
-                if (r > 0 && other < 0) || (r < 0 && other > 0) {
-                    d - 1
-                } else {
-                    d
-                }
-            }
+
         }
     )*)
 }
@@ -114,6 +103,16 @@ impl<I: Iterator> AllSameBy<I> for I {
     }
 }
 
+pub fn calc_triangle_area(
+    v0: &na::Vector3<f32>,
+    v1: &na::Vector3<f32>,
+    v2: &na::Vector3<f32>,
+) -> na::Vector3<f32> {
+    let side0 = v1 - v0;
+    let side1 = v2 - v0;
+    side0.cross(&side1) / 2.0
+}
+
 pub fn calc_triangle_normal(
     v0: &na::Vector3<f32>,
     v1: &na::Vector3<f32>,
@@ -122,6 +121,13 @@ pub fn calc_triangle_normal(
     let side0 = v1 - v0;
     let side1 = v2 - v0;
     side0.cross(&side1).normalize()
+}
+
+pub fn camera_move_xz(rotation: Vec3, front_back: f64, left_right: f64) -> DVec3 {
+    let d = DVec3::new((-rotation.y).sin() as f64, 0.0, (-rotation.y).cos() as f64);
+    let mut motion_delta = -d * (front_back as f64);
+    motion_delta -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * (left_right) as f64;
+    motion_delta
 }
 
 /// Calculate interpolated normals using neighbour triangles.

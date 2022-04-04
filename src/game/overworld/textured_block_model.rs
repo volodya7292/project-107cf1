@@ -1,5 +1,7 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{BlockModel, ContentType, Vertex};
+use crate::game::overworld::cluster::Occluder;
+use crate::physics::AABB;
 use nalgebra_glm::Vec2;
 use std::ops::Range;
 
@@ -64,7 +66,8 @@ pub struct TexturedBlockModel {
     vertices: Vec<Vertex>,
     side_quad_vertices: [Range<usize>; 6],
     inner_quad_vertices: Range<usize>,
-    occluded_sides: [bool; 6],
+    occluder: Occluder,
+    aabbs: Vec<AABB>,
 }
 
 impl TexturedBlockModel {
@@ -72,24 +75,27 @@ impl TexturedBlockModel {
         let mut model = TexturedBlockModel {
             content_type: block_model.content_type(),
             vertices: vec![],
-            side_quad_vertices: block_model.side_quads.clone(),
-            inner_quad_vertices: block_model.inner_quads.clone(),
-            occluded_sides: block_model.occluded_sides.clone(),
+            side_quad_vertices: block_model.side_quads_range(),
+            inner_quad_vertices: block_model.inner_quads_range(),
+            occluder: block_model.occluder(),
+            aabbs: block_model.aabbs().to_vec(),
         };
 
         model.vertices = block_model
-            .quads
+            .all_quads()
             .iter()
             .zip(quad_materials)
             .flat_map(|(quad, q_mat)| {
                 let material_id = q_mat.material_id as u32;
+                let vertices = quad.vertices();
+                let normal = engine::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
 
                 quad.vertices()
                     .iter()
                     .zip(&q_mat.texture_uv.0)
                     .map(move |(p, uv)| Vertex {
                         position: *p,
-                        normal: Default::default(), // TODO
+                        normal,
                         tex_uv: *uv,
                         ao: 0.0,
                         material_id,
@@ -115,5 +121,14 @@ impl TexturedBlockModel {
     pub fn get_inner_quads(&self) -> &[Vertex] {
         let range = self.inner_quad_vertices.clone();
         &self.vertices[range]
+    }
+
+    pub fn occluder(&self) -> Occluder {
+        // TODO: account for texture transparency
+        self.occluder
+    }
+
+    pub fn aabbs(&self) -> &[AABB] {
+        &self.aabbs
     }
 }

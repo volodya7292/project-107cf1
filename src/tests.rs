@@ -1,6 +1,9 @@
+use crate::game::overworld::block_model;
+use crate::game::overworld::block_model::Quad;
+use approx::{abs_diff_eq, assert_abs_diff_eq, AbsDiff};
 use engine::vertex_impl;
 use nalgebra as na;
-use nalgebra_glm::I32Vec3;
+use nalgebra_glm::{I32Vec3, Vec3};
 
 #[derive(Default, Copy, Clone, PartialEq)]
 struct Vertex {
@@ -60,6 +63,18 @@ fn cluster_facing() {
     assert_eq!(Facing::PositiveY.mirror(), Facing::NegativeY);
     assert_eq!(Facing::NegativeZ.mirror(), Facing::PositiveZ);
     assert_eq!(Facing::PositiveZ.mirror(), Facing::NegativeZ);
+}
+
+#[test]
+fn calc_block_quad_area() {
+    let quad = Quad::new([
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(1.0, 1.0, 0.0),
+    ]);
+
+    assert_abs_diff_eq!(quad.area(), 1.0, epsilon = 1e-7);
 }
 
 // fn test_vertex_mesh(device: &Arc<vkw::Device>) {

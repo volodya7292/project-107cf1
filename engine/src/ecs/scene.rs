@@ -1,5 +1,5 @@
 use crate::ecs::component;
-use crate::ecs::component::internal::{Children, Parent, WorldTransform};
+use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::component::Transform;
 use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{
@@ -27,7 +27,7 @@ impl Scene {
         scene.prepare_storage::<Parent>();
         scene.prepare_storage::<Children>();
         scene.prepare_storage::<component::Transform>().emit_events(true);
-        scene.prepare_storage::<WorldTransform>().emit_events(true);
+        scene.prepare_storage::<GlobalTransform>().emit_events(true);
         scene
             .prepare_storage::<component::RenderConfig>()
             .emit_events(true);

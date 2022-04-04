@@ -11,12 +11,12 @@ use engine::renderer::Renderer;
 use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec};
 use std::collections::hash_map;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
 
@@ -29,7 +29,7 @@ pub struct OverworldStreamer {
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
-    overworld: Overworld,
+    overworld_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
     rclusters: HashMap<I64Vec3, RCluster>,
     clusters_to_remove: Vec<scene::Entity>,
     clusters_to_add: Vec<I64Vec3>,
@@ -191,7 +191,7 @@ fn cluster_update_worker(
             let lock0 = cluster0.cluster.try_read();
             let lock1 = cluster1.cluster.try_write();
 
-            if lock0.is_ok() && lock1.is_ok() {
+            if lock0.is_some() && lock1.is_some() {
                 let cluster = lock0.unwrap();
                 let mut side_cluster = lock1.unwrap();
 
@@ -223,7 +223,7 @@ impl OverworldStreamer {
         registry: &Arc<MainRegistry>,
         re: &Renderer,
         cluster_mat_pipeline: u32,
-        overworld: Overworld,
+        overworld_clusters: &Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
     ) -> Self {
         Self {
             device: Arc::clone(re.device()),
@@ -232,7 +232,7 @@ impl OverworldStreamer {
             stream_pos: Default::default(),
             xz_render_distance: 128,
             y_render_distance: 128,
-            overworld,
+            overworld_clusters: Arc::clone(&overworld_clusters),
             rclusters: Default::default(),
             clusters_to_remove: Default::default(),
             clusters_to_add: Default::default(),
@@ -265,7 +265,7 @@ impl OverworldStreamer {
         let device = &self.device;
         let stream_pos = self.stream_pos;
         let rclusters = &mut self.rclusters;
-        let oclusters = &mut self.overworld.loaded_clusters;
+        let oclusters = &self.overworld_clusters;
         let clusters_to_remove = &mut self.clusters_to_remove;
         let clusters_to_add = &mut self.clusters_to_add;
 
@@ -282,7 +282,7 @@ impl OverworldStreamer {
 
                 do_preserve
             });
-            oclusters.retain(|p, ocl| {
+            oclusters.write().retain(|p, ocl| {
                 let in_layout = rclusters.contains_key(p);
                 let mut do_preserve = false;
 
@@ -334,6 +334,7 @@ impl OverworldStreamer {
 
         // Generate clusters
         {
+            let mut oclusters = oclusters.write();
             let max_clusters_in_process = 64;
             let registry = self.main_registry.registry();
 
@@ -371,7 +372,7 @@ impl OverworldStreamer {
                         return;
                     }
 
-                    generator::generate_cluster(&mut ocluster.cluster.write().unwrap(), &main_registry, pos);
+                    generator::generate_cluster(&mut ocluster.cluster.write(), &main_registry, pos);
 
                     // Note: use CAS to account for DISCARDED state
                     let _ = ocluster.state.compare_exchange(
@@ -385,6 +386,7 @@ impl OverworldStreamer {
             }
         }
 
+        let oclusters = oclusters.read();
         let oclusters_states: HashMap<_, _> = oclusters
             .iter()
             .map(|(p, v)| (p, v.state.load(MO_RELAXED)))
@@ -399,7 +401,7 @@ impl OverworldStreamer {
                 }
                 let rcluster = &rclusters[pos];
 
-                let cluster = ocluster.cluster.read().unwrap();
+                let cluster = ocluster.cluster.read();
                 let cluster_changed = cluster.changed();
                 if !cluster_changed {
                     return;
@@ -489,7 +491,7 @@ impl OverworldStreamer {
                 let process_count = Arc::clone(&process_count);
                 let receiver = side_occlusion_work.1.clone();
                 let sender = side_occlusion_work.0.clone();
-                cluster_update_worker(process_count, receiver, sender, rclusters, oclusters);
+                cluster_update_worker(process_count, receiver, sender, rclusters, &oclusters);
             });
 
             // Finally, update clusters meshes
@@ -500,7 +502,7 @@ impl OverworldStreamer {
                     && oclusters_states[pos] == CLUSTER_STATE_LOADED
                     && rcluster.needs_occlusion_fill.load(MO_RELAXED) == 0
                 {
-                    let mut cluster = ocluster.cluster.write().unwrap();
+                    let mut cluster = ocluster.cluster.write();
 
                     cluster.update_mesh();
                     rcluster.mesh_changed.store(true, MO_RELAXED);
@@ -542,10 +544,10 @@ impl OverworldStreamer {
         }
 
         // Update meshes
-        for (pos, ocluster) in &self.overworld.loaded_clusters {
+        for (pos, ocluster) in self.overworld_clusters.read().iter() {
             let rcluster = &self.rclusters[pos];
             if rcluster.mesh_changed.swap(false, MO_RELAXED) {
-                let cluster = ocluster.cluster.read().unwrap();
+                let cluster = ocluster.cluster.read();
                 let mesh = cluster.vertex_mesh();
                 vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
                 // rcluster.mesh_available.store(true, atomic::Ordering::Relaxed);

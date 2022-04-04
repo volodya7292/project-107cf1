@@ -1,5 +1,7 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster;
+use crate::game::overworld::cluster::Occluder;
+use crate::physics::AABB;
 use approx::AbsDiffEq;
 use engine::renderer::vertex_mesh::VertexPositionImpl;
 use engine::vertex_impl;
@@ -59,12 +61,22 @@ pub struct Quad {
 }
 
 impl Quad {
+    /// Creates a new quad. Vertices must be ordered in triangle strip manner (Z).
     pub fn new(vertices: [Vec3; 4]) -> Quad {
         Quad { vertices }
     }
 
     pub fn vertices(&self) -> &[Vec3; 4] {
         &self.vertices
+    }
+
+    /// May return 0 if vertices are ordered incorrectly
+    pub fn area(&self) -> f32 {
+        let d0 = self.vertices[0] - self.vertices[1];
+        let d1 = self.vertices[2] - self.vertices[1];
+        let d2 = self.vertices[3] - self.vertices[1];
+
+        (d0.cross(&d1) + d1.cross(&d2)).magnitude() / 2.0
     }
 }
 
@@ -102,10 +114,11 @@ impl ContentType {
 
 pub struct BlockModel {
     content_type: ContentType,
-    pub(crate) quads: Vec<Quad>,
-    pub(crate) side_quads: [Range<usize>; 6],
-    pub(crate) inner_quads: Range<usize>,
-    pub(crate) occluded_sides: [bool; 6],
+    quads: Vec<Quad>,
+    side_quads_range: [Range<usize>; 6],
+    inner_quads_range: Range<usize>,
+    occluder: Occluder,
+    aabbs: Vec<AABB>,
 }
 
 fn determine_quad_side(quad: &Quad) -> Option<Facing> {
@@ -135,14 +148,19 @@ fn determine_quad_side(quad: &Quad) -> Option<Facing> {
     }
 }
 
+fn quad_occludes_side(quad: &Quad) -> bool {
+    quad.area().abs_diff_eq(&1.0, 1e-7)
+}
+
 impl BlockModel {
-    pub fn new(quads: &[Quad]) -> BlockModel {
+    pub fn new(quads: &[Quad], aabbs: &[AABB]) -> BlockModel {
         let mut model = BlockModel {
             content_type: Default::default(),
             quads: vec![],
-            side_quads: Default::default(),
-            inner_quads: Default::default(),
-            occluded_sides: Default::default(),
+            side_quads_range: Default::default(),
+            inner_quads_range: Default::default(),
+            occluder: Default::default(),
+            aabbs: aabbs.to_vec(),
         };
 
         let mut inner_quads = Vec::<Quad>::new();
@@ -153,19 +171,23 @@ impl BlockModel {
 
             if let Some(facing) = facing {
                 side_quads[facing as usize].push(*quad);
+
+                if quad_occludes_side(quad) {
+                    model.occluder.occlude_side(facing);
+                }
             } else {
                 inner_quads.push(*quad);
             }
         }
 
-        model.inner_quads = 0..inner_quads.len();
+        model.inner_quads_range = 0..inner_quads.len();
         model.quads.extend(inner_quads);
 
-        let mut offset = model.inner_quads.end;
+        let mut offset = model.inner_quads_range.end;
 
         for i in 0..6 {
             let end = offset + side_quads[i].len();
-            model.side_quads[i] = offset..end;
+            model.side_quads_range[i] = offset..end;
             model.quads.extend(&side_quads[i]);
             offset = end;
         }
@@ -177,17 +199,33 @@ impl BlockModel {
         self.content_type
     }
 
-    pub fn occludes_side(&self, facing: Facing) -> bool {
-        self.occluded_sides[facing as usize]
+    pub fn occluder(&self) -> Occluder {
+        self.occluder
     }
 
     pub fn get_quads_by_facing(&self, facing: Facing) -> &[Quad] {
-        let range = self.side_quads[facing as usize].clone();
+        let range = self.side_quads_range[facing as usize].clone();
         &self.quads[range]
     }
 
     pub fn get_inner_quads(&self) -> &[Quad] {
-        let range = self.inner_quads.clone();
+        let range = self.inner_quads_range.clone();
         &self.quads[range]
+    }
+
+    pub fn aabbs(&self) -> &[AABB] {
+        return &self.aabbs;
+    }
+
+    pub fn all_quads(&self) -> &[Quad] {
+        &self.quads
+    }
+
+    pub fn inner_quads_range(&self) -> Range<usize> {
+        self.inner_quads_range.clone()
+    }
+
+    pub fn side_quads_range(&self) -> [Range<usize>; 6] {
+        self.side_quads_range.clone()
     }
 }
