@@ -14,7 +14,7 @@ use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec};
-use std::collections::hash_map;
+use std::collections::{hash_map, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Arc;
 use std::time::Instant;
@@ -35,8 +35,6 @@ pub struct OverworldStreamer {
     clusters_entities_to_remove: Vec<scene::Entity>,
     clusters_entities_to_add: Vec<I64Vec3>,
     curr_loading_clusters_n: Arc<AtomicU32>,
-    // TODO: implement cluster caching (using `unused_clusters`) to avoid creating a new one every time
-    unused_clusters: Arc<Mutex<Vec<Cluster>>>,
     loaded_clusters_to_add: Arc<Mutex<Vec<(I64Vec3, Arc<OverworldCluster>)>>>,
 }
 
@@ -242,7 +240,6 @@ impl OverworldStreamer {
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
             curr_loading_clusters_n: Arc::new(Default::default()),
-            unused_clusters: Default::default(),
             loaded_clusters_to_add: Default::default(),
         }
     }
@@ -291,6 +288,11 @@ impl OverworldStreamer {
 
                 do_preserve
             });
+
+            oclusters
+                .write()
+                .extend(self.loaded_clusters_to_add.lock().drain(..));
+
             oclusters.write().retain(|p, ocl| {
                 let in_layout = rclusters.contains_key(p);
                 let mut do_preserve = false;
@@ -315,9 +317,6 @@ impl OverworldStreamer {
 
                 do_preserve
             });
-            oclusters
-                .write()
-                .extend(self.loaded_clusters_to_add.lock().drain(..));
 
             for p in &layout {
                 if let hash_map::Entry::Vacant(e) = rclusters.entry(*p) {
@@ -409,7 +408,6 @@ impl OverworldStreamer {
             }
 
             drop(oclusters_r);
-
             oclusters.write().extend(oclusters_to_add);
         }
 

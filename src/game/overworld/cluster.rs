@@ -378,7 +378,6 @@ impl BlockDataBuilder<'_> {
 pub struct Cluster {
     registry: Arc<Registry>,
     sectors: [Sector; VOLUME_IN_SECTORS],
-    entry_size: u32,
     changed: bool,
     side_changed: [bool; 6],
     device: Arc<vkw::Device>,
@@ -394,16 +393,11 @@ impl Cluster {
         Self {
             registry: Arc::clone(registry),
             sectors: sectors.try_into().ok().unwrap(),
-            entry_size: 1,
             changed: false,
             side_changed: [false; 6],
             device,
             vertex_mesh: Default::default(),
         }
-    }
-
-    pub fn entry_size(&self) -> u32 {
-        self.entry_size
     }
 
     /// Returns whether the cluster has been changed since the previous `Cluster::update_mesh()` call.
@@ -553,9 +547,8 @@ impl Cluster {
 
     pub fn paste_outer_side_occlusion(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let so = side_offset;
-        let sc_size = SIZE as i32 * side_cluster.entry_size as i32;
-        let self_size = SIZE as i32 * self.entry_size as i32;
-        let b = so.map(|v| v == -sc_size || v == self_size);
+        let size = SIZE as i32;
+        let b = so.map(|v| v == -size || v == size);
 
         if glm::all(&b) {
             self.paste_outer_side_occlusion_corner(side_cluster, so);
@@ -613,104 +606,31 @@ impl Cluster {
             TVec3::new(x, y, z)
         }
 
-        let lb = -(SIZE as i32 * side_cluster.entry_size as i32);
-        let rb = SIZE as i32 * self.entry_size as i32;
+        let lb = -(SIZE as i32);
+        let rb = SIZE as i32;
 
         // Direction towards side cluster
         let dir = side_offset.map(|v| (v == rb) as i32 - (v == lb) as i32);
         let facing = Facing::from_direction(dir).unwrap();
         let facing_m = facing.mirror();
 
-        if side_cluster.entry_size == self.entry_size {
-            for i in 0..SIZE_IN_SECTORS {
-                for j in 0..SIZE_IN_SECTORS {
-                    let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
-                    let src_sector =
-                        &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
+        for i in 0..SIZE_IN_SECTORS {
+            for j in 0..SIZE_IN_SECTORS {
+                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
+                let src_sector =
+                    &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
 
-                    for k in 0..SECTOR_SIZE {
-                        for l in 0..SECTOR_SIZE {
-                            let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
-                            let src_p = map_pos(-dir, k, l, SECTOR_SIZE - 1).add_scalar(1);
+                for k in 0..SECTOR_SIZE {
+                    for l in 0..SECTOR_SIZE {
+                        let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
+                        let src_p = map_pos(-dir, k, l, SECTOR_SIZE - 1).add_scalar(1);
 
-                            dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                                src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                        }
+                        dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
+                            src_sector.occluders[src_p.x][src_p.y][src_p.z];
                     }
-
-                    dst_sector.changed = true;
                 }
-            }
-        } else if side_cluster.entry_size == (self.entry_size / 2) {
-            let dabs = dir.abs();
-            let is = (side_offset.x * dabs.z + side_offset.x * dabs.y + side_offset.y * dabs.x) as u32
-                / self.entry_size
-                / SECTOR_SIZE as u32;
-            let js = (side_offset.y * dabs.z + side_offset.z * dabs.y + side_offset.z * dabs.x) as u32
-                / self.entry_size
-                / SECTOR_SIZE as u32;
 
-            for i in 0..SIZE_IN_SECTORS {
-                for j in 0..SIZE_IN_SECTORS {
-                    let dst_sector = &mut self.sectors
-                        [sector_index(map_sector_pos(dir, is + i as u32 / 2, js + j as u32 / 2))];
-                    let src_sector =
-                        &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
-
-                    let ks = (i % 2) * SECTOR_SIZE / 2;
-                    let ls = (j % 2) * SECTOR_SIZE / 2;
-
-                    for k in (0..SECTOR_SIZE).step_by(2) {
-                        for l in (0..SECTOR_SIZE).step_by(2) {
-                            let dst_p = map_pos(dir, ks + k / 2 + 1, ls + l / 2 + 1, ALIGNED_SECTOR_SIZE - 1);
-                            let mut occluder = Occluder::default();
-                            occluder.occlude_side(facing_m);
-
-                            for k2 in 0..2 {
-                                for l2 in 0..2 {
-                                    let src_p = map_pos(-dir, k + k2, l + l2, SECTOR_SIZE - 1).add_scalar(1);
-                                    occluder &= src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                                }
-                            }
-
-                            dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] = occluder;
-                        }
-                    }
-
-                    dst_sector.changed = true;
-                }
-            }
-        } else if side_cluster.entry_size == (self.entry_size * 2) {
-            let dabs = dir.abs();
-            let is = (side_offset.x * dabs.z + side_offset.x * dabs.y + side_offset.y * dabs.x).abs() as u32
-                / side_cluster.entry_size
-                / SECTOR_SIZE as u32;
-            let js = (side_offset.y * dabs.z + side_offset.z * dabs.y + side_offset.z * dabs.x).abs() as u32
-                / side_cluster.entry_size
-                / SECTOR_SIZE as u32;
-
-            for i in 0..SIZE_IN_SECTORS {
-                for j in 0..SIZE_IN_SECTORS {
-                    let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
-                    let src_sector = &side_cluster.sectors
-                        [sector_index(map_sector_pos(-dir, is + i as u32 / 2, js + j as u32 / 2))];
-
-                    let ks = (i % 2) * SECTOR_SIZE / 2;
-                    let ls = (j % 2) * SECTOR_SIZE / 2;
-
-                    // Note: 0..(SECTOR_SIZE + 1) : added 1 to compensate for lower-lod edges and corners.
-                    for k in 0..(SECTOR_SIZE + 1) {
-                        for l in 0..(SECTOR_SIZE + 1) {
-                            let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
-                            let src_p = map_pos(-dir, ks + k / 2, ls + l / 2, SECTOR_SIZE - 1).add_scalar(1);
-
-                            dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                                src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                        }
-                    }
-
-                    dst_sector.changed = true;
-                }
+                dst_sector.changed = true;
             }
         }
 
@@ -726,77 +646,22 @@ impl Cluster {
             m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
         }
 
-        let m =
-            side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32 * self.entry_size as i32) as i32);
+        let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
         let n = -m;
 
-        if side_cluster.entry_size == self.entry_size {
-            for i in 0..SIZE_IN_SECTORS {
-                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
-                let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
+        for i in 0..SIZE_IN_SECTORS {
+            let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
+            let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
 
-                for k in 0..SECTOR_SIZE {
-                    let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
-                    let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
+            for k in 0..SECTOR_SIZE {
+                let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
+                let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
 
-                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                        src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                }
-
-                dst_sector.changed = true;
+                dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
+                    src_sector.occluders[src_p.x][src_p.y][src_p.z];
             }
-        } else if side_cluster.entry_size == (self.entry_size / 2) {
-            let abs = m.map(|v| (v == 0) as i32);
-            let is = (side_offset.x * abs.x + side_offset.y * abs.y + side_offset.z * abs.z)
-                / self.entry_size as i32
-                / SECTOR_SIZE as i32;
 
-            for i in 0..SIZE_IN_SECTORS {
-                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, is as u32 + i as u32 / 2))];
-                let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
-                let ks = (i % 2) * SECTOR_SIZE / 2;
-
-                for k in (0..SECTOR_SIZE).step_by(2) {
-                    let dst_p = map_pos(m, ks + k / 2 + 1, ALIGNED_SECTOR_SIZE - 1);
-                    let src_p = map_pos(n, k, SECTOR_SIZE - 2).add_scalar(1);
-                    let mut occluder = Occluder::full();
-
-                    for x in 0..2 {
-                        for y in 0..2 {
-                            for z in 0..2 {
-                                let src_p = src_p + glm::vec3(x, y, z);
-                                occluder &= src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                            }
-                        }
-                    }
-
-                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] = occluder;
-                }
-
-                dst_sector.changed = true;
-            }
-        } else if side_cluster.entry_size == (self.entry_size * 2) {
-            let abs = m.map(|v| (v == 0) as i32);
-            let is = (side_offset.x * abs.x + side_offset.y * abs.y + side_offset.z * abs.z)
-                / side_cluster.entry_size as i32
-                / SECTOR_SIZE as i32;
-
-            for i in 0..SIZE_IN_SECTORS {
-                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
-                let src_sector =
-                    &side_cluster.sectors[sector_index(map_sector_pos(n, is as u32 + i as u32 / 2))];
-                let ks = (i % 2) * SECTOR_SIZE / 2;
-
-                for k in 0..SECTOR_SIZE {
-                    let dst_p = map_pos(m, k, ALIGNED_SECTOR_SIZE - 1);
-                    let src_p = map_pos(n, ks + k / 2, SECTOR_SIZE - 1).add_scalar(1);
-
-                    dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                        src_sector.occluders[src_p.x][src_p.y][src_p.z];
-                }
-
-                dst_sector.changed = true;
-            }
+            dst_sector.changed = true;
         }
 
         self.changed = true;
@@ -810,33 +675,13 @@ impl Cluster {
         let dst_sector_pos = m * (SIZE_IN_SECTORS - 1) as u32;
         let dst_sector = &mut self.sectors[sector_index(dst_sector_pos)];
 
-        if side_cluster.entry_size == self.entry_size || side_cluster.entry_size == (self.entry_size * 2) {
-            let src_pos = (n * (SECTOR_SIZE - 1) as u32).add_scalar(1);
-            let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
-            let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
+        let src_pos = (n * (SECTOR_SIZE - 1) as u32).add_scalar(1);
+        let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
+        let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
 
-            dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] =
-                src_sector.occluders[src_pos.x as usize][src_pos.y as usize][src_pos.z as usize];
-            dst_sector.changed = true;
-        } else if side_cluster.entry_size == (self.entry_size / 2) {
-            let src_p = (n * (SECTOR_SIZE - 2) as u32).add_scalar(1);
-            let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
-            let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
-            let mut occluder = Occluder::full();
-
-            for x in 0..2 {
-                for y in 0..2 {
-                    for z in 0..2 {
-                        let src_p = src_p + U32Vec3::new(x, y, z);
-                        occluder &=
-                            src_sector.occluders[src_p.x as usize][src_p.y as usize][src_p.z as usize];
-                    }
-                }
-            }
-
-            dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] = occluder;
-            dst_sector.changed = true;
-        }
+        dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] =
+            src_sector.occluders[src_pos.x as usize][src_pos.y as usize][src_pos.z as usize];
+        dst_sector.changed = true;
 
         self.changed = true;
     }
@@ -953,14 +798,12 @@ impl Cluster {
     fn triangulate(&mut self, sector_index: usize) {
         let sector = &mut self.sectors[sector_index];
         let sector_pos: TVec3<f32> = glm::convert(sector_pos(sector_index) * (SECTOR_SIZE as u32));
-        let scale = self.entry_size as f32;
 
         sector.cache_vertices = Vec::<PackedVertex>::with_capacity(SECTOR_VOLUME * 8);
 
-        fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, scale: f32, vertices: &[Vertex]) {
+        fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
                 v.position += pos;
-                v.position *= scale;
                 v.pack()
             }));
         }
@@ -981,7 +824,7 @@ impl Cluster {
                         .get_textured_block_model(block.textured_model())
                         .unwrap();
 
-                    add_vertices(&mut sector.cache_vertices, posf, scale, model.get_inner_quads());
+                    add_vertices(&mut sector.cache_vertices, posf, model.get_inner_quads());
 
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
@@ -1019,7 +862,6 @@ impl Cluster {
 
                                 for j in 0..4 {
                                     v[j].position += sector_pos;
-                                    v[j].position *= scale;
                                 }
 
                                 sector.cache_vertices.extend(v.map(|v| v.pack()));

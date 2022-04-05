@@ -9,7 +9,6 @@ use noise::Seedable;
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 
 pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos: I64Vec3) {
-    let entry_size = cluster.entry_size();
     let noise = noise::SuperSimplex::new().set_seed(0);
 
     // NoiseBuilder::cellular2_2d_offset().generate().
@@ -34,8 +33,7 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
         for y in 0..cluster::SIZE {
             for z in 0..cluster::SIZE {
                 let xyz = U32Vec3::new(x as u32, y as u32, z as u32);
-                let posf: DVec3 =
-                    glm::convert(glm::convert::<U32Vec3, I64Vec3>(xyz) * (entry_size as i64) + pos);
+                let posf: DVec3 = glm::convert(glm::convert::<U32Vec3, I64Vec3>(xyz) + pos);
 
                 let n = sample(posf, 0.05);
                 let n = (n + 2.0) * ((posf.y - 30.0) / 128.0);
