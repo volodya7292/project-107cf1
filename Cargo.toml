@@ -31,10 +31,13 @@ winit = "0.26"
 approx = "0.5"
 entity_data = "1.0"
 smallvec = "1.6"
-parking_lot = { version = "0.12", features = ["arc_lock"] }
+parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 
 [build-dependencies]
 common = { path = "common" }
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.dev.package."basis-universal-sys"]
 opt-level = 3

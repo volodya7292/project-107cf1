@@ -62,12 +62,16 @@ impl ClusterState {
     }
 }
 
+pub struct Clusters {
+    pub loaded_clusters: HashMap<I64Vec3, Arc<OverworldCluster>>,
+    pub clusters_states: HashMap<I64Vec3, Arc<ClusterState>>,
+}
+
 pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
     value_noise: ValueNoise<u64>,
-    loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
-    clusters_states: Arc<RwLock<HashMap<I64Vec3, Arc<ClusterState>>>>,
+    clusters: Arc<RwLock<Clusters>>,
 }
 
 pub struct BlockDataGuard {}
@@ -78,8 +82,10 @@ impl Overworld {
             seed,
             main_registry: Arc::clone(registry),
             value_noise: ValueNoise::new(seed),
-            loaded_clusters: Default::default(),
-            clusters_states: Default::default(),
+            clusters: Arc::new(RwLock::new(Clusters {
+                loaded_clusters: Default::default(),
+                clusters_states: Default::default(),
+            })),
         }
     }
 
@@ -87,12 +93,8 @@ impl Overworld {
         &self.main_registry
     }
 
-    pub fn loaded_clusters(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>> {
-        &self.loaded_clusters
-    }
-
-    pub fn clusters_states(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<ClusterState>>>> {
-        &self.clusters_states
+    pub fn clusters(&self) -> &Arc<RwLock<Clusters>> {
+        &self.clusters
     }
 
     fn get_world(&self, center_pos: I64Vec3) -> World {
@@ -199,24 +201,18 @@ impl Overworld {
         todo!()
     }
 
-    pub fn clusters(&self) -> OverworldClusters {
-        OverworldClusters {
-            loaded_clusters: self.loaded_clusters.read(),
-            clusters_states: self.clusters_states.read(),
-        }
+    pub fn clusters_read(&self) -> ClustersRead {
+        ClustersRead(self.clusters.read())
     }
 }
 
-pub struct OverworldClusters<'a> {
-    loaded_clusters: RwLockReadGuard<'a, HashMap<I64Vec3, Arc<OverworldCluster>>>,
-    clusters_states: RwLockReadGuard<'a, HashMap<I64Vec3, Arc<ClusterState>>>,
-}
+pub struct ClustersRead<'a>(RwLockReadGuard<'a, Clusters>);
 
-impl OverworldClusters<'_> {
+impl ClustersRead<'_> {
     pub fn access(&self) -> ClustersAccessCache {
         ClustersAccessCache {
-            loaded_clusters: &self.loaded_clusters,
-            cluster_states: &self.clusters_states,
+            loaded_clusters: &self.0.loaded_clusters,
+            cluster_states: &self.0.clusters_states,
             clusters_cache: HashMap::with_capacity(32),
         }
     }

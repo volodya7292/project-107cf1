@@ -2,7 +2,7 @@ use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::{
-    cluster, generator, ClusterState, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED,
+    cluster, generator, ClusterState, Clusters, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED,
     CLUSTER_STATE_INITIAL, CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING,
 };
 use crossbeam_channel as cb;
@@ -14,7 +14,7 @@ use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec};
-use std::collections::{hash_map, VecDeque};
+use std::collections::hash_map;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,8 +29,7 @@ pub struct OverworldStreamer {
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
-    overworld_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
-    clusters_states: Arc<RwLock<HashMap<I64Vec3, Arc<ClusterState>>>>,
+    overworld_clusters: Arc<RwLock<Clusters>>,
     rclusters: HashMap<I64Vec3, RCluster>,
     clusters_entities_to_remove: Vec<scene::Entity>,
     clusters_entities_to_add: Vec<I64Vec3>,
@@ -234,8 +233,7 @@ impl OverworldStreamer {
             stream_pos: Default::default(),
             xz_render_distance: 128,
             y_render_distance: 128,
-            overworld_clusters: Arc::clone(overworld.loaded_clusters()),
-            clusters_states: Arc::clone(overworld.clusters_states()),
+            overworld_clusters: Arc::clone(overworld.clusters()),
             rclusters: Default::default(),
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
@@ -275,7 +273,9 @@ impl OverworldStreamer {
 
         // Add/remove clusters
         {
-            let clusters_states = self.clusters_states.read();
+            let oclusters = &mut *oclusters.write();
+            let loaded_clusters = &mut oclusters.loaded_clusters;
+            let clusters_states = &mut oclusters.clusters_states;
 
             rclusters.retain(|p, rcl| {
                 let in_layout = layout.contains(p);
@@ -289,11 +289,9 @@ impl OverworldStreamer {
                 do_preserve
             });
 
-            oclusters
-                .write()
-                .extend(self.loaded_clusters_to_add.lock().drain(..));
+            loaded_clusters.extend(self.loaded_clusters_to_add.lock().drain(..));
 
-            oclusters.write().retain(|p, ocl| {
+            loaded_clusters.retain(|p, _| {
                 let in_layout = rclusters.contains_key(p);
                 let mut do_preserve = false;
 
@@ -347,9 +345,8 @@ impl OverworldStreamer {
 
         // Generate clusters
         {
-            let mut oclusters_r = oclusters.read();
-            let mut clusters_states = self.clusters_states.write();
-            let mut oclusters_to_add = Vec::with_capacity(sorted_layout.len());
+            let mut oclusters = oclusters.write();
+            let oclusters_to_add = Vec::with_capacity(sorted_layout.len());
             let max_clusters_in_process = 64;
 
             for p in &sorted_layout {
@@ -360,7 +357,7 @@ impl OverworldStreamer {
                     continue;
                 }
 
-                let cl_state = clusters_states.entry(p.pos).or_insert_with(|| {
+                let cl_state = oclusters.clusters_states.entry(p.pos).or_insert_with(|| {
                     Arc::new(ClusterState {
                         state: AtomicU8::new(CLUSTER_STATE_INITIAL),
                     })
@@ -407,19 +404,20 @@ impl OverworldStreamer {
                 });
             }
 
-            drop(oclusters_r);
-            oclusters.write().extend(oclusters_to_add);
+            oclusters.loaded_clusters.extend(oclusters_to_add);
         }
 
-        let clusters_states = self.clusters_states.read();
-        let oclusters = oclusters.read();
-        let preloaded_clusters_states: HashMap<_, _> =
-            clusters_states.iter().map(|(p, v)| (*p, v.state())).collect();
+        let oclusters = self.overworld_clusters.read();
+        let preloaded_clusters_states: HashMap<_, _> = oclusters
+            .clusters_states
+            .iter()
+            .map(|(p, v)| (*p, v.state()))
+            .collect();
 
         // Generate meshes
         {
             // Mark changes
-            oclusters.par_iter().for_each(|(pos, ocluster)| {
+            oclusters.loaded_clusters.par_iter().for_each(|(pos, ocluster)| {
                 if preloaded_clusters_states[pos] != CLUSTER_STATE_LOADED {
                     return;
                 }
@@ -461,9 +459,9 @@ impl OverworldStreamer {
             });
 
             // Collect changes
-            let side_occlusion_work = cb::bounded::<ClusterSidePair>(oclusters.len() * 26);
+            let side_occlusion_work = cb::bounded::<ClusterSidePair>(oclusters.loaded_clusters.len() * 26);
 
-            for pos in oclusters.keys() {
+            for pos in oclusters.loaded_clusters.keys() {
                 if preloaded_clusters_states[pos] != CLUSTER_STATE_LOADED {
                     continue;
                 }
@@ -494,7 +492,8 @@ impl OverworldStreamer {
                 }
 
                 let ready_to_update = side_clusters.iter().all(|p| {
-                    oclusters.contains_key(p) && preloaded_clusters_states[p] == CLUSTER_STATE_LOADED
+                    oclusters.loaded_clusters.contains_key(p)
+                        && preloaded_clusters_states[p] == CLUSTER_STATE_LOADED
                 });
 
                 if ready_to_update {
@@ -515,11 +514,17 @@ impl OverworldStreamer {
                 let process_count = Arc::clone(&process_count);
                 let receiver = side_occlusion_work.1.clone();
                 let sender = side_occlusion_work.0.clone();
-                cluster_update_worker(process_count, receiver, sender, rclusters, &oclusters);
+                cluster_update_worker(
+                    process_count,
+                    receiver,
+                    sender,
+                    rclusters,
+                    &oclusters.loaded_clusters,
+                );
             });
 
             // Finally, update clusters meshes
-            oclusters.par_iter().for_each(|(pos, ocluster)| {
+            oclusters.loaded_clusters.par_iter().for_each(|(pos, ocluster)| {
                 let rcluster = &rclusters[pos];
 
                 if rcluster.changed.load(MO_RELAXED)
@@ -568,7 +573,7 @@ impl OverworldStreamer {
         }
 
         // Update meshes
-        for (pos, ocluster) in self.overworld_clusters.read().iter() {
+        for (pos, ocluster) in self.overworld_clusters.read().loaded_clusters.iter() {
             let rcluster = &self.rclusters[pos];
             if rcluster.mesh_changed.swap(false, MO_RELAXED) {
                 let cluster = ocluster.cluster.read();

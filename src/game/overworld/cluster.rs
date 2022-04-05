@@ -606,13 +606,8 @@ impl Cluster {
             TVec3::new(x, y, z)
         }
 
-        let lb = -(SIZE as i32);
-        let rb = SIZE as i32;
-
         // Direction towards side cluster
-        let dir = side_offset.map(|v| (v == rb) as i32 - (v == lb) as i32);
-        let facing = Facing::from_direction(dir).unwrap();
-        let facing_m = facing.mirror();
+        let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
 
         for i in 0..SIZE_IN_SECTORS {
             for j in 0..SIZE_IN_SECTORS {

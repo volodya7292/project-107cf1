@@ -1,8 +1,7 @@
-use crate::game::overworld::cluster::{BlockDataImpl, Cluster};
+use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld::Overworld;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
-use smallvec::SmallVec;
+use nalgebra_glm::{DVec3, I64Vec3};
 
 #[derive(Debug, Copy, Clone)]
 pub struct AABB {
@@ -52,10 +51,11 @@ impl AABB {
             {
                 continue;
             }
+            // Note: add 1e-10 to collision delta to account for f64 precision errors
             if other.min[i] >= self.min[i] {
-                delta[i] = (other.min[i] - self.max[i]).min(0.0);
+                delta[i] = (other.min[i] - self.max[i] - 1e-10).min(0.0);
             } else {
-                delta[i] = (other.max[i] - self.min[i]).max(0.0);
+                delta[i] = (other.max[i] - self.min[i] + 1e-10).max(0.0);
             }
         }
 
@@ -89,7 +89,7 @@ impl Overworld {
         let size: I64Vec3 = glm::try_convert(glm::ceil(&global_obj_aabb.size()).add_scalar(1.0)).unwrap();
 
         let reg = self.main_registry().registry();
-        let mut clusters = self.clusters();
+        let clusters = self.clusters_read();
         let mut access = clusters.access();
         let mut blocks_aabbs = Vec::<AABB>::with_capacity((size.x * size.y * size.z) as usize * 2);
 

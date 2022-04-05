@@ -6,14 +6,14 @@ pub mod registry;
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::material_pipelines;
 use crate::physics::AABB;
+use crate::{material_pipelines, utils, PROGRAM_NAME};
 use engine::ecs::scene::Scene;
 use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
-use engine::Application;
+use engine::{Application, Input};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
 use overworld::Overworld;
@@ -24,13 +24,16 @@ use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
-use winit::event::{Event, VirtualKeyCode};
+use vk_wrapper::Adapter;
+use winit::event::VirtualKeyCode;
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::{Fullscreen, Window, WindowBuilder};
+
+const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
     registry: Arc<MainRegistry>,
-
-    pressed_keys: HashSet<winit::event::VirtualKeyCode>,
 
     cursor_rel: (i32, i32),
     game_tick_finished: Arc<AtomicBool>,
@@ -41,6 +44,8 @@ pub struct Game {
     player_pos: DVec3,
     player_aabb: AABB,
     change_stream_pos: bool,
+    player_collision_enabled: bool,
+    cursor_grab: bool,
 }
 
 impl Game {
@@ -56,7 +61,6 @@ impl Game {
         let program = Game {
             resources,
             registry: main_registry,
-            pressed_keys: Default::default(),
             cursor_rel: (0, 0),
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
@@ -64,17 +68,44 @@ impl Game {
             player_pos: Default::default(),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             change_stream_pos: true,
+            player_collision_enabled: true,
+            cursor_grab: true,
         };
         program
-    }
-
-    pub fn is_key_pressed(&self, keycode: winit::event::VirtualKeyCode) -> bool {
-        self.pressed_keys.contains(&keycode)
     }
 }
 
 impl Application for Game {
-    fn on_start(&mut self, renderer: &mut Renderer) {
+    fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window {
+        let window = WindowBuilder::new()
+            .with_title(PROGRAM_NAME)
+            .with_inner_size(winit::dpi::PhysicalSize::new(
+                DEF_WINDOW_SIZE.0,
+                DEF_WINDOW_SIZE.1,
+            ))
+            .with_resizable(true)
+            .build(event_loop)
+            .unwrap();
+
+        // Center the window
+        let win_size = window.outer_size();
+        let mon_size = window.current_monitor().unwrap().size();
+        window.set_outer_position(winit::dpi::PhysicalPosition {
+            x: (mon_size.width as i32 - win_size.width as i32) / 2,
+            y: (mon_size.height as i32 - win_size.height as i32) / 2,
+        });
+
+        window.set_cursor_grab(self.cursor_grab).unwrap();
+        window.set_cursor_visible(!self.cursor_grab);
+
+        window
+    }
+
+    fn on_adapter_select(&mut self, _adapters: &[Arc<Adapter>]) -> usize {
+        0
+    }
+
+    fn on_engine_initialized(&mut self, renderer: &mut Renderer) {
         let mat_pipelines;
         {
             mat_pipelines = material_pipelines::create(&self.resources, renderer);
@@ -102,27 +133,36 @@ impl Application for Game {
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
     }
 
-    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, background_tp: &ThreadPool) {
+    fn on_update(
+        &mut self,
+        delta_time: f64,
+        renderer: &mut Renderer,
+        input: &mut Input,
+        background_tp: &ThreadPool,
+    ) {
+        println!("{}", delta_time);
+
+        let kb = input.keyboard();
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
 
-        if self.is_key_pressed(VirtualKeyCode::W) {
+        if kb.is_key_pressed(VirtualKeyCode::W) {
             vel_front_back += 1;
         }
-        if self.is_key_pressed(VirtualKeyCode::S) {
+        if kb.is_key_pressed(VirtualKeyCode::S) {
             vel_front_back -= 1;
         }
-        if self.is_key_pressed(VirtualKeyCode::A) {
+        if kb.is_key_pressed(VirtualKeyCode::A) {
             vel_left_right -= 1;
         }
-        if self.is_key_pressed(VirtualKeyCode::D) {
+        if kb.is_key_pressed(VirtualKeyCode::D) {
             vel_left_right += 1;
         }
-        if self.is_key_pressed(VirtualKeyCode::Space) {
+        if kb.is_key_pressed(VirtualKeyCode::Space) {
             vel_up_down += 1;
         }
-        if self.is_key_pressed(VirtualKeyCode::LShift) {
+        if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
         }
 
@@ -154,44 +194,32 @@ impl Application for Game {
             let overworld = &self.overworld;
             let new_pos = overworld.move_entity(camera.position(), motion_delta, &self.player_aabb);
 
-            camera.set_position(new_pos);
+            if self.player_collision_enabled {
+                camera.set_position(new_pos);
+            } else {
+                camera.set_position(camera.position() + motion_delta);
+            }
 
             self.player_pos = camera.position();
             self.cursor_rel = (0, 0);
-            // dbg!(self.player_pos);
         }
 
-        // Physics
         {
-            let camera = renderer.active_camera_mut();
             let overworld = &self.overworld;
-
-            // let new_player_pos =
-
-            // let delta = overworld.calc_collision_delta(&self.player_aabb.translate(self.player_pos));
-
-            // println!("BEFORE DELTA: {}", camera.position());
-            // camera.set_position(camera.position() - delta);
-            // self.player_pos = camera.position();
-
-            // println!("{}", delta);
-            // println!("AFTER DELTA: {}", camera.position());
-
-            let clusters = overworld.clusters();
+            let clusters = overworld.clusters_read();
             let mut a = clusters.access();
 
-            if let Some(a) = a.set_block(I64Vec3::new(0, 60, 0), self.registry.block_default()) {
+            if let Some(a) = a.set_block(I64Vec3::new(-2, 63, -5), self.registry.block_default()) {
                 a.build();
             }
-            if let Some(a) = a.set_block(I64Vec3::new(1, 60, 0), self.registry.block_default()) {
-                a.build();
-            }
-
+            // if let Some(a) = a.set_block(I64Vec3::new(1, 60, 0), self.registry.block_default()) {
+            //     a.build();
+            // }
             // let b = a.get_block(
-            //     glm::try_convert::<DVec3, I64Vec3>(camera.position().map(|v| v.div_euclid(1.0))).unwrap(),
+            //     glm::try_convert::<DVec3, I64Vec3>(self.player_pos.map(|v| v.div_euclid(1.0))).unwrap(),
             // );
             // if let Some(b) = b {
-            //     println!("{} {}", b.block().archetype(), b.block().has_texture_model());
+            //     println!("{} {}", b.block().archetype(), b.block().has_textured_model());
             // }
         }
 
@@ -223,30 +251,58 @@ impl Application for Game {
         }
     }
 
-    fn on_event(&mut self, event: Event<()>) {
+    fn on_event(
+        &mut self,
+        event: winit::event::Event<()>,
+        main_window: &Window,
+        control_flow: &mut ControlFlow,
+    ) {
         use winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
         match event {
-            Event::WindowEvent { window_id: _, event } => match event {
+            Event::WindowEvent {
+                window_id: _window_id,
+                event,
+            } => match event {
                 WindowEvent::KeyboardInput {
                     device_id: _,
                     input,
                     is_synthetic: _,
                 } => {
-                    if input.state == ElementState::Pressed {
-                        if let Some(keycode) = input.virtual_keycode {
-                            self.pressed_keys.insert(keycode);
-
-                            if keycode == VirtualKeyCode::L {
+                    if input.virtual_keycode.is_none() {
+                        return;
+                    }
+                    if input.state == ElementState::Released {
+                        match input.virtual_keycode.unwrap() {
+                            VirtualKeyCode::Escape => {
+                                *control_flow = ControlFlow::Exit;
+                            }
+                            VirtualKeyCode::L => {
                                 self.change_stream_pos = !self.change_stream_pos;
                             }
-                        }
-                    } else {
-                        if let Some(keycode) = input.virtual_keycode {
-                            self.pressed_keys.remove(&keycode);
+                            VirtualKeyCode::C => {
+                                self.player_collision_enabled = !self.player_collision_enabled;
+                            }
+                            VirtualKeyCode::F11 => {
+                                if let Some(_) = main_window.fullscreen() {
+                                    main_window.set_fullscreen(None);
+                                } else {
+                                    let mode = utils::find_largest_video_mode(
+                                        &main_window.current_monitor().unwrap(),
+                                    );
+                                    main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
+                                }
+                            }
+                            VirtualKeyCode::T => {
+                                self.cursor_grab = !self.cursor_grab;
+                                main_window.set_cursor_grab(self.cursor_grab).unwrap();
+                                main_window.set_cursor_visible(!self.cursor_grab);
+                            }
+                            _ => {}
                         }
                     }
                 }
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => {}
             },
             Event::DeviceEvent { device_id: _, event } => match event {
