@@ -6,8 +6,9 @@ pub mod registry;
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::physics::AABB;
-use crate::{material_pipelines, utils, PROGRAM_NAME};
+use crate::physics::{AABB, MOTION_EPSILON};
+use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
+use approx::AbsDiffEq;
 use engine::ecs::scene::Scene;
 use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
@@ -43,6 +44,9 @@ pub struct Game {
 
     player_pos: DVec3,
     player_aabb: AABB,
+    fall_time: f64,
+    curr_jump_force: f64,
+
     change_stream_pos: bool,
     player_collision_enabled: bool,
     cursor_grab: bool,
@@ -67,6 +71,8 @@ impl Game {
             overworld_streamer: None,
             player_pos: Default::default(),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
+            fall_time: 0.0,
+            curr_jump_force: 0.0,
             change_stream_pos: true,
             player_collision_enabled: true,
             cursor_grab: true,
@@ -120,9 +126,7 @@ impl Application for Game {
             }
         }
 
-        renderer
-            .active_camera_mut()
-            .set_position(DVec3::new(0.0, 64.0, 0.0));
+        self.player_pos = DVec3::new(0.0, 64.0, 0.0);
 
         let mut overworld_streamer =
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
@@ -140,7 +144,9 @@ impl Application for Game {
         input: &mut Input,
         background_tp: &ThreadPool,
     ) {
-        println!("{}", delta_time);
+        if delta_time > 0.017 {
+            println!("dt SPIKE: {}", delta_time);
+        }
 
         let kb = input.keyboard();
         let mut vel_front_back = 0;
@@ -160,7 +166,8 @@ impl Application for Game {
             vel_left_right += 1;
         }
         if kb.is_key_pressed(VirtualKeyCode::Space) {
-            vel_up_down += 1;
+            // vel_up_down += 1;
+            self.curr_jump_force = 6.0;
         }
         if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
@@ -179,7 +186,7 @@ impl Application for Game {
 
             let mut rotation = camera.rotation();
             rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
-            rotation.y += cursor_offset.0;
+            rotation.y += cursor_offset.0 + (delta_time as f32);
 
             camera.set_rotation(rotation);
 
@@ -191,27 +198,50 @@ impl Application for Game {
                 vel_left_right as f64 * ms,
             );
 
-            let overworld = &self.overworld;
-            let new_pos = overworld.move_entity(camera.position(), motion_delta, &self.player_aabb);
+            {
+                let overworld = &self.overworld;
+                let clusters = overworld.clusters_read();
+                let mut blocks = clusters.access();
 
-            if self.player_collision_enabled {
-                camera.set_position(new_pos);
-            } else {
-                camera.set_position(camera.position() + motion_delta);
+                if blocks
+                    .get_block(glm::try_convert(glm::floor(&self.player_pos)).unwrap())
+                    .is_some()
+                {
+                    // Free fall
+                    motion_delta.y -= (physics::G_ACCEL * self.fall_time) * delta_time;
+
+                    // Jump force
+                    motion_delta.y += self.curr_jump_force * delta_time;
+                }
             }
 
-            self.player_pos = camera.position();
+            let prev_pos = self.player_pos;
+            let overworld = &self.overworld;
+            let new_pos = overworld.move_entity(prev_pos, motion_delta, &self.player_aabb);
+
+            if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
+                // Note: the ground is reached
+                self.curr_jump_force = 0.0;
+                // println!("GROUND HIT");
+                self.fall_time = delta_time;
+            } else {
+                self.fall_time += delta_time;
+            }
+
+            if self.player_collision_enabled {
+                self.player_pos = new_pos;
+            } else {
+                self.player_pos = prev_pos + motion_delta;
+            }
+
+            camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
             self.cursor_rel = (0, 0);
         }
 
         {
-            let overworld = &self.overworld;
-            let clusters = overworld.clusters_read();
-            let mut a = clusters.access();
-
-            if let Some(a) = a.set_block(I64Vec3::new(-2, 63, -5), self.registry.block_default()) {
-                a.build();
-            }
+            // if let Some(a) = blocks.set_block(I64Vec3::new(-2, 63, -5), self.registry.block_default()) {
+            //     a.build();
+            // }
             // if let Some(a) = a.set_block(I64Vec3::new(1, 60, 0), self.registry.block_default()) {
             //     a.build();
             // }
@@ -247,7 +277,7 @@ impl Application for Game {
             }
 
             background_tp.spawn(|| game_tick(streamer, game_tick_finished));
-            println!("as {}", renderer.device().calc_real_device_mem_usage());
+            // println!("as {}", renderer.device().calc_real_device_mem_usage());
         }
     }
 

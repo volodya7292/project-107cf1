@@ -10,6 +10,8 @@ use nalgebra as na;
 use nalgebra_glm::{DVec3, Vec3};
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
@@ -171,5 +173,13 @@ where
 
     for (i, v) in vertices.iter_mut().enumerate() {
         v.set_normal((v.normal() / vertex_triangle_counts[i] as f32).normalize());
+    }
+}
+
+pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
+    let end_t = Instant::now() + duration;
+
+    while Instant::now() < end_t {
+        thread::sleep(single_sleep_period);
     }
 }

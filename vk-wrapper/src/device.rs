@@ -670,7 +670,7 @@ impl Device {
 
         Ok(Swapchain {
             wrapper: swapchain_wrapper,
-            semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
+            readiness_semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
             images: images?,
         })
     }

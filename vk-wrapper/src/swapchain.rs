@@ -34,7 +34,7 @@ impl Drop for SwapchainWrapper {
 
 pub struct Swapchain {
     pub(crate) wrapper: Arc<SwapchainWrapper>,
-    pub(crate) semaphore: Arc<Semaphore>,
+    pub(crate) readiness_semaphore: Arc<Semaphore>,
     pub(crate) images: Vec<Arc<Image>>,
 }
 
@@ -49,7 +49,7 @@ impl Swapchain {
             self.wrapper.device.swapchain_khr.acquire_next_image(
                 *native,
                 u64::MAX,
-                self.semaphore.native,
+                self.readiness_semaphore.native,
                 vk::Fence::default(),
             )
         };
@@ -67,8 +67,8 @@ impl Swapchain {
         }
     }
 
-    pub fn semaphore(&self) -> &Arc<Semaphore> {
-        &self.semaphore
+    pub fn readiness_semaphore(&self) -> &Arc<Semaphore> {
+        &self.readiness_semaphore
     }
 }
 

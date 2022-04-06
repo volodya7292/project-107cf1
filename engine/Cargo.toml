@@ -26,6 +26,10 @@ raw-window-handle = "0.3"
 winit = "0.26"
 vk-wrapper = { path = "../vk-wrapper" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.22"
+core-video-sys = "0.1"
+
 [build-dependencies]
 common = { path = "../common" }
 

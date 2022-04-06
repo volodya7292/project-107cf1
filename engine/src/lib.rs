@@ -1,5 +1,6 @@
 pub mod ecs;
 pub mod keyboard;
+mod platform;
 pub mod renderer;
 pub mod resource_file;
 #[cfg(test)]
@@ -7,18 +8,26 @@ mod tests;
 pub mod utils;
 
 use crate::keyboard::Keyboard;
+use crate::platform::current_refresh_rate;
 use crate::renderer::Renderer;
 use crate::utils::thread_pool::SafeThreadPool;
-use crate::utils::HashSet;
+use crate::utils::{HashSet, MO_RELAXED};
+use lazy_static::lazy_static;
 use rayon::ThreadPool;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use vk_wrapper as vkw;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
+
+lazy_static! {
+    static ref INITIALIZED: AtomicBool = AtomicBool::new(false);
+}
 
 pub struct Input {
     keyboard: Keyboard,
@@ -30,15 +39,34 @@ impl Input {
     }
 }
 
+#[derive(Default, Copy, Clone)]
+pub struct EngineStatistics {
+    update_time: f64,
+    render_time: f64,
+    total: f64,
+}
+
+impl Display for EngineStatistics {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "Engine Statistics: upd {:.5} | render {:.5} | total {:.5}",
+            self.update_time, self.render_time, self.total
+        ))
+    }
+}
+
 pub struct Engine {
     renderer: Renderer,
     render_tp: SafeThreadPool,
     update_tp: SafeThreadPool,
     frame_start_time: Instant,
+    frame_end_time: Instant,
     delta_time: f64,
     event_loop: EventLoop<()>,
     main_window: Window,
     input: Input,
+    curr_mode_refresh_rate: u32,
+    curr_statistics: EngineStatistics,
     app: Box<dyn Application + Send>,
 }
 
@@ -63,6 +91,10 @@ pub trait Application {
 
 impl Engine {
     pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
+        if INITIALIZED.swap(true, MO_RELAXED) {
+            panic!("Engine has already been initialized!");
+        }
+
         let n_threads = thread::available_parallelism().unwrap().get().max(2);
         let n_render_threads = (n_threads / 2).max(4);
         let n_update_threads = n_threads - n_render_threads;
@@ -93,17 +125,22 @@ impl Engine {
 
         app.on_engine_initialized(&mut renderer);
 
+        let curr_mode_refresh_rate = current_refresh_rate(&main_window);
+
         Engine {
             renderer,
             render_tp: render_thread_pool,
             update_tp: update_thread_pool,
             frame_start_time: Instant::now(),
+            frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop,
             main_window,
             input: Input {
                 keyboard: Keyboard::new(),
             },
+            curr_mode_refresh_rate,
+            curr_statistics: Default::default(),
             app,
         }
     }
@@ -116,9 +153,6 @@ impl Engine {
             *control_flow = ControlFlow::Poll;
 
             match &event {
-                Event::NewEvents(_) => {
-                    self.frame_start_time = Instant::now();
-                }
                 Event::WindowEvent {
                     window_id: _window_id,
                     event,
@@ -150,19 +184,44 @@ impl Engine {
                     _ => {}
                 },
                 Event::MainEventsCleared => {
+                    let t0 = Instant::now();
+
                     self.render_tp.install(|| {
+                        let t0 = Instant::now();
                         self.app.on_update(
                             self.delta_time,
                             &mut self.renderer,
                             &mut self.input,
                             &self.update_tp,
                         );
+                        let t1 = Instant::now();
+                        self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
+
                         self.renderer.on_draw();
+                        let t2 = Instant::now();
+
+                        self.curr_statistics.render_time = (t2 - t1).as_secs_f64();
                     });
+
+                    let t1 = Instant::now();
+                    self.curr_statistics.total = (t1 - t0).as_secs_f64();
                 }
                 Event::RedrawEventsCleared => {
                     let end_dt = Instant::now();
+                    self.frame_end_time = end_dt;
                     self.delta_time = (end_dt - self.frame_start_time).as_secs_f64();
+
+                    let expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
+                    // let to_wait = (expected_dt - self.delta_time - 0.005).max(0.0);
+                    // utils::high_precision_sleep(Duration::from_secs_f64(to_wait), Duration::from_micros(50));
+
+                    // println!("dt {}", self.delta_time);
+                    // self.delta_time += to_wait;
+                    self.frame_start_time = end_dt;
+
+                    if self.delta_time >= (expected_dt + 0.001) {
+                        println!("dt {:.5}  | {}", self.delta_time, self.curr_statistics);
+                    }
                 }
                 _ => {}
             }

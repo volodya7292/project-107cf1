@@ -1727,7 +1727,7 @@ impl Renderer {
                         }],
                         &[Arc::clone(&self.final_cl[1])],
                         &[SignalSemaphore {
-                            semaphore: Arc::clone(present_queue.frame_semaphore()),
+                            semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
                             signal_value: 0,
                         }],
                     )])
@@ -1763,14 +1763,14 @@ impl Renderer {
                 );
 
                 let signal_sem = &[SignalSemaphore {
-                    semaphore: Arc::clone(present_queue.frame_semaphore()),
+                    semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
                     signal_value: 0,
                 }];
 
                 self.final_submit[0]
                     .set(&[SubmitInfo::new(
                         &[WaitSemaphore {
-                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().semaphore()),
+                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
                             wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // TODO: change if necessary
                             wait_value: 0,
                         }],

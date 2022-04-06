@@ -209,7 +209,7 @@ impl Queue {
         }
     }
 
-    pub fn frame_semaphore(&self) -> &Arc<Semaphore> {
+    pub fn end_of_frame_semaphore(&self) -> &Arc<Semaphore> {
         &self.semaphore
     }
 
