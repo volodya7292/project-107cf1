@@ -14,7 +14,7 @@ use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
-use engine::{Application, Input};
+use engine::{renderer, Application, Input};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
 use overworld::Overworld;
@@ -112,6 +112,15 @@ impl Application for Game {
     }
 
     fn on_engine_initialized(&mut self, renderer: &mut Renderer) {
+        renderer.set_settings(renderer::Settings {
+            fps_limit: renderer::FPSLimit::VSync,
+            prefer_triple_buffering: false,
+            textures_mipmaps: true,
+            texture_quality: renderer::TextureQuality::STANDARD,
+            translucency_max_depth: renderer::TranslucencyMaxDepth::LOW,
+            textures_max_anisotropy: 1.0,
+        });
+
         let mat_pipelines;
         {
             mat_pipelines = material_pipelines::create(&self.resources, renderer);
@@ -144,10 +153,6 @@ impl Application for Game {
         input: &mut Input,
         background_tp: &ThreadPool,
     ) {
-        if delta_time > 0.017 {
-            println!("dt SPIKE: {}", delta_time);
-        }
-
         let kb = input.keyboard();
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
@@ -186,7 +191,8 @@ impl Application for Game {
 
             let mut rotation = camera.rotation();
             rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
-            rotation.y += cursor_offset.0 + (delta_time as f32);
+            rotation.y += cursor_offset.0;
+            // rotation.y += delta_time as f32;
 
             camera.set_rotation(rotation);
 

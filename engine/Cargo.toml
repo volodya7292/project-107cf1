@@ -29,6 +29,7 @@ vk-wrapper = { path = "../vk-wrapper" }
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22"
 core-video-sys = "0.1"
+macos = { path = "macos" }
 
 [build-dependencies]
 common = { path = "../common" }

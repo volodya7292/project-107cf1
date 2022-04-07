@@ -29,6 +29,7 @@ use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use std::collections::hash_map;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, iter, mem, slice};
@@ -55,6 +56,53 @@ use vk_wrapper::{
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
+
+#[derive(Default, Copy, Clone)]
+pub struct UpdateTimings {
+    pub systems_batch0: f64,
+    pub batch0_render_events: f64,
+    pub batch0_vertex_meshes: f64,
+    pub batch0_hierarchy_propag: f64,
+    pub systems_batch1: f64,
+    pub batch1_global_transforms: f64,
+    pub batch1_buffer_updates: f64,
+    pub batch1_updates_commit: f64,
+    pub uniform_buffers_update: f64,
+    pub total: f64,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct RenderTimings {
+    pub depth_record: f64,
+    pub depth_exec: f64,
+    pub color_record: f64,
+    pub color_exec: f64,
+    pub total: f64,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct RendererTimings {
+    pub update: UpdateTimings,
+    pub render: RenderTimings,
+}
+
+impl Display for RendererTimings {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} || depth_rec {:.5} \
+            | depth_exec {:.5} | color_rec {:.5} | color_exec {:.5} || upd_total {:.5} | render_total {:.5}",
+            self.update.systems_batch0,
+            self.update.systems_batch1,
+            self.update.uniform_buffers_update,
+            self.render.depth_record,
+            self.render.depth_exec,
+            self.render.color_record,
+            self.render.color_exec,
+            self.update.total,
+            self.render.total
+        ))
+    }
+}
 
 pub struct Renderer {
     scene: Scene,
@@ -151,9 +199,16 @@ pub enum TranslucencyMaxDepth {
     HIGH = 16,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum FPSLimit {
+    VSync,
+    Limit(u32),
+}
+
 #[derive(Copy, Clone)]
 pub struct Settings {
-    pub vsync: bool,
+    pub fps_limit: FPSLimit,
+    pub prefer_triple_buffering: bool,
     pub textures_mipmaps: bool,
     pub texture_quality: TextureQuality,
     pub translucency_max_depth: TranslucencyMaxDepth,
@@ -163,7 +218,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            vsync: true,
+            fps_limit: FPSLimit::VSync,
+            prefer_triple_buffering: true,
             textures_mipmaps: true,
             texture_quality: TextureQuality::STANDARD,
             translucency_max_depth: TranslucencyMaxDepth::LOW,
@@ -1088,13 +1144,18 @@ impl Renderer {
         }
     }
 
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
     pub fn set_settings(&mut self, settings: Settings) {
         // TODO: change rendering according to settings
         self.settings = settings;
     }
 
-    fn on_update(&mut self) {
-        let t0 = Instant::now();
+    fn on_update(&mut self) -> UpdateTimings {
+        let mut timings = UpdateTimings::default();
+        let total_t0 = Instant::now();
         let camera = *self.active_camera();
         let camera_pos_diff = camera.position() - self.prev_camera_pos;
 
@@ -1149,9 +1210,17 @@ impl Renderer {
         };
 
         rayon::scope(|s| {
+            let t0 = Instant::now();
             s.spawn(|_| renderer_events_system.run());
+            let t1 = Instant::now();
             s.spawn(|_| vertex_mesh_system.run());
+            let t2 = Instant::now();
             s.spawn(|_| hierarchy_propagation_system.run());
+            let t3 = Instant::now();
+
+            timings.batch0_render_events = (t1 - t0).as_secs_f64();
+            timings.batch0_vertex_meshes = (t2 - t1).as_secs_f64();
+            timings.batch0_hierarchy_propag = (t3 - t2).as_secs_f64();
 
             // Wait for previous transfers before committing them
             if !self.vertex_mesh_pending_updates.is_empty() {
@@ -1160,7 +1229,7 @@ impl Renderer {
         });
 
         let t11 = Instant::now();
-        let systems_t = (t11 - t00).as_secs_f64();
+        timings.systems_batch0 = (t11 - t00).as_secs_f64();
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
             uniform_buffer_updates: &mut uniform_buffers_updates,
@@ -1188,15 +1257,23 @@ impl Renderer {
         };
 
         rayon::scope(|s| {
+            let t0 = Instant::now();
             s.spawn(|_| global_transform_events_system.run());
+            let t1 = Instant::now();
             s.spawn(|_| buffer_update_system.run());
-            s.spawn(|_| commit_buffer_updates_system.run())
+            let t2 = Instant::now();
+            s.spawn(|_| commit_buffer_updates_system.run());
+            let t3 = Instant::now();
+
+            timings.batch1_global_transforms = (t1 - t0).as_secs_f64();
+            timings.batch1_buffer_updates = (t2 - t1).as_secs_f64();
+            timings.batch1_updates_commit = (t3 - t2).as_secs_f64();
         });
 
         // FIXME: VMA: parallel invocations (when creating Cluster meshes) of `vkAllocateMemory` causes huge stutters
 
         let t11 = Instant::now();
-        let systems2_t = (t11 - t00).as_secs_f64();
+        timings.systems_batch1 = (t11 - t00).as_secs_f64();
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -1268,15 +1345,12 @@ impl Renderer {
         }
 
         let t1 = Instant::now();
-        let updates_t = (t1 - t11).as_secs_f64();
+        timings.uniform_buffers_update = (t1 - t11).as_secs_f64();
 
-        let t = (t1 - t0).as_secs_f64();
-        if t > 0.003 {
-            println!(
-                "renderer::update {} | systems {} | systems2 {} | updates {}",
-                t, systems_t, systems2_t, updates_t
-            );
-        }
+        let total_t1 = Instant::now();
+        timings.total = (total_t1 - total_t0).as_secs_f64();
+
+        timings
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
@@ -1451,14 +1525,18 @@ impl Renderer {
             });
     }
 
-    fn on_render(&mut self, sw_image: &SwapchainImage) {
+    fn on_render(&mut self, sw_image: &SwapchainImage) -> RenderTimings {
+        let mut timings = RenderTimings::default();
+        let total_t0 = Instant::now();
         let device = Arc::clone(&self.device);
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
         let object_count = self.ordered_entities.len() as u32;
         let frustum_visible_objects = self.record_depth_cmd_lists();
 
+        let t1;
         {
+            let t0 = Instant::now();
             let mut cl = self.staging_cl.lock();
             cl.begin(true).unwrap();
             cl.begin_render_pass(
@@ -1469,6 +1547,8 @@ impl Renderer {
             );
             cl.execute_secondary(&self.depth_secondary_cls);
             cl.end_render_pass();
+            t1 = Instant::now();
+            timings.depth_record = (t1 - t0).as_secs_f64();
 
             let depth_image = self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
             let depth_pyramid_image = self.depth_pyramid_image.as_ref().unwrap();
@@ -1597,7 +1677,12 @@ impl Renderer {
             submit.wait().unwrap();
         }
 
+        let t2 = Instant::now();
+        timings.depth_exec = (t2 - t1).as_secs_f64();
+
         self.record_g_cmd_lists();
+        let t3 = Instant::now();
+        timings.color_record = (t3 - t2).as_secs_f64();
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         unsafe {
@@ -1734,12 +1819,20 @@ impl Renderer {
                     .unwrap();
 
                 present_queue.submit(&mut self.final_submit[1]).unwrap();
-                self.final_submit[1].wait().unwrap();
             }
         }
+
+        let t3 = Instant::now();
+        timings.color_exec = (t3 - t2).as_secs_f64();
+
+        let total_t1 = Instant::now();
+        timings.total = (total_t1 - total_t0).as_secs_f64();
+
+        timings
     }
 
-    pub fn on_draw(&mut self) {
+    pub fn on_draw(&mut self) -> RendererTimings {
+        let mut timings = RendererTimings::default();
         let device = Arc::clone(&self.device);
         let adapter = device.get_adapter();
         let surface = &self.surface;
@@ -1756,7 +1849,12 @@ impl Renderer {
                         .create_swapchain(
                             &self.surface,
                             self.surface_size,
-                            self.settings.vsync,
+                            self.settings.fps_limit == FPSLimit::VSync,
+                            if self.settings.prefer_triple_buffering {
+                                3
+                            } else {
+                                2
+                            },
                             self.swapchain.take(),
                         )
                         .unwrap(),
@@ -1771,7 +1869,7 @@ impl Renderer {
                     .set(&[SubmitInfo::new(
                         &[WaitSemaphore {
                             semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                            wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, // TODO: change if necessary
+                            wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             wait_value: 0,
                         }],
                         &[Arc::clone(&self.final_cl[0])],
@@ -1797,8 +1895,9 @@ impl Renderer {
                     // to not destroy DeviceBuffers after entity deletion in on_update()
                     self.final_submit[0].wait().unwrap();
                     self.final_submit[1].wait().unwrap();
-                    self.on_update();
-                    self.on_render(&sw_image);
+
+                    timings.update = self.on_update();
+                    timings.render = self.on_render(&sw_image);
 
                     let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
                     let present_result = present_queue.present(sw_image);
@@ -1823,6 +1922,8 @@ impl Renderer {
                 }
             }
         }
+
+        timings
     }
 
     pub fn on_resize(&mut self, new_size: (u32, u32)) {

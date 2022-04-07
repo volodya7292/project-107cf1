@@ -25,7 +25,7 @@ use std::ffi::CString;
 use std::mem::ManuallyDrop;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
-use std::{cmp, ffi::CStr, marker::PhantomData, mem, slice};
+use std::{ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
@@ -513,11 +513,17 @@ impl Device {
         }))
     }
 
+    pub fn swapchain_min_max_images(&self, surface: &Surface) -> Result<(u32, u32), DeviceError> {
+        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
+        Ok((surface_capabs.min_image_count, surface_capabs.max_image_count))
+    }
+
     pub fn create_swapchain(
         self: &Arc<Self>,
         surface: &Arc<Surface>,
         size: (u32, u32),
         vsync: bool,
+        preferred_n_images: u32,
         old_swapchain: Option<Swapchain>,
     ) -> Result<Swapchain, DeviceError> {
         let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
@@ -565,6 +571,9 @@ impl Device {
             }
         };
 
+        let min_image_count =
+            preferred_n_images.clamp(surface_capabs.min_image_count, surface_capabs.max_image_count);
+
         let present_mode = if vsync {
             vk::PresentModeKHR::FIFO
         } else {
@@ -579,10 +588,7 @@ impl Device {
 
         let mut create_info = vk::SwapchainCreateInfoKHR::builder()
             .surface(surface.native)
-            .min_image_count(cmp::min(
-                surface_capabs.max_image_count,
-                cmp::max(3, surface_capabs.min_image_count),
-            ))
+            .min_image_count(min_image_count)
             .image_format(s_format.format)
             .image_color_space(s_format.color_space)
             .image_extent(vk::Extent2D {

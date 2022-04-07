@@ -9,8 +9,8 @@ pub mod utils;
 
 use crate::keyboard::Keyboard;
 use crate::platform::current_refresh_rate;
-use crate::renderer::Renderer;
-use crate::utils::thread_pool::SafeThreadPool;
+use crate::renderer::{FPSLimit, Renderer, RendererTimings};
+use crate::utils::thread_pool::{SafeThreadPool, ThreadPoolPriority};
 use crate::utils::{HashSet, MO_RELAXED};
 use lazy_static::lazy_static;
 use rayon::ThreadPool;
@@ -42,15 +42,20 @@ impl Input {
 #[derive(Default, Copy, Clone)]
 pub struct EngineStatistics {
     update_time: f64,
-    render_time: f64,
-    total: f64,
+    render_time: RendererTimings,
+}
+
+impl EngineStatistics {
+    pub fn total(&self) -> f64 {
+        self.update_time + self.render_time.update.total + self.render_time.render.total
+    }
 }
 
 impl Display for EngineStatistics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "Engine Statistics: upd {:.5} | render {:.5} | total {:.5}",
-            self.update_time, self.render_time, self.total
+            "Engine Statistics: upd {:.5} | renderer: {:.5}",
+            self.update_time, self.render_time
         ))
     }
 }
@@ -100,8 +105,9 @@ impl Engine {
         let n_update_threads = n_threads - n_render_threads;
 
         // Note: use safe thread pools to account for proper destruction of Vulkan objects.
-        let render_thread_pool = SafeThreadPool::new(n_render_threads).unwrap();
-        let update_thread_pool = SafeThreadPool::new(n_update_threads).unwrap();
+        let render_thread_pool = SafeThreadPool::new(n_render_threads, ThreadPoolPriority::Realtime).unwrap();
+        let update_thread_pool =
+            SafeThreadPool::new(n_update_threads, ThreadPoolPriority::Background).unwrap();
 
         let event_loop = EventLoop::new();
         let main_window = app.on_engine_start(&event_loop);
@@ -145,8 +151,8 @@ impl Engine {
         }
     }
 
-    pub fn run(&mut self) {
-        self.event_loop.run_return(|event, _, control_flow| {
+    pub fn run(mut self) {
+        self.event_loop.run_return(move |event, _, control_flow| {
             use winit::event::ElementState;
             use winit::event::Event;
 
@@ -186,6 +192,8 @@ impl Engine {
                 Event::MainEventsCleared => {
                     let t0 = Instant::now();
 
+                    // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
+
                     self.render_tp.install(|| {
                         let t0 = Instant::now();
                         self.app.on_update(
@@ -197,31 +205,42 @@ impl Engine {
                         let t1 = Instant::now();
                         self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
 
-                        self.renderer.on_draw();
-                        let t2 = Instant::now();
-
-                        self.curr_statistics.render_time = (t2 - t1).as_secs_f64();
+                        self.curr_statistics.render_time = self.renderer.on_draw();
                     });
 
-                    let t1 = Instant::now();
-                    self.curr_statistics.total = (t1 - t0).as_secs_f64();
+                    // let t1 = Instant::now();
+                    // self.curr_statistics.total = (t1 - t0).as_secs_f64();
                 }
                 Event::RedrawEventsCleared => {
                     let end_dt = Instant::now();
-                    self.frame_end_time = end_dt;
-                    self.delta_time = (end_dt - self.frame_start_time).as_secs_f64();
+                    self.delta_time = (end_dt - self.frame_start_time).as_secs_f64().min(1.0);
 
-                    let expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
-                    // let to_wait = (expected_dt - self.delta_time - 0.005).max(0.0);
-                    // utils::high_precision_sleep(Duration::from_secs_f64(to_wait), Duration::from_micros(50));
+                    let expected_dt;
+
+                    if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
+                        expected_dt = 1.0 / (limit as f64);
+                        let to_wait = (expected_dt - self.delta_time).max(0.0);
+                        utils::high_precision_sleep(
+                            Duration::from_secs_f64(to_wait),
+                            Duration::from_micros(50),
+                        );
+                        self.delta_time += to_wait;
+                    } else {
+                        expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
+                    }
+
+                    // if self.delta_time >= (1.0 / self.curr_mode_refresh_rate as f64) {
+                    let total_frame_time = self.curr_statistics.total();
+                    if total_frame_time >= 0.017 {
+                        println!(
+                            "dt {:.5}| total {:.5} | {}",
+                            self.delta_time, total_frame_time, self.curr_statistics
+                        );
+                    }
 
                     // println!("dt {}", self.delta_time);
-                    // self.delta_time += to_wait;
-                    self.frame_start_time = end_dt;
-
-                    if self.delta_time >= (expected_dt + 0.001) {
-                        println!("dt {:.5}  | {}", self.delta_time, self.curr_statistics);
-                    }
+                    self.frame_end_time = Instant::now();
+                    self.frame_start_time = self.frame_end_time;
                 }
                 _ => {}
             }
