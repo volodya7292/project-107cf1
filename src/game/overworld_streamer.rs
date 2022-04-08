@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
 
-pub const INVISIBLE_LOAD_RANGE: usize = 128;
+pub const FORCED_LOAD_RANGE: usize = 128;
 
 pub struct OverworldStreamer {
     device: Arc<vkw::Device>,
@@ -137,6 +137,13 @@ fn look_cube_directions(dir: DVec3) -> [I32Vec3; 3] {
     ]
 }
 
+fn is_cluster_in_forced_load_range(pos: &I64Vec3, stream_pos: &DVec3) -> bool {
+    let center_pos: DVec3 = glm::convert(pos.add_scalar(cluster::SIZE as i64 / 2));
+    let dir_to_cluster_unnorm = center_pos - stream_pos;
+
+    dir_to_cluster_unnorm.magnitude() <= FORCED_LOAD_RANGE as f64
+}
+
 /// Checks if cluster at `pos` is occluded by neighbour clusters when camera is at `stream_pos`
 fn is_cluster_visibly_occluded(
     rclusters: &HashMap<I64Vec3, RCluster>,
@@ -146,7 +153,7 @@ fn is_cluster_visibly_occluded(
     let center_pos: DVec3 = glm::convert(pos.add_scalar(cluster::SIZE as i64 / 2));
     let dir_to_cluster_unnorm = center_pos - stream_pos;
 
-    if glm::length(&dir_to_cluster_unnorm) <= INVISIBLE_LOAD_RANGE as f64 {
+    if dir_to_cluster_unnorm.magnitude() <= FORCED_LOAD_RANGE as f64 {
         return false;
     }
 
@@ -297,14 +304,14 @@ impl OverworldStreamer {
 
                 if in_layout {
                     let rcl = rclusters.get_mut(p).unwrap();
-                    let is_visible = rcl.is_visible();
+                    do_preserve = rcl.is_visible() || is_cluster_in_forced_load_range(p, &self.stream_pos);
 
-                    if !is_visible && rcl.entity != scene::Entity::NULL {
+                    // Do not remove nearby empty/occluded clusters up to FORCED_LOAD_RANGE
+                    // to allow fast access to blocks near streaming position.
+                    if !do_preserve && rcl.entity != scene::Entity::NULL {
                         clusters_entities_to_remove.push(rcl.entity);
                         rcl.entity = scene::Entity::NULL;
                     }
-
-                    do_preserve = is_visible;
                 }
 
                 if !do_preserve {
@@ -480,9 +487,9 @@ impl OverworldStreamer {
 
                 // Collect valid side clusters
                 for p in get_side_clusters(*pos) {
-                    let exists = rclusters.contains_key(&p) && rclusters[&p].is_visible();
+                    let valid = rclusters.contains_key(&p) && rclusters[&p].is_visible();
 
-                    if exists {
+                    if valid {
                         side_clusters.push(p);
                     } else {
                         rcluster

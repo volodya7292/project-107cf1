@@ -172,7 +172,7 @@ impl Application for Game {
         }
         if kb.is_key_pressed(VirtualKeyCode::Space) {
             // vel_up_down += 1;
-            self.curr_jump_force = 6.0;
+            self.curr_jump_force = 5.7;
         }
         if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
