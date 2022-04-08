@@ -153,9 +153,7 @@ impl Sector {
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
 
-        if block.has_textured_model() {
-            self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = occluder;
-        }
+        self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = occluder;
 
         let mut side_changed = self.side_changed;
         side_changed[0] |= pos.x == 0;
@@ -559,6 +557,7 @@ impl Cluster {
         }
     }
 
+    /// Checks if self inner edge is fully occluded
     pub fn check_edge_fully_occluded(&self, facing: Facing) -> bool {
         let dir = facing.direction();
         let mut state = true;

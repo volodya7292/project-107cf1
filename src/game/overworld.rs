@@ -8,14 +8,17 @@ pub mod textured_block_model;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block::Block;
-use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, Cluster};
+use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, BlockDataImpl, Cluster};
 use crate::game::overworld::structure::world::World;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld_streamer;
+use crate::game::registry::Registry;
+use crate::physics::aabb::AABBRayIntersection;
 use engine::utils::value_noise::ValueNoise;
 use engine::utils::{HashMap, Int, MO_RELAXED};
 use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, U32Vec3, Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, U32Vec3, Vec3};
 use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::Rng;
 use std::cell::RefCell;
@@ -202,17 +205,24 @@ impl Overworld {
     }
 
     pub fn clusters_read(&self) -> ClustersRead {
-        ClustersRead(self.clusters.read())
+        ClustersRead {
+            guard: self.clusters.read(),
+            registry: self.main_registry.registry(),
+        }
     }
 }
 
-pub struct ClustersRead<'a>(RwLockReadGuard<'a, Clusters>);
+pub struct ClustersRead<'a> {
+    guard: RwLockReadGuard<'a, Clusters>,
+    registry: &'a Arc<Registry>,
+}
 
 impl ClustersRead<'_> {
     pub fn access(&self) -> ClustersAccessCache {
         ClustersAccessCache {
-            loaded_clusters: &self.0.loaded_clusters,
-            cluster_states: &self.0.clusters_states,
+            registry: self.registry,
+            loaded_clusters: &self.guard.loaded_clusters,
+            cluster_states: &self.guard.clusters_states,
             clusters_cache: HashMap::with_capacity(32),
         }
     }
@@ -242,6 +252,7 @@ impl AccessGuard<'_> {
 }
 
 pub struct ClustersAccessCache<'a> {
+    registry: &'a Arc<Registry>,
     loaded_clusters: &'a HashMap<I64Vec3, Arc<OverworldCluster>>,
     cluster_states: &'a HashMap<I64Vec3, Arc<ClusterState>>,
     clusters_cache: HashMap<I64Vec3, AccessGuard<'a>>,
@@ -249,7 +260,7 @@ pub struct ClustersAccessCache<'a> {
 
 impl<'a> ClustersAccessCache<'a> {
     /// Returns block data or `None` if respective cluster is not loaded
-    pub fn get_block(&mut self, pos: I64Vec3) -> Option<BlockData> {
+    pub fn get_block(&mut self, pos: &I64Vec3) -> Option<BlockData> {
         let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
         let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
 
@@ -268,7 +279,7 @@ impl<'a> ClustersAccessCache<'a> {
     }
 
     /// Returns block builder or `None` if respective cluster is not loaded
-    pub fn set_block(&mut self, pos: I64Vec3, block: Block) -> Option<BlockDataBuilder> {
+    pub fn set_block(&mut self, pos: &I64Vec3, block: Block) -> Option<BlockDataBuilder> {
         let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
         let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
 
@@ -286,6 +297,75 @@ impl<'a> ClustersAccessCache<'a> {
                 )
             }
             hash_map::Entry::Occupied(e) => Some(e.into_mut().set(block_pos, block)),
+        }
+    }
+
+    /// Returns facing, intersection point, and block data of the block that intersects with specified ray.
+    pub fn get_block_at_ray(
+        &mut self,
+        ray_origin: &DVec3,
+        ray_dir: &DVec3,
+        max_ray_length: f64,
+    ) -> Option<(I64Vec3, Facing)> {
+        assert!(ray_dir.magnitude_squared() > 0.0);
+
+        let registry = Arc::clone(self.registry);
+        let step = ray_dir.map(|v| v.signum());
+        let step_dt = step.component_div(ray_dir);
+
+        let mut curr_origin = *ray_origin;
+        let mut curr_block_pos = glm::floor(ray_origin);
+        let mut dt = curr_block_pos.zip_zip_map(&curr_origin, ray_dir, |pos, origin, dir| {
+            (pos + (dir > 0.0) as i64 as f64 - origin) / dir
+        });
+        let mut t = 0.0;
+
+        loop {
+            let curr_block_upos = glm::try_convert(curr_block_pos).unwrap();
+            let curr_block = self.get_block(&curr_block_upos);
+
+            if let Some(data) = &curr_block {
+                let block = data.block();
+
+                if block.has_textured_model() {
+                    let model = registry.get_textured_block_model(block.textured_model()).unwrap();
+                    let mut closest_inter = None;
+                    let mut min_length = f64::MAX;
+
+                    for aabb in model.aabbs() {
+                        if let Some(inter) = aabb
+                            .translate(curr_block_pos)
+                            .ray_intersection(ray_origin, ray_dir)
+                        {
+                            let len = (inter.point() - ray_origin).magnitude();
+
+                            if len < min_length {
+                                min_length = len;
+                                closest_inter = Some(inter);
+                            }
+                        }
+                    }
+
+                    if min_length > max_ray_length {
+                        return None;
+                    }
+                    if let Some(inter) = closest_inter {
+                        return Some((curr_block_upos, inter.facing()));
+                    }
+                }
+            } else {
+                return None;
+            }
+
+            let min_i = dt.imin();
+            curr_block_pos[min_i] += step[min_i];
+            t += dt[min_i];
+            dt.add_scalar_mut(-dt[min_i]);
+            dt[min_i] += step_dt[min_i];
+
+            if t > max_ray_length {
+                return None;
+            }
         }
     }
 }

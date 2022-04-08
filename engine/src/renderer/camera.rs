@@ -22,10 +22,6 @@ pub fn create_view_matrix(position: Vec3, rotation: Vec3) -> Mat4 {
 
 impl Camera {
     pub fn new(aspect: f32, fovy: f32, near: f32) -> Camera {
-        let projection = glm::infinite_perspective_rh_zo(aspect, fovy, near);
-        let view = Isometry3::identity();
-        let proj_view_mat = projection * view.to_homogeneous();
-
         Camera {
             position: DVec3::default(),
             rotation: Vec3::new(0.0, 0.0, 0.0),
@@ -69,7 +65,7 @@ impl Camera {
     }
 
     pub fn rotation(&self) -> Vec3 {
-        self.rotation.clone()
+        self.rotation
     }
 
     pub fn set_rotation(&mut self, rotation: Vec3) {
@@ -78,9 +74,8 @@ impl Camera {
 
     pub fn direction(&self) -> Vec3 {
         let view = self.view();
-        let identity = DVec4::new(0.0, 0.0, 1.0, 1.0);
-        let dir = view * identity;
-        glm::convert(DVec3::from(dir.fixed_rows::<3>(0)))
+        let d: Vec3 = glm::convert(DVec3::from(view.row(2).transpose().fixed_rows::<3>(0)));
+        -d
     }
 
     pub fn fovy(&self) -> f32 {
@@ -134,6 +129,6 @@ impl Frustum {
             }
         }
 
-        return true;
+        true
     }
 }

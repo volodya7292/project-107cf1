@@ -4,9 +4,11 @@ pub mod overworld_streamer;
 pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld_streamer::OverworldStreamer;
-use crate::physics::{AABB, MOTION_EPSILON};
+use crate::physics::aabb::{AABBRayIntersection, AABB};
+use crate::physics::MOTION_EPSILON;
 use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
 use engine::ecs::scene::Scene;
@@ -26,7 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 use vk_wrapper::Adapter;
-use winit::event::VirtualKeyCode;
+use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowBuilder};
 
@@ -46,6 +48,8 @@ pub struct Game {
     player_aabb: AABB,
     fall_time: f64,
     curr_jump_force: f64,
+    look_at_block: Option<(I64Vec3, Facing)>,
+    block_set_cooldown: f64,
 
     change_stream_pos: bool,
     player_collision_enabled: bool,
@@ -73,6 +77,8 @@ impl Game {
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
             curr_jump_force: 0.0,
+            look_at_block: None,
+            block_set_cooldown: 0.0,
             change_stream_pos: true,
             player_collision_enabled: true,
             cursor_grab: true,
@@ -195,6 +201,7 @@ impl Application for Game {
             // rotation.y += delta_time as f32;
 
             camera.set_rotation(rotation);
+            self.cursor_rel = (0, 0);
 
             // Handle translation
             motion_delta.y += vel_up_down as f64 * ms;
@@ -210,7 +217,7 @@ impl Application for Game {
                 let mut blocks = clusters.access();
 
                 if blocks
-                    .get_block(glm::try_convert(glm::floor(&self.player_pos)).unwrap())
+                    .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
                     .is_some()
                 {
                     // Free fall
@@ -241,10 +248,33 @@ impl Application for Game {
             }
 
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
-            self.cursor_rel = (0, 0);
+
+            // Detect look-at block
+            let clusers_read = overworld.clusters_read();
+            let mut access = clusers_read.access();
+
+            self.look_at_block =
+                access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
         }
 
+        // Set block on mouse buttons
         {
+            let clusers_read = self.overworld.clusters_read();
+            let mut access = clusers_read.access();
+
+            if self.block_set_cooldown == 0.0 {
+                if let Some(inter) = self.look_at_block {
+                    if input.mouse().is_button_pressed(MouseButton::Left) {
+                    } else if input.mouse().is_button_pressed(MouseButton::Right) {
+                        access.set_block(&inter.0, self.registry.block_empty());
+
+                        self.block_set_cooldown = 0.5;
+                    }
+                }
+            }
+
+            self.block_set_cooldown = (self.block_set_cooldown - delta_time).max(0.0);
+
             // if let Some(a) = blocks.set_block(I64Vec3::new(-2, 63, -5), self.registry.block_default()) {
             //     a.build();
             // }
@@ -356,10 +386,10 @@ impl Application for Game {
 pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
     let mut streamer = streamer.lock();
 
-    let _t0 = Instant::now();
+    let t0 = Instant::now();
     streamer.update();
-    let _t1 = Instant::now();
-    // println!("tick time: {}", (t1 - t0).as_secs_f64());
+    let t1 = Instant::now();
+    println!("tick time: {}", (t1 - t0).as_secs_f64());
 
     finished.store(true, atomic::Ordering::Relaxed);
 }

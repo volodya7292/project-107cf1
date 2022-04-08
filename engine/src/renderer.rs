@@ -16,7 +16,6 @@ use crate::renderer::material_pipeline::UniformStruct;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::resource_file::ResourceRef;
 use crate::utils;
-use crate::utils::slot_vec::SlotVec;
 use crate::utils::{HashMap, LruCache, UInt};
 use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
@@ -182,7 +181,7 @@ pub struct Renderer {
     vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
     pub(crate) material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
-    device_buffers: SlotVec<DeviceBuffer>,
+    // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
 }
 
@@ -688,7 +687,7 @@ impl Renderer {
         let texture_atlases = [
             // albedo
             texture_atlas::new(
-                &device,
+                device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
@@ -698,7 +697,7 @@ impl Renderer {
             .unwrap(),
             // specular
             texture_atlas::new(
-                &device,
+                device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
@@ -708,7 +707,7 @@ impl Renderer {
             .unwrap(),
             // emission
             texture_atlas::new(
-                &device,
+                device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
@@ -718,7 +717,7 @@ impl Renderer {
             .unwrap(),
             // normal
             texture_atlas::new(
-                &device,
+                device,
                 Format::BC5_RG_UNORM,
                 settings.textures_mipmaps,
                 settings.textures_max_anisotropy,
@@ -813,7 +812,7 @@ impl Renderer {
                 free_indices.clone(),
                 free_indices.clone(),
                 free_indices.clone(),
-                free_indices.clone(),
+                free_indices,
             ],
             staging_buffer,
             transfer_cl,
@@ -861,7 +860,7 @@ impl Renderer {
             compose_desc,
             material_pipelines: vec![],
             uniform_buffer_basic,
-            device_buffers: SlotVec::new(),
+            // device_buffers: SlotVec::new(),
             vertex_meshes: Default::default(),
             vertex_mesh_updates: LruCache::unbounded(),
             vertex_mesh_pending_updates: vec![],
@@ -1067,8 +1066,7 @@ impl Renderer {
             || self
                 .vertex_mesh_pending_updates
                 .iter()
-                .find(|v| v.entity == entity)
-                .is_some()
+                .any(|v| v.entity == entity)
     }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
@@ -1138,8 +1136,8 @@ impl Renderer {
                 cl.end().unwrap();
             }
 
-            let mut submit = &mut self.staging_submit;
-            graphics_queue.submit(&mut submit).unwrap();
+            let submit = &mut self.staging_submit;
+            graphics_queue.submit(submit).unwrap();
             submit.wait().unwrap();
         }
     }
@@ -1451,7 +1449,7 @@ impl Renderer {
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(&vertex_mesh);
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
 
                 cl.end().unwrap();
@@ -1508,17 +1506,17 @@ impl Renderer {
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(&signature, 0, self.g_per_frame_in, &[]);
+                        cl.bind_graphics_input(signature, 0, self.g_per_frame_in, &[]);
                     }
 
                     cl.bind_graphics_input(
-                        &signature,
+                        signature,
                         1,
                         self.g_dyn_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(&vertex_mesh);
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
 
                 cl.end().unwrap();
@@ -1673,7 +1671,7 @@ impl Renderer {
         }
         {
             let mut submit = &mut self.staging_submit;
-            unsafe { graphics_queue.submit(&mut submit).unwrap() };
+            unsafe { graphics_queue.submit(submit).unwrap() };
             submit.wait().unwrap();
         }
 

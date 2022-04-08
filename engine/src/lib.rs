@@ -1,5 +1,5 @@
 pub mod ecs;
-pub mod keyboard;
+pub mod input;
 mod platform;
 pub mod renderer;
 pub mod resource_file;
@@ -7,7 +7,7 @@ pub mod resource_file;
 mod tests;
 pub mod utils;
 
-use crate::keyboard::Keyboard;
+use crate::input::{Keyboard, Mouse};
 use crate::platform::current_refresh_rate;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 use crate::utils::thread_pool::{SafeThreadPool, ThreadPoolPriority};
@@ -31,11 +31,16 @@ lazy_static! {
 
 pub struct Input {
     keyboard: Keyboard,
+    mouse: Mouse,
 }
 
 impl Input {
     pub fn keyboard(&self) -> &Keyboard {
         &self.keyboard
+    }
+
+    pub fn mouse(&self) -> &Mouse {
+        &self.mouse
     }
 }
 
@@ -144,6 +149,7 @@ impl Engine {
             main_window,
             input: Input {
                 keyboard: Keyboard::new(),
+                mouse: Mouse::new(),
             },
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
@@ -175,11 +181,17 @@ impl Engine {
                                 self.input.keyboard.pressed_keys.remove(&keycode);
                             }
                         }
-
-                        if let Some(keycode) = input.virtual_keycode {
-                            match keycode {
-                                _ => {}
-                            }
+                    }
+                    WindowEvent::MouseInput {
+                        device_id: _,
+                        state,
+                        button,
+                        ..
+                    } => {
+                        if *state == ElementState::Pressed {
+                            self.input.mouse.pressed_buttons.insert(*button);
+                        } else {
+                            self.input.mouse.pressed_buttons.remove(button);
                         }
                     }
                     WindowEvent::Resized(size) => {
@@ -190,7 +202,7 @@ impl Engine {
                     _ => {}
                 },
                 Event::MainEventsCleared => {
-                    let t0 = Instant::now();
+                    // let t0 = Instant::now();
 
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
@@ -226,7 +238,7 @@ impl Engine {
                         );
                         self.delta_time += to_wait;
                     } else {
-                        expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
+                        // expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
                     }
 
                     // if self.delta_time >= (1.0 / self.curr_mode_refresh_rate as f64) {

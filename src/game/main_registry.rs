@@ -5,7 +5,7 @@ use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
-use crate::physics::AABB;
+use crate::physics::aabb::AABB;
 use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
 use engine::resource_file::ResourceFile;
 use nalgebra_glm::{DVec3, U64Vec3, Vec3};
@@ -52,19 +52,17 @@ impl MainRegistry {
             &[AABB::new(DVec3::from_element(0.0), DVec3::from_element(1.0))],
         ));
 
-        let cluster_layout = reg.cluster_layout_mut();
-
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let arch = cluster_layout.add_archetype().build();
+            let arch = reg.cluster_layout_mut().add_archetype().build();
             Block::new(arch as u16, u16::MAX)
         };
         let block_default = {
-            let arch = cluster_layout.add_archetype().build();
+            let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(material_default, Default::default()); 6],
+                &[QuadMaterial::new(material_default, false, Default::default()); 6],
             ));
             Block::new(arch as u16, tex_model)
         };

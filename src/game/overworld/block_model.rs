@@ -1,7 +1,7 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Occluder;
-use crate::physics::AABB;
+use crate::physics::aabb::AABB;
 use approx::AbsDiffEq;
 use engine::renderer::vertex_mesh::VertexPositionImpl;
 use engine::vertex_impl;
@@ -121,8 +121,10 @@ pub struct BlockModel {
     aabbs: Vec<AABB>,
 }
 
-fn determine_quad_side(quad: &Quad) -> Option<Facing> {
+pub fn determine_quad_side(quad: &Quad) -> Option<Facing> {
     let v = quad.vertices()[0];
+
+    // Find quad axis. If it's X axis, then v_eq = (1, 0, 0)
     let v_eq = quad.vertices().iter().fold(BVec3::from_element(true), |s, x| {
         glm::equal(&v, x).zip_map(&s, |a, b| a && b)
     });
@@ -137,6 +139,7 @@ fn determine_quad_side(quad: &Quad) -> Option<Facing> {
         }
     }
 
+    // Determine side direction
     if v_eq.x {
         check(v.x, Facing::NegativeX, Facing::PositiveX)
     } else if v_eq.y {
@@ -148,7 +151,7 @@ fn determine_quad_side(quad: &Quad) -> Option<Facing> {
     }
 }
 
-fn quad_occludes_side(quad: &Quad) -> bool {
+pub fn quad_occludes_side(quad: &Quad) -> bool {
     quad.area().abs_diff_eq(&1.0, 1e-7)
 }
 

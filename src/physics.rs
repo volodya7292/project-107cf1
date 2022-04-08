@@ -1,97 +1,15 @@
+pub mod aabb;
+
+use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld::Overworld;
+use aabb::AABB;
 use approx::AbsDiffEq;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3};
 
 pub const MOTION_EPSILON: f64 = 1e-10;
 pub const G_ACCEL: f64 = 14.0;
-
-#[derive(Debug, Copy, Clone)]
-pub struct AABB {
-    min: DVec3,
-    max: DVec3,
-}
-
-impl AABB {
-    pub fn new(min: DVec3, max: DVec3) -> Self {
-        Self { min, max }
-    }
-
-    /// Creates a new AABB centered at origin of specified size.
-    pub fn from_size(size: DVec3) -> Self {
-        let half = size / 2.0;
-        Self {
-            min: -half,
-            max: half,
-        }
-    }
-
-    pub fn min(&self) -> &DVec3 {
-        &self.min
-    }
-
-    pub fn max(&self) -> &DVec3 {
-        &self.max
-    }
-
-    pub fn size(&self) -> DVec3 {
-        self.max - self.min
-    }
-
-    pub fn translate(&self, translation: DVec3) -> Self {
-        Self {
-            min: self.min + translation,
-            max: self.max + translation,
-        }
-    }
-
-    pub fn combine(&self, other: &AABB) -> Self {
-        Self {
-            min: self.min.inf(&other.min),
-            max: self.max.sup(&other.max),
-        }
-    }
-
-    pub fn collides_with(&self, other: &Self) -> bool {
-        self.min < other.max && self.max > other.min
-    }
-
-    /// Calculates delta of collision of `other` to `self`
-    pub fn collision_delta(&self, other: &Self, resolve_direction: &DVec3) -> DVec3 {
-        let mut delta = DVec3::from_element(0.0);
-
-        if !self.collides_with(other) {
-            return DVec3::default();
-        }
-
-        for i in 0..3 {
-            // `other` is inside `self`
-            if other.min[i] >= self.min[i] && other.max[i] <= self.max[i] {
-                continue;
-            }
-            // `self` is inside `other`
-            if other.min[i] <= self.min[i] && other.max[i] >= self.max[i] {
-                if resolve_direction[i] > MOTION_EPSILON {
-                    delta[i] = (other.min[i] - self.max[i] - MOTION_EPSILON).min(0.0);
-                } else if resolve_direction[i] < -MOTION_EPSILON {
-                    delta[i] = (other.max[i] - self.min[i] + MOTION_EPSILON).max(0.0);
-                } else {
-                    continue;
-                }
-            }
-
-            // Note: add MOTION_EPSILON to collision delta to account for f64 precision errors
-            if other.min[i] >= self.min[i] {
-                delta[i] = (other.min[i] - self.max[i] - MOTION_EPSILON).min(0.0);
-            } else {
-                delta[i] = (other.max[i] - self.min[i] + MOTION_EPSILON).max(0.0);
-            }
-        }
-
-        delta
-    }
-}
 
 fn combine_collision_deltas(a: DVec3, b: DVec3) -> DVec3 {
     a.zip_map(&b, |a, b| {
@@ -119,7 +37,7 @@ impl Overworld {
         let motion_aabb = prev_aabb.combine(&new_aabb);
 
         // Use motion_aabb to account for extreme motion deltas to prevent 'tunneling'
-        let start: I64Vec3 = glm::try_convert(glm::floor(&motion_aabb.min)).unwrap();
+        let start: I64Vec3 = glm::try_convert(glm::floor(&motion_aabb.min())).unwrap();
         let size: I64Vec3 = glm::try_convert(glm::ceil(&motion_aabb.size()).add_scalar(1.0)).unwrap();
 
         let reg = self.main_registry().registry();
@@ -132,7 +50,7 @@ impl Overworld {
                 for z in 0..size.z {
                     let pos = start + I64Vec3::new(x, y, z);
 
-                    if let Some(entry) = access.get_block(pos) {
+                    if let Some(entry) = access.get_block(&pos) {
                         let block = entry.block();
                         if !block.has_textured_model() {
                             continue;
