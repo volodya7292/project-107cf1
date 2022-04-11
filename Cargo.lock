@@ -1498,7 +1498,6 @@ name = "project-107cf1"
 version = "0.1.0"
 dependencies = [
  "approx",
- "bit-vec",
  "common",
  "crossbeam-channel",
  "engine",
@@ -1514,6 +1513,7 @@ dependencies = [
  "rand_distr",
  "raw-window-handle 0.4.3",
  "rayon",
+ "replace_with",
  "simple_logger",
  "smallvec",
  "vk-wrapper",
@@ -1715,6 +1715,12 @@ name = "regex-syntax"
 version = "0.6.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
+
+[[package]]
+name = "replace_with"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
 
 [[package]]
 name = "rustc-demangle"

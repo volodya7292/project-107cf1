@@ -19,13 +19,15 @@ use engine::utils::value_noise::ValueNoise;
 use engine::utils::{HashMap, Int, MO_RELAXED};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3, Vec3};
-use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
+use parking_lot::{Mutex, MutexGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::hash_map;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 use std::sync::Arc;
+use winit::event::VirtualKeyCode::P;
 
 // TODO Main world - 'The Origin'
 
@@ -44,37 +46,32 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
     AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
 }
 
-/// The cluster data is not yet loaded
-pub const CLUSTER_STATE_INITIAL: u8 = 0;
 /// The cluster is not needed anymore
-pub const CLUSTER_STATE_DISCARDED: u8 = 1;
 pub const CLUSTER_STATE_LOADING: u8 = 2;
 pub const CLUSTER_STATE_LOADED: u8 = 3;
+pub const CLUSTER_STATE_DISCARDED: u8 = 1;
+
+// Cluster lifecycle
+// ----------------------------------
+// LOADING -> LOADED | DISCARDED
+// LOADED  -> DISCARDED
 
 pub struct OverworldCluster {
-    pub cluster: RwLock<Cluster>,
-}
-
-pub struct ClusterState {
+    pub cluster: Arc<RwLock<Option<Cluster>>>,
     pub state: AtomicU8,
 }
 
-impl ClusterState {
+impl OverworldCluster {
     pub fn state(&self) -> u8 {
         self.state.load(MO_RELAXED)
     }
-}
-
-pub struct Clusters {
-    pub loaded_clusters: HashMap<I64Vec3, Arc<OverworldCluster>>,
-    pub clusters_states: HashMap<I64Vec3, Arc<ClusterState>>,
 }
 
 pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
     value_noise: ValueNoise<u64>,
-    clusters: Arc<RwLock<Clusters>>,
+    loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
 }
 
 pub struct BlockDataGuard {}
@@ -85,10 +82,7 @@ impl Overworld {
             seed,
             main_registry: Arc::clone(registry),
             value_noise: ValueNoise::new(seed),
-            clusters: Arc::new(RwLock::new(Clusters {
-                loaded_clusters: Default::default(),
-                clusters_states: Default::default(),
-            })),
+            loaded_clusters: Default::default(),
         }
     }
 
@@ -96,8 +90,8 @@ impl Overworld {
         &self.main_registry
     }
 
-    pub fn clusters(&self) -> &Arc<RwLock<Clusters>> {
-        &self.clusters
+    pub fn loaded_clusters(&self) -> &Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>> {
+        &self.loaded_clusters
     }
 
     fn get_world(&self, center_pos: I64Vec3) -> World {
@@ -204,61 +198,45 @@ impl Overworld {
         todo!()
     }
 
-    pub fn clusters_read(&self) -> ClustersRead {
-        ClustersRead {
-            guard: self.clusters.read(),
-            registry: self.main_registry.registry(),
-        }
-    }
-}
-
-pub struct ClustersRead<'a> {
-    guard: RwLockReadGuard<'a, Clusters>,
-    registry: &'a Arc<Registry>,
-}
-
-impl ClustersRead<'_> {
     pub fn access(&self) -> ClustersAccessCache {
         ClustersAccessCache {
-            registry: self.registry,
-            loaded_clusters: &self.guard.loaded_clusters,
-            cluster_states: &self.guard.clusters_states,
+            registry: Arc::clone(self.main_registry.registry()),
+            loaded_clusters: Arc::clone(&self.loaded_clusters),
             clusters_cache: HashMap::with_capacity(32),
         }
     }
 }
 
-pub enum AccessGuard<'a> {
-    Read(RwLockReadGuard<'a, Cluster>),
-    Write(RwLockWriteGuard<'a, Cluster>),
+pub enum AccessGuard {
+    Read(ArcRwLockReadGuard<RawRwLock, Option<Cluster>>),
+    Write(ArcRwLockWriteGuard<RawRwLock, Option<Cluster>>),
 }
 
-impl AccessGuard<'_> {
+impl AccessGuard {
     #[inline]
     pub fn get(&self, pos: U32Vec3) -> BlockData {
         match self {
-            AccessGuard::Read(g) => g.get(pos),
-            AccessGuard::Write(g) => g.get(pos),
+            AccessGuard::Read(g) => g.as_ref().unwrap().get(&pos),
+            AccessGuard::Write(g) => g.as_ref().unwrap().get(&pos),
         }
     }
 
     #[inline]
     pub fn set(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
         match self {
-            AccessGuard::Write(g) => g.set(pos, block),
+            AccessGuard::Write(g) => g.as_mut().unwrap().set(&pos, block),
             _ => unreachable!(),
         }
     }
 }
 
-pub struct ClustersAccessCache<'a> {
-    registry: &'a Arc<Registry>,
-    loaded_clusters: &'a HashMap<I64Vec3, Arc<OverworldCluster>>,
-    cluster_states: &'a HashMap<I64Vec3, Arc<ClusterState>>,
-    clusters_cache: HashMap<I64Vec3, AccessGuard<'a>>,
+pub struct ClustersAccessCache {
+    registry: Arc<Registry>,
+    loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
+    clusters_cache: HashMap<I64Vec3, AccessGuard>,
 }
 
-impl<'a> ClustersAccessCache<'a> {
+impl ClustersAccessCache {
     /// Returns block data or `None` if respective cluster is not loaded
     pub fn get_block(&mut self, pos: &I64Vec3) -> Option<BlockData> {
         let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
@@ -266,13 +244,17 @@ impl<'a> ClustersAccessCache<'a> {
 
         match self.clusters_cache.entry(cluster_pos) {
             hash_map::Entry::Vacant(e) => {
-                let cluster = self.loaded_clusters.get(&cluster_pos)?;
+                let clusters = self.loaded_clusters.read();
+                let cluster = Arc::clone(clusters.get(&cluster_pos)?);
 
-                if self.cluster_states[&cluster_pos].state() != CLUSTER_STATE_LOADED {
+                if cluster.state() != CLUSTER_STATE_LOADED {
                     return None;
                 }
 
-                Some(e.insert(AccessGuard::Read(cluster.cluster.read())).get(block_pos))
+                Some(
+                    e.insert(AccessGuard::Read(cluster.cluster.read_arc()))
+                        .get(block_pos),
+                )
             }
             hash_map::Entry::Occupied(e) => Some(e.into_mut().get(block_pos)),
         }
@@ -285,18 +267,42 @@ impl<'a> ClustersAccessCache<'a> {
 
         match self.clusters_cache.entry(cluster_pos) {
             hash_map::Entry::Vacant(e) => {
-                let cluster = self.loaded_clusters.get(&cluster_pos)?;
+                let clusters = self.loaded_clusters.read();
+                let cluster = Arc::clone(clusters.get(&cluster_pos)?);
 
-                if self.cluster_states[&cluster_pos].state() != CLUSTER_STATE_LOADED {
-                    return None;
+                if cluster.state() != CLUSTER_STATE_LOADED {
+                    None
+                } else {
+                    Some(
+                        e.insert(AccessGuard::Write(cluster.cluster.write_arc()))
+                            .set(block_pos, block),
+                    )
+                }
+            }
+            hash_map::Entry::Occupied(mut e) => {
+                let guard = e.into_mut();
+
+                if let AccessGuard::Read(_) = guard {
+                    replace_with::replace_with_or_abort(guard, |v| {
+                        let read_guard = if let AccessGuard::Read(v) = v {
+                            v
+                        } else {
+                            unreachable!()
+                        };
+
+                        let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
+                        drop(read_guard);
+
+                        AccessGuard::Write(rwlock.write_arc())
+                    });
                 }
 
-                Some(
-                    e.insert(AccessGuard::Write(cluster.cluster.try_write()?))
-                        .set(block_pos, block),
-                )
+                if let AccessGuard::Write(g) = guard {
+                    Some(g.as_mut().unwrap().set(&block_pos, block))
+                } else {
+                    unreachable!()
+                }
             }
-            hash_map::Entry::Occupied(e) => Some(e.into_mut().set(block_pos, block)),
         }
     }
 
@@ -309,7 +315,7 @@ impl<'a> ClustersAccessCache<'a> {
     ) -> Option<(I64Vec3, Facing)> {
         assert!(ray_dir.magnitude_squared() > 0.0);
 
-        let registry = Arc::clone(self.registry);
+        let registry = Arc::clone(&self.registry);
         let step = ray_dir.map(|v| v.signum());
         let step_dt = step.component_div(ray_dir);
 

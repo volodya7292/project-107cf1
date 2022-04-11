@@ -41,8 +41,7 @@ impl Overworld {
         let size: I64Vec3 = glm::try_convert(glm::ceil(&motion_aabb.size()).add_scalar(1.0)).unwrap();
 
         let reg = self.main_registry().registry();
-        let clusters = self.clusters_read();
-        let mut access = clusters.access();
+        let mut access = self.access();
         let mut blocks_aabbs = Vec::<AABB>::with_capacity((size.x * size.y * size.z) as usize * 2);
 
         for x in 0..size.x {

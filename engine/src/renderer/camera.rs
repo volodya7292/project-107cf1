@@ -1,6 +1,6 @@
-use nalgebra::{Isometry3, Rotation3, Translation3};
+use nalgebra::{Rotation3, Translation3};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DMat4, DVec3, DVec4, Mat4, Vec3, Vec4};
+use nalgebra_glm::{DMat4, DVec3, Mat4, Vec3, Vec4};
 
 #[derive(Copy, Clone)]
 pub struct Camera {

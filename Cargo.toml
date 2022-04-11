@@ -27,12 +27,12 @@ futures = "0.3"
 noise = { version = "0.7.0", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"
-bit-vec = "0.6"
 winit = "0.26"
 approx = "0.5"
 entity_data = "1.0"
 smallvec = "1.6"
-parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
+replace_with = "0.1"
+parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision", "deadlock_detection"] }
 
 [build-dependencies]
 common = { path = "common" }

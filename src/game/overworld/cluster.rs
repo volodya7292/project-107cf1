@@ -2,17 +2,18 @@ use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{PackedVertex, Vertex};
 use crate::game::registry::Registry;
-use bit_vec::BitVec;
-use engine::renderer;
 use engine::renderer::vertex_mesh::VertexMeshCreate;
-use engine::utils::SliceSplitImpl;
+use engine::utils::MO_RELAXED;
 use entity_data::{EntityBuilder, EntityId, EntityStorage, EntityStorageLayout};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec2, TVec3};
 
+use engine::renderer::VertexMesh;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use std::convert::TryInto;
 use std::ops::{BitAnd, BitAndAssign};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 
@@ -47,7 +48,7 @@ const fn sector_pos(index: usize) -> U32Vec3 {
     )
 }
 
-fn block_pos_to_sector_index(cell_pos: U32Vec3) -> usize {
+fn block_pos_to_sector_index(cell_pos: &U32Vec3) -> usize {
     sector_index(cell_pos / (SECTOR_SIZE as u32))
 }
 
@@ -109,16 +110,24 @@ impl BitAndAssign for Occluder {
     }
 }
 
+#[derive(Default)]
+struct VertexMeshCache {
+    vertices: Vec<PackedVertex>,
+    indices: Vec<u32>,
+}
+
 struct Sector {
     block_storage: EntityStorage,
     block_map: Box<[[[EntityId; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
     blocks: Box<[[[Block; SECTOR_SIZE]; SECTOR_SIZE]; SECTOR_SIZE]>,
-    occluders: Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>,
-    occupied_cells: BitVec,
+    occluders: Mutex<Box<[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]>>,
+    // Non-atomic, allows fast mutation under `&mut self`
     changed: bool,
+    // Atomic, allows mutation under `&self`
+    changed2: AtomicBool,
     side_changed: [bool; 6],
-    cache_vertices: Vec<PackedVertex>,
-    cache_indices: Vec<u32>,
+    empty: AtomicBool,
+    mesh_cache: Mutex<VertexMeshCache>,
 }
 
 impl Sector {
@@ -128,11 +137,11 @@ impl Sector {
             block_map: Default::default(),
             blocks: Default::default(),
             occluders: Default::default(),
-            occupied_cells: BitVec::from_elem(SECTOR_VOLUME, false),
             changed: false,
+            changed2: AtomicBool::new(false),
             side_changed: [false; 6],
-            cache_vertices: vec![],
-            cache_indices: vec![],
+            empty: AtomicBool::new(true),
+            mesh_cache: Default::default(),
         }
     }
 
@@ -140,20 +149,13 @@ impl Sector {
         SECTOR_SIZE * SECTOR_SIZE * x as usize + SECTOR_SIZE * y as usize + z as usize
     }
 
-    /// Returns whether the sector has been changed since the previous `Cluster::update_mesh()` call.
-    pub fn changed(&self) -> bool {
-        self.changed
-    }
-
-    fn set_block(&mut self, pos: U32Vec3, block: Block, occluder: Occluder) -> BlockDataBuilder {
+    fn set_block(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
         let pos: TVec3<usize> = glm::convert(pos);
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
         if *entity_id != EntityId::NULL {
             self.block_storage.remove(entity_id);
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
-
-        self.occluders[pos.x + 1][pos.y + 1][pos.z + 1] = occluder;
 
         let mut side_changed = self.side_changed;
         side_changed[0] |= pos.x == 0;
@@ -163,10 +165,6 @@ impl Sector {
         side_changed[4] |= pos.z == 0;
         side_changed[5] |= pos.z == SECTOR_SIZE - 1;
 
-        self.occupied_cells.set(
-            pos.z * SECTOR_SIZE * SECTOR_SIZE + pos.y * SECTOR_SIZE + pos.z,
-            block.has_textured_model(),
-        );
         self.blocks[pos.x][pos.y][pos.z] = block;
         self.side_changed = side_changed;
         self.changed = true;
@@ -177,8 +175,46 @@ impl Sector {
         }
     }
 
+    fn check_edge_fully_occluded(&self, facing: Facing) -> bool {
+        let dir = facing.direction();
+        let mut state = true;
+
+        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+            let dx = (d.x != 0) as usize;
+            let dy = (d.y != 0) as usize;
+            let dz = (d.z != 0) as usize;
+            let x = k * dy + k * dz + v * (d.x > 0) as usize;
+            let y = k * dx + l * dz + v * (d.y > 0) as usize;
+            let z = l * dx + l * dy + v * (d.z > 0) as usize;
+            TVec3::new(x, y, z)
+        }
+
+        let occluders = self.occluders.lock();
+
+        for i in 0..SECTOR_SIZE {
+            for j in 0..SECTOR_SIZE {
+                let p = map_pos(dir, i, j, SECTOR_SIZE - 1).add_scalar(1);
+                state &= occluders[p[0]][p[1]][p[2]].occludes_side(facing);
+                if !state {
+                    break;
+                }
+            }
+        }
+
+        state
+    }
+
+    fn is_empty(&self) -> bool {
+        self.empty.load(MO_RELAXED)
+    }
+
     // TODO: optimize this
-    fn calculate_ao(&self, block_pos: I32Vec3, vertex_pos: Vec3, facing: Facing) -> f32 {
+    fn calculate_ao(
+        occluders: &[[[Occluder; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE]; ALIGNED_SECTOR_SIZE],
+        block_pos: I32Vec3,
+        vertex_pos: Vec3,
+        facing: Facing,
+    ) -> f32 {
         let dir = facing.direction();
 
         let mut k: I32Vec2 = Default::default();
@@ -268,47 +304,11 @@ impl Sector {
         let side1 = side1.add_scalar(1);
         let side2 = side2.add_scalar(1);
 
-        // TODO: to account for boundaries, access global occluders instead of sector-local
-
-        // TODO: try another method: use outer clusters to get global occluders on boundaries.
-        // TODO: cache their locks to improve performance
-
-        let corner = self.occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
-        let side1 = self.occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
-        let side2 = self.occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
+        let corner = occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
+        let side1 = occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
+        let side2 = occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
 
         !(side1 || side2 || corner) as u32 as f32
-    }
-
-    fn check_edge_fully_occluded(&self, facing: Facing) -> bool {
-        let dir = facing.direction();
-        let mut state = true;
-
-        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
-            let dx = (d.x != 0) as usize;
-            let dy = (d.y != 0) as usize;
-            let dz = (d.z != 0) as usize;
-            let x = k * dy + k * dz + v * (d.x > 0) as usize;
-            let y = k * dx + l * dz + v * (d.y > 0) as usize;
-            let z = l * dx + l * dy + v * (d.z > 0) as usize;
-            TVec3::new(x, y, z)
-        }
-
-        for i in 0..SECTOR_SIZE {
-            for j in 0..SECTOR_SIZE {
-                let p = map_pos(dir, i, j, SECTOR_SIZE - 1).add_scalar(1);
-                state &= self.occluders[p[0]][p[1]][p[2]].occludes_side(facing);
-                if !state {
-                    break;
-                }
-            }
-        }
-
-        state
-    }
-
-    fn is_empty(&self) -> bool {
-        !self.occupied_cells.any()
     }
 }
 
@@ -376,10 +376,9 @@ impl BlockDataBuilder<'_> {
 pub struct Cluster {
     registry: Arc<Registry>,
     sectors: [Sector; VOLUME_IN_SECTORS],
-    changed: bool,
     side_changed: [bool; 6],
     device: Arc<vkw::Device>,
-    vertex_mesh: renderer::VertexMesh<PackedVertex, ()>,
+    vertex_mesh: Mutex<VertexMesh<PackedVertex, ()>>,
 }
 
 impl Cluster {
@@ -391,16 +390,10 @@ impl Cluster {
         Self {
             registry: Arc::clone(registry),
             sectors: sectors.try_into().ok().unwrap(),
-            changed: false,
             side_changed: [false; 6],
             device,
             vertex_mesh: Default::default(),
         }
-    }
-
-    /// Returns whether the cluster has been changed since the previous `Cluster::update_mesh()` call.
-    pub fn changed(&self) -> bool {
-        self.changed
     }
 
     /// Returns a mask of `Facing` of changed cluster sides since the previous `Cluster::update_mesh()` call.
@@ -411,18 +404,14 @@ impl Cluster {
             .fold(0_u8, |mask, (i, b)| mask | ((*b as u8) << i))
     }
 
-    pub fn vertex_mesh(&self) -> &renderer::VertexMesh<PackedVertex, ()> {
-        &self.vertex_mesh
-    }
-
     /// Returns block data at `pos`
-    pub fn get(&self, pos: U32Vec3) -> BlockData {
+    pub fn get(&self, pos: &U32Vec3) -> BlockData {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
             panic!("Cluster::get_block failed: pos >= Cluster::SIZE");
         }
-        if pos >= U32Vec3::from_element(SIZE as u32) {
+        if pos >= &U32Vec3::from_element(SIZE as u32) {
             assert_failed();
         }
 
@@ -440,13 +429,13 @@ impl Cluster {
     }
 
     /// Returns mutable block data at `pos`
-    pub fn get_mut(&mut self, pos: U32Vec3) -> BlockDataMut {
+    pub fn get_mut(&mut self, pos: &U32Vec3) -> BlockDataMut {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
             panic!("Cluster::get_block_mut failed: pos >= Cluster::SIZE");
         }
-        if pos >= U32Vec3::from_element(SIZE as u32) {
+        if pos >= &U32Vec3::from_element(SIZE as u32) {
             assert_failed();
         }
 
@@ -464,19 +453,18 @@ impl Cluster {
     }
 
     /// Sets specified block at `pos`
-    pub fn set(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
+    pub fn set(&mut self, pos: &U32Vec3, block: Block) -> BlockDataBuilder {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
             panic!("Cluster::set_block failed: pos >= Cluster::SIZE");
         }
-        if pos >= U32Vec3::from_element(SIZE as u32) {
+        if pos >= &U32Vec3::from_element(SIZE as u32) {
             assert_failed();
         }
 
         let sector = self.sectors.get_mut(block_pos_to_sector_index(pos)).unwrap();
 
-        self.changed = true;
         self.side_changed[0] |= pos.x == 0;
         self.side_changed[1] |= pos.x == (SIZE - 1) as u32;
         self.side_changed[2] |= pos.y == 0;
@@ -484,66 +472,11 @@ impl Cluster {
         self.side_changed[4] |= pos.z == 0;
         self.side_changed[5] |= pos.z == (SIZE - 1) as u32;
 
-        let occluder = if block.has_textured_model() {
-            let model = self
-                .registry
-                .get_textured_block_model(block.textured_model())
-                .unwrap();
-            model.occluder()
-        } else {
-            Occluder::default()
-        };
-
         let s_pos = pos.map(|v| v % (SECTOR_SIZE as u32));
-        sector.set_block(s_pos, block, occluder)
+        sector.set_block(s_pos, block)
     }
 
-    pub fn clean_outer_side_occlusion(&mut self, facing: Facing) {
-        macro_rules! side_loop {
-            ($i: ident, $j: ident, $k: ident, $l: ident, $cx: expr, $cy: expr, $cz: expr, $x: expr, $y: expr, $z: expr, $oi: expr) => {
-                for $i in 0..SIZE_IN_SECTORS as u32 {
-                    for $j in 0..SIZE_IN_SECTORS as u32 {
-                        let sector = &mut self.sectors[sector_index(U32Vec3::new($cx, $cy, $cz))];
-                        sector.changed = true;
-
-                        for $k in 0..SECTOR_SIZE {
-                            for $l in 0..SECTOR_SIZE {
-                                sector.occluders[$x][$y][$z].clear_side($oi);
-                            }
-                        }
-                    }
-                }
-            };
-        }
-
-        let n = (SIZE_IN_SECTORS - 1) as u32;
-        let m = ALIGNED_SECTOR_SIZE - 1;
-
-        match facing {
-            Facing::NegativeX => {
-                side_loop!(i, j, k, l, n, i, j, m, k + 1, l + 1, Facing::NegativeX);
-            }
-            Facing::PositiveX => {
-                side_loop!(i, j, k, l, 0, i, j, 0, k + 1, l + 1, Facing::PositiveX);
-            }
-            Facing::NegativeY => {
-                side_loop!(i, j, k, l, i, n, j, k + 1, m, l + 1, Facing::NegativeY);
-            }
-            Facing::PositiveY => {
-                side_loop!(i, j, k, l, i, 0, j, k + 1, 0, l + 1, Facing::PositiveY);
-            }
-            Facing::NegativeZ => {
-                side_loop!(i, j, k, l, i, j, n, k + 1, l + 1, m, Facing::NegativeZ);
-            }
-            Facing::PositiveZ => {
-                side_loop!(i, j, k, l, i, j, 0, k + 1, l + 1, 0, Facing::PositiveZ);
-            }
-        }
-
-        self.changed = true;
-    }
-
-    pub fn paste_outer_side_occlusion(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    pub fn paste_outer_side_occlusion(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let so = side_offset;
         let size = SIZE as i32;
         let b = so.map(|v| v == -size || v == size);
@@ -585,7 +518,7 @@ impl Cluster {
         state
     }
 
-    fn paste_outer_side_occlusion_side(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    fn paste_outer_side_occlusion_side(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
         fn map_sector_pos(d: I32Vec3, k: u32, l: u32) -> U32Vec3 {
             let dx = (d.x != 0) as u32;
             let dy = (d.y != 0) as u32;
@@ -610,28 +543,27 @@ impl Cluster {
 
         for i in 0..SIZE_IN_SECTORS {
             for j in 0..SIZE_IN_SECTORS {
-                let dst_sector = &mut self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
+                let dst_sector = &self.sectors[sector_index(map_sector_pos(dir, i as u32, j as u32))];
+                let mut dst_occluders = dst_sector.occluders.lock();
                 let src_sector =
                     &side_cluster.sectors[sector_index(map_sector_pos(-dir, i as u32, j as u32))];
+                let src_occluders = src_sector.occluders.lock();
 
                 for k in 0..SECTOR_SIZE {
                     for l in 0..SECTOR_SIZE {
                         let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SECTOR_SIZE - 1);
                         let src_p = map_pos(-dir, k, l, SECTOR_SIZE - 1).add_scalar(1);
 
-                        dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                            src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                        dst_occluders[dst_p.x][dst_p.y][dst_p.z] = src_occluders[src_p.x][src_p.y][src_p.z];
                     }
                 }
 
-                dst_sector.changed = true;
+                dst_sector.changed2.store(true, MO_RELAXED);
             }
         }
-
-        self.changed = true;
     }
 
-    fn paste_outer_side_occlusion_edge(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    fn paste_outer_side_occlusion_edge(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
         fn map_sector_pos(m: I32Vec3, i: u32) -> U32Vec3 {
             let s = SIZE_IN_SECTORS as u32 - 1;
             m.map(|v| i * (v == 0) as u32 + s * (v > 0) as u32)
@@ -644,46 +576,46 @@ impl Cluster {
         let n = -m;
 
         for i in 0..SIZE_IN_SECTORS {
-            let dst_sector = &mut self.sectors[sector_index(map_sector_pos(m, i as u32))];
+            let dst_sector = &self.sectors[sector_index(map_sector_pos(m, i as u32))];
+            let mut dst_occluders = dst_sector.occluders.lock();
             let src_sector = &side_cluster.sectors[sector_index(map_sector_pos(n, i as u32))];
+            let src_occluders = src_sector.occluders.lock();
 
             for k in 0..SECTOR_SIZE {
                 let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
                 let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
 
-                dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                    src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                dst_occluders[dst_p.x][dst_p.y][dst_p.z] = src_occluders[src_p.x][src_p.y][src_p.z];
             }
 
-            dst_sector.changed = true;
+            dst_sector.changed2.store(true, MO_RELAXED);
         }
-
-        self.changed = true;
     }
 
-    fn paste_outer_side_occlusion_corner(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    fn paste_outer_side_occlusion_corner(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let m = side_offset.map(|v| (v > 0) as u32);
         let n = side_offset.map(|v| (v < 0) as u32);
 
         let dst_p = m * (ALIGNED_SECTOR_SIZE - 1) as u32;
         let dst_sector_pos = m * (SIZE_IN_SECTORS - 1) as u32;
-        let dst_sector = &mut self.sectors[sector_index(dst_sector_pos)];
+        let dst_sector = &self.sectors[sector_index(dst_sector_pos)];
+        let mut dst_occluders = dst_sector.occluders.lock();
 
         let src_pos = (n * (SECTOR_SIZE - 1) as u32).add_scalar(1);
         let src_sector_pos = n * (SIZE_IN_SECTORS - 1) as u32;
         let src_sector = &side_cluster.sectors[sector_index(src_sector_pos)];
+        let src_occluders = src_sector.occluders.lock();
 
-        dst_sector.occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] =
-            src_sector.occluders[src_pos.x as usize][src_pos.y as usize][src_pos.z as usize];
-        dst_sector.changed = true;
-
-        self.changed = true;
+        dst_occluders[dst_p.x as usize][dst_p.y as usize][dst_p.z as usize] =
+            src_occluders[src_pos.x as usize][src_pos.y as usize][src_pos.z as usize];
+        dst_sector.changed2.store(true, MO_RELAXED);
     }
 
-    fn update_inner_side_occluders(&mut self) {
+    fn update_inner_side_occluders(&self) {
         macro_rules! side {
             ($sector_i: expr, $facing: expr, $k: ident, $l: ident, $x: expr, $y: expr, $z: expr, $x2: expr, $y2: expr, $z2: expr) => {
-                let (sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+                let sector = &self.sectors[$sector_i];
+                let occluders = sector.occluders.lock();
                 let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
                 let j = $facing as usize;
                 let rel = (pos + $facing.direction());
@@ -692,25 +624,23 @@ impl Cluster {
                     && rel >= I32Vec3::from_element(0)
                     && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
                 {
-                    let side_sector = &mut sectors[sector_index(glm::try_convert(rel).unwrap())];
+                    let side_sector = &self.sectors[sector_index(glm::try_convert(rel).unwrap())];
+                    let mut side_occluders = side_sector.occluders.lock();
                     let facing_m = $facing.mirror();
 
                     for $k in 0..SECTOR_SIZE {
                         for $l in 0..SECTOR_SIZE {
-                            side_sector.occluders[$x][$y][$z].set_side(
-                                $facing,
-                                sector.occluders[$x2][$y2][$z2].occludes_side(facing_m),
-                            );
+                            side_occluders[$x][$y][$z]
+                                .set_side($facing, occluders[$x2][$y2][$z2].occludes_side(facing_m));
                         }
                     }
-
-                    sector.side_changed[j] = false;
                 }
             };
         }
         macro_rules! edge {
             ($sector_i: expr, $side_offset: expr) => {
-                let (src_sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+                let src_sector = &self.sectors[$sector_i];
+                let src_occluders = src_sector.occluders.lock();
                 let n = $side_offset;
                 let m = -n;
                 let src_sector_pos: I32Vec3 = glm::convert(sector_pos($sector_i));
@@ -719,7 +649,8 @@ impl Cluster {
                 if dst_sector_pos >= I32Vec3::from_element(0)
                     && dst_sector_pos < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
                 {
-                    let dst_sector = &mut sectors[sector_index(glm::try_convert(dst_sector_pos).unwrap())];
+                    let dst_sector = &self.sectors[sector_index(glm::try_convert(dst_sector_pos).unwrap())];
+                    let mut dst_occluders = dst_sector.occluders.lock();
 
                     fn map_pos(m: I32Vec3, k: usize, s: usize) -> TVec3<usize> {
                         m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
@@ -729,8 +660,7 @@ impl Cluster {
                         let dst_p = map_pos(m, k + 1, ALIGNED_SECTOR_SIZE - 1);
                         let src_p = map_pos(n, k, SECTOR_SIZE - 1).add_scalar(1);
 
-                        dst_sector.occluders[dst_p.x][dst_p.y][dst_p.z] =
-                            src_sector.occluders[src_p.x][src_p.y][src_p.z];
+                        dst_occluders[dst_p.x][dst_p.y][dst_p.z] = src_occluders[src_p.x][src_p.y][src_p.z];
                     }
                 }
             };
@@ -738,7 +668,8 @@ impl Cluster {
 
         macro_rules! corner {
             ($sector_i: expr, $xyz: expr) => {
-                let (sector, mut sectors) = self.sectors.split_mid_mut($sector_i).unwrap();
+                let sector = &self.sectors[$sector_i];
+                let occluders = sector.occluders.lock();
 
                 if sector.changed {
                     let xyz = $xyz;
@@ -748,8 +679,10 @@ impl Cluster {
 
                     if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
                     {
-                        let side_sector = &mut sectors[sector_index(glm::try_convert(rel).unwrap())];
-                        side_sector.occluders[xyz2.x][xyz2.y][xyz2.z] = sector.occluders[xyz.x][xyz.y][xyz.z];
+                        let side_sector = &self.sectors[sector_index(glm::try_convert(rel).unwrap())];
+                        let mut side_occluders = side_sector.occluders.lock();
+
+                        side_occluders[xyz2.x][xyz2.y][xyz2.z] = occluders[xyz.x][xyz.y][xyz.z];
                     }
                 }
             };
@@ -789,11 +722,39 @@ impl Cluster {
         }
     }
 
-    fn triangulate(&mut self, sector_index: usize) {
-        let sector = &mut self.sectors[sector_index];
-        let sector_pos: TVec3<f32> = glm::convert(sector_pos(sector_index) * (SECTOR_SIZE as u32));
+    fn update_sector_blocks_occluders(&self, sector: &Sector) {
+        let mut occluders = sector.occluders.lock();
 
-        sector.cache_vertices = Vec::<PackedVertex>::with_capacity(SECTOR_VOLUME * 8);
+        for x in 0..SECTOR_SIZE {
+            for y in 0..SECTOR_SIZE {
+                for z in 0..SECTOR_SIZE {
+                    let block = &sector.blocks[x][y][z];
+
+                    let occluder = if block.has_textured_model() {
+                        let model = self
+                            .registry
+                            .get_textured_block_model(block.textured_model())
+                            .unwrap();
+                        model.occluder()
+                    } else {
+                        Occluder::default()
+                    };
+
+                    occluders[x + 1][y + 1][z + 1] = occluder;
+                }
+            }
+        }
+    }
+
+    fn triangulate(&self, sector_index: usize) {
+        let sector = &self.sectors[sector_index];
+        let sector_pos: TVec3<f32> = glm::convert(sector_pos(sector_index) * (SECTOR_SIZE as u32));
+        let occluders = sector.occluders.lock();
+
+        self.update_sector_blocks_occluders(sector);
+
+        let mut cache = &mut *sector.mesh_cache.lock();
+        cache.vertices = Vec::<PackedVertex>::with_capacity(SECTOR_VOLUME * 8);
 
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
@@ -801,6 +762,8 @@ impl Cluster {
                 v.pack()
             }));
         }
+
+        let mut empty = true;
 
         for x in 0..SECTOR_SIZE {
             for y in 0..SECTOR_SIZE {
@@ -812,19 +775,20 @@ impl Cluster {
                     if !block.has_textured_model() {
                         continue;
                     }
+                    empty = false;
 
                     let model = self
                         .registry
                         .get_textured_block_model(block.textured_model())
                         .unwrap();
 
-                    add_vertices(&mut sector.cache_vertices, posf, model.get_inner_quads());
+                    add_vertices(&mut cache.vertices, posf, model.get_inner_quads());
 
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
                         let rel = (pos + facing.direction()).add_scalar(1);
 
-                        let occludes = sector.occluders[rel.x as usize][rel.y as usize][rel.z as usize]
+                        let occludes = occluders[rel.x as usize][rel.y as usize][rel.z as usize]
                             .occludes_side(facing.mirror());
 
                         if !occludes {
@@ -839,10 +803,10 @@ impl Cluster {
                                 // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
                                 // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
                                 // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
-                                v[0].ao = sector.calculate_ao(pos, v[0].position, facing);
-                                v[1].ao = sector.calculate_ao(pos, v[1].position, facing);
-                                v[2].ao = sector.calculate_ao(pos, v[2].position, facing);
-                                v[3].ao = sector.calculate_ao(pos, v[3].position, facing);
+                                v[0].ao = Sector::calculate_ao(&occluders, pos, v[0].position, facing);
+                                v[1].ao = Sector::calculate_ao(&occluders, pos, v[1].position, facing);
+                                v[2].ao = Sector::calculate_ao(&occluders, pos, v[2].position, facing);
+                                v[3].ao = Sector::calculate_ao(&occluders, pos, v[3].position, facing);
 
                                 if v[1].ao != v[2].ao {
                                     // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {
@@ -858,7 +822,7 @@ impl Cluster {
                                     v[j].position += sector_pos;
                                 }
 
-                                sector.cache_vertices.extend(v.map(|v| v.pack()));
+                                cache.vertices.extend(v.map(|v| v.pack()));
                             }
                         }
                     }
@@ -866,10 +830,12 @@ impl Cluster {
             }
         }
 
-        sector.cache_vertices.shrink_to_fit();
+        sector.empty.store(empty, MO_RELAXED);
 
-        let indices = &mut sector.cache_indices;
-        indices.resize(sector.cache_vertices.len() / 4 * 6, 0);
+        cache.vertices.shrink_to_fit();
+
+        let indices = &mut cache.indices;
+        indices.resize(cache.vertices.len() / 4 * 6, 0);
 
         for i in (0..indices.len()).step_by(6) {
             let ind = (i / 6 * 4) as u32;
@@ -883,27 +849,18 @@ impl Cluster {
     }
 
     /// Note: sets `Cluster::changed` to `false` and `Sector::changed` to `false` for all the sectors in the cluster.
-    pub fn update_mesh(&mut self) {
-        if !self.changed {
-            return;
-        }
-        self.changed = false;
-
+    fn update_mesh(&self) {
         self.update_inner_side_occluders();
 
         for i in 0..VOLUME_IN_SECTORS {
-            if self.sectors[i].changed {
+            if self.sectors[i].changed || self.sectors[i].changed2.load(MO_RELAXED) {
                 self.triangulate(i);
-                self.sectors[i].changed = false;
-                self.sectors[i].side_changed = [false; 6];
             }
         }
 
         let (v_count, i_count) = self.sectors.iter().fold((0, 0), |(v_count, i_count), sector| {
-            (
-                v_count + sector.cache_vertices.len(),
-                i_count + sector.cache_indices.len(),
-            )
+            let cache = sector.mesh_cache.lock();
+            (v_count + cache.vertices.len(), i_count + cache.indices.len())
         });
         let mut vertices = Vec::<PackedVertex>::with_capacity(v_count);
         let mut indices = Vec::<u32>::with_capacity(i_count);
@@ -912,19 +869,37 @@ impl Cluster {
             let sector = &self.sectors[i];
             let i_start = vertices.len() as u32;
 
-            let mut sector_indices = sector.cache_indices.clone();
+            let cache = sector.mesh_cache.lock();
+            let mut sector_indices = cache.indices.clone();
             for i in &mut sector_indices {
                 *i += i_start;
             }
 
-            vertices.extend(&sector.cache_vertices);
+            vertices.extend(&cache.vertices);
             indices.extend(&sector_indices);
         }
 
-        self.vertex_mesh = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
+        *self.vertex_mesh.lock() = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sectors.iter().find(|sector| !sector.is_empty()).is_none()
+        self.sectors.iter().all(|sector| sector.is_empty())
+    }
+}
+
+pub fn update_mesh(cluster: &RwLock<Cluster>) {
+    let cluster = cluster.upgradable_read();
+
+    cluster.update_mesh();
+
+    // Remove `changed` markers
+    let mut cluster = RwLockUpgradableReadGuard::upgrade(cluster);
+
+    cluster.side_changed = [false; 6];
+
+    for sector in &mut cluster.sectors {
+        sector.changed = false;
+        sector.side_changed = [false; 6];
+        sector.changed2.store(false, MO_RELAXED);
     }
 }

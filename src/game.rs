@@ -213,8 +213,7 @@ impl Application for Game {
 
             {
                 let overworld = &self.overworld;
-                let clusters = overworld.clusters_read();
-                let mut blocks = clusters.access();
+                let mut blocks = overworld.access();
 
                 if blocks
                     .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
@@ -250,8 +249,7 @@ impl Application for Game {
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
 
             // Detect look-at block
-            let clusers_read = overworld.clusters_read();
-            let mut access = clusers_read.access();
+            let mut access = overworld.access();
 
             self.look_at_block =
                 access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
@@ -259,8 +257,7 @@ impl Application for Game {
 
         // Set block on mouse buttons
         {
-            let clusers_read = self.overworld.clusters_read();
-            let mut access = clusers_read.access();
+            let mut access = self.overworld.access();
 
             if self.block_set_cooldown == 0.0 {
                 if let Some(inter) = self.look_at_block {
