@@ -39,8 +39,7 @@ lazy_static! {
         (Format::RGB32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGBA32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .collect();
     pub static ref IMAGE_FORMATS: AHashSet<Format> = [
         Format::R32_UINT,
@@ -49,8 +48,7 @@ lazy_static! {
         Format::RG16_UNORM,
         Format::RG32_UINT
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .collect();
     pub static ref FORMAT_SIZES: AHashMap<Format, u8> = [
         (Format::UNDEFINED, 0),
@@ -72,7 +70,6 @@ lazy_static! {
         (Format::BC5_RG_UNORM, 1),
         (Format::BC7_UNORM, 1),
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .collect();
 }

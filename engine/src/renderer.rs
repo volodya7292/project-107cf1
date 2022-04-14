@@ -1670,7 +1670,7 @@ impl Renderer {
             cl.end().unwrap();
         }
         {
-            let mut submit = &mut self.staging_submit;
+            let submit = &mut self.staging_submit;
             unsafe { graphics_queue.submit(submit).unwrap() };
             submit.wait().unwrap();
         }

@@ -91,9 +91,8 @@ impl AABB {
                     delta[i] = (other.min[i] - self.max[i] - MOTION_EPSILON).min(0.0);
                 } else if resolve_direction[i] < -MOTION_EPSILON {
                     delta[i] = (other.max[i] - self.min[i] + MOTION_EPSILON).max(0.0);
-                } else {
-                    continue;
                 }
+                continue;
             }
 
             // Note: add MOTION_EPSILON to collision delta to account for f64 precision errors

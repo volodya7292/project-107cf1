@@ -11,10 +11,14 @@ pub struct SafeThreadPool {
     threads: Vec<Arc<(Mutex<bool>, Condvar)>>,
 }
 
-#[derive(Copy, Clone)]
-pub enum ThreadPoolPriority {
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub enum TaskPriority {
+    /// Used for realtime tasks such as rendering or updating per-frame state
     Realtime,
-    Background,
+    /// One separate thread for urgent small tasks
+    Coroutine,
+    /// Used for intensive workloads
+    Intensive,
 }
 
 #[cfg(target_os = "macos")]
@@ -33,10 +37,11 @@ where
 }
 
 #[cfg(target_os = "macos")]
-fn schedule_worker(worker: ThreadBuilder, priority: ThreadPoolPriority) -> Arc<(Mutex<bool>, Condvar)> {
+fn schedule_worker(worker: ThreadBuilder, priority: TaskPriority) -> Arc<(Mutex<bool>, Condvar)> {
     let macos_priority = match priority {
-        ThreadPoolPriority::Realtime => macos::QOS_CLASS_USER_INTERACTIVE,
-        ThreadPoolPriority::Background => macos::QOS_CLASS_DEFAULT,
+        TaskPriority::Realtime => macos::QOS_CLASS_USER_INTERACTIVE,
+        TaskPriority::Coroutine => macos::QOS_CLASS_USER_INITIATED,
+        TaskPriority::Intensive => macos::QOS_CLASS_DEFAULT,
     };
 
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
@@ -62,7 +67,7 @@ fn schedule_worker(worker: ThreadBuilder, priority: ThreadPoolPriority) -> Arc<(
 }
 
 #[cfg(not(target_os = "macos"))]
-fn schedule_worker(worker: ThreadBuilder, _: ThreadPoolPriority) -> Arc<(Mutex<bool>, Condvar)> {
+fn schedule_worker(worker: ThreadBuilder, _: TaskPriority) -> Arc<(Mutex<bool>, Condvar)> {
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
 
     {
@@ -83,7 +88,7 @@ fn schedule_worker(worker: ThreadBuilder, _: ThreadPoolPriority) -> Arc<(Mutex<b
 impl SafeThreadPool {
     pub fn new(
         num_threads: usize,
-        priority: ThreadPoolPriority,
+        priority: TaskPriority,
     ) -> Result<SafeThreadPool, rayon::ThreadPoolBuildError> {
         let mut threads = vec![];
         let inner = Some(

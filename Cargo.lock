@@ -1504,6 +1504,7 @@ dependencies = [
  "entity_data",
  "futures",
  "image",
+ "lazy_static",
  "log",
  "nalgebra",
  "nalgebra-glm",

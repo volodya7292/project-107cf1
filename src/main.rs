@@ -1,11 +1,10 @@
-mod utils;
-#[macro_use]
 mod game;
 mod material_pipelines;
 mod physics;
 mod scene_component;
 #[cfg(test)]
 mod tests;
+mod utils;
 
 use crate::game::Game;
 use engine::utils::noise::ParamNoise;
@@ -76,15 +75,15 @@ fn parking_lot_deadlock_detection() {
 }
 
 fn main() {
-    // parking_lot_deadlock_detection();
+    parking_lot_deadlock_detection();
 
     SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
         .init()
         .unwrap();
 
-    let mut game = Box::new(Game::init());
-    let mut engine = Engine::init(PROGRAM_NAME, 4, game);
+    let game = Box::new(Game::init());
+    let engine = Engine::init(PROGRAM_NAME, 4, game);
 
     engine.run();
 }

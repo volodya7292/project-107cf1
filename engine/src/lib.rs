@@ -1,6 +1,7 @@
 pub mod ecs;
 pub mod input;
 mod platform;
+pub mod queue;
 pub mod renderer;
 pub mod resource_file;
 #[cfg(test)]
@@ -9,15 +10,14 @@ pub mod utils;
 
 use crate::input::{Keyboard, Mouse};
 use crate::platform::current_refresh_rate;
+use crate::queue::realtime_queue;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-use crate::utils::thread_pool::{SafeThreadPool, ThreadPoolPriority};
+use crate::utils::thread_pool::{SafeThreadPool, TaskPriority};
 use crate::utils::{HashSet, MO_RELAXED};
 use lazy_static::lazy_static;
-use rayon::ThreadPool;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 use vk_wrapper as vkw;
 use winit::event::WindowEvent;
@@ -26,7 +26,7 @@ use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
 
 lazy_static! {
-    static ref INITIALIZED: AtomicBool = AtomicBool::new(false);
+    static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
 }
 
 pub struct Input {
@@ -67,8 +67,6 @@ impl Display for EngineStatistics {
 
 pub struct Engine {
     renderer: Renderer,
-    render_tp: SafeThreadPool,
-    update_tp: SafeThreadPool,
     frame_start_time: Instant,
     frame_end_time: Instant,
     delta_time: f64,
@@ -84,13 +82,7 @@ pub trait Application {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
     fn on_adapter_select(&mut self, adapters: &[Arc<vkw::Adapter>]) -> usize;
     fn on_engine_initialized(&mut self, renderer: &mut Renderer);
-    fn on_update(
-        &mut self,
-        delta_time: f64,
-        renderer: &mut Renderer,
-        input: &mut Input,
-        background_thread_pool: &ThreadPool,
-    );
+    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input);
     fn on_event(
         &mut self,
         event: winit::event::Event<()>,
@@ -101,18 +93,9 @@ pub trait Application {
 
 impl Engine {
     pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
-        if INITIALIZED.swap(true, MO_RELAXED) {
+        if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
             panic!("Engine has already been initialized!");
         }
-
-        let n_threads = thread::available_parallelism().unwrap().get().max(2);
-        let n_render_threads = (n_threads / 2).max(4);
-        let n_update_threads = n_threads - n_render_threads;
-
-        // Note: use safe thread pools to account for proper destruction of Vulkan objects.
-        let render_thread_pool = SafeThreadPool::new(n_render_threads, ThreadPoolPriority::Realtime).unwrap();
-        let update_thread_pool =
-            SafeThreadPool::new(n_update_threads, ThreadPoolPriority::Background).unwrap();
 
         let event_loop = EventLoop::new();
         let main_window = app.on_engine_start(&event_loop);
@@ -140,8 +123,6 @@ impl Engine {
 
         Engine {
             renderer,
-            render_tp: render_thread_pool,
-            update_tp: update_thread_pool,
             frame_start_time: Instant::now(),
             frame_end_time: Instant::now(),
             delta_time: 1.0,
@@ -206,14 +187,10 @@ impl Engine {
 
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
-                    self.render_tp.install(|| {
+                    realtime_queue().install(|| {
                         let t0 = Instant::now();
-                        self.app.on_update(
-                            self.delta_time,
-                            &mut self.renderer,
-                            &mut self.input,
-                            &self.update_tp,
-                        );
+                        self.app
+                            .on_update(self.delta_time, &mut self.renderer, &mut self.input);
                         let t1 = Instant::now();
                         self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
 

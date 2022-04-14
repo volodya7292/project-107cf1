@@ -46,10 +46,13 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
     AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
 }
 
+pub const CLUSTER_STATE_INITIAL: u8 = 0;
+pub const CLUSTER_STATE_LOADING: u8 = 1;
+pub const CLUSTER_STATE_LOADED: u8 = 2;
 /// The cluster is not needed anymore
-pub const CLUSTER_STATE_LOADING: u8 = 2;
-pub const CLUSTER_STATE_LOADED: u8 = 3;
-pub const CLUSTER_STATE_DISCARDED: u8 = 1;
+pub const CLUSTER_STATE_DISCARDED: u8 = 3;
+/// The cluster is invisible relative to the camera and is offloaded to reduce memory usage
+pub const CLUSTER_STATE_OFFLOADED_INVISIBLE: u8 = 4;
 
 // Cluster lifecycle
 // ----------------------------------
@@ -59,6 +62,7 @@ pub const CLUSTER_STATE_DISCARDED: u8 = 1;
 pub struct OverworldCluster {
     pub cluster: Arc<RwLock<Option<Cluster>>>,
     pub state: AtomicU8,
+    pub changed: AtomicBool,
 }
 
 impl OverworldCluster {
@@ -201,30 +205,48 @@ impl Overworld {
     pub fn access(&self) -> ClustersAccessCache {
         ClustersAccessCache {
             registry: Arc::clone(self.main_registry.registry()),
+            block_empty: self.main_registry.block_empty(),
             loaded_clusters: Arc::clone(&self.loaded_clusters),
             clusters_cache: HashMap::with_capacity(32),
         }
     }
 }
 
-pub enum AccessGuard {
+pub struct AccessGuard {
+    block_empty: Block,
+    lock: AccessGuardLock,
+}
+
+pub enum AccessGuardLock {
     Read(ArcRwLockReadGuard<RawRwLock, Option<Cluster>>),
     Write(ArcRwLockWriteGuard<RawRwLock, Option<Cluster>>),
 }
 
 impl AccessGuard {
     #[inline]
-    pub fn get(&self, pos: U32Vec3) -> BlockData {
-        match self {
-            AccessGuard::Read(g) => g.as_ref().unwrap().get(&pos),
-            AccessGuard::Write(g) => g.as_ref().unwrap().get(&pos),
+    pub fn get(&self, pos: &U32Vec3) -> BlockData {
+        match &self.lock {
+            AccessGuardLock::Read(g) => {
+                if let Some(cluster) = g.as_ref() {
+                    cluster.get(pos)
+                } else {
+                    BlockData::empty()
+                }
+            }
+            AccessGuardLock::Write(g) => {
+                if let Some(cluster) = g.as_ref() {
+                    cluster.get(pos)
+                } else {
+                    BlockData::empty()
+                }
+            }
         }
     }
 
     #[inline]
-    pub fn set(&mut self, pos: U32Vec3, block: Block) -> BlockDataBuilder {
-        match self {
-            AccessGuard::Write(g) => g.as_mut().unwrap().set(&pos, block),
+    pub fn set(&mut self, pos: &U32Vec3, block: Block) -> BlockDataBuilder {
+        match &mut self.lock {
+            AccessGuardLock::Write(g) => g.as_mut().unwrap().set(pos, block),
             _ => unreachable!(),
         }
     }
@@ -232,6 +254,7 @@ impl AccessGuard {
 
 pub struct ClustersAccessCache {
     registry: Arc<Registry>,
+    block_empty: Block,
     loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
     clusters_cache: HashMap<I64Vec3, AccessGuard>,
 }
@@ -246,17 +269,21 @@ impl ClustersAccessCache {
             hash_map::Entry::Vacant(e) => {
                 let clusters = self.loaded_clusters.read();
                 let cluster = Arc::clone(clusters.get(&cluster_pos)?);
+                let state = cluster.state();
 
-                if cluster.state() != CLUSTER_STATE_LOADED {
+                if state != CLUSTER_STATE_LOADED && state != CLUSTER_STATE_OFFLOADED_INVISIBLE {
                     return None;
                 }
 
                 Some(
-                    e.insert(AccessGuard::Read(cluster.cluster.read_arc()))
-                        .get(block_pos),
+                    e.insert(AccessGuard {
+                        block_empty: self.block_empty,
+                        lock: AccessGuardLock::Read(cluster.cluster.read_arc()),
+                    })
+                    .get(&block_pos),
                 )
             }
-            hash_map::Entry::Occupied(e) => Some(e.into_mut().get(block_pos)),
+            hash_map::Entry::Occupied(e) => Some(e.into_mut().get(&block_pos)),
         }
     }
 
@@ -273,18 +300,22 @@ impl ClustersAccessCache {
                 if cluster.state() != CLUSTER_STATE_LOADED {
                     None
                 } else {
+                    cluster.changed.store(true, MO_RELAXED);
                     Some(
-                        e.insert(AccessGuard::Write(cluster.cluster.write_arc()))
-                            .set(block_pos, block),
+                        e.insert(AccessGuard {
+                            block_empty: self.block_empty,
+                            lock: AccessGuardLock::Write(cluster.cluster.write_arc()),
+                        })
+                        .set(&block_pos, block),
                     )
                 }
             }
             hash_map::Entry::Occupied(mut e) => {
                 let guard = e.into_mut();
 
-                if let AccessGuard::Read(_) = guard {
-                    replace_with::replace_with_or_abort(guard, |v| {
-                        let read_guard = if let AccessGuard::Read(v) = v {
+                if let AccessGuardLock::Read(_) = &guard.lock {
+                    replace_with::replace_with_or_abort(&mut guard.lock, |v| {
+                        let read_guard = if let AccessGuardLock::Read(v) = v {
                             v
                         } else {
                             unreachable!()
@@ -293,11 +324,15 @@ impl ClustersAccessCache {
                         let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
                         drop(read_guard);
 
-                        AccessGuard::Write(rwlock.write_arc())
+                        let clusters = self.loaded_clusters.read();
+                        let ocluster = clusters.get(&cluster_pos).unwrap();
+                        ocluster.changed.store(true, MO_RELAXED);
+
+                        AccessGuardLock::Write(rwlock.write_arc())
                     });
                 }
 
-                if let AccessGuard::Write(g) = guard {
+                if let AccessGuardLock::Write(g) = &mut guard.lock {
                     Some(g.as_mut().unwrap().set(&block_pos, block))
                 } else {
                     unreachable!()

@@ -12,6 +12,7 @@ use crate::physics::MOTION_EPSILON;
 use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
 use engine::ecs::scene::Scene;
+use engine::queue::{coroutine_queue, intensive_queue};
 use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
@@ -57,7 +58,7 @@ pub struct Game {
 }
 
 impl Game {
-    const MOVEMENT_SPEED: f64 = 4.0;
+    const MOVEMENT_SPEED: f64 = 20.0;
     const MOUSE_SENSITIVITY: f64 = 0.003;
 
     pub fn init() -> Game {
@@ -147,18 +148,13 @@ impl Application for Game {
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
 
         overworld_streamer.set_xz_render_distance(1024);
+        // overworld_streamer.set_xz_render_distance(256);
         overworld_streamer.set_y_render_distance(256);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
     }
 
-    fn on_update(
-        &mut self,
-        delta_time: f64,
-        renderer: &mut Renderer,
-        input: &mut Input,
-        background_tp: &ThreadPool,
-    ) {
+    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
         let kb = input.keyboard();
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
@@ -177,8 +173,11 @@ impl Application for Game {
             vel_left_right += 1;
         }
         if kb.is_key_pressed(VirtualKeyCode::Space) {
-            // vel_up_down += 1;
-            self.curr_jump_force = 5.7;
+            if !self.player_collision_enabled {
+                vel_up_down += 1;
+            }
+            // self.curr_jump_force = 5.7;
+            self.curr_jump_force = 14.0;
         }
         if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
@@ -211,9 +210,8 @@ impl Application for Game {
                 vel_left_right as f64 * ms,
             );
 
-            {
-                let overworld = &self.overworld;
-                let mut blocks = overworld.access();
+            if self.player_collision_enabled {
+                let mut blocks = self.overworld.access();
 
                 if blocks
                     .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
@@ -228,8 +226,9 @@ impl Application for Game {
             }
 
             let prev_pos = self.player_pos;
-            let overworld = &self.overworld;
-            let new_pos = overworld.move_entity(prev_pos, motion_delta, &self.player_aabb);
+            let new_pos = self
+                .overworld
+                .move_entity(prev_pos, motion_delta, &self.player_aabb);
 
             if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
                 // Note: the ground is reached
@@ -249,7 +248,7 @@ impl Application for Game {
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
 
             // Detect look-at block
-            let mut access = overworld.access();
+            let mut access = self.overworld.access();
 
             self.look_at_block =
                 access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
@@ -309,7 +308,7 @@ impl Application for Game {
                 }
             }
 
-            background_tp.spawn(|| game_tick(streamer, game_tick_finished));
+            coroutine_queue().spawn(|| game_tick(streamer, game_tick_finished));
             // println!("as {}", renderer.device().calc_real_device_mem_usage());
         }
     }
@@ -383,10 +382,10 @@ impl Application for Game {
 pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
     let mut streamer = streamer.lock();
 
-    let t0 = Instant::now();
+    // let t0 = Instant::now();
     streamer.update();
-    let t1 = Instant::now();
-    println!("tick time: {}", (t1 - t0).as_secs_f64());
+    // let t1 = Instant::now();
+    // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
     finished.store(true, atomic::Ordering::Relaxed);
 }
