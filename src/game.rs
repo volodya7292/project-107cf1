@@ -58,7 +58,7 @@ pub struct Game {
 }
 
 impl Game {
-    const MOVEMENT_SPEED: f64 = 20.0;
+    const MOVEMENT_SPEED: f64 = 8.0;
     const MOUSE_SENSITIVITY: f64 = 0.003;
 
     pub fn init() -> Game {
@@ -147,8 +147,8 @@ impl Application for Game {
         let mut overworld_streamer =
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
 
-        overworld_streamer.set_xz_render_distance(1024);
-        // overworld_streamer.set_xz_render_distance(256);
+        // overworld_streamer.set_xz_render_distance(1024);
+        overworld_streamer.set_xz_render_distance(256);
         overworld_streamer.set_y_render_distance(256);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
@@ -210,60 +210,58 @@ impl Application for Game {
                 vel_left_right as f64 * ms,
             );
 
-            if self.player_collision_enabled {
-                let mut blocks = self.overworld.access();
-
-                if blocks
-                    .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
-                    .is_some()
-                {
-                    // Free fall
-                    motion_delta.y -= (physics::G_ACCEL * self.fall_time) * delta_time;
-
-                    // Jump force
-                    motion_delta.y += self.curr_jump_force * delta_time;
-                }
-            }
-
             let prev_pos = self.player_pos;
-            let new_pos = self
-                .overworld
-                .move_entity(prev_pos, motion_delta, &self.player_aabb);
-
-            if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
-                // Note: the ground is reached
-                self.curr_jump_force = 0.0;
-                // println!("GROUND HIT");
-                self.fall_time = delta_time;
-            } else {
-                self.fall_time += delta_time;
-            }
 
             if self.player_collision_enabled {
+                {
+                    let mut blocks = self.overworld.access();
+
+                    if blocks
+                        .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
+                        .is_some()
+                    {
+                        // Free fall
+                        motion_delta.y -= (physics::G_ACCEL * self.fall_time) * delta_time;
+
+                        // Jump force
+                        motion_delta.y += self.curr_jump_force * delta_time;
+                    }
+                }
+
+                let new_pos = self
+                    .overworld
+                    .move_entity(prev_pos, motion_delta, &self.player_aabb);
+
+                if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
+                    // Note: the ground is reached
+                    self.curr_jump_force = 0.0;
+                    // println!("GROUND HIT");
+                    self.fall_time = delta_time;
+                } else {
+                    self.fall_time += delta_time;
+                }
+
                 self.player_pos = new_pos;
             } else {
                 self.player_pos = prev_pos + motion_delta;
             }
 
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
-
-            // Detect look-at block
-            let mut access = self.overworld.access();
-
-            self.look_at_block =
-                access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
         }
 
         // Set block on mouse buttons
         {
-            let mut access = self.overworld.access();
-
             if self.block_set_cooldown == 0.0 {
-                if let Some(inter) = self.look_at_block {
-                    if input.mouse().is_button_pressed(MouseButton::Left) {
-                    } else if input.mouse().is_button_pressed(MouseButton::Right) {
-                        access.set_block(&inter.0, self.registry.block_empty());
+                if input.mouse().is_button_pressed(MouseButton::Left) {
+                } else if input.mouse().is_button_pressed(MouseButton::Right) {
+                    let mut access = self.overworld.access();
+                    let camera = renderer.active_camera();
 
+                    self.look_at_block =
+                        access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
+
+                    if let Some(inter) = self.look_at_block {
+                        access.set_block(&inter.0, self.registry.block_empty());
                         self.block_set_cooldown = 0.5;
                     }
                 }
@@ -354,6 +352,9 @@ impl Application for Game {
                                     );
                                     main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
                                 }
+                            }
+                            VirtualKeyCode::P => {
+                                println!("{}", self.player_pos);
                             }
                             VirtualKeyCode::T => {
                                 self.cursor_grab = !self.cursor_grab;

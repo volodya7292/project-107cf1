@@ -128,7 +128,7 @@ struct Sector {
     // Non-atomic, allows fast mutation under `&mut self`
     changed: bool,
     // Atomic, allows mutation under `&self`
-    outer_occlusion_changed: AtomicBool,
+    occlusion_changed: AtomicBool,
     side_changed: [bool; 6],
     empty: AtomicBool,
     mesh_cache: Mutex<VertexMeshCache>,
@@ -142,7 +142,7 @@ impl Sector {
             blocks: Default::default(),
             occluders: Default::default(),
             changed: false,
-            outer_occlusion_changed: AtomicBool::new(false),
+            occlusion_changed: AtomicBool::new(false),
             side_changed: [false; 6],
             empty: AtomicBool::new(true),
             mesh_cache: Default::default(),
@@ -574,7 +574,7 @@ impl Cluster {
                     }
                 }
 
-                dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+                dst_sector.occlusion_changed.store(true, MO_RELAXED);
             }
         }
     }
@@ -599,7 +599,7 @@ impl Cluster {
                 dst_occluders[dst_p.x][dst_p.y][dst_p.z] = value;
             }
 
-            dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+            dst_sector.occlusion_changed.store(true, MO_RELAXED);
         }
     }
 
@@ -613,7 +613,7 @@ impl Cluster {
 
         dst_occluders[dst_pos.x as usize][dst_pos.y as usize][dst_pos.z as usize] = value;
 
-        dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+        dst_sector.occlusion_changed.store(true, MO_RELAXED);
     }
 
     pub fn paste_outer_side_occlusion(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
@@ -672,7 +672,7 @@ impl Cluster {
                     }
                 }
 
-                dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+                dst_sector.occlusion_changed.store(true, MO_RELAXED);
             }
         }
     }
@@ -704,7 +704,7 @@ impl Cluster {
                 dst_occluders[dst_p.x][dst_p.y][dst_p.z] = side_cluster.block_occluder(src_block);
             }
 
-            dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+            dst_sector.occlusion_changed.store(true, MO_RELAXED);
         }
     }
 
@@ -726,7 +726,7 @@ impl Cluster {
         dst_occluders[dst_pos.x as usize][dst_pos.y as usize][dst_pos.z as usize] =
             side_cluster.block_occluder(src_block);
 
-        dst_sector.outer_occlusion_changed.store(true, MO_RELAXED);
+        dst_sector.occlusion_changed.store(true, MO_RELAXED);
     }
 
     fn update_inner_side_occluders(&self) {
@@ -752,6 +752,8 @@ impl Cluster {
                                 .set_side($facing, occluders[$x2][$y2][$z2].occludes_side(facing_m));
                         }
                     }
+
+                    side_sector.occlusion_changed.store(true, MO_RELAXED);
                 }
             }};
         }
@@ -764,6 +766,7 @@ impl Cluster {
                 let src_sector_pos: I32Vec3 = glm::convert(sector_pos($sector_i));
                 let dst_sector_pos = src_sector_pos + $side_offset;
 
+                // TODO: check for sector side change (do similar to above)
                 if dst_sector_pos >= I32Vec3::from_element(0)
                     && dst_sector_pos < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
                 {
@@ -780,6 +783,9 @@ impl Cluster {
 
                         dst_occluders[dst_p.x][dst_p.y][dst_p.z] = src_occluders[src_p.x][src_p.y][src_p.z];
                     }
+
+                    // TODO: add sector edge change
+                    // side_sector.occlusion_changed.store(true, MO_RELAXED);
                 }
             }};
         }
@@ -789,19 +795,20 @@ impl Cluster {
                 let sector = &self.sectors[$sector_i];
                 let occluders = sector.occluders.lock();
 
-                if sector.changed {
-                    let xyz = $xyz;
-                    let xyz2 = xyz.map(|v| (ALIGNED_SECTOR_SIZE - 1) * (v == 1) as usize);
-                    let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
-                    let rel = pos + glm::sign(&xyz.map(|v| v as i32 - SECTOR_SIZE as i32 / 2));
+                let xyz = $xyz;
+                let xyz2 = xyz.map(|v| (ALIGNED_SECTOR_SIZE - 1) * (v == 1) as usize);
+                let pos: I32Vec3 = glm::convert(sector_pos($sector_i));
+                let rel = pos + glm::sign(&xyz.map(|v| v as i32 - SECTOR_SIZE as i32 / 2));
 
-                    if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32)
-                    {
-                        let side_sector = &self.sectors[sector_index(glm::try_convert(rel).unwrap())];
-                        let mut side_occluders = side_sector.occluders.lock();
+                // TODO: check for sector corner change (do similar to above)
+                if rel >= I32Vec3::from_element(0) && rel < I32Vec3::from_element(SIZE_IN_SECTORS as i32) {
+                    let side_sector = &self.sectors[sector_index(glm::try_convert(rel).unwrap())];
+                    let mut side_occluders = side_sector.occluders.lock();
 
-                        side_occluders[xyz2.x][xyz2.y][xyz2.z] = occluders[xyz.x][xyz.y][xyz.z];
-                    }
+                    side_occluders[xyz2.x][xyz2.y][xyz2.z] = occluders[xyz.x][xyz.y][xyz.z];
+
+                    // TODO: add sector corner change
+                    // side_sector.occlusion_changed.store(true, MO_RELAXED);
                 }
             }};
         }
@@ -972,8 +979,7 @@ impl Cluster {
 
         // First update blocks occluders
         for sector in &self.sectors {
-            if sector.changed || sector.outer_occlusion_changed.load(MO_RELAXED) {
-                if sector.outer_occlusion_changed.load(MO_RELAXED) {}
+            if sector.changed || sector.occlusion_changed.load(MO_RELAXED) {
                 self.update_sector_blocks_occluders(sector);
                 changed_overall = true;
             }
@@ -987,10 +993,10 @@ impl Cluster {
         self.update_inner_side_occluders();
 
         for i in 0..VOLUME_IN_SECTORS {
-            if self.sectors[i].changed || self.sectors[i].outer_occlusion_changed.load(MO_RELAXED) {
+            if self.sectors[i].changed || self.sectors[i].occlusion_changed.load(MO_RELAXED) {
                 // Set changed2=false before triangulation
                 // to prevent race condition with potentially changed `occluders` afterwards
-                self.sectors[i].outer_occlusion_changed.store(false, MO_RELAXED);
+                self.sectors[i].occlusion_changed.store(false, MO_RELAXED);
                 self.triangulate(i);
             }
         }

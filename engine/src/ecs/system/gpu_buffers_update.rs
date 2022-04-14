@@ -3,7 +3,7 @@ use crate::ecs::scene_storage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::renderer::VMBufferUpdate;
-use crate::utils::{HashMap, LruCache};
+use crate::utils::HashMap;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use vk_wrapper as vkw;
@@ -13,7 +13,8 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
     pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
-    pub buffer_updates: &'a mut LruCache<Entity, Arc<RawVertexMesh>>,
+    pub buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
+    pub sorted_buffer_updates_entities: &'a Vec<(Entity, f64)>,
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
 }
 
@@ -38,11 +39,14 @@ impl GpuBuffersUpdate<'_> {
             let mut transfer_barriers = Vec::with_capacity(self.buffer_updates.len());
             let mut graphics_barriers = Vec::with_capacity(transfer_barriers.len());
 
-            for _ in 0..self.buffer_updates.len() {
-                let (entity, mesh) = self.buffer_updates.pop_lru().unwrap();
+            for (entity, _) in self.sorted_buffer_updates_entities {
+                let mesh = self.buffer_updates.remove(entity).unwrap();
 
                 if mesh.staging_buffer.is_none() {
-                    self.pending_buffer_updates.push(VMBufferUpdate { entity, mesh });
+                    self.pending_buffer_updates.push(VMBufferUpdate {
+                        entity: *entity,
+                        mesh,
+                    });
                     continue;
                 }
 
@@ -66,7 +70,10 @@ impl GpuBuffersUpdate<'_> {
                 );
 
                 total_copy_size += src_buffer.size();
-                self.pending_buffer_updates.push(VMBufferUpdate { entity, mesh });
+                self.pending_buffer_updates.push(VMBufferUpdate {
+                    entity: *entity,
+                    mesh,
+                });
 
                 if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
                     break;

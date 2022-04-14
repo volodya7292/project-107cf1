@@ -50,7 +50,7 @@ const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
 struct RCluster {
     creation_time: Instant,
     entity: scene::Entity,
-    /// Whether this cluster is invisible due to full occlusion by neighbours relative to `stream_pos`
+    /// Whether this cluster is invisible due to full occlusion by the neighbour clusters
     occluded: AtomicBool,
     empty: Arc<AtomicBool>,
     /// A mask of 3x3 'sides' of outer occlusions which are needed to be cleared
@@ -159,7 +159,7 @@ fn is_cluster_in_forced_load_range(pos: &I64Vec3, stream_pos: &DVec3) -> bool {
     dir_to_cluster_unnorm.magnitude() <= FORCED_LOAD_RANGE as f64
 }
 
-/// Checks if cluster at `pos` is occluded by neighbour clusters when camera is at `stream_pos`
+/// Checks if cluster at `pos` is occluded at all sides by the neighbour clusters
 fn is_cluster_visibly_occluded(
     rclusters: &HashMap<I64Vec3, RCluster>,
     pos: I64Vec3,
@@ -172,25 +172,22 @@ fn is_cluster_visibly_occluded(
         return false;
     }
 
-    let look_dirs = look_cube_directions(dir_to_cluster_unnorm);
     let mut edges_occluded = true;
 
-    for dir in look_dirs {
-        if let Some(facing) = Facing::from_direction(dir) {
-            let p = get_side_cluster_by_facing(pos, facing);
+    for i in 0..6 {
+        let facing = Facing::from_u8(i);
+        let p = get_side_cluster_by_facing(pos, facing);
 
-            if let Some(rcl) = rclusters.get(&p) {
-                let edge_occluded =
-                    ((rcl.edge_occlusion.load(MO_RELAXED) >> (facing.mirror() as u8)) & 1) == 1;
-                edges_occluded &= edge_occluded;
-            } else {
-                edges_occluded = false;
-                break;
-            }
+        if let Some(rcl) = rclusters.get(&p) {
+            let edge_occluded = ((rcl.edge_occlusion.load(MO_RELAXED) >> (facing.mirror() as u8)) & 1) == 1;
+            edges_occluded &= edge_occluded;
+        } else {
+            edges_occluded = false;
+            break;
+        }
 
-            if !edges_occluded {
-                break;
-            }
+        if !edges_occluded {
+            break;
         }
     }
 
@@ -245,6 +242,9 @@ impl OverworldStreamer {
 
     /// Generates new clusters and their content.
     pub fn update(&mut self) {
+        // let layout: HashSet<I64Vec3> = [I64Vec3::new(0, 0, 0), I64Vec3::new(64, 0, 0)]
+        //     .into_iter()
+        //     .collect();
         let layout = calc_cluster_layout(self.stream_pos, self.xz_render_distance, self.y_render_distance);
         let rclusters = &mut self.rclusters;
         let mut oclusters = self.overworld_clusters.upgradable_read();
@@ -259,7 +259,7 @@ impl OverworldStreamer {
                     .magnitude(),
             })
             .collect();
-        sorted_layout.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+        sorted_layout.sort_unstable_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
 
         let max_loading_clusters_in_progress = (intensive_queue().current_num_threads() as u32 / 2).max(1);
         let max_updating_clusters_in_progress = max_loading_clusters_in_progress;
@@ -454,7 +454,7 @@ impl OverworldStreamer {
                     )
                 })
                 .collect();
-            keys.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            keys.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
             for (pos, _) in &keys {
                 if self.curr_clusters_occlusions_updating_n.load(MO_RELAXED)

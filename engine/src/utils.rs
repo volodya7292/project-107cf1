@@ -17,7 +17,6 @@ pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 pub type IndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 pub type IndexMap<T> = indexmap::IndexMap<T, ahash::RandomState>;
-pub type LruCache<K, V> = lru::LruCache<K, V, ahash::RandomState>;
 
 pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;

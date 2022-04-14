@@ -16,7 +16,7 @@ use crate::renderer::material_pipeline::UniformStruct;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::resource_file::ResourceRef;
 use crate::utils;
-use crate::utils::{HashMap, LruCache, UInt};
+use crate::utils::{HashMap, UInt};
 use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
@@ -171,7 +171,7 @@ pub struct Renderer {
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
-    vertex_mesh_updates: LruCache<Entity, Arc<RawVertexMesh>>,
+    vertex_mesh_updates: HashMap<Entity, Arc<RawVertexMesh>>,
     vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
     /// Entities ordered in respect to children order inside `Children` components:
@@ -862,7 +862,7 @@ impl Renderer {
             uniform_buffer_basic,
             // device_buffers: SlotVec::new(),
             vertex_meshes: Default::default(),
-            vertex_mesh_updates: LruCache::unbounded(),
+            vertex_mesh_updates: Default::default(),
             vertex_mesh_pending_updates: vec![],
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
@@ -1062,7 +1062,7 @@ impl Renderer {
 
     /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
     pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-        self.vertex_mesh_updates.contains(&entity)
+        self.vertex_mesh_updates.contains_key(&entity)
             || self
                 .vertex_mesh_pending_updates
                 .iter()
@@ -1241,11 +1241,28 @@ impl Renderer {
         // Before updating new buffers, collect all the completed updates to commit them
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
 
+        // Sort by distance to perform updates of the nearest vertex meshes first
+        let mut sorted_buffer_updates_entities: Vec<_> = {
+            let transforms = self.scene.storage_read::<component::internal::GlobalTransform>();
+            self.vertex_mesh_updates
+                .keys()
+                .map(|v| {
+                    let transform = transforms.get(*v).unwrap();
+                    (
+                        *v,
+                        (transform.position - self.relative_camera_pos).magnitude_squared(),
+                    )
+                })
+                .collect()
+        };
+        sorted_buffer_updates_entities.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
             transfer_submit: &mut self.transfer_submit,
             buffer_updates: &mut self.vertex_mesh_updates,
+            sorted_buffer_updates_entities: &sorted_buffer_updates_entities,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
         };
         let commit_buffer_updates_system = system::CommitBufferUpdates {
