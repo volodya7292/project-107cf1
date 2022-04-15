@@ -43,6 +43,8 @@ const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
 struct RCluster {
     creation_time: Instant,
     entity: scene::Entity,
+    /// Occlusion mask of clusters whose occlusion data is currently being pasted into this cluster
+    updating_outer_occlusion: Arc<AtomicU32>,
     /// Whether this cluster is invisible due to full occlusion by the neighbour clusters
     occluded: AtomicBool,
     empty: Arc<AtomicBool>,
@@ -304,9 +306,10 @@ impl OverworldStreamer {
                 if let hash_map::Entry::Vacant(e) = rclusters.entry(*p) {
                     e.insert(RCluster {
                         creation_time: curr_t,
+                        entity: scene::Entity::NULL,
+                        updating_outer_occlusion: Default::default(),
                         occluded: Default::default(),
                         empty: Default::default(),
-                        entity: scene::Entity::NULL,
                         needs_occlusion_clear_at: 0,
                         needs_occlusion_fill_at: CLUSTER_ALL_NEIGHBOURS_3X3,
                         edge_occlusion: Default::default(),
@@ -523,6 +526,9 @@ impl OverworldStreamer {
                 let mut rcluster = rclusters.get_mut(pos).unwrap();
                 rcluster.needs_occlusion_clear_at = 0;
                 rcluster.needs_occlusion_fill_at = 0;
+                rcluster
+                    .updating_outer_occlusion
+                    .store(needs_occlusion_fill_at, MO_RELAXED);
 
                 // Subtract fill sides from clear sides because sides for clearing will be overridden by filling
                 let clear_mask = needs_occlusion_clear_at & !needs_occlusion_fill_at;
@@ -610,6 +616,7 @@ impl OverworldStreamer {
                 let edge_occlusion = Arc::clone(&rcluster.edge_occlusion);
                 let edge_occlusion_determined = Arc::clone(&rcluster.edge_occlusion_determined);
                 let curr_clusters_meshes_updating_n = Arc::clone(&self.curr_clusters_meshes_updating_n);
+                let updating_outer_occlusion = Arc::clone(&rcluster.updating_outer_occlusion);
 
                 curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
 
@@ -640,6 +647,7 @@ impl OverworldStreamer {
                     // Set a flag to initiate object's component::VertexMesh change in the scene
                     mesh_changed.store(true, MO_RELEASE);
 
+                    updating_outer_occlusion.store(0, MO_RELEASE);
                     curr_clusters_meshes_updating_n.fetch_sub(1, MO_RELEASE);
                 });
             }
@@ -679,14 +687,30 @@ impl OverworldStreamer {
         for (pos, ocluster) in self.overworld_clusters.read().iter() {
             let rcluster = &self.rclusters[pos];
 
-            if rcluster.mesh_changed.swap(false, MO_RELAXED) {
-                let cluster = ocluster.cluster.read();
-                let cluster = unwrap_option!(cluster.as_ref(), continue);
-                let mesh = cluster.vertex_mesh();
+            if !rcluster.mesh_changed.load(MO_RELAXED) {
+                continue;
+            }
 
-                if rcluster.entity != scene::Entity::NULL {
-                    vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
+            let cluster = ocluster.cluster.read();
+            let cluster = unwrap_option!(cluster.as_ref(), continue);
+            let mesh = cluster.vertex_mesh();
+            let mut ready_to_set_mesh = true;
+
+            for p in get_side_clusters(pos) {
+                if let Some(rcl) = self.rclusters.get(&p) {
+                    let updating_mask = rcl.updating_outer_occlusion.load(MO_RELAXED);
+                    let mask = 1 << neighbour_dir_index(&p, pos);
+
+                    if updating_mask & mask != 0 {
+                        ready_to_set_mesh = false;
+                        break;
+                    }
                 }
+            }
+
+            if ready_to_set_mesh && rcluster.entity != scene::Entity::NULL {
+                vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
+                rcluster.mesh_changed.store(false, MO_RELAXED);
             }
         }
 
