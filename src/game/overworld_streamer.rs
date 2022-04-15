@@ -15,18 +15,12 @@ use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use smallvec::SmallVec;
 use std::collections::hash_map;
-use std::collections::hash_map::Entry;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
 
 pub const FORCED_LOAD_RANGE: usize = 128;
-
-struct FillOcclusionMask {
-    clear_mask: u32,
-    fill_mask: u32,
-}
 
 pub struct OverworldStreamer {
     device: Arc<vkw::Device>,
@@ -37,7 +31,6 @@ pub struct OverworldStreamer {
     y_render_distance: u64,
     overworld_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
     rclusters: HashMap<I64Vec3, RCluster>,
-    cluster_masks_to_fill_occlusion: HashMap<I64Vec3, FillOcclusionMask>,
     clusters_entities_to_remove: Vec<scene::Entity>,
     clusters_entities_to_add: Vec<I64Vec3>,
     curr_loading_clusters_n: Arc<AtomicU32>,
@@ -139,7 +132,7 @@ fn get_side_cluster_by_facing(pos: I64Vec3, facing: Facing) -> I64Vec3 {
     pos + glm::convert::<I32Vec3, I64Vec3>(dir) * cl_size
 }
 
-fn facing_dir_index(pos: &I64Vec3, target: &I64Vec3) -> u8 {
+fn neighbour_dir_index(pos: &I64Vec3, target: &I64Vec3) -> u8 {
     let d: U8Vec3 = glm::try_convert(((target - pos) / (cluster::SIZE as i64)).add_scalar(1)).unwrap();
     d.x * 9 + d.y * 3 + d.z
 }
@@ -215,7 +208,6 @@ impl OverworldStreamer {
             y_render_distance: 128,
             overworld_clusters: Arc::clone(overworld.loaded_clusters()),
             rclusters: Default::default(),
-            cluster_masks_to_fill_occlusion: Default::default(),
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
             curr_loading_clusters_n: Arc::new(Default::default()),
@@ -338,7 +330,7 @@ impl OverworldStreamer {
             for removed_pos in removed_rclusters {
                 for p in get_side_clusters(&removed_pos) {
                     if let Some(rcluster) = rclusters.get_mut(&p) {
-                        rcluster.needs_occlusion_clear_at |= 1 << facing_dir_index(&p, &removed_pos);
+                        rcluster.needs_occlusion_clear_at |= 1 << neighbour_dir_index(&p, &removed_pos);
                     }
                 }
             }
@@ -415,11 +407,29 @@ impl OverworldStreamer {
                 rcluster.mesh_can_be_updated.store(true, MO_RELAXED);
 
                 // Set the need to update occlusions of sides of neighbour clusters
-                if changed_sides != 0 {
-                    // TODO: optimize based on specific changed sides
-                    for p in get_side_clusters(pos) {
-                        if let Some(rcl) = rclusters.get_mut(&p) {
-                            rcl.needs_occlusion_fill_at |= 1 << facing_dir_index(&p, pos);
+                for (i, side) in changed_sides.iter().enumerate() {
+                    if !side {
+                        continue;
+                    }
+                    let changed_dir: I64Vec3 = glm::convert(cluster::changed_side_index_to_dir(i));
+
+                    let p0 = *pos;
+                    let p1 = pos + changed_dir * (cluster::SIZE as i64);
+
+                    let min = p0.inf(&p1);
+                    let max = p0.sup(&p1);
+
+                    for x in min.x..=max.x {
+                        for y in min.y..=max.y {
+                            for z in min.z..=max.z {
+                                let p = glm::vec3(x, y, z);
+                                if p == *pos {
+                                    continue;
+                                }
+                                if let Some(rcl) = rclusters.get_mut(&p) {
+                                    rcl.needs_occlusion_fill_at |= 1 << neighbour_dir_index(&p, pos);
+                                }
+                            }
                         }
                     }
                 }
@@ -436,7 +446,7 @@ impl OverworldStreamer {
                     );
                 }
 
-                let mut rcluster = rclusters.get_mut(pos).unwrap();
+                let rcluster = rclusters.get_mut(pos).unwrap();
 
                 if rcluster.needs_occlusion_fill_at != 0 || rcluster.needs_occlusion_clear_at != 0 {
                     // Do not update mesh when outer occlusion is not filled yet
@@ -465,7 +475,7 @@ impl OverworldStreamer {
 
                 let rcluster = unwrap_option!(rclusters.get(pos), continue);
                 let mut needs_occlusion_fill_at = rcluster.needs_occlusion_fill_at;
-                let mut needs_occlusion_clear_at = rcluster.needs_occlusion_clear_at;
+                let needs_occlusion_clear_at = rcluster.needs_occlusion_clear_at;
 
                 if needs_occlusion_fill_at == 0 && needs_occlusion_clear_at == 0 {
                     continue;
@@ -482,7 +492,7 @@ impl OverworldStreamer {
                 let mut fill_neighbours = SmallVec::<[(I64Vec3, Arc<_>); 26]>::new();
 
                 for p in get_side_clusters(&pos) {
-                    let mask = 1 << facing_dir_index(pos, &p);
+                    let mask = 1 << neighbour_dir_index(pos, &p);
 
                     if !rclusters.contains_key(&p) {
                         needs_occlusion_fill_at &= !mask;
@@ -511,14 +521,14 @@ impl OverworldStreamer {
                 rcluster.needs_occlusion_clear_at = 0;
                 rcluster.needs_occlusion_fill_at = 0;
 
-                let mut fill_mask = needs_occlusion_fill_at;
+                let fill_mask = needs_occlusion_fill_at;
                 // Subtract fill sides from clear sides because sides for clearing will be overridden by filling
-                let mut clear_mask = needs_occlusion_clear_at & !fill_mask;
+                let clear_mask = needs_occlusion_clear_at & !fill_mask;
 
                 let clear_neighbour_sides: SmallVec<[I64Vec3; 26]> = get_side_clusters(&pos)
                     .into_iter()
                     .filter_map(|p| {
-                        let mask = 1 << facing_dir_index(&pos, &p);
+                        let mask = 1 << neighbour_dir_index(&pos, &p);
                         if (clear_mask & mask) != 0 {
                             Some(p)
                         } else {
@@ -602,8 +612,6 @@ impl OverworldStreamer {
                 curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
 
                 intensive_queue().spawn(move || {
-                    cluster::update_mesh(&cluster);
-
                     let cluster = cluster.read();
                     let cluster = if let Some(cluster) = cluster.as_ref() {
                         cluster
@@ -611,6 +619,8 @@ impl OverworldStreamer {
                         curr_clusters_meshes_updating_n.fetch_sub(1, MO_RELEASE);
                         return;
                     };
+
+                    cluster.update_mesh();
 
                     // Determine edge occlusion
                     {
@@ -666,10 +676,12 @@ impl OverworldStreamer {
         // Update meshes
         for (pos, ocluster) in self.overworld_clusters.read().iter() {
             let rcluster = &self.rclusters[pos];
+
             if rcluster.mesh_changed.swap(false, MO_RELAXED) {
                 let cluster = ocluster.cluster.read();
-                let cluster = cluster.as_ref().unwrap();
+                let cluster = unwrap_option!(cluster.as_ref(), continue);
                 let mesh = cluster.vertex_mesh();
+
                 if rcluster.entity != scene::Entity::NULL {
                     vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
                 }

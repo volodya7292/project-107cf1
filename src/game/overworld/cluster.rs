@@ -10,7 +10,7 @@ use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec2, TVec3};
-use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use std::convert::TryInto;
 use std::ops::{BitAnd, BitAndAssign};
 use std::sync::atomic::AtomicBool;
@@ -20,7 +20,6 @@ use vk_wrapper as vkw;
 pub const SIZE: usize = 24;
 pub const VOLUME: usize = SIZE * SIZE * SIZE;
 const ALIGNED_SIZE: usize = SIZE + 2;
-const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
 
 lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new(&Default::default());
@@ -30,10 +29,13 @@ pub fn size(level: u32) -> u64 {
     SIZE as u64 * 2_u64.pow(level)
 }
 
-fn index_1d_to_3d(i: usize, ds: usize) -> [usize; 3] {
-    let ds_sqr = ds * ds;
-    let i_2d = i % ds_sqr;
-    [i / ds_sqr, i_2d / ds, i_2d % ds]
+fn side_change_index(pos: &TVec3<usize>) -> usize {
+    let p = pos.map(|v| (v > 0) as usize + (v == SIZE - 1) as usize);
+    p.x * 9 + p.y * 3 + p.z
+}
+
+pub fn changed_side_index_to_dir(index: usize) -> I32Vec3 {
+    I32Vec3::new(index as i32 / 9 % 3, index as i32 / 3 % 3, index as i32 % 3).add_scalar(-1)
 }
 
 #[derive(Default, Copy, Clone)]
@@ -171,7 +173,7 @@ pub struct Cluster {
     block_map: Box<[[[EntityId; SIZE]; SIZE]; SIZE]>,
     blocks: Box<[[[Block; SIZE]; SIZE]; SIZE]>,
     occluders: Mutex<Box<[[[Occluder; ALIGNED_SIZE]; ALIGNED_SIZE]; ALIGNED_SIZE]>>,
-    side_changed: [bool; 6],
+    side_changed: [bool; 27],
     occlusion_changed: AtomicBool,
     empty: AtomicBool,
     device: Arc<vkw::Device>,
@@ -189,7 +191,7 @@ impl Cluster {
             block_map: Default::default(),
             blocks: Default::default(),
             occluders: Default::default(),
-            side_changed: [false; 6],
+            side_changed: [false; 27],
             occlusion_changed: Default::default(),
             empty: AtomicBool::new(true),
             device,
@@ -203,14 +205,12 @@ impl Cluster {
 
     /// Returns a mask of `Facing` of changed cluster sides since the previous `Cluster::update_mesh()` call,
     /// and clears it.
-    pub fn acquire_changed_sides(&mut self) -> u8 {
-        let mask = self
-            .side_changed
-            .iter()
-            .enumerate()
-            .fold(0_u8, |mask, (i, b)| mask | ((*b as u8) << i));
-        self.side_changed = [false; 6];
-        mask
+    pub fn acquire_changed_sides(&mut self) -> [bool; 27] {
+        let mut changed_sides = self.side_changed;
+        changed_sides[1 * 9 + 1 * 3 + 1] = false;
+
+        self.side_changed = [false; 27];
+        changed_sides
     }
 
     /// Returns block data at `pos`
@@ -246,6 +246,8 @@ impl Cluster {
             assert_failed();
         }
 
+        // TODO: set `side_changed` if necessary
+
         let pos: TVec3<usize> = glm::convert(*pos);
         let block = self.blocks[pos.x][pos.y][pos.z];
         let entity = self.block_map[pos.x][pos.y][pos.z];
@@ -267,21 +269,15 @@ impl Cluster {
         if pos >= &U32Vec3::from_element(SIZE as u32) {
             assert_failed();
         }
-
-        self.side_changed[0] |= pos.x == 0;
-        self.side_changed[1] |= pos.x == (SIZE - 1) as u32;
-        self.side_changed[2] |= pos.y == 0;
-        self.side_changed[3] |= pos.y == (SIZE - 1) as u32;
-        self.side_changed[4] |= pos.z == 0;
-        self.side_changed[5] |= pos.z == (SIZE - 1) as u32;
-
         let pos: TVec3<usize> = glm::convert(*pos);
+
         let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
         if *entity_id != EntityId::NULL {
             self.block_storage.remove(entity_id);
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
 
+        self.side_changed[side_change_index(&pos)] = true;
         self.blocks[pos.x][pos.y][pos.z] = block;
 
         BlockDataBuilder {
@@ -584,7 +580,7 @@ impl Cluster {
         !(side1 || side2 || corner) as u32 as f32
     }
 
-    fn update_mesh(&self) {
+    pub fn update_mesh(&self) {
         let mut occluders = self.occluders.lock();
 
         // Update blocks occluders before calculating AO
@@ -688,20 +684,4 @@ impl Cluster {
     pub fn is_empty(&self) -> bool {
         self.empty.load(MO_RELAXED)
     }
-}
-
-pub fn update_mesh(cluster: &RwLock<Option<Cluster>>) {
-    let cluster = cluster.upgradable_read();
-
-    if cluster.is_none() {
-        return;
-    }
-
-    cluster.as_ref().unwrap().update_mesh();
-
-    // Remove `changed` markers
-    let mut cluster = RwLockUpgradableReadGuard::upgrade(cluster);
-    let mut cluster = cluster.as_mut().unwrap();
-
-    cluster.side_changed = [false; 6];
 }
