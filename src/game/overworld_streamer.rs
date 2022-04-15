@@ -416,7 +416,7 @@ impl OverworldStreamer {
 
                 // Set the need to update occlusions of sides of neighbour clusters
                 if changed_sides != 0 {
-                    // TODO: maybe optimize based on specific changed sides
+                    // TODO: optimize based on specific changed sides
                     for p in get_side_clusters(pos) {
                         if let Some(rcl) = rclusters.get_mut(&p) {
                             rcl.needs_occlusion_fill_at |= 1 << facing_dir_index(&p, pos);

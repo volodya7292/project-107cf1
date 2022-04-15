@@ -2,7 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "../../engine/shaders/common.glsl"
 
-#define CLUSTER_SIZE 64
+#define CLUSTER_SIZE 24
 
 layout(location = 0) in uvec4 inPack;
 

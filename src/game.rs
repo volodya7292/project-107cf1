@@ -262,7 +262,7 @@ impl Application for Game {
 
                     if let Some(inter) = self.look_at_block {
                         access.set_block(&inter.0, self.registry.block_empty());
-                        self.block_set_cooldown = 0.5;
+                        self.block_set_cooldown = 0.15;
                     }
                 }
             }
