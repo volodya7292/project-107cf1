@@ -494,6 +494,9 @@ impl OverworldStreamer {
                 for p in get_side_clusters(&pos) {
                     let mask = 1 << neighbour_dir_index(pos, &p);
 
+                    if needs_occlusion_fill_at & mask == 0 {
+                        continue;
+                    }
                     if !rclusters.contains_key(&p) {
                         needs_occlusion_fill_at &= !mask;
                         continue;
@@ -521,9 +524,8 @@ impl OverworldStreamer {
                 rcluster.needs_occlusion_clear_at = 0;
                 rcluster.needs_occlusion_fill_at = 0;
 
-                let fill_mask = needs_occlusion_fill_at;
                 // Subtract fill sides from clear sides because sides for clearing will be overridden by filling
-                let clear_mask = needs_occlusion_clear_at & !fill_mask;
+                let clear_mask = needs_occlusion_clear_at & !needs_occlusion_fill_at;
 
                 let clear_neighbour_sides: SmallVec<[I64Vec3; 26]> = get_side_clusters(&pos)
                     .into_iter()
