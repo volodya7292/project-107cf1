@@ -253,6 +253,19 @@ impl Application for Game {
         {
             if self.block_set_cooldown == 0.0 {
                 if input.mouse().is_button_pressed(MouseButton::Left) {
+                    let mut access = self.overworld.access();
+                    let camera = renderer.active_camera();
+
+                    self.look_at_block =
+                        access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
+
+                    if let Some((pos, facing)) = self.look_at_block {
+                        let dir: I64Vec3 = glm::convert(facing.direction());
+                        let set_pos = pos + dir;
+
+                        access.set_block(&set_pos, self.registry.block_default());
+                        self.block_set_cooldown = 0.15;
+                    }
                 } else if input.mouse().is_button_pressed(MouseButton::Right) {
                     let mut access = self.overworld.access();
                     let camera = renderer.active_camera();

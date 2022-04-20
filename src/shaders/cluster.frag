@@ -21,6 +21,7 @@ layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
 layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
 layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
 
+const vec3 ambient_light = vec3(0.7);
 
 layout(location = 0) in Output {
     vec2 tex_uv;
@@ -29,6 +30,7 @@ layout(location = 0) in Output {
     vec3 surface_normal;
     uint material_id;
     float ao;
+    vec3 light;
 } vs_in;
 
 vec2 triplan_coord[3];
@@ -97,7 +99,7 @@ void main() {
     color = (vs_in.surface_normal + 1.0) / 2.0;
 
     if (color.r != color.r)
-        color = vec3(1.0);    
+    color = vec3(1.0);
 
     // Calculate triplanar texture mapping
     // -------------------------------------------------------
@@ -134,8 +136,10 @@ void main() {
     uint material_id;
     sample_material(vs_in.material_id, vs_in.tex_uv, mat);
 
-     vec3 diffuse = mat.diffuse.rgb * max(0.75, vs_in.ao);
-//    vec3 diffuse = vec3(1.0) * (0.75 + vs_in.ao * 0.25);
+    vec3 combined_light = min(vec3(1.0), ambient_light + vs_in.light);
+
+    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
+    // vec3 diffuse = vec3(1.0) * (0.75 + vs_in.ao * 0.25);
     // diffuse = vs_in.surface_normal;
 
     // outDiffuse = vec4(color, 1);

@@ -3,6 +3,8 @@ pub mod block_component;
 pub mod block_model;
 pub mod cluster;
 pub mod generator;
+pub mod light_level;
+pub mod occluder;
 pub mod structure;
 pub mod textured_block_model;
 

@@ -1,18 +1,19 @@
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{PackedVertex, Vertex};
+use crate::game::overworld::light_level::LightLevel;
+use crate::game::overworld::occluder::Occluder;
 use crate::game::registry::Registry;
 use engine::renderer::vertex_mesh::VertexMeshCreate;
 use engine::renderer::VertexMesh;
-use engine::utils::MO_RELAXED;
+use engine::utils::{Int, MO_RELAXED};
 use entity_data::{EntityBuilder, EntityId, EntityStorage};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec2, TVec3};
-use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use parking_lot::{RwLock, RwLockReadGuard};
 use std::convert::TryInto;
-use std::ops::{BitAnd, BitAndAssign};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use vk_wrapper as vkw;
@@ -20,6 +21,7 @@ use vk_wrapper as vkw;
 pub const SIZE: usize = 24;
 pub const VOLUME: usize = SIZE * SIZE * SIZE;
 const ALIGNED_SIZE: usize = SIZE + 2;
+const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
 
 lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new(&Default::default());
@@ -29,71 +31,58 @@ pub fn size(level: u32) -> u64 {
     SIZE as u64 * 2_u64.pow(level)
 }
 
-fn side_change_index(pos: &TVec3<usize>) -> usize {
+fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     let p = pos.map(|v| (v > 0) as usize + (v == SIZE - 1) as usize);
     p.x * 9 + p.y * 3 + p.z
 }
 
-pub fn changed_side_index_to_dir(index: usize) -> I32Vec3 {
+fn neighbour_index_from_dir(dir: &I32Vec3) -> usize {
+    let p = dir.add_scalar(1);
+    (p.x * 9 + p.y * 3 + p.z) as usize
+}
+
+pub fn neighbour_index_to_dir(index: usize) -> I32Vec3 {
     I32Vec3::new(index as i32 / 9 % 3, index as i32 / 3 % 3, index as i32 % 3).add_scalar(-1)
 }
 
-#[derive(Default, Copy, Clone)]
-pub struct Occluder(u8);
+#[inline]
+fn block_index(pos: &TVec3<usize>) -> usize {
+    pos.x * SIZE * SIZE + pos.y * SIZE + pos.z
+}
 
-impl Occluder {
-    pub const fn new(
-        x_neg: bool,
-        x_pos: bool,
-        y_neg: bool,
-        y_pos: bool,
-        z_neg: bool,
-        z_pos: bool,
-    ) -> Occluder {
-        Occluder(
-            ((x_neg as u8) << (Facing::NegativeX as u8))
-                | ((x_pos as u8) << (Facing::PositiveX as u8))
-                | ((y_neg as u8) << (Facing::NegativeY as u8))
-                | ((y_pos as u8) << (Facing::PositiveY as u8))
-                | ((z_neg as u8) << (Facing::NegativeZ as u8))
-                | ((z_pos as u8) << (Facing::PositiveZ as u8)),
-        )
+#[inline]
+fn aligned_block_index(pos: &TVec3<usize>) -> usize {
+    pos.x * ALIGNED_SIZE * ALIGNED_SIZE + pos.y * ALIGNED_SIZE + pos.z
+}
+
+struct NeighbourVertexIntrinsics {
+    corner: IntrinsicBlockData,
+    sides: [IntrinsicBlockData; 2],
+}
+
+impl NeighbourVertexIntrinsics {
+    #[inline]
+    fn calculate_ao(&self) -> u8 {
+        (self.corner.occluder.is_empty()
+            && self.sides[0].occluder.is_empty()
+            && self.sides[1].occluder.is_empty()) as u8
+            * 255
     }
 
-    pub const fn full() -> Occluder {
-        Self::new(true, true, true, true, true, true)
-    }
-
-    pub const fn occludes_side(&self, facing: Facing) -> bool {
-        ((self.0 >> (facing as u8)) & 1) == 1
-    }
-
-    pub fn occlude_side(&mut self, facing: Facing) {
-        self.0 |= 1 << (facing as u8);
-    }
-
-    pub fn set_side(&mut self, facing: Facing, value: bool) {
-        self.0 = (self.0 & !(1 << (facing as u8))) | ((value as u8) << (facing as u8));
-    }
-
-    pub fn clear_side(&mut self, facing: Facing) {
-        self.0 &= !(1 << (facing as u8));
+    #[inline]
+    fn calculate_lighting(&self) -> u16 {
+        let color = (self.corner.light_level.color()
+            + self.sides[0].light_level.color()
+            + self.sides[1].light_level.color())
+            / 3.0;
+        LightLevel::from_color(color).bits()
     }
 }
 
-impl BitAnd for Occluder {
-    type Output = Self;
-
-    fn bitand(mut self, rhs: Self) -> Self::Output {
-        self.0 &= rhs.0;
-        self
-    }
-}
-
-impl BitAndAssign for Occluder {
-    fn bitand_assign(&mut self, rhs: Self) {
-        *self = *self & rhs;
-    }
+#[derive(Default, Debug, Clone, Copy)]
+pub struct IntrinsicBlockData {
+    pub occluder: Occluder,
+    pub light_level: LightLevel,
 }
 
 pub struct BlockData<'a> {
@@ -172,9 +161,9 @@ pub struct Cluster {
     block_storage: EntityStorage,
     block_map: Box<[[[EntityId; SIZE]; SIZE]; SIZE]>,
     blocks: Box<[[[Block; SIZE]; SIZE]; SIZE]>,
-    occluders: Mutex<Box<[[[Occluder; ALIGNED_SIZE]; ALIGNED_SIZE]; ALIGNED_SIZE]>>,
+    intrinsic_data: Vec<IntrinsicBlockData>,
     side_changed: [bool; 27],
-    occlusion_changed: AtomicBool,
+    intrinsics_changed: AtomicBool,
     empty: AtomicBool,
     device: Arc<vkw::Device>,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
@@ -190,9 +179,9 @@ impl Cluster {
             block_storage: EntityStorage::new(layout),
             block_map: Default::default(),
             blocks: Default::default(),
-            occluders: Default::default(),
+            intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             side_changed: [false; 27],
-            occlusion_changed: Default::default(),
+            intrinsics_changed: Default::default(),
             empty: AtomicBool::new(true),
             device,
             vertex_mesh: Default::default(),
@@ -277,8 +266,21 @@ impl Cluster {
         }
         let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
 
-        self.side_changed[side_change_index(&pos)] = true;
+        let occluder = if block.has_textured_model() {
+            let model = self
+                .registry
+                .get_textured_block_model(block.textured_model())
+                .unwrap();
+            model.occluder()
+        } else {
+            Occluder::default()
+        };
+
+        self.side_changed[neighbour_index_from_pos(&pos)] = true;
         self.blocks[pos.x][pos.y][pos.z] = block;
+
+        let index = aligned_block_index(&pos.add_scalar(1));
+        self.intrinsic_data[index].occluder = occluder;
 
         BlockDataBuilder {
             entity_builder,
@@ -286,12 +288,22 @@ impl Cluster {
         }
     }
 
+    pub fn get_light_level(&mut self, pos: &U32Vec3) -> LightLevel {
+        let index = aligned_block_index(&glm::convert(pos.add_scalar(1)));
+        self.intrinsic_data[index].light_level
+    }
+
+    pub fn set_light_level(&mut self, pos: &U32Vec3, light_level: LightLevel) {
+        let index = aligned_block_index(&glm::convert(pos.add_scalar(1)));
+        self.intrinsic_data[index].light_level = light_level;
+    }
+
     /// Checks if self inner edge is fully occluded
     pub fn check_edge_fully_occluded(&self, facing: Facing) -> bool {
         let dir = facing.direction();
         let mut state = true;
 
-        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
             let dx = (d.x != 0) as usize;
             let dy = (d.y != 0) as usize;
             let dz = (d.z != 0) as usize;
@@ -301,12 +313,13 @@ impl Cluster {
             TVec3::new(x, y, z)
         }
 
-        let occluders = self.occluders.lock();
-
         for i in 0..SIZE {
             for j in 0..SIZE {
-                let p = map_pos(dir, i, j, SIZE - 1).add_scalar(1);
-                state &= occluders[p[0]][p[1]][p[2]].occludes_side(facing);
+                let p = map_pos(&dir, i, j, SIZE - 1).add_scalar(1);
+                let index = aligned_block_index(&p);
+
+                state &= self.intrinsic_data[index].occluder.occludes_side(facing);
+
                 if !state {
                     break;
                 }
@@ -315,22 +328,22 @@ impl Cluster {
 
         state
     }
-    pub fn clear_outer_side_occlusion(&self, side_offset: I32Vec3, value: Occluder) {
+    pub fn clear_outer_intrinsics(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
         let so = side_offset;
         let size = SIZE as i32;
         let b = so.map(|v| v == -size || v == size);
 
         if glm::all(&b) {
-            self.clear_outer_side_occlusion_corner(so, value);
+            self.clear_outer_intrinsics_corner(so, value);
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
-            self.clear_outer_side_occlusion_edge(side_offset, value);
+            self.clear_outer_intrinsics_edge(side_offset, value);
         } else {
-            self.clear_outer_side_occlusion_side(side_offset, value);
+            self.clear_outer_intrinsics_side(side_offset, value);
         }
     }
 
-    fn clear_outer_side_occlusion_side(&self, side_offset: I32Vec3, value: Occluder) {
-        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+    fn clear_outer_intrinsics_side(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
+        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
             let dx = (d.x != 0) as usize;
             let dy = (d.y != 0) as usize;
             let dz = (d.z != 0) as usize;
@@ -342,61 +355,60 @@ impl Cluster {
 
         // Direction towards side cluster
         let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
-        let mut dst_occluders = self.occluders.lock();
 
         for k in 0..SIZE {
             for l in 0..SIZE {
-                let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SIZE - 1);
-                dst_occluders[dst_p.x][dst_p.y][dst_p.z] = value;
+                let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                let index = aligned_block_index(&dst_p);
+                self.intrinsic_data[index] = value;
             }
         }
 
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    fn clear_outer_side_occlusion_edge(&self, side_offset: I32Vec3, value: Occluder) {
-        fn map_pos(m: I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+    fn clear_outer_intrinsics_edge(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
+        fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
             m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
         }
 
         let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
-        let mut dst_occluders = self.occluders.lock();
 
         for k in 0..SIZE {
-            let dst_p = map_pos(m, k + 1, ALIGNED_SIZE - 1);
-            dst_occluders[dst_p.x][dst_p.y][dst_p.z] = value;
+            let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
+            let index = aligned_block_index(&dst_p);
+            self.intrinsic_data[index] = value;
         }
 
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    fn clear_outer_side_occlusion_corner(&self, side_offset: I32Vec3, value: Occluder) {
+    fn clear_outer_intrinsics_corner(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
         let m = side_offset.map(|v| (v > 0) as u32);
 
         let dst_pos = m * (ALIGNED_SIZE - 1) as u32;
-        let mut dst_occluders = self.occluders.lock();
+        let index = aligned_block_index(&glm::convert(dst_pos));
+        self.intrinsic_data[index] = value;
 
-        dst_occluders[dst_pos.x as usize][dst_pos.y as usize][dst_pos.z as usize] = value;
-
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    pub fn paste_outer_side_occlusion(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    pub fn paste_outer_intrinsics(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let so = side_offset;
         let size = SIZE as i32;
         let b = so.map(|v| v == -size || v == size);
 
         if glm::all(&b) {
-            self.paste_outer_side_occlusion_corner(side_cluster, so);
+            self.paste_outer_intrinsics_corner(side_cluster, so);
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
-            self.paste_outer_side_occlusion_edge(side_cluster, side_offset);
+            self.paste_outer_intrinsics_edge(side_cluster, side_offset);
         } else {
-            self.paste_outer_side_occlusion_side(side_cluster, side_offset);
+            self.paste_outer_intrinsics_side(side_cluster, side_offset);
         }
     }
 
-    fn paste_outer_side_occlusion_side(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        fn map_pos(d: I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+    fn paste_outer_intrinsics_side(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
             let dx = (d.x != 0) as usize;
             let dy = (d.y != 0) as usize;
             let dz = (d.z != 0) as usize;
@@ -408,82 +420,64 @@ impl Cluster {
 
         // Direction towards side cluster
         let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
-
-        let mut dst_occluders = self.occluders.lock();
-        let src_blocks = &side_cluster.blocks;
+        let dir_inv = -dir;
 
         for k in 0..SIZE {
             for l in 0..SIZE {
-                let dst_p = map_pos(dir, k + 1, l + 1, ALIGNED_SIZE - 1);
-                let src_blk_p = map_pos(-dir, k, l, SIZE - 1);
+                let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
+                let dst_index = aligned_block_index(&dst_p);
+                let src_index = aligned_block_index(&src_p);
 
-                let src_block = &src_blocks[src_blk_p.x][src_blk_p.y][src_blk_p.z];
-
-                dst_occluders[dst_p.x][dst_p.y][dst_p.z] = side_cluster.block_occluder(src_block);
+                self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
             }
         }
 
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    fn paste_outer_side_occlusion_edge(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        fn map_pos(m: I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+    fn paste_outer_intrinsics_edge(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
             m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
         }
 
         let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
         let n = -m;
 
-        let mut dst_occluders = self.occluders.lock();
-        let src_blocks = &side_cluster.blocks;
-
         for k in 0..SIZE {
-            let dst_p = map_pos(m, k + 1, ALIGNED_SIZE - 1);
-            let src_blk_p = map_pos(n, k, SIZE - 1);
+            let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
+            let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
+            let dst_index = aligned_block_index(&dst_p);
+            let src_index = aligned_block_index(&src_p);
 
-            let src_block = &src_blocks[src_blk_p.x][src_blk_p.y][src_blk_p.z];
-
-            dst_occluders[dst_p.x][dst_p.y][dst_p.z] = side_cluster.block_occluder(src_block);
+            self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
         }
 
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    fn paste_outer_side_occlusion_corner(&self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    fn paste_outer_intrinsics_corner(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let m = side_offset.map(|v| (v > 0) as u32);
         let n = side_offset.map(|v| (v < 0) as u32);
 
-        let dst_pos = m * (ALIGNED_SIZE - 1) as u32;
-        let mut dst_occluders = self.occluders.lock();
+        let dst_p = m * (ALIGNED_SIZE - 1) as u32;
+        let src_p = (n * (SIZE as u32 - 1)).add_scalar(1);
+        let dst_index = aligned_block_index(&glm::convert(dst_p));
+        let src_index = aligned_block_index(&glm::convert(src_p));
 
-        let src_blk_p = glm::convert::<U32Vec3, TVec3<usize>>(n) * (SIZE - 1);
-        let src_block = &self.blocks[src_blk_p.x][src_blk_p.y][src_blk_p.z];
+        self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
 
-        dst_occluders[dst_pos.x as usize][dst_pos.y as usize][dst_pos.z as usize] =
-            side_cluster.block_occluder(src_block);
-
-        self.occlusion_changed.store(true, MO_RELAXED);
+        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
-    fn block_occluder(&self, block: &Block) -> Occluder {
-        if block.has_textured_model() {
-            let model = self
-                .registry
-                .get_textured_block_model(block.textured_model())
-                .unwrap();
-            model.occluder()
-        } else {
-            Occluder::default()
-        }
-    }
-
-    // TODO: optimize this
-    fn calculate_ao(
-        occluders: &[[[Occluder; ALIGNED_SIZE]; ALIGNED_SIZE]; ALIGNED_SIZE],
-        block_pos: I32Vec3,
-        vertex_pos: Vec3,
+    // TODO: Optimize this
+    /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.
+    fn get_vertex_neighbours(
+        block_pos: &I32Vec3,
+        vertex_pos: &Vec3,
         facing: Facing,
-    ) -> f32 {
+        intrinsic_data: &[IntrinsicBlockData],
+    ) -> NeighbourVertexIntrinsics {
         let dir = facing.direction();
 
         let mut k: I32Vec2 = Default::default();
@@ -573,26 +567,21 @@ impl Cluster {
         let side1 = side1.add_scalar(1);
         let side2 = side2.add_scalar(1);
 
-        let corner = occluders[corner.x as usize][corner.y as usize][corner.z as usize].0 != 0;
-        let side1 = occluders[side1.x as usize][side1.y as usize][side1.z as usize].0 != 0;
-        let side2 = occluders[side2.x as usize][side2.y as usize][side2.z as usize].0 != 0;
+        let corner_index = aligned_block_index(&glm::try_convert(corner).unwrap());
+        let side1_index = aligned_block_index(&glm::try_convert(side1).unwrap());
+        let side2_index = aligned_block_index(&glm::try_convert(side2).unwrap());
 
-        !(side1 || side2 || corner) as u32 as f32
+        let corner = intrinsic_data[corner_index];
+        let side1 = intrinsic_data[side1_index];
+        let side2 = intrinsic_data[side2_index];
+
+        NeighbourVertexIntrinsics {
+            corner,
+            sides: [side1, side2],
+        }
     }
 
     pub fn update_mesh(&self) {
-        let mut occluders = self.occluders.lock();
-
-        // Update blocks occluders before calculating AO
-        for x in 0..SIZE {
-            for y in 0..SIZE {
-                for z in 0..SIZE {
-                    let block = &self.blocks[x][y][z];
-                    occluders[x + 1][y + 1][z + 1] = self.block_occluder(block);
-                }
-            }
-        }
-
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
                 v.position += pos;
@@ -600,6 +589,7 @@ impl Cluster {
             }));
         }
 
+        let intrinsics = &self.intrinsic_data;
         let mut vertices = Vec::<PackedVertex>::with_capacity(VOLUME * 8);
         let mut empty = true;
 
@@ -625,39 +615,55 @@ impl Cluster {
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
                         let rel = (pos + facing.direction()).add_scalar(1);
+                        let rel_index = aligned_block_index(&glm::try_convert(rel).unwrap());
 
-                        let occludes = occluders[rel.x as usize][rel.y as usize][rel.z as usize]
-                            .occludes_side(facing.mirror());
+                        let occludes = intrinsics[rel_index].occluder.occludes_side(facing.mirror());
 
-                        if !occludes {
-                            for v in model.get_quads_by_facing(facing).chunks_exact(4) {
-                                let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
+                        if occludes {
+                            continue;
+                        }
 
-                                v[0].position += posf;
-                                v[1].position += posf;
-                                v[2].position += posf;
-                                v[3].position += posf;
-                                // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
-                                // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
-                                // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
-                                // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
-                                v[0].ao = Self::calculate_ao(&occluders, pos, v[0].position, facing);
-                                v[1].ao = Self::calculate_ao(&occluders, pos, v[1].position, facing);
-                                v[2].ao = Self::calculate_ao(&occluders, pos, v[2].position, facing);
-                                v[3].ao = Self::calculate_ao(&occluders, pos, v[3].position, facing);
+                        for v in model.get_quads_by_facing(facing).chunks_exact(4) {
+                            let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
 
-                                if v[1].ao != v[2].ao {
-                                    // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {
-                                    let vc = v;
+                            v[0].position += posf;
+                            v[1].position += posf;
+                            v[2].position += posf;
+                            v[3].position += posf;
 
-                                    v[1] = vc[0];
-                                    v[3] = vc[1];
-                                    v[0] = vc[2];
-                                    v[2] = vc[3];
-                                }
+                            let neighbours0 =
+                                Self::get_vertex_neighbours(&pos, &v[0].position, facing, intrinsics);
+                            let neighbours1 =
+                                Self::get_vertex_neighbours(&pos, &v[1].position, facing, intrinsics);
+                            let neighbours2 =
+                                Self::get_vertex_neighbours(&pos, &v[2].position, facing, intrinsics);
+                            let neighbours3 =
+                                Self::get_vertex_neighbours(&pos, &v[3].position, facing, intrinsics);
 
-                                vertices.extend(v.map(|v| v.pack()));
+                            // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
+                            // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
+                            // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
+                            // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
+                            v[0].ao = neighbours0.calculate_ao();
+                            v[1].ao = neighbours1.calculate_ao();
+                            v[2].ao = neighbours2.calculate_ao();
+                            v[3].ao = neighbours3.calculate_ao();
+                            v[0].lighting = neighbours0.calculate_lighting();
+                            v[1].lighting = neighbours1.calculate_lighting();
+                            v[2].lighting = neighbours2.calculate_lighting();
+                            v[3].lighting = neighbours3.calculate_lighting();
+
+                            if v[1].ao != v[2].ao {
+                                // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {
+                                let vc = v;
+
+                                v[1] = vc[0];
+                                v[3] = vc[1];
+                                v[0] = vc[2];
+                                v[2] = vc[3];
                             }
+
+                            vertices.extend(v.map(|v| v.pack()));
                         }
                     }
                 }

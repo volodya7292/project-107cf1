@@ -4,7 +4,8 @@
 
 #define CLUSTER_SIZE 24
 
-layout(location = 0) in uvec4 inPack;
+layout(location = 0) in uvec4 inPack1;
+layout(location = 1) in uint inPack2;
 
 layout(set = 0, binding = 0) uniform per_frame_data {
     PerFrameInfo info;
@@ -20,17 +21,21 @@ layout(location = 0) out Output {
     vec3 surface_normal;
     uint material_id;
     float ao;
+    vec3 light;
 } vs_out;
 
 void main() {
-    vec3 inPosition = vec3(uvec3((inPack[0] >> 16) & 0xffffu, (inPack[0]) & 0xffffu, (inPack[1] >> 16) & 0xffffu));
+    vec3 inPosition = vec3(uvec3((inPack1[0] >> 16) & 0xffffu, (inPack1[0]) & 0xffffu, (inPack1[1] >> 16) & 0xffffu));
     inPosition = inPosition / 65535.0 * CLUSTER_SIZE;
-    vec3 inNormal = vec3(uvec3((inPack[1] >> 8) & 0xffu, inPack[1] & 0xffu, (inPack[2] >> 24) & 0xffu));
+    vec3 inNormal = vec3(uvec3((inPack1[1] >> 8) & 0xffu, inPack1[1] & 0xffu, (inPack1[2] >> 24) & 0xffu));
     inNormal = inNormal / 255.0 * 2.0 - 1.0;
-    vec2 inTexUV = vec2(uvec2((inPack[3] >> 16) & 0xffffu, inPack[3] & 0xffffu));
+    vec2 inTexUV = vec2(uvec2((inPack1[3] >> 16) & 0xffffu, inPack1[3] & 0xffffu));
     inTexUV = inTexUV / 65535.0 * 64.0;
-    float inAO = float((inPack[2] >> 16) & 0xffu) / 255.0;
-    uint inMaterialId = inPack[2] & 0xffffu;
+    float inAO = float((inPack1[2] >> 16) & 0xffu) / 255.0;
+    uint inMaterialId = inPack1[2] & 0xffffu;
+    uint inLighting = inPack2;
+
+    vec3 light = vec3(float(inLighting >> 10), float((inLighting >> 5) & 0x1Fu), float(inLighting & 0x1Fu)) / 32.0;
 
     vec4 world_pos = (model * vec4(inPosition.xyz, 1));
 
@@ -38,7 +43,8 @@ void main() {
     vs_out.local_pos = inPosition.xyz;
     vs_out.world_pos = world_pos.xyz;
     vs_out.surface_normal = inNormal;
-    vs_out.ao = inAO;
     vs_out.material_id = inMaterialId;
+    vs_out.ao = inAO;
+    vs_out.light = light;
     gl_Position = info.camera.proj_view * world_pos;
 }

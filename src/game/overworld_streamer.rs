@@ -1,6 +1,7 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::cluster::{Cluster, Occluder};
+use crate::game::overworld::cluster::{Cluster, IntrinsicBlockData};
+use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::{
     cluster, generator, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED, CLUSTER_STATE_INITIAL,
     CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING, CLUSTER_STATE_OFFLOADED_INVISIBLE,
@@ -34,7 +35,7 @@ pub struct OverworldStreamer {
     clusters_entities_to_remove: Vec<scene::Entity>,
     clusters_entities_to_add: Vec<I64Vec3>,
     curr_loading_clusters_n: Arc<AtomicU32>,
-    curr_clusters_occlusions_updating_n: Arc<AtomicU32>,
+    curr_clusters_intrinsics_updating_n: Arc<AtomicU32>,
     curr_clusters_meshes_updating_n: Arc<AtomicU32>,
 }
 
@@ -43,19 +44,19 @@ const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
 struct RCluster {
     creation_time: Instant,
     entity: scene::Entity,
-    /// Occlusion mask of clusters whose occlusion data is currently being pasted into this cluster
-    updating_outer_occlusion: Arc<AtomicU32>,
-    /// Whether this cluster is invisible due to full occlusion by the neighbour clusters
+    /// Intrinsics mask of clusters whose intrinsics data is currently being pasted into this cluster
+    updating_outer_intrinsics: Arc<AtomicU32>,
+    /// Whether this cluster is invisible due to full intrinsics by the neighbour clusters
     occluded: AtomicBool,
     empty: Arc<AtomicBool>,
-    /// A mask of 3x3 'sides' of outer occlusions which are needed to be cleared
-    needs_occlusion_clear_at: u32,
-    /// A mask of 3x3 'sides' which are needed to be filled with occlusion of neighbour clusters
-    needs_occlusion_fill_at: u32,
+    /// A mask of 3x3 'sides' of outer intrinsics which are needed to be cleared
+    needs_intrinsics_clear_at: u32,
+    /// A mask of 3x3 'sides' which are needed to be filled with intrinsics of neighbour clusters
+    needs_intrinsics_fill_at: u32,
     /// Whether a particular Facing of this cluster is fully occluded by another cluster
-    edge_occlusion: Arc<AtomicU8>,
-    /// Whether `edge_occlusion` has been determined, only then `occluded` can be set
-    edge_occlusion_determined: Arc<AtomicBool>,
+    edge_intrinsics: Arc<AtomicU8>,
+    /// Whether `edge_intrinsics` has been determined, only then `occluded` can be set
+    edge_intrinsics_determined: Arc<AtomicBool>,
     /// All conditions are met for the vertex mesh to be updated
     mesh_can_be_updated: Arc<AtomicBool>,
     /// Mesh has been updated and it needs to be updated inside the VertexMesh scene component
@@ -174,7 +175,7 @@ fn is_cluster_visibly_occluded(
         let p = get_side_cluster_by_facing(pos, facing);
 
         if let Some(rcl) = rclusters.get(&p) {
-            let edge_occluded = ((rcl.edge_occlusion.load(MO_RELAXED) >> (facing.mirror() as u8)) & 1) == 1;
+            let edge_occluded = ((rcl.edge_intrinsics.load(MO_RELAXED) >> (facing.mirror() as u8)) & 1) == 1;
             edges_occluded &= edge_occluded;
         } else {
             edges_occluded = false;
@@ -213,7 +214,7 @@ impl OverworldStreamer {
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
             curr_loading_clusters_n: Arc::new(Default::default()),
-            curr_clusters_occlusions_updating_n: Default::default(),
+            curr_clusters_intrinsics_updating_n: Default::default(),
             curr_clusters_meshes_updating_n: Default::default(),
         }
     }
@@ -307,13 +308,13 @@ impl OverworldStreamer {
                     e.insert(RCluster {
                         creation_time: curr_t,
                         entity: scene::Entity::NULL,
-                        updating_outer_occlusion: Default::default(),
+                        updating_outer_intrinsics: Default::default(),
                         occluded: Default::default(),
                         empty: Default::default(),
-                        needs_occlusion_clear_at: 0,
-                        needs_occlusion_fill_at: CLUSTER_ALL_NEIGHBOURS_3X3,
-                        edge_occlusion: Default::default(),
-                        edge_occlusion_determined: Default::default(),
+                        needs_intrinsics_clear_at: 0,
+                        needs_intrinsics_fill_at: CLUSTER_ALL_NEIGHBOURS_3X3,
+                        edge_intrinsics: Default::default(),
+                        edge_intrinsics_determined: Default::default(),
                         mesh_can_be_updated: Default::default(),
                         mesh_changed: Default::default(),
                     });
@@ -329,11 +330,11 @@ impl OverworldStreamer {
             }
             oclusters = RwLockWriteGuard::downgrade_to_upgradable(oclusters_write);
 
-            // Mask neighbour rclusters of removed rclusters for clearing their outer occlusion
+            // Mask neighbour rclusters of removed rclusters for clearing their outer intrinsics
             for removed_pos in removed_rclusters {
                 for p in get_side_clusters(&removed_pos) {
                     if let Some(rcluster) = rclusters.get_mut(&p) {
-                        rcluster.needs_occlusion_clear_at |= 1 << neighbour_dir_index(&p, &removed_pos);
+                        rcluster.needs_intrinsics_clear_at |= 1 << neighbour_dir_index(&p, &removed_pos);
                     }
                 }
             }
@@ -406,15 +407,15 @@ impl OverworldStreamer {
                 let rcluster = rclusters.get_mut(pos).unwrap();
                 let changed_sides = ocluster.cluster.write().as_mut().unwrap().acquire_changed_sides();
 
-                // Set a flag for updating the mesh when possible (eg. when outer occlusion is filled)
+                // Set a flag for updating the mesh when possible (eg. when outer intrinsics is filled)
                 rcluster.mesh_can_be_updated.store(true, MO_RELAXED);
 
-                // Set the need to update occlusions of sides of neighbour clusters
+                // Set the need to update intrinsics of sides of neighbour clusters
                 for (i, side) in changed_sides.iter().enumerate() {
                     if !side {
                         continue;
                     }
-                    let changed_dir: I64Vec3 = glm::convert(cluster::changed_side_index_to_dir(i));
+                    let changed_dir: I64Vec3 = glm::convert(cluster::neighbour_index_to_dir(i));
 
                     let p0 = *pos;
                     let p1 = pos + changed_dir * (cluster::SIZE as i64);
@@ -430,7 +431,7 @@ impl OverworldStreamer {
                                     continue;
                                 }
                                 if let Some(rcl) = rclusters.get_mut(&p) {
-                                    rcl.needs_occlusion_fill_at |= 1 << neighbour_dir_index(&p, pos);
+                                    rcl.needs_intrinsics_fill_at |= 1 << neighbour_dir_index(&p, pos);
                                 }
                             }
                         }
@@ -438,11 +439,11 @@ impl OverworldStreamer {
                 }
             }
 
-            // Collect necessary clusters to update their outer occlusions
+            // Collect necessary clusters to update their outer intrinsics
             for pos in oclusters.keys() {
                 let rcluster = &rclusters[pos];
 
-                if rcluster.edge_occlusion_determined.load(MO_RELAXED) {
+                if rcluster.edge_intrinsics_determined.load(MO_RELAXED) {
                     rcluster.occluded.store(
                         is_cluster_visibly_occluded(rclusters, *pos, self.stream_pos),
                         MO_RELAXED,
@@ -451,13 +452,13 @@ impl OverworldStreamer {
 
                 let rcluster = rclusters.get_mut(pos).unwrap();
 
-                if rcluster.needs_occlusion_fill_at != 0 || rcluster.needs_occlusion_clear_at != 0 {
-                    // Do not update mesh when outer occlusion is not filled yet
+                if rcluster.needs_intrinsics_fill_at != 0 || rcluster.needs_intrinsics_clear_at != 0 {
+                    // Do not update mesh when outer intrinsics is not filled yet
                     rcluster.mesh_can_be_updated.store(false, MO_RELAXED);
                 }
             }
 
-            // Schedule task of updating clusters outer occlusions
+            // Schedule task of updating clusters outer intrinsics
             let mut keys: Vec<_> = oclusters
                 .keys()
                 .map(|v| {
@@ -470,17 +471,17 @@ impl OverworldStreamer {
             keys.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
             for (pos, _) in &keys {
-                if self.curr_clusters_occlusions_updating_n.load(MO_RELAXED)
+                if self.curr_clusters_intrinsics_updating_n.load(MO_RELAXED)
                     >= max_updating_clusters_in_progress
                 {
                     break;
                 }
 
                 let rcluster = unwrap_option!(rclusters.get(pos), continue);
-                let mut needs_occlusion_fill_at = rcluster.needs_occlusion_fill_at;
-                let needs_occlusion_clear_at = rcluster.needs_occlusion_clear_at;
+                let mut needs_intrinsics_fill_at = rcluster.needs_intrinsics_fill_at;
+                let needs_intrinsics_clear_at = rcluster.needs_intrinsics_clear_at;
 
-                if needs_occlusion_fill_at == 0 && needs_occlusion_clear_at == 0 {
+                if needs_intrinsics_fill_at == 0 && needs_intrinsics_clear_at == 0 {
                     continue;
                 }
 
@@ -497,11 +498,11 @@ impl OverworldStreamer {
                 for p in get_side_clusters(&pos) {
                     let mask = 1 << neighbour_dir_index(pos, &p);
 
-                    if needs_occlusion_fill_at & mask == 0 {
+                    if needs_intrinsics_fill_at & mask == 0 {
                         continue;
                     }
                     if !rclusters.contains_key(&p) {
-                        needs_occlusion_fill_at &= !mask;
+                        needs_intrinsics_fill_at &= !mask;
                         continue;
                     }
 
@@ -521,17 +522,17 @@ impl OverworldStreamer {
                     continue;
                 }
 
-                self.curr_clusters_occlusions_updating_n.fetch_add(1, MO_RELAXED);
+                self.curr_clusters_intrinsics_updating_n.fetch_add(1, MO_RELAXED);
 
                 let mut rcluster = rclusters.get_mut(pos).unwrap();
-                rcluster.needs_occlusion_clear_at = 0;
-                rcluster.needs_occlusion_fill_at = 0;
+                rcluster.needs_intrinsics_clear_at = 0;
+                rcluster.needs_intrinsics_fill_at = 0;
                 rcluster
-                    .updating_outer_occlusion
-                    .store(needs_occlusion_fill_at, MO_RELAXED);
+                    .updating_outer_intrinsics
+                    .store(needs_intrinsics_fill_at, MO_RELAXED);
 
                 // Subtract fill sides from clear sides because sides for clearing will be overridden by filling
-                let clear_mask = needs_occlusion_clear_at & !needs_occlusion_fill_at;
+                let clear_mask = needs_intrinsics_clear_at & !needs_intrinsics_fill_at;
 
                 let clear_neighbour_sides: SmallVec<[I64Vec3; 26]> = get_side_clusters(&pos)
                     .into_iter()
@@ -547,22 +548,20 @@ impl OverworldStreamer {
 
                 let pos = *pos;
                 let mesh_can_be_updated = Arc::clone(&rcluster.mesh_can_be_updated);
-                let curr_updating_clusters_n = Arc::clone(&self.curr_clusters_occlusions_updating_n);
+                let curr_updating_clusters_n = Arc::clone(&self.curr_clusters_intrinsics_updating_n);
 
                 intensive_queue().spawn(move || {
                     for neighbour_pos in clear_neighbour_sides {
-                        let cluster = cluster.read();
-                        let cluster = unwrap_option!(cluster.as_ref(), continue);
+                        let mut cluster = cluster.write();
+                        let cluster = unwrap_option!(cluster.as_mut(), continue);
                         let offset = neighbour_pos - pos;
-                        cluster.clear_outer_side_occlusion(glm::convert(offset), Occluder::default());
+                        cluster.clear_outer_side_intrinsics(glm::convert(offset), Default::default());
                     }
                     for (neighbour_pos, neighbour) in fill_neighbours {
                         // Use loop in case of failure to acquire a lock of one of the clusters
                         loop {
                             let neighbour_cluster = neighbour.cluster.try_read();
-                            // We can use shared (read) access here, but instead use exclusive
-                            // to prevent deadlocks of the mutex inside the clusters (interior mutability)
-                            let cluster = cluster.try_write();
+                            let mut cluster = cluster.try_write();
 
                             if neighbour_cluster.is_none() || cluster.is_none() {
                                 continue;
@@ -576,10 +575,16 @@ impl OverworldStreamer {
                             if neighbour.state() == CLUSTER_STATE_LOADED {
                                 let offset = neighbour_pos - pos;
                                 let neighbour_cluster = unwrap_option!(neighbour_cluster.as_ref(), break);
-                                cluster.paste_outer_side_occlusion(&neighbour_cluster, glm::convert(offset));
+                                cluster.paste_outer_side_intrinsics(&neighbour_cluster, glm::convert(offset));
                             } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
                                 let offset = neighbour_pos - pos;
-                                cluster.clear_outer_side_occlusion(glm::convert(offset), Occluder::full());
+                                cluster.clear_outer_side_intrinsics(
+                                    glm::convert(offset),
+                                    IntrinsicBlockData {
+                                        occluder: Occluder::full(),
+                                        light_level: Default::default(),
+                                    },
+                                );
                             }
 
                             break;
@@ -613,10 +618,10 @@ impl OverworldStreamer {
 
                 let mesh_changed = Arc::clone(&rcluster.mesh_changed);
                 let empty = Arc::clone(&rcluster.empty);
-                let edge_occlusion = Arc::clone(&rcluster.edge_occlusion);
-                let edge_occlusion_determined = Arc::clone(&rcluster.edge_occlusion_determined);
+                let edge_intrinsics = Arc::clone(&rcluster.edge_intrinsics);
+                let edge_intrinsics_determined = Arc::clone(&rcluster.edge_intrinsics_determined);
                 let curr_clusters_meshes_updating_n = Arc::clone(&self.curr_clusters_meshes_updating_n);
-                let updating_outer_occlusion = Arc::clone(&rcluster.updating_outer_occlusion);
+                let updating_outer_intrinsics = Arc::clone(&rcluster.updating_outer_intrinsics);
 
                 curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
 
@@ -631,15 +636,15 @@ impl OverworldStreamer {
 
                     cluster.update_mesh();
 
-                    // Determine edge occlusion
+                    // Determine edge intrinsics
                     {
-                        let mut occlusion = 0_u8;
+                        let mut intrinsics = 0_u8;
                         for i in 0..6 {
                             let occluded = cluster.check_edge_fully_occluded(Facing::from_u8(i));
-                            occlusion |= (occluded as u8) << i;
+                            intrinsics |= (occluded as u8) << i;
                         }
-                        edge_occlusion.store(occlusion, MO_RELEASE);
-                        edge_occlusion_determined.store(true, MO_RELEASE);
+                        edge_intrinsics.store(intrinsics, MO_RELEASE);
+                        edge_intrinsics_determined.store(true, MO_RELEASE);
                     }
 
                     // Check if cluster is empty (cluster's empty status is updated in `update_mesh`)
@@ -647,7 +652,7 @@ impl OverworldStreamer {
                     // Set a flag to initiate object's component::VertexMesh change in the scene
                     mesh_changed.store(true, MO_RELEASE);
 
-                    updating_outer_occlusion.store(0, MO_RELEASE);
+                    updating_outer_intrinsics.store(0, MO_RELEASE);
                     curr_clusters_meshes_updating_n.fetch_sub(1, MO_RELEASE);
                 });
             }
@@ -698,7 +703,7 @@ impl OverworldStreamer {
 
             for p in get_side_clusters(pos) {
                 if let Some(rcl) = self.rclusters.get(&p) {
-                    let updating_mask = rcl.updating_outer_occlusion.load(MO_RELAXED);
+                    let updating_mask = rcl.updating_outer_intrinsics.load(MO_RELAXED);
                     let mask = 1 << neighbour_dir_index(&p, pos);
 
                     if updating_mask & mask != 0 {

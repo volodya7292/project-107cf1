@@ -1,7 +1,7 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::{BlockModel, ContentType, Vertex};
-use crate::game::overworld::cluster::Occluder;
+use crate::game::overworld::occluder::Occluder;
 use crate::physics::aabb::AABB;
 use nalgebra_glm::Vec2;
 use std::ops::Range;
@@ -123,7 +123,8 @@ impl TexturedBlockModel {
                         position: *p,
                         normal,
                         tex_uv: *uv,
-                        ao: 0.0,
+                        ao: 0,
+                        lighting: 0,
                         material_id,
                     })
             })
