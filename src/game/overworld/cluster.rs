@@ -70,12 +70,29 @@ impl NeighbourVertexIntrinsics {
     }
 
     #[inline]
-    fn calculate_lighting(&self) -> u16 {
-        let color = (self.corner.light_level.color()
-            + self.sides[0].light_level.color()
-            + self.sides[1].light_level.color())
-            / 3.0;
-        LightLevel::from_color(color).bits()
+    fn calculate_lighting(&self, curr_block: IntrinsicBlockData) -> u16 {
+        let corner = if self.corner.occluder.is_full() {
+            curr_block.light_level
+        } else {
+            self.corner.light_level
+        }
+        .components();
+        let side1 = if self.sides[0].occluder.is_full() {
+            curr_block.light_level
+        } else {
+            self.sides[0].light_level
+        }
+        .components();
+        let side2 = if self.sides[1].occluder.is_full() {
+            curr_block.light_level
+        } else {
+            self.sides[1].light_level
+        }
+        .components();
+
+        let color = (corner + side1 + side2) / 3;
+
+        LightLevel::from_vec(color).bits()
     }
 }
 
@@ -294,8 +311,12 @@ impl Cluster {
     }
 
     pub fn set_light_level(&mut self, pos: &U32Vec3, light_level: LightLevel) {
-        let index = aligned_block_index(&glm::convert(pos.add_scalar(1)));
+        let pos: TVec3<usize> = glm::convert(*pos);
+
+        let index = aligned_block_index(&pos.add_scalar(1));
         self.intrinsic_data[index].light_level = light_level;
+
+        self.side_changed[neighbour_index_from_pos(&pos)] = true;
     }
 
     /// Checks if self inner edge is fully occluded
@@ -617,7 +638,8 @@ impl Cluster {
                         let rel = (pos + facing.direction()).add_scalar(1);
                         let rel_index = aligned_block_index(&glm::try_convert(rel).unwrap());
 
-                        let occludes = intrinsics[rel_index].occluder.occludes_side(facing.mirror());
+                        let curr_intrinsics = intrinsics[rel_index];
+                        let occludes = curr_intrinsics.occluder.occludes_side(facing.mirror());
 
                         if occludes {
                             continue;
@@ -648,10 +670,10 @@ impl Cluster {
                             v[1].ao = neighbours1.calculate_ao();
                             v[2].ao = neighbours2.calculate_ao();
                             v[3].ao = neighbours3.calculate_ao();
-                            v[0].lighting = neighbours0.calculate_lighting();
-                            v[1].lighting = neighbours1.calculate_lighting();
-                            v[2].lighting = neighbours2.calculate_lighting();
-                            v[3].lighting = neighbours3.calculate_lighting();
+                            v[0].lighting = neighbours0.calculate_lighting(curr_intrinsics);
+                            v[1].lighting = neighbours1.calculate_lighting(curr_intrinsics);
+                            v[2].lighting = neighbours2.calculate_lighting(curr_intrinsics);
+                            v[3].lighting = neighbours3.calculate_lighting(curr_intrinsics);
 
                             if v[1].ao != v[2].ao {
                                 // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {

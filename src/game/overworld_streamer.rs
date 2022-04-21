@@ -555,7 +555,7 @@ impl OverworldStreamer {
                         let mut cluster = cluster.write();
                         let cluster = unwrap_option!(cluster.as_mut(), continue);
                         let offset = neighbour_pos - pos;
-                        cluster.clear_outer_side_intrinsics(glm::convert(offset), Default::default());
+                        cluster.clear_outer_intrinsics(glm::convert(offset), Default::default());
                     }
                     for (neighbour_pos, neighbour) in fill_neighbours {
                         // Use loop in case of failure to acquire a lock of one of the clusters
@@ -575,10 +575,10 @@ impl OverworldStreamer {
                             if neighbour.state() == CLUSTER_STATE_LOADED {
                                 let offset = neighbour_pos - pos;
                                 let neighbour_cluster = unwrap_option!(neighbour_cluster.as_ref(), break);
-                                cluster.paste_outer_side_intrinsics(&neighbour_cluster, glm::convert(offset));
+                                cluster.paste_outer_intrinsics(&neighbour_cluster, glm::convert(offset));
                             } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
                                 let offset = neighbour_pos - pos;
-                                cluster.clear_outer_side_intrinsics(
+                                cluster.clear_outer_intrinsics(
                                     glm::convert(offset),
                                     IntrinsicBlockData {
                                         occluder: Occluder::full(),

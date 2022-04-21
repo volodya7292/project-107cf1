@@ -35,7 +35,11 @@ void main() {
     uint inMaterialId = inPack1[2] & 0xffffu;
     uint inLighting = inPack2;
 
-    vec3 light = vec3(float(inLighting >> 10), float((inLighting >> 5) & 0x1Fu), float(inLighting & 0x1Fu)) / 32.0;
+    vec3 light = vec3(
+    float((inLighting >> 10) & 0x1Fu),
+    float((inLighting >> 5) & 0x1Fu),
+    float(inLighting & 0x1Fu)
+    ) / 32.0;
 
     vec4 world_pos = (model * vec4(inPosition.xyz, 1));
 

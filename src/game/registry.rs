@@ -94,4 +94,13 @@ impl Registry {
     pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {
         &self.structured_by_level[cluster_level as usize]
     }
+
+    pub fn is_block_opaque(&self, block: &Block) -> bool {
+        if !block.has_textured_model() {
+            return false;
+        }
+
+        let model = self.get_textured_block_model(block.textured_model()).unwrap();
+        model.is_opaque()
+    }
 }

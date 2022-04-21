@@ -4,8 +4,10 @@ pub mod overworld_streamer;
 pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::BlockDataImpl;
+use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld_streamer::OverworldStreamer;
 use crate::physics::aabb::{AABBRayIntersection, AABB};
 use crate::physics::MOTION_EPSILON;
@@ -51,6 +53,7 @@ pub struct Game {
     curr_jump_force: f64,
     look_at_block: Option<(I64Vec3, Facing)>,
     block_set_cooldown: f64,
+    curr_block: Block,
 
     change_stream_pos: bool,
     player_collision_enabled: bool,
@@ -69,7 +72,7 @@ impl Game {
 
         let program = Game {
             resources,
-            registry: main_registry,
+            registry: Arc::clone(&main_registry),
             cursor_rel: (0, 0),
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
@@ -80,6 +83,7 @@ impl Game {
             curr_jump_force: 0.0,
             look_at_block: None,
             block_set_cooldown: 0.0,
+            curr_block: main_registry.block_default(),
             change_stream_pos: true,
             player_collision_enabled: true,
             cursor_grab: true,
@@ -132,9 +136,8 @@ impl Application for Game {
         {
             mat_pipelines = material_pipelines::create(&self.resources, renderer);
 
-            for (ty, res_ref) in self.registry.registry().textures() {
-                let id = renderer.add_texture(*ty, res_ref.clone());
-                renderer.load_texture(id);
+            for (index, (ty, res_ref)) in self.registry.registry().textures().iter().enumerate() {
+                renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
             }
 
             for (id, info) in self.registry.registry().materials().iter().enumerate() {
@@ -263,7 +266,10 @@ impl Application for Game {
                         let dir: I64Vec3 = glm::convert(facing.direction());
                         let set_pos = pos + dir;
 
-                        access.set_block(&set_pos, self.registry.block_default());
+                        access.set_block(&set_pos, self.curr_block);
+                        if self.curr_block == self.registry.block_glow() {
+                            access.set_light(&set_pos, LightLevel::from_intensity(10));
+                        }
                         self.block_set_cooldown = 0.15;
                     }
                 } else if input.mouse().is_button_pressed(MouseButton::Right) {
@@ -274,7 +280,12 @@ impl Application for Game {
                         access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
 
                     if let Some(inter) = self.look_at_block {
+                        let prev_block = access.get_block(&inter.0).unwrap().block();
                         access.set_block(&inter.0, self.registry.block_empty());
+
+                        if prev_block == self.registry.block_glow() {
+                            access.remove_light(&inter.0);
+                        }
                         self.block_set_cooldown = 0.15;
                     }
                 }
@@ -373,6 +384,12 @@ impl Application for Game {
                                 self.cursor_grab = !self.cursor_grab;
                                 main_window.set_cursor_grab(self.cursor_grab).unwrap();
                                 main_window.set_cursor_visible(!self.cursor_grab);
+                            }
+                            VirtualKeyCode::Key1 => {
+                                self.curr_block = self.registry.block_default();
+                            }
+                            VirtualKeyCode::Key2 => {
+                                self.curr_block = self.registry.block_glow();
                             }
                             _ => {}
                         }

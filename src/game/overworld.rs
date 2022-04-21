@@ -12,6 +12,7 @@ use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, BlockDataImpl, Cluster};
+use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::structure::world::World;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld_streamer;
@@ -19,14 +20,16 @@ use crate::game::registry::Registry;
 use crate::physics::aabb::AABBRayIntersection;
 use engine::utils::value_noise::ValueNoise;
 use engine::utils::{HashMap, Int, MO_RELAXED};
+use nalgebra::{SimdBool, SimdPartialOrd};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, U32Vec3, Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, U32Vec3, Vec3};
 use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
 use parking_lot::{Mutex, MutexGuard, RawRwLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rand::Rng;
 use std::cell::RefCell;
-use std::collections::hash_map;
+use std::collections::{hash_map, VecDeque};
 use std::hash::Hash;
+use std::ops::Add;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 use std::sync::Arc;
 use winit::event::VirtualKeyCode::P;
@@ -46,6 +49,12 @@ fn sample_world_size(rng: &mut impl rand::Rng) -> u64 {
 
     let s: f64 = rng.sample(rand_distr::StandardNormal);
     AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
+}
+
+/// Returns cluster-local block position from global position
+#[inline]
+fn cluster_block_pos_from_global(global_pos: &I64Vec3) -> U32Vec3 {
+    global_pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32)
 }
 
 pub const CLUSTER_STATE_INITIAL: u8 = 0;
@@ -225,6 +234,13 @@ pub enum AccessGuardLock {
 }
 
 impl AccessGuard {
+    pub fn get_cluster_mut(&mut self) -> &mut Cluster {
+        match &mut self.lock {
+            AccessGuardLock::Write(g) => g.as_mut().unwrap(),
+            _ => unreachable!(),
+        }
+    }
+
     #[inline]
     pub fn get(&self, pos: &U32Vec3) -> BlockData {
         match &self.lock {
@@ -262,37 +278,9 @@ pub struct ClustersAccessCache {
 }
 
 impl ClustersAccessCache {
-    /// Returns block data or `None` if respective cluster is not loaded
-    pub fn get_block(&mut self, pos: &I64Vec3) -> Option<BlockData> {
-        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
-        let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
-
-        match self.clusters_cache.entry(cluster_pos) {
-            hash_map::Entry::Vacant(e) => {
-                let clusters = self.loaded_clusters.read();
-                let cluster = Arc::clone(clusters.get(&cluster_pos)?);
-                let state = cluster.state();
-
-                if state != CLUSTER_STATE_LOADED && state != CLUSTER_STATE_OFFLOADED_INVISIBLE {
-                    return None;
-                }
-
-                Some(
-                    e.insert(AccessGuard {
-                        block_empty: self.block_empty,
-                        lock: AccessGuardLock::Read(cluster.cluster.read_arc()),
-                    })
-                    .get(&block_pos),
-                )
-            }
-            hash_map::Entry::Occupied(e) => Some(e.into_mut().get(&block_pos)),
-        }
-    }
-
-    /// Returns block builder or `None` if respective cluster is not loaded
-    pub fn set_block(&mut self, pos: &I64Vec3, block: Block) -> Option<BlockDataBuilder> {
-        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
-        let block_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64) as u32);
+    /// Returns cluster for the specified global block position
+    pub fn get_cluster_for_pos_mut(&mut self, global_pos: &I64Vec3) -> Option<&mut Cluster> {
+        let cluster_pos = global_pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
 
         match self.clusters_cache.entry(cluster_pos) {
             hash_map::Entry::Vacant(e) => {
@@ -308,7 +296,7 @@ impl ClustersAccessCache {
                             block_empty: self.block_empty,
                             lock: AccessGuardLock::Write(cluster.cluster.write_arc()),
                         })
-                        .set(&block_pos, block),
+                        .get_cluster_mut(),
                     )
                 }
             }
@@ -335,11 +323,61 @@ impl ClustersAccessCache {
                 }
 
                 if let AccessGuardLock::Write(g) = &mut guard.lock {
-                    Some(g.as_mut().unwrap().set(&block_pos, block))
+                    Some(g.as_mut().unwrap())
                 } else {
                     unreachable!()
                 }
             }
+        }
+    }
+
+    /// Returns block data or `None` if respective cluster is not loaded
+    pub fn get_block(&mut self, pos: &I64Vec3) -> Option<BlockData> {
+        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
+        let block_pos = cluster_block_pos_from_global(pos);
+
+        match self.clusters_cache.entry(cluster_pos) {
+            hash_map::Entry::Vacant(e) => {
+                let clusters = self.loaded_clusters.read();
+                let cluster = Arc::clone(clusters.get(&cluster_pos)?);
+                let state = cluster.state();
+
+                if state != CLUSTER_STATE_LOADED && state != CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                    return None;
+                }
+
+                Some(
+                    e.insert(AccessGuard {
+                        block_empty: self.block_empty,
+                        lock: AccessGuardLock::Read(cluster.cluster.read_arc()),
+                    })
+                    .get(&block_pos),
+                )
+            }
+            hash_map::Entry::Occupied(e) => Some(e.into_mut().get(&block_pos)),
+        }
+    }
+
+    /// Returns block builder or `None` if respective cluster is not loaded
+    pub fn set_block(&mut self, pos: &I64Vec3, block: Block) -> Option<BlockDataBuilder> {
+        let cluster = self.get_cluster_for_pos_mut(pos)?;
+        let block_pos = cluster_block_pos_from_global(pos);
+
+        Some(cluster.set(&block_pos, block))
+    }
+
+    /// Returns block builder or `None` if respective cluster is not loaded
+    fn get_light_level(&mut self, pos: &I64Vec3) -> Option<LightLevel> {
+        let cluster = self.get_cluster_for_pos_mut(pos)?;
+        let block_pos = cluster_block_pos_from_global(pos);
+        Some(cluster.get_light_level(&block_pos))
+    }
+
+    /// Returns block builder or `None` if respective cluster is not loaded
+    fn set_light_level(&mut self, pos: &I64Vec3, light_level: LightLevel) {
+        if let Some(cluster) = self.get_cluster_for_pos_mut(pos) {
+            let block_pos = cluster_block_pos_from_global(pos);
+            cluster.set_light_level(&block_pos, light_level);
         }
     }
 
@@ -410,6 +448,76 @@ impl ClustersAccessCache {
                 return None;
             }
         }
+    }
+
+    fn propagate_light_addition(&mut self, queue: &mut VecDeque<I64Vec3>) {
+        while let Some(curr_pos) = queue.pop_front() {
+            let curr_level = self.get_light_level(&curr_pos).unwrap();
+            let curr_color = curr_level.components();
+
+            for i in 0..6 {
+                let dir: I64Vec3 = glm::convert(Facing::from_u8(i).direction());
+                let rel_pos = curr_pos + dir;
+
+                let block = self.get_block(&rel_pos).unwrap().block();
+                let level = self.get_light_level(&rel_pos).unwrap();
+                let color = level.components();
+
+                if !self.registry.is_block_opaque(&block)
+                    && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b))
+                {
+                    let new_color = curr_color.map(|v| v.saturating_sub(1));
+                    self.set_light_level(&rel_pos, LightLevel::from_vec(new_color));
+
+                    queue.push_back(rel_pos);
+                }
+            }
+        }
+    }
+
+    /// Use breadth-first search to set lighting across all lit area
+    pub fn set_light(&mut self, global_pos: &I64Vec3, light_level: LightLevel) {
+        self.set_light_level(global_pos, light_level);
+
+        let mut queue = VecDeque::with_capacity((light_level.components().max() as usize * 2).pow(2));
+        queue.push_back(*global_pos);
+
+        self.propagate_light_addition(&mut queue);
+    }
+
+    pub fn remove_light(&mut self, global_pos: &I64Vec3) {
+        let curr_level = self.get_light_level(&global_pos).unwrap();
+        self.set_light_level(global_pos, LightLevel::zero());
+
+        let mut removal_queue = VecDeque::with_capacity((curr_level.components().max() as usize * 2).pow(3));
+        let mut addition_queue = VecDeque::with_capacity(removal_queue.capacity());
+
+        removal_queue.push_back((*global_pos, curr_level));
+
+        while let Some((curr_pos, curr_level)) = removal_queue.pop_front() {
+            let curr_color = curr_level.components();
+
+            for i in 0..6 {
+                let dir: I64Vec3 = glm::convert(Facing::from_u8(i).direction());
+                let rel_pos = curr_pos + dir;
+
+                let level = self.get_light_level(&rel_pos).unwrap();
+                let color = level.components();
+
+                if glm::any(&color.zip_map(&curr_color, |a, b| a < b)) {
+                    if !level.is_zero() {
+                        self.set_light_level(&rel_pos, LightLevel::zero());
+                        removal_queue.push_back((rel_pos, level));
+                    }
+                }
+
+                if glm::any(&color.zip_map(&curr_color, |a, b| a >= b)) {
+                    addition_queue.push_back(rel_pos);
+                }
+            }
+        }
+
+        self.propagate_light_addition(&mut addition_queue);
     }
 }
 

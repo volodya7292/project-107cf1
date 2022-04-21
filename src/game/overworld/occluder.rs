@@ -46,6 +46,10 @@ impl Occluder {
     pub fn is_empty(&self) -> bool {
         self.0 == 0
     }
+
+    pub fn is_full(&self) -> bool {
+        self.0 == 0b111111
+    }
 }
 
 impl BitAnd for Occluder {

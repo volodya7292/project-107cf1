@@ -17,6 +17,7 @@ pub struct MainRegistry {
     structure_world: u32,
     block_empty: Block,
     block_default: Block,
+    block_glow: Block,
 }
 
 macro_rules! add_getters {
@@ -36,10 +37,20 @@ impl MainRegistry {
             TextureAtlasType::ALBEDO,
             resources.get("textures/test_texture.basis").unwrap(),
         );
+        let tex_glow = reg.register_texture(
+            TextureAtlasType::ALBEDO,
+            resources.get("textures/glow_texture.basis").unwrap(),
+        );
 
         // Materials
         let material_default = reg.register_material(MaterialInfo::new(
             MatComponent::Texture(tex_default),
+            MatComponent::Color(Default::default()),
+            TEXTURE_ID_NONE,
+            Default::default(),
+        ));
+        let material_glow = reg.register_material(MaterialInfo::new(
+            MatComponent::Texture(tex_glow),
             MatComponent::Color(Default::default()),
             TEXTURE_ID_NONE,
             Default::default(),
@@ -66,6 +77,14 @@ impl MainRegistry {
             ));
             Block::new(arch as u16, tex_model)
         };
+        let block_glow = {
+            let arch = reg.cluster_layout_mut().add_archetype().build();
+            let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
+                reg.get_block_model(cube_model).unwrap(),
+                &[QuadMaterial::new(material_glow, false, Default::default()); 6],
+            ));
+            Block::new(arch as u16, tex_model)
+        };
 
         // Structures
         // ----------------------------------------------------------------------------------------------------
@@ -81,6 +100,7 @@ impl MainRegistry {
             structure_world,
             block_empty,
             block_default,
+            block_glow,
         })
     }
 
@@ -89,5 +109,5 @@ impl MainRegistry {
     }
 
     add_getters! { u32, structure_world }
-    add_getters! { Block, block_empty block_default }
+    add_getters! { Block, block_empty block_default block_glow }
 }

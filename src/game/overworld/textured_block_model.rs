@@ -158,4 +158,8 @@ impl TexturedBlockModel {
     pub fn aabbs(&self) -> &[AABB] {
         &self.aabbs
     }
+
+    pub fn is_opaque(&self) -> bool {
+        self.occluder.is_full()
+    }
 }
