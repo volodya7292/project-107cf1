@@ -32,7 +32,7 @@ impl GlobalTransformEvents<'_> {
 
             if let crate::renderer::BufferUpdate::Type2(upd) = &mut buffer_updates[0] {
                 let src_offset = upd.data.len();
-                upd.data.extend(matrix_bytes);
+                upd.data.extend_from_slice(matrix_bytes);
                 upd.regions.push(vkw::CopyRegion::new(
                     src_offset as u64,
                     renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE

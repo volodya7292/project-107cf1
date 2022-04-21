@@ -26,7 +26,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::collections::hash_map;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -116,9 +116,7 @@ pub struct Renderer {
     settings: Settings,
     device: Arc<Device>,
 
-    texture_resources: Vec<(ResourceRef, TextureAtlasType, Option<u32>)>,
     texture_atlases: [TextureAtlas; 4],
-    free_texture_indices: [Vec<u32>; 4],
 
     staging_buffer: HostBuffer<u8>,
     transfer_cl: [Arc<Mutex<CmdList>>; 2],
@@ -276,12 +274,12 @@ pub(crate) struct Renderable {
 pub(crate) struct BufferUpdate1 {
     pub buffer: BufferHandle,
     pub offset: u64,
-    pub data: Vec<u8>,
+    pub data: SmallVec<[u8; 256]>,
 }
 
 pub(crate) struct BufferUpdate2 {
     pub buffer: BufferHandle,
-    pub data: Vec<u8>,
+    pub data: SmallVec<[u8; 256]>,
     pub regions: Vec<CopyRegion>,
 }
 
@@ -295,7 +293,7 @@ pub(crate) struct VMBufferUpdate {
     pub mesh: Arc<RawVertexMesh>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct MaterialInfo {
     pub(crate) diffuse_tex_id: u32,
@@ -792,8 +790,6 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
-        let free_indices: Vec<u32> = (0..tile_count).into_iter().collect();
-
         // TODO: allocate buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
             scene,
@@ -806,14 +802,7 @@ impl Renderer {
             surface_size: size,
             settings,
             device: Arc::clone(device),
-            texture_resources: Default::default(),
             texture_atlases,
-            free_texture_indices: [
-                free_indices.clone(),
-                free_indices.clone(),
-                free_indices.clone(),
-                free_indices,
-            ],
             staging_buffer,
             transfer_cl,
             transfer_submit,
@@ -892,90 +881,56 @@ impl Renderer {
         &mut self.active_camera
     }
 
-    /// Add texture to renderer
-    pub fn add_texture(&mut self, atlas_type: TextureAtlasType, res_ref: ResourceRef) -> usize {
-        self.texture_resources.push((res_ref, atlas_type, None));
-        self.texture_resources.len() - 1
-    }
+    pub fn load_texture_into_atlas(
+        &mut self,
+        texture_index: u32,
+        atlas_type: TextureAtlasType,
+        res_ref: ResourceRef,
+    ) {
+        let res_data = res_ref.read().unwrap();
 
-    /// Texture must be loaded before being used in a shader
-    pub fn load_texture(&mut self, index: usize) {
-        let (res_ref, atlas_type, tex_index) = &mut self.texture_resources[index];
+        let mut t = basis_universal::Transcoder::new();
+        t.prepare_transcoding(&res_data).unwrap();
 
-        if tex_index.is_none() {
-            let free_indices = &mut self.free_texture_indices[*atlas_type as usize];
-            *tex_index = if free_indices.is_empty() {
-                None
-            } else {
-                Some(free_indices.swap_remove(0))
-            };
+        let img_info = t.image_info(&res_data, 0).unwrap();
+        let width = img_info.m_width;
+        let height = img_info.m_height;
+
+        if !utils::is_pow_of_2(width as u64)
+            || width != height
+            || width < (self.settings.texture_quality as u32)
+        {
+            return;
         }
 
-        if let Some(tex_index) = tex_index {
-            let res_data = res_ref.read().unwrap();
-
-            // let t = basis_universal::transcoding::Transcoder::new();
-            // basis_universal::transcoder_init();
-
-            let mut t = basis_universal::Transcoder::new();
-            t.prepare_transcoding(&res_data).unwrap();
-
-            let img_info = t.image_info(&res_data, 0).unwrap();
-            let width = img_info.m_width;
-            let height = img_info.m_height;
-
-            // let decoder = ktx::Decoder::new(res_data.as_slice()).unwrap();
-            // let width = decoder.pixel_width();
-            // let height = decoder.pixel_height();
-
-            if !utils::is_pow_of_2(width as u64)
-                || width != height
-                || width < (self.settings.texture_quality as u32)
-            {
-                return;
-            }
-
-            let mipmaps: Vec<_> = (0..img_info.m_total_levels)
-                .map(|i| {
-                    t.transcode_image_level(
-                        &res_data,
-                        atlas_type.basis_decode_type(),
-                        TranscodeParameters {
-                            image_index: 0,
-                            level_index: i,
-                            decode_flags: None,
-                            output_row_pitch_in_blocks_or_pixels: None,
-                            output_rows_in_pixels: None,
-                        },
-                    )
-                    .unwrap()
-                })
-                .collect();
-
-            t.end_transcoding();
-
-            // let mip_maps: Vec<Vec<u8>> = decoder.read_textures().collect();
-
-            let first_level = UInt::log2(&(width / (self.settings.texture_quality as u32)));
-            let last_level = UInt::log2(&(width / 4)); // BC block size = 4x4
-
-            self.texture_atlases[*atlas_type as usize]
-                .set_texture(
-                    *tex_index,
-                    &mipmaps[(first_level as usize)..(last_level as usize + 1)],
+        let mipmaps: Vec<_> = (0..img_info.m_total_levels)
+            .map(|i| {
+                t.transcode_image_level(
+                    &res_data,
+                    atlas_type.basis_decode_type(),
+                    TranscodeParameters {
+                        image_index: 0,
+                        level_index: i,
+                        decode_flags: None,
+                        output_row_pitch_in_blocks_or_pixels: None,
+                        output_rows_in_pixels: None,
+                    },
                 )
-                .unwrap();
-        }
-    }
+                .unwrap()
+            })
+            .collect();
 
-    /// Unload unused texture to free GPU memory for another texture
-    pub fn unload_texture(&mut self, index: u32) {
-        let (_res_ref, atlas_type, tex_index) = &mut self.texture_resources[index as usize];
+        t.end_transcoding();
 
-        if let Some(tex_index) = tex_index {
-            self.free_texture_indices[*atlas_type as usize].push(*tex_index);
-        }
-        *tex_index = None;
+        let first_level = UInt::log2(&(width / (self.settings.texture_quality as u32)));
+        let last_level = UInt::log2(&(width / 4)); // BC block size = 4x4
+
+        self.texture_atlases[atlas_type as usize]
+            .set_texture(
+                texture_index,
+                &mipmaps[(first_level as usize)..(last_level as usize + 1)],
+            )
+            .unwrap();
     }
 
     /// Returns id of registered material pipeline.
@@ -1057,6 +1012,7 @@ impl Renderer {
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
+        assert!(id < MAX_MATERIAL_COUNT);
         self.material_updates.insert(id, info);
     }
 
@@ -1121,10 +1077,23 @@ impl Renderer {
                         }
                         BufferUpdate::Type2(update) => {
                             self.staging_buffer.write(used_size as u64, &update.data);
+
+                            let regions: SmallVec<[CopyRegion; 64]> = update
+                                .regions
+                                .iter()
+                                .map(|region| {
+                                    CopyRegion::new(
+                                        used_size + region.src_offset(),
+                                        region.dst_offset(),
+                                        region.size(),
+                                    )
+                                })
+                                .collect();
+
                             cl.copy_buffer_regions_to_device_bytes(
                                 &self.staging_buffer,
                                 &update.buffer,
-                                &update.regions,
+                                &regions,
                             );
                         }
                     }
@@ -1173,7 +1142,7 @@ impl Renderer {
         let mut buffer_updates = vec![];
         let mut uniform_buffers_updates = [BufferUpdate::Type2(BufferUpdate2 {
             buffer: self.uniform_buffer_basic.handle(),
-            data: vec![],
+            data: smallvec![],
             regions: vec![],
         })];
 
@@ -1319,7 +1288,7 @@ impl Renderer {
                     &per_frame_info as *const PerFrameInfo as *const u8,
                     mem::size_of_val(&per_frame_info),
                 )
-                .to_vec()
+                .to_smallvec()
             };
             buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
                 buffer: self.per_frame_ub.handle(),
@@ -1349,7 +1318,7 @@ impl Renderer {
 
             buffer_updates.push(BufferUpdate::Type2(BufferUpdate2 {
                 buffer: self.material_buffer.handle(),
-                data: data.to_vec(),
+                data: data.to_smallvec(),
                 regions,
             }));
         }

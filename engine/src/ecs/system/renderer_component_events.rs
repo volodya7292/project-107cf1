@@ -57,7 +57,7 @@ impl RendererComponentEvents<'_> {
                     buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
                         buffer: buf_res.device_buffer.handle(),
                         offset: 0,
-                        data,
+                        data: data.into(),
                     }));
                     buf_res.changed = false;
 

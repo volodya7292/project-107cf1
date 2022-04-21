@@ -20,6 +20,7 @@ pub struct CmdList {
     pub(crate) last_pipeline: *const Pipeline,
 }
 
+#[derive(Debug)]
 #[repr(transparent)]
 pub struct CopyRegion(vk::BufferCopy);
 
@@ -34,6 +35,14 @@ impl CopyRegion {
 
     pub fn size(&self) -> u64 {
         self.0.size
+    }
+
+    pub fn src_offset(&self) -> u64 {
+        self.0.src_offset
+    }
+
+    pub fn dst_offset(&self) -> u64 {
+        self.0.dst_offset
     }
 }
 
@@ -115,7 +124,7 @@ impl CmdList {
         clear_values: &[ClearValue],
         secondary_cmd_lists: bool,
     ) {
-        let clear_values: Vec<vk::ClearValue> = clear_values.iter().map(|val| vk_clear_value(val)).collect();
+        let clear_values: Vec<vk::ClearValue> = clear_values.iter().map(vk_clear_value).collect();
 
         let begin_info = vk::RenderPassBeginInfo::builder()
             .render_pass(render_pass.native)
@@ -437,7 +446,7 @@ impl CmdList {
                 self.native,
                 src_buffer.buffer.native,
                 dst_buffer.handle().0,
-                &regions,
+                regions,
             )
         };
     }
@@ -496,6 +505,7 @@ impl CmdList {
         };
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn copy_host_buffer_to_image_2d(
         &mut self,
         src_buffer: &HostBuffer<u8>,
@@ -539,6 +549,7 @@ impl CmdList {
         };
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn copy_image_2d(
         &mut self,
         src_image: &Arc<Image>,
@@ -593,6 +604,7 @@ impl CmdList {
         };
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn blit_image_2d(
         &mut self,
         src_image: &Arc<Image>,
