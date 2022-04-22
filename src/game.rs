@@ -220,7 +220,7 @@ impl Application for Game {
                     let mut blocks = self.overworld.access();
 
                     if blocks
-                        .get_block(&glm::try_convert(glm::floor(&self.player_pos)).unwrap())
+                        .get_block(&glm::convert_unchecked(glm::floor(&self.player_pos)))
                         .is_some()
                     {
                         // Free fall
@@ -267,9 +267,14 @@ impl Application for Game {
                         let set_pos = pos + dir;
 
                         access.set_block(&set_pos, self.curr_block);
+
                         if self.curr_block == self.registry.block_glow() {
                             access.set_light(&set_pos, LightLevel::from_intensity(10));
+                        } else {
+                            // Remove light to cause occlusion of nearby lights
+                            access.remove_light(&set_pos);
                         }
+
                         self.block_set_cooldown = 0.15;
                     }
                 } else if input.mouse().is_button_pressed(MouseButton::Right) {
@@ -285,7 +290,10 @@ impl Application for Game {
 
                         if prev_block == self.registry.block_glow() {
                             access.remove_light(&inter.0);
+                        } else {
+                            // TODO: set corresponding light level if there is a light nearby
                         }
+
                         self.block_set_cooldown = 0.15;
                     }
                 }

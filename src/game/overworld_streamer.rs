@@ -75,7 +75,7 @@ struct ClusterPosD {
 }
 
 fn cluster_aligned_pos(pos: DVec3) -> I64Vec3 {
-    glm::try_convert(glm::floor(&(pos / cluster::SIZE as f64))).unwrap()
+    glm::convert_unchecked(glm::floor(&(pos / cluster::SIZE as f64)))
 }
 
 fn calc_cluster_layout(
@@ -136,7 +136,7 @@ fn get_side_cluster_by_facing(pos: I64Vec3, facing: Facing) -> I64Vec3 {
 }
 
 fn neighbour_dir_index(pos: &I64Vec3, target: &I64Vec3) -> u8 {
-    let d: U8Vec3 = glm::try_convert(((target - pos) / (cluster::SIZE as i64)).add_scalar(1)).unwrap();
+    let d: U8Vec3 = glm::convert_unchecked(((target - pos) / (cluster::SIZE as i64)).add_scalar(1));
     d.x * 9 + d.y * 3 + d.z
 }
 
@@ -493,7 +493,7 @@ impl OverworldStreamer {
                 let cluster = Arc::clone(&ocluster.cluster);
 
                 let mut ready_to_fill = true;
-                let mut fill_neighbours = SmallVec::<[(I64Vec3, Arc<_>); 26]>::new();
+                let mut fill_neighbours = SmallVec::<[_; 26]>::new();
 
                 for p in get_side_clusters(&pos) {
                     let mask = 1 << neighbour_dir_index(pos, &p);
@@ -515,7 +515,11 @@ impl OverworldStreamer {
                         break;
                     }
 
-                    fill_neighbours.push((p, Arc::clone(&oclusters[&p])));
+                    fill_neighbours.push((
+                        p,
+                        Arc::clone(&oclusters[&p]),
+                        Arc::clone(&rclusters[&p].mesh_can_be_updated),
+                    ));
                 }
 
                 if !ready_to_fill {
@@ -550,6 +554,16 @@ impl OverworldStreamer {
                 let mesh_can_be_updated = Arc::clone(&rcluster.mesh_can_be_updated);
                 let curr_updating_clusters_n = Arc::clone(&self.curr_clusters_intrinsics_updating_n);
 
+                // Remove unnecessary filling of neighbour cluster
+                // (neighbour cluster is filled mutually with current cluster)
+                for (neighbour_pos, ocluster, _) in &fill_neighbours {
+                    let rcluster = rclusters.get_mut(neighbour_pos).unwrap();
+                    let offset = (pos - neighbour_pos);
+                    let mask = 1 << neighbour_dir_index(&neighbour_pos, &pos);
+
+                    rcluster.needs_intrinsics_fill_at &= !mask;
+                }
+
                 intensive_queue().spawn(move || {
                     for neighbour_pos in clear_neighbour_sides {
                         let mut cluster = cluster.write();
@@ -557,25 +571,55 @@ impl OverworldStreamer {
                         let offset = neighbour_pos - pos;
                         cluster.clear_outer_intrinsics(glm::convert(offset), Default::default());
                     }
-                    for (neighbour_pos, neighbour) in fill_neighbours {
+                    for (neighbour_pos, neighbour, neighbour_mesh_can_be_updated) in fill_neighbours {
                         // Use loop in case of failure to acquire a lock of one of the clusters
                         loop {
-                            let neighbour_cluster = neighbour.cluster.try_read();
-                            let mut cluster = cluster.try_write();
+                            let neighbour_cluster = neighbour.cluster.try_upgradable_read();
+                            let cluster = cluster.try_write();
 
                             if neighbour_cluster.is_none() || cluster.is_none() {
                                 continue;
                             }
 
-                            let neighbour_cluster = neighbour_cluster.unwrap();
-                            let mut cluster = cluster.unwrap();
+                            let neighbour_cluster_guard = neighbour_cluster.unwrap();
+                            let mut cluster_guard = cluster.unwrap();
 
-                            let cluster = unwrap_option!(cluster.as_mut(), break);
+                            let cluster = unwrap_option!(cluster_guard.as_mut(), break);
 
                             if neighbour.state() == CLUSTER_STATE_LOADED {
-                                let offset = neighbour_pos - pos;
-                                let neighbour_cluster = unwrap_option!(neighbour_cluster.as_ref(), break);
-                                cluster.paste_outer_intrinsics(&neighbour_cluster, glm::convert(offset));
+                                let offset: I32Vec3 = glm::convert(neighbour_pos - pos);
+                                let neighbour_cluster =
+                                    unwrap_option!(neighbour_cluster_guard.as_ref(), break);
+
+                                // Mutually update `cluster` and `neighbour_cluster` intrinsics.
+                                // First, propagate lighting in both clusters,
+                                // and only then update intrinsics (which are also related by lighting).
+
+                                cluster.propagate_outer_lighting(&neighbour_cluster, offset);
+
+                                // Switch cluster to read, neighbour_cluster to write
+                                let cluster_guard = RwLockWriteGuard::downgrade_to_upgradable(cluster_guard);
+                                let mut neighbour_cluster_guard =
+                                    RwLockUpgradableReadGuard::upgrade(neighbour_cluster_guard);
+                                let cluster = cluster_guard.as_ref().unwrap();
+                                let neighbour_cluster = neighbour_cluster_guard.as_mut().unwrap();
+
+                                neighbour_cluster.propagate_outer_lighting(&cluster, -offset);
+
+                                // Finally, mutually paste intrinsics.
+
+                                // Paste intrinsics from `cluster` into `neighbour_cluster`
+                                neighbour_cluster.paste_outer_intrinsics(&cluster, -offset);
+
+                                // Switch back: cluster to write, neighbour_cluster to read
+                                let mut cluster_guard = RwLockUpgradableReadGuard::upgrade(cluster_guard);
+                                let neighbour_cluster_guard =
+                                    RwLockWriteGuard::downgrade_to_upgradable(neighbour_cluster_guard);
+                                let cluster = cluster_guard.as_mut().unwrap();
+                                let neighbour_cluster = neighbour_cluster_guard.as_ref().unwrap();
+
+                                // Paste intrinsics from `neighbour_cluster` into `cluster`
+                                cluster.paste_outer_intrinsics(&neighbour_cluster, offset);
                             } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
                                 let offset = neighbour_pos - pos;
                                 cluster.clear_outer_intrinsics(
@@ -589,6 +633,8 @@ impl OverworldStreamer {
 
                             break;
                         }
+
+                        neighbour_mesh_can_be_updated.store(true, MO_RELEASE);
                     }
 
                     mesh_can_be_updated.store(true, MO_RELEASE);

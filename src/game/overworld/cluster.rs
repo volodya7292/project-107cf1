@@ -6,13 +6,14 @@ use crate::game::overworld::occluder::Occluder;
 use crate::game::registry::Registry;
 use engine::renderer::vertex_mesh::VertexMeshCreate;
 use engine::renderer::VertexMesh;
-use engine::utils::{Int, MO_RELAXED};
+use engine::utils::MO_RELAXED;
 use entity_data::{EntityBuilder, EntityId, EntityStorage};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec2, TVec3};
 use parking_lot::{RwLock, RwLockReadGuard};
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -36,7 +37,7 @@ fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     p.x * 9 + p.y * 3 + p.z
 }
 
-fn neighbour_index_from_dir(dir: &I32Vec3) -> usize {
+pub fn neighbour_index_from_dir(dir: &I32Vec3) -> usize {
     let p = dir.add_scalar(1);
     (p.x * 9 + p.y * 3 + p.z) as usize
 }
@@ -180,10 +181,10 @@ pub struct Cluster {
     blocks: Box<[[[Block; SIZE]; SIZE]; SIZE]>,
     intrinsic_data: Vec<IntrinsicBlockData>,
     side_changed: [bool; 27],
-    intrinsics_changed: AtomicBool,
     empty: AtomicBool,
     device: Arc<vkw::Device>,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
+    light_addition_cache: VecDeque<TVec3<usize>>,
 }
 
 impl Cluster {
@@ -198,10 +199,10 @@ impl Cluster {
             blocks: Default::default(),
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             side_changed: [false; 27],
-            intrinsics_changed: Default::default(),
             empty: AtomicBool::new(true),
             device,
             vertex_mesh: Default::default(),
+            light_addition_cache: VecDeque::with_capacity(SIZE * SIZE),
         }
     }
 
@@ -349,146 +350,230 @@ impl Cluster {
 
         state
     }
+
     pub fn clear_outer_intrinsics(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
-        let so = side_offset;
         let size = SIZE as i32;
-        let b = so.map(|v| v == -size || v == size);
+        let b = side_offset.map(|v| v == -size || v == size);
 
         if glm::all(&b) {
-            self.clear_outer_intrinsics_corner(so, value);
+            // Corner
+            let m = side_offset.map(|v| (v > 0) as u32);
+            let dst_pos = m * (ALIGNED_SIZE - 1) as u32;
+            let index = aligned_block_index(&glm::convert(dst_pos));
+            self.intrinsic_data[index] = value;
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
-            self.clear_outer_intrinsics_edge(side_offset, value);
-        } else {
-            self.clear_outer_intrinsics_side(side_offset, value);
-        }
-    }
+            // Edge
+            fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+                m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+            }
 
-    fn clear_outer_intrinsics_side(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
-        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
-            let dx = (d.x != 0) as usize;
-            let dy = (d.y != 0) as usize;
-            let dz = (d.z != 0) as usize;
-            let x = k * dy + k * dz + v * (d.x > 0) as usize;
-            let y = k * dx + l * dz + v * (d.y > 0) as usize;
-            let z = l * dx + l * dy + v * (d.z > 0) as usize;
-            TVec3::new(x, y, z)
-        }
+            let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
 
-        // Direction towards side cluster
-        let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
-
-        for k in 0..SIZE {
-            for l in 0..SIZE {
-                let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+            for k in 0..SIZE {
+                let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
                 let index = aligned_block_index(&dst_p);
                 self.intrinsic_data[index] = value;
             }
+        } else {
+            // Side
+            fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+                let dx = (d.x != 0) as usize;
+                let dy = (d.y != 0) as usize;
+                let dz = (d.z != 0) as usize;
+                let x = k * dy + k * dz + v * (d.x > 0) as usize;
+                let y = k * dx + l * dz + v * (d.y > 0) as usize;
+                let z = l * dx + l * dy + v * (d.z > 0) as usize;
+                TVec3::new(x, y, z)
+            }
+
+            // Direction towards side cluster
+            let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
+
+            for k in 0..SIZE {
+                for l in 0..SIZE {
+                    let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                    let index = aligned_block_index(&dst_p);
+                    self.intrinsic_data[index] = value;
+                }
+            }
         }
-
-        self.intrinsics_changed.store(true, MO_RELAXED);
-    }
-
-    fn clear_outer_intrinsics_edge(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
-        fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
-            m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
-        }
-
-        let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
-
-        for k in 0..SIZE {
-            let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
-            let index = aligned_block_index(&dst_p);
-            self.intrinsic_data[index] = value;
-        }
-
-        self.intrinsics_changed.store(true, MO_RELAXED);
-    }
-
-    fn clear_outer_intrinsics_corner(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
-        let m = side_offset.map(|v| (v > 0) as u32);
-
-        let dst_pos = m * (ALIGNED_SIZE - 1) as u32;
-        let index = aligned_block_index(&glm::convert(dst_pos));
-        self.intrinsic_data[index] = value;
-
-        self.intrinsics_changed.store(true, MO_RELAXED);
     }
 
     pub fn paste_outer_intrinsics(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        let so = side_offset;
         let size = SIZE as i32;
-        let b = so.map(|v| v == -size || v == size);
+        let b = side_offset.map(|v| v == -size || v == size);
 
         if glm::all(&b) {
-            self.paste_outer_intrinsics_corner(side_cluster, so);
+            // Corner
+            let m = side_offset.map(|v| (v > 0) as u32);
+            let n = side_offset.map(|v| (v < 0) as u32);
+
+            let dst_p = m * (ALIGNED_SIZE - 1) as u32;
+            let src_p = (n * (SIZE as u32 - 1)).add_scalar(1);
+            let dst_index = aligned_block_index(&glm::convert(dst_p));
+            let src_index = aligned_block_index(&glm::convert(src_p));
+
+            self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
-            self.paste_outer_intrinsics_edge(side_cluster, side_offset);
-        } else {
-            self.paste_outer_intrinsics_side(side_cluster, side_offset);
-        }
-    }
+            // Edge
+            fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+                m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+            }
 
-    fn paste_outer_intrinsics_side(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
-            let dx = (d.x != 0) as usize;
-            let dy = (d.y != 0) as usize;
-            let dz = (d.z != 0) as usize;
-            let x = k * dy + k * dz + v * (d.x > 0) as usize;
-            let y = k * dx + l * dz + v * (d.y > 0) as usize;
-            let z = l * dx + l * dy + v * (d.z > 0) as usize;
-            TVec3::new(x, y, z)
-        }
+            let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
+            let n = -m;
 
-        // Direction towards side cluster
-        let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
-        let dir_inv = -dir;
-
-        for k in 0..SIZE {
-            for l in 0..SIZE {
-                let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
-                let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
+            for k in 0..SIZE {
+                let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
+                let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
                 let dst_index = aligned_block_index(&dst_p);
                 let src_index = aligned_block_index(&src_p);
 
                 self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
             }
-        }
+        } else {
+            // Side
+            fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+                let dx = (d.x != 0) as usize;
+                let dy = (d.y != 0) as usize;
+                let dz = (d.z != 0) as usize;
+                let x = k * dy + k * dz + v * (d.x > 0) as usize;
+                let y = k * dx + l * dz + v * (d.y > 0) as usize;
+                let z = l * dx + l * dy + v * (d.z > 0) as usize;
+                TVec3::new(x, y, z)
+            }
 
-        self.intrinsics_changed.store(true, MO_RELAXED);
+            // Direction towards side cluster
+            let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
+            let dir_inv = -dir;
+
+            for k in 0..SIZE {
+                for l in 0..SIZE {
+                    let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                    let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
+                    let dst_index = aligned_block_index(&dst_p);
+                    let src_index = aligned_block_index(&src_p);
+
+                    self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
+                }
+            }
+        }
     }
 
-    fn paste_outer_intrinsics_edge(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
-            m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+    pub fn propagate_outer_lighting(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+        let size = SIZE as i32;
+        let b = side_offset.map(|v| v == -size || v == size);
+
+        if glm::all(&b) {
+            // Corner
+            let m = side_offset.map(|v| (v > 0) as u32);
+            let n = side_offset.map(|v| (v < 0) as u32);
+
+            let dst_p = m * (ALIGNED_SIZE - 1) as u32;
+            let src_p = (n * (SIZE as u32 - 1)).add_scalar(1);
+            let dst_index = aligned_block_index(&glm::convert(dst_p));
+            let src_index = aligned_block_index(&glm::convert(src_p));
+
+            self.intrinsic_data[dst_index].light_level = side_cluster.intrinsic_data[src_index].light_level;
+            self.light_addition_cache.push_back(glm::convert(dst_p));
+        } else if b.x && b.y || b.x && b.z || b.y && b.z {
+            // Edge
+            fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
+                m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
+            }
+
+            let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
+            let n = -m;
+
+            for k in 0..SIZE {
+                let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
+                let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
+                let dst_index = aligned_block_index(&dst_p);
+                let src_index = aligned_block_index(&src_p);
+
+                self.intrinsic_data[dst_index].light_level =
+                    side_cluster.intrinsic_data[src_index].light_level;
+                self.light_addition_cache.push_back(dst_p);
+            }
+        } else {
+            // Side
+            fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+                let dx = (d.x != 0) as usize;
+                let dy = (d.y != 0) as usize;
+                let dz = (d.z != 0) as usize;
+                let x = k * dy + k * dz + v * (d.x > 0) as usize;
+                let y = k * dx + l * dz + v * (d.y > 0) as usize;
+                let z = l * dx + l * dy + v * (d.z > 0) as usize;
+                TVec3::new(x, y, z)
+            }
+
+            // Direction towards side cluster
+            let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
+            let dir_inv = -dir;
+
+            for k in 0..SIZE {
+                for l in 0..SIZE {
+                    let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                    let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
+                    let dst_index = aligned_block_index(&dst_p);
+                    let src_index = aligned_block_index(&src_p);
+
+                    self.intrinsic_data[dst_index].light_level =
+                        side_cluster.intrinsic_data[src_index].light_level;
+                    self.light_addition_cache.push_back(dst_p);
+                }
+            }
         }
 
-        let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
-        let n = -m;
-
-        for k in 0..SIZE {
-            let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
-            let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
-            let dst_index = aligned_block_index(&dst_p);
-            let src_index = aligned_block_index(&src_p);
-
-            self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
-        }
-
-        self.intrinsics_changed.store(true, MO_RELAXED);
+        self.propagate_pending_lighting()
     }
 
-    fn paste_outer_intrinsics_corner(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
-        let m = side_offset.map(|v| (v > 0) as u32);
-        let n = side_offset.map(|v| (v < 0) as u32);
+    /// Propagates lighting from boundaries into the cluster
+    fn propagate_pending_lighting(&mut self) {
+        const MAX_BOUNDARY: i32 = (SIZE + 1) as i32;
 
-        let dst_p = m * (ALIGNED_SIZE - 1) as u32;
-        let src_p = (n * (SIZE as u32 - 1)).add_scalar(1);
-        let dst_index = aligned_block_index(&glm::convert(dst_p));
-        let src_index = aligned_block_index(&glm::convert(src_p));
+        while let Some(curr_pos) = self.light_addition_cache.pop_front() {
+            let curr_index = aligned_block_index(&curr_pos);
+            let curr_level = self.intrinsic_data[curr_index].light_level;
+            let curr_color = curr_level.components();
 
-        self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
+            for i in 0..6 {
+                let dir = Facing::from_u8(i).direction();
+                let rel_pos = glm::convert::<TVec3<usize>, I32Vec3>(curr_pos) + dir;
 
-        self.intrinsics_changed.store(true, MO_RELAXED);
+                if rel_pos.x < 1
+                    || rel_pos.y < 1
+                    || rel_pos.z < 1
+                    || rel_pos.x >= MAX_BOUNDARY
+                    || rel_pos.y >= MAX_BOUNDARY
+                    || rel_pos.z >= MAX_BOUNDARY
+                {
+                    continue;
+                }
+                let rel_pos: TVec3<usize> = glm::convert_unchecked(rel_pos);
+
+                let block = self.blocks[rel_pos.x - 1][rel_pos.y - 1][rel_pos.z - 1];
+                let index = aligned_block_index(&rel_pos);
+                let level = &mut self.intrinsic_data[index].light_level;
+                let color = level.components();
+
+                if !self.registry.is_block_opaque(&block)
+                    && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b))
+                {
+                    let new_color = curr_color.map(|v| v.saturating_sub(1));
+                    *level = LightLevel::from_vec(new_color);
+
+                    self.light_addition_cache.push_back(glm::convert(rel_pos));
+                }
+            }
+        }
+    }
+
+    /// Propagates lighting where necessary in the cluster using light source at `block_pos`.
+    pub fn propagate_lighting(&mut self, block_pos: &U32Vec3) {
+        self.light_addition_cache
+            .push_back(glm::convert(block_pos.add_scalar(1)));
+        self.propagate_pending_lighting();
     }
 
     // TODO: Optimize this
@@ -503,7 +588,7 @@ impl Cluster {
 
         let mut k: I32Vec2 = Default::default();
         let mut c = 0;
-        let corner: I32Vec3 = glm::try_convert(vertex_pos.zip_zip_map(&dir, &block_pos, |v, d, b| {
+        let corner: I32Vec3 = glm::convert_unchecked(vertex_pos.zip_zip_map(&dir, &block_pos, |v, d, b| {
             if d != 0 {
                 if v.fract() > 0.0001 {
                     v.floor()
@@ -519,8 +604,7 @@ impl Cluster {
                 c += 1;
                 b as f32 + (v - b as f32 - 0.5).signum()
             }
-        }))
-        .unwrap();
+        }));
 
         c = 0;
         let side1 = corner.zip_map(&dir, |v, d| {
@@ -588,9 +672,9 @@ impl Cluster {
         let side1 = side1.add_scalar(1);
         let side2 = side2.add_scalar(1);
 
-        let corner_index = aligned_block_index(&glm::try_convert(corner).unwrap());
-        let side1_index = aligned_block_index(&glm::try_convert(side1).unwrap());
-        let side2_index = aligned_block_index(&glm::try_convert(side2).unwrap());
+        let corner_index = aligned_block_index(&glm::convert_unchecked(corner));
+        let side1_index = aligned_block_index(&glm::convert_unchecked(side1));
+        let side2_index = aligned_block_index(&glm::convert_unchecked(side2));
 
         let corner = intrinsic_data[corner_index];
         let side1 = intrinsic_data[side1_index];
@@ -636,7 +720,7 @@ impl Cluster {
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
                         let rel = (pos + facing.direction()).add_scalar(1);
-                        let rel_index = aligned_block_index(&glm::try_convert(rel).unwrap());
+                        let rel_index = aligned_block_index(&glm::convert_unchecked(rel));
 
                         let curr_intrinsics = intrinsics[rel_index];
                         let occludes = curr_intrinsics.occluder.occludes_side(facing.mirror());

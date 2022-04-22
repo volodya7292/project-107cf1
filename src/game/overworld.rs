@@ -195,7 +195,7 @@ impl Overworld {
                     let y = r * phi.sin() * theta.cos();
                     let z = r * theta.cos();
 
-                    let v: I64Vec3 = glm::try_convert(Vec3::new(x, y, z)).unwrap();
+                    let v: I64Vec3 = glm::convert_unchecked(Vec3::new(x, y, z));
                     let p = start_cluster_pos + v * octant_size;
 
                     let result = self.gen_structure_pos(structure, p);
@@ -402,7 +402,7 @@ impl ClustersAccessCache {
         let mut t = 0.0;
 
         loop {
-            let curr_block_upos = glm::try_convert(curr_block_pos).unwrap();
+            let curr_block_upos = glm::convert_unchecked(curr_block_pos);
             let curr_block = self.get_block(&curr_block_upos);
 
             if let Some(data) = &curr_block {
@@ -477,12 +477,18 @@ impl ClustersAccessCache {
 
     /// Use breadth-first search to set lighting across all lit area
     pub fn set_light(&mut self, global_pos: &I64Vec3, light_level: LightLevel) {
-        self.set_light_level(global_pos, light_level);
+        if let Some(cluster) = self.get_cluster_for_pos_mut(&global_pos) {
+            let block_pos = cluster_block_pos_from_global(&global_pos);
+            cluster.set_light_level(&block_pos, light_level);
+            cluster.propagate_lighting(&block_pos);
+        }
 
-        let mut queue = VecDeque::with_capacity((light_level.components().max() as usize * 2).pow(2));
-        queue.push_back(*global_pos);
-
-        self.propagate_light_addition(&mut queue);
+        // self.set_light_level(global_pos, light_level);
+        //
+        // let mut queue = VecDeque::with_capacity((light_level.components().max() as usize * 2).pow(2));
+        // queue.push_back(*global_pos);
+        //
+        // self.propagate_light_addition(&mut queue);
     }
 
     pub fn remove_light(&mut self, global_pos: &I64Vec3) {
@@ -517,7 +523,14 @@ impl ClustersAccessCache {
             }
         }
 
-        self.propagate_light_addition(&mut addition_queue);
+        for pos in addition_queue {
+            let cluster = self.get_cluster_for_pos_mut(&pos).unwrap();
+            let block_pos = cluster_block_pos_from_global(&pos);
+
+            cluster.propagate_lighting(&block_pos);
+        }
+
+        // self.propagate_light_addition(&mut addition_queue);
     }
 }
 

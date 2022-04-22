@@ -35,8 +35,8 @@ impl Overworld {
         let global_motion_aabb = aabb_in_full_motion.translate(curr_object_pos);
 
         // Use motion_aabb to account for extreme motion deltas to prevent 'tunneling'
-        let start: I64Vec3 = glm::try_convert(glm::floor(&global_motion_aabb.min())).unwrap();
-        let size: I64Vec3 = glm::try_convert(glm::ceil(&global_motion_aabb.size()).add_scalar(1.0)).unwrap();
+        let start: I64Vec3 = glm::convert_unchecked(glm::floor(&global_motion_aabb.min()));
+        let size: I64Vec3 = glm::convert_unchecked(glm::ceil(&global_motion_aabb.size()).add_scalar(1.0));
 
         let reg = self.main_registry().registry();
         let mut access = self.access();

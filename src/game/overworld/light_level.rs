@@ -1,6 +1,4 @@
 use nalgebra_glm::{U8Vec3, Vec3};
-use std::cmp::Ordering;
-use std::ops::Add;
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 pub struct LightLevel(u16);
