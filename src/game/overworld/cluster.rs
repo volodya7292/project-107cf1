@@ -577,6 +577,7 @@ impl Cluster {
     }
 
     /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.
+    #[inline]
     fn get_vertex_neighbours(
         &self,
         block_pos: &I32Vec3,
@@ -679,28 +680,18 @@ impl Cluster {
                         for v in model.get_quads_by_facing(facing).chunks_exact(4) {
                             let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
 
-                            let neighbours0 = self.get_vertex_neighbours(&pos, &v[0].position, facing);
-                            let neighbours1 = self.get_vertex_neighbours(&pos, &v[1].position, facing);
-                            let neighbours2 = self.get_vertex_neighbours(&pos, &v[2].position, facing);
-                            let neighbours3 = self.get_vertex_neighbours(&pos, &v[3].position, facing);
+                            for v in &mut v {
+                                let neighbours = self.get_vertex_neighbours(&pos, &v.position, facing);
 
-                            v[0].position += posf;
-                            v[1].position += posf;
-                            v[2].position += posf;
-                            v[3].position += posf;
+                                v.position += posf;
 
-                            // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
-                            // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
-                            // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
-                            // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
-                            v[0].ao = neighbours0.calculate_ao();
-                            v[1].ao = neighbours1.calculate_ao();
-                            v[2].ao = neighbours2.calculate_ao();
-                            v[3].ao = neighbours3.calculate_ao();
-                            v[0].lighting = neighbours0.calculate_lighting(intrinsic);
-                            v[1].lighting = neighbours1.calculate_lighting(intrinsic);
-                            v[2].lighting = neighbours2.calculate_lighting(intrinsic);
-                            v[3].lighting = neighbours3.calculate_lighting(intrinsic);
+                                // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
+                                // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
+                                // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
+                                // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
+                                v.ao = neighbours.calculate_ao();
+                                v.lighting = neighbours.calculate_lighting(intrinsic);
+                            }
 
                             if v[1].ao != v[2].ao {
                                 let vc = v;

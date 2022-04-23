@@ -237,9 +237,8 @@ impl OverworldStreamer {
 
     /// Generates new clusters and their content.
     pub fn update(&mut self) {
-        // let layout: HashSet<I64Vec3> = [I64Vec3::new(0, 0, 0), I64Vec3::new(64, 0, 0)]
-        //     .into_iter()
-        //     .collect();
+        // Note: the work this method schedules on other threads
+        // supposed to run for 20 ms in total.
         let layout = calc_cluster_layout(self.stream_pos, self.xz_render_distance, self.y_render_distance);
         let rclusters = &mut self.rclusters;
         let mut oclusters = self.overworld_clusters.upgradable_read();
@@ -256,8 +255,12 @@ impl OverworldStreamer {
             .collect();
         sorted_layout.sort_unstable_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
 
-        let max_loading_clusters_in_progress = (intensive_queue().current_num_threads() as u32 / 2).max(1);
-        let max_updating_clusters_in_progress = max_loading_clusters_in_progress;
+        let num_threads = intensive_queue().current_num_threads() as u32;
+
+        // Cluster load time ~ 2ms. Each update load clusters for ~ 10ms. 10 / 2 ~= 5 clusters per thread.
+        let max_loading_clusters_in_progress = num_threads * 5;
+        // Cluster mesh update time ~ 2ms. Each update load updates meshes for another 10ms. 10 / 2 ~= 5 clusters per thread.
+        let max_updating_clusters_in_progress = num_threads * 5;
 
         // Add new clusters according to layout & Remove unnecessary clusters
         {
@@ -372,6 +375,7 @@ impl OverworldStreamer {
                     }
 
                     let mut cluster = Cluster::new(main_registry.registry(), device);
+
                     generator::generate_cluster(&mut cluster, &main_registry, pos);
 
                     *ocluster.cluster.write() = Some(cluster);
@@ -417,8 +421,8 @@ impl OverworldStreamer {
                     }
                     let changed_dir: I64Vec3 = glm::convert(cluster::neighbour_index_to_dir(i));
 
-                    let p0 = *pos;
-                    let p1 = pos + changed_dir * (cluster::SIZE as i64);
+                    let p0 = pos / (cluster::SIZE as i64);
+                    let p1 = pos / (cluster::SIZE as i64) + changed_dir;
 
                     let min = p0.inf(&p1);
                     let max = p0.sup(&p1);
@@ -426,7 +430,7 @@ impl OverworldStreamer {
                     for x in min.x..=max.x {
                         for y in min.y..=max.y {
                             for z in min.z..=max.z {
-                                let p = glm::vec3(x, y, z);
+                                let p = glm::vec3(x, y, z) * (cluster::SIZE as i64);
                                 if p == *pos {
                                     continue;
                                 }
