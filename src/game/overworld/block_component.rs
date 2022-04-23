@@ -1,4 +1,4 @@
-use nalgebra_glm::{I32Vec3};
+use nalgebra_glm::I32Vec3;
 use std::mem;
 
 #[repr(u8)]
@@ -21,6 +21,14 @@ impl Facing {
         I32Vec3::new(0, 0, -1),
         I32Vec3::new(0, 0, 1),
     ];
+    const MIRRORED: [Facing; 6] = [
+        Facing::PositiveX,
+        Facing::NegativeX,
+        Facing::PositiveY,
+        Facing::NegativeY,
+        Facing::PositiveZ,
+        Facing::NegativeZ,
+    ];
 
     pub const fn direction(&self) -> I32Vec3 {
         Self::DIRECTIONS[*self as usize]
@@ -32,9 +40,7 @@ impl Facing {
     }
 
     pub fn from_direction(dir: I32Vec3) -> Option<Facing> {
-        if dir.abs().sum() != 1 {
-            None
-        } else {
+        if dir.abs().sum() == 1 {
             Some(Self::from_u8(
                 (dir.x == 1) as u8
                     + dir.y.abs() as u8 * 2
@@ -42,11 +48,12 @@ impl Facing {
                     + dir.z.abs() as u8 * 4
                     + (dir.z == 1) as u8,
             ))
+        } else {
+            None
         }
     }
 
     pub fn mirror(&self) -> Facing {
-        let id = *self as u8;
-        Facing::from_u8((id & !1) + (id + 1) % 2)
+        Self::MIRRORED[*self as usize]
     }
 }

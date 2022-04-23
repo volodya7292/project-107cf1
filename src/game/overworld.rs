@@ -279,7 +279,7 @@ pub struct ClustersAccessCache {
 
 impl ClustersAccessCache {
     /// Returns cluster for the specified global block position
-    pub fn get_cluster_for_pos_mut(&mut self, global_pos: &I64Vec3) -> Option<&mut Cluster> {
+    pub fn get_cluster_for_block_mut(&mut self, global_pos: &I64Vec3) -> Option<&mut Cluster> {
         let cluster_pos = global_pos.map(|v| v.div_euclid(cluster::SIZE as i64) * (cluster::SIZE as i64));
 
         match self.clusters_cache.entry(cluster_pos) {
@@ -360,7 +360,7 @@ impl ClustersAccessCache {
 
     /// Returns block builder or `None` if respective cluster is not loaded
     pub fn set_block(&mut self, pos: &I64Vec3, block: Block) -> Option<BlockDataBuilder> {
-        let cluster = self.get_cluster_for_pos_mut(pos)?;
+        let cluster = self.get_cluster_for_block_mut(pos)?;
         let block_pos = cluster_block_pos_from_global(pos);
 
         Some(cluster.set(&block_pos, block))
@@ -368,14 +368,14 @@ impl ClustersAccessCache {
 
     /// Returns block builder or `None` if respective cluster is not loaded
     fn get_light_level(&mut self, pos: &I64Vec3) -> Option<LightLevel> {
-        let cluster = self.get_cluster_for_pos_mut(pos)?;
+        let cluster = self.get_cluster_for_block_mut(pos)?;
         let block_pos = cluster_block_pos_from_global(pos);
         Some(cluster.get_light_level(&block_pos))
     }
 
     /// Returns block builder or `None` if respective cluster is not loaded
     fn set_light_level(&mut self, pos: &I64Vec3, light_level: LightLevel) {
-        if let Some(cluster) = self.get_cluster_for_pos_mut(pos) {
+        if let Some(cluster) = self.get_cluster_for_block_mut(pos) {
             let block_pos = cluster_block_pos_from_global(pos);
             cluster.set_light_level(&block_pos, light_level);
         }
@@ -477,18 +477,11 @@ impl ClustersAccessCache {
 
     /// Use breadth-first search to set lighting across all lit area
     pub fn set_light(&mut self, global_pos: &I64Vec3, light_level: LightLevel) {
-        if let Some(cluster) = self.get_cluster_for_pos_mut(&global_pos) {
+        if let Some(cluster) = self.get_cluster_for_block_mut(&global_pos) {
             let block_pos = cluster_block_pos_from_global(&global_pos);
             cluster.set_light_level(&block_pos, light_level);
             cluster.propagate_lighting(&block_pos);
         }
-
-        // self.set_light_level(global_pos, light_level);
-        //
-        // let mut queue = VecDeque::with_capacity((light_level.components().max() as usize * 2).pow(2));
-        // queue.push_back(*global_pos);
-        //
-        // self.propagate_light_addition(&mut queue);
     }
 
     pub fn remove_light(&mut self, global_pos: &I64Vec3) {
@@ -524,13 +517,29 @@ impl ClustersAccessCache {
         }
 
         for pos in addition_queue {
-            let cluster = self.get_cluster_for_pos_mut(&pos).unwrap();
+            let cluster = self.get_cluster_for_block_mut(&pos).unwrap();
             let block_pos = cluster_block_pos_from_global(&pos);
 
             cluster.propagate_lighting(&block_pos);
         }
+    }
 
-        // self.propagate_light_addition(&mut addition_queue);
+    /// Useful for restoring lighting from neighbours when removing block at `block_pos`.
+    pub fn check_neighbour_lighting(&mut self, block_pos: &I64Vec3) {
+        for i in 0..6 {
+            let dir: I64Vec3 = glm::convert(Facing::from_u8(i).direction());
+            let rel_pos = block_pos + dir;
+            let cluster = self.get_cluster_for_block_mut(block_pos);
+
+            if let Some(cluster) = cluster {
+                let block_pos = cluster_block_pos_from_global(&rel_pos);
+                let level = cluster.get_light_level(&block_pos);
+
+                if !level.is_zero() {
+                    cluster.propagate_lighting(&block_pos);
+                }
+            }
+        }
     }
 }
 

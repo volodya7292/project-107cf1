@@ -576,109 +576,45 @@ impl Cluster {
         self.propagate_pending_lighting();
     }
 
-    // TODO: Optimize this
     /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.
     fn get_vertex_neighbours(
+        &self,
         block_pos: &I32Vec3,
         vertex_pos: &Vec3,
         facing: Facing,
-        intrinsic_data: &[IntrinsicBlockData],
     ) -> NeighbourVertexIntrinsics {
-        let dir = facing.direction();
+        let facing_dir = facing.direction();
+        let facing_comp = facing_dir.iter().cloned().position(|v| v != 0).unwrap_or(0);
 
-        let mut k: I32Vec2 = Default::default();
-        let mut c = 0;
-        let corner: I32Vec3 = glm::convert_unchecked(vertex_pos.zip_zip_map(&dir, &block_pos, |v, d, b| {
-            if d != 0 {
-                if v.fract() > 0.0001 {
-                    v.floor()
-                } else {
-                    if d < 0 {
-                        v - 1.0
-                    } else {
-                        v
-                    }
-                }
-            } else {
-                k[c] = (v - b as f32 - 0.5).signum() as i32;
-                c += 1;
-                b as f32 + (v - b as f32 - 0.5).signum()
-            }
-        }));
+        let mut vertex_pos = *vertex_pos;
+        vertex_pos[facing_comp] = 0.0;
 
-        c = 0;
-        let side1 = corner.zip_map(&dir, |v, d| {
-            if d != 0 {
-                v
-            } else {
-                c += 1;
+        let mut center = Vec3::from_element(0.5);
+        center[facing_comp] = 0.0;
 
-                if c == 1 {
-                    if k[0] < 0 && k[1] < 0 {
-                        v
-                    } else if k[0] < 0 && k[1] > 0 {
-                        v + 1
-                    } else if k[0] > 0 && k[1] > 0 {
-                        v
-                    } else {
-                        v - 1
-                    }
-                } else {
-                    if k[0] < 0 && k[1] < 0 {
-                        v + 1
-                    } else if k[0] < 0 && k[1] > 0 {
-                        v
-                    } else if k[0] > 0 && k[1] > 0 {
-                        v - 1
-                    } else {
-                        v
-                    }
-                }
-            }
-        });
+        let side_dir: I32Vec3 = glm::convert_unchecked(glm::sign(&(vertex_pos - center)));
 
-        c = 0;
-        let side2 = corner.zip_map(&dir, |v, d| {
-            if d != 0 {
-                v
-            } else {
-                c += 1;
+        let side1_comp = (facing_comp + 1) % 3;
+        let side2_comp = (facing_comp + 2) % 3;
 
-                if c == 1 {
-                    if k[0] < 0 && k[1] < 0 {
-                        v + 1
-                    } else if k[0] < 0 && k[1] > 0 {
-                        v
-                    } else if k[0] > 0 && k[1] > 0 {
-                        v - 1
-                    } else {
-                        v
-                    }
-                } else {
-                    if k[0] < 0 && k[1] < 0 {
-                        v
-                    } else if k[0] < 0 && k[1] > 0 {
-                        v - 1
-                    } else if k[0] > 0 && k[1] > 0 {
-                        v
-                    } else {
-                        v + 1
-                    }
-                }
-            }
-        });
+        let mut side1_dir = I32Vec3::default();
+        side1_dir[side1_comp] = side_dir[side1_comp];
 
-        let corner = corner.add_scalar(1);
-        let side1 = side1.add_scalar(1);
-        let side2 = side2.add_scalar(1);
+        let mut side2_dir = I32Vec3::default();
+        side2_dir[side2_comp] = side_dir[side2_comp];
 
-        let corner_index = aligned_block_index(&glm::convert_unchecked(corner));
-        let side1_index = aligned_block_index(&glm::convert_unchecked(side1));
-        let side2_index = aligned_block_index(&glm::convert_unchecked(side2));
+        let new_pos = block_pos.add_scalar(1) + facing_dir;
+        let corner_pos = new_pos + side_dir;
+        let side1_pos = new_pos + side1_dir;
+        let side2_pos = new_pos + side2_dir;
 
-        let corner = intrinsic_data[corner_index];
-        let side1 = intrinsic_data[side1_index];
-        let side2 = intrinsic_data[side2_index];
+        let corner_index = aligned_block_index(&glm::convert_unchecked(corner_pos));
+        let side1_index = aligned_block_index(&glm::convert_unchecked(side1_pos));
+        let side2_index = aligned_block_index(&glm::convert_unchecked(side2_pos));
+
+        let corner = self.intrinsic_data[corner_index];
+        let side1 = self.intrinsic_data[side1_index];
+        let side2 = self.intrinsic_data[side2_index];
 
         NeighbourVertexIntrinsics {
             corner,
@@ -687,6 +623,7 @@ impl Cluster {
     }
 
     pub fn update_mesh(&self) {
+        #[inline]
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
                 v.position += pos;
@@ -715,15 +652,25 @@ impl Cluster {
                         .get_textured_block_model(block.textured_model())
                         .unwrap();
 
-                    add_vertices(&mut vertices, posf, model.get_inner_quads());
+                    if !model.get_inner_quads().is_empty() {
+                        // For inner quads use the light level of the current block
+                        let aligned_pos = pos.add_scalar(1);
+                        let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
+                        let light_level = intrinsics[index].light_level;
+
+                        for mut v in model.get_inner_quads().iter().cloned() {
+                            v.lighting = light_level.bits();
+                            vertices.push(v.pack());
+                        }
+                    }
 
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
                         let rel = (pos + facing.direction()).add_scalar(1);
                         let rel_index = aligned_block_index(&glm::convert_unchecked(rel));
 
-                        let curr_intrinsics = intrinsics[rel_index];
-                        let occludes = curr_intrinsics.occluder.occludes_side(facing.mirror());
+                        let intrinsic = intrinsics[rel_index];
+                        let occludes = intrinsic.occluder.occludes_side(facing.mirror());
 
                         if occludes {
                             continue;
@@ -732,19 +679,15 @@ impl Cluster {
                         for v in model.get_quads_by_facing(facing).chunks_exact(4) {
                             let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
 
+                            let neighbours0 = self.get_vertex_neighbours(&pos, &v[0].position, facing);
+                            let neighbours1 = self.get_vertex_neighbours(&pos, &v[1].position, facing);
+                            let neighbours2 = self.get_vertex_neighbours(&pos, &v[2].position, facing);
+                            let neighbours3 = self.get_vertex_neighbours(&pos, &v[3].position, facing);
+
                             v[0].position += posf;
                             v[1].position += posf;
                             v[2].position += posf;
                             v[3].position += posf;
-
-                            let neighbours0 =
-                                Self::get_vertex_neighbours(&pos, &v[0].position, facing, intrinsics);
-                            let neighbours1 =
-                                Self::get_vertex_neighbours(&pos, &v[1].position, facing, intrinsics);
-                            let neighbours2 =
-                                Self::get_vertex_neighbours(&pos, &v[2].position, facing, intrinsics);
-                            let neighbours3 =
-                                Self::get_vertex_neighbours(&pos, &v[3].position, facing, intrinsics);
 
                             // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
                             // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
@@ -754,15 +697,13 @@ impl Cluster {
                             v[1].ao = neighbours1.calculate_ao();
                             v[2].ao = neighbours2.calculate_ao();
                             v[3].ao = neighbours3.calculate_ao();
-                            v[0].lighting = neighbours0.calculate_lighting(curr_intrinsics);
-                            v[1].lighting = neighbours1.calculate_lighting(curr_intrinsics);
-                            v[2].lighting = neighbours2.calculate_lighting(curr_intrinsics);
-                            v[3].lighting = neighbours3.calculate_lighting(curr_intrinsics);
+                            v[0].lighting = neighbours0.calculate_lighting(intrinsic);
+                            v[1].lighting = neighbours1.calculate_lighting(intrinsic);
+                            v[2].lighting = neighbours2.calculate_lighting(intrinsic);
+                            v[3].lighting = neighbours3.calculate_lighting(intrinsic);
 
                             if v[1].ao != v[2].ao {
-                                // if (1 - ao[0]) + (1 - ao[3]) > (1 - ao[1]) + (1 - ao[2]) {
                                 let vc = v;
-
                                 v[1] = vc[0];
                                 v[3] = vc[1];
                                 v[0] = vc[2];

@@ -291,6 +291,7 @@ impl Application for Game {
                         if prev_block == self.registry.block_glow() {
                             access.remove_light(&inter.0);
                         } else {
+                            access.check_neighbour_lighting(&inter.0);
                             // TODO: set corresponding light level if there is a light nearby
                         }
 
