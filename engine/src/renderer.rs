@@ -1212,7 +1212,7 @@ impl Renderer {
 
         // Sort by distance to perform updates of the nearest vertex meshes first
         let mut sorted_buffer_updates_entities: Vec<_> = {
-            let transforms = self.scene.storage_read::<component::internal::GlobalTransform>();
+            let transforms = self.scene.storage_read::<GlobalTransform>();
             self.vertex_mesh_updates
                 .keys()
                 .map(|v| {

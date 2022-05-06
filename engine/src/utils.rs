@@ -6,7 +6,6 @@ pub mod thread_pool;
 pub mod value_noise;
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
-use nalgebra as na;
 use nalgebra_glm::{DVec3, Vec3};
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
@@ -104,21 +103,13 @@ impl<I: Iterator> AllSameBy<I> for I {
     }
 }
 
-pub fn calc_triangle_area(
-    v0: &na::Vector3<f32>,
-    v1: &na::Vector3<f32>,
-    v2: &na::Vector3<f32>,
-) -> na::Vector3<f32> {
+pub fn calc_triangle_area(v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Vec3 {
     let side0 = v1 - v0;
     let side1 = v2 - v0;
     side0.cross(&side1) / 2.0
 }
 
-pub fn calc_triangle_normal(
-    v0: &na::Vector3<f32>,
-    v1: &na::Vector3<f32>,
-    v2: &na::Vector3<f32>,
-) -> na::Vector3<f32> {
+pub fn calc_triangle_normal(v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Vec3 {
     let side0 = v1 - v0;
     let side1 = v2 - v0;
     side0.cross(&side1).normalize()
@@ -137,7 +128,7 @@ where
     T: VertexImpl + VertexPositionImpl + VertexNormalImpl,
 {
     let mut vertex_triangle_counts = vec![0_u32; vertices.len()];
-    let mut triangle_normals = Vec::<na::Vector3<f32>>::with_capacity(indices.len() / 3);
+    let mut triangle_normals = Vec::<Vec3>::with_capacity(indices.len() / 3);
 
     for i in (0..indices.len()).step_by(3) {
         let ind = &indices[i..(i + 3)];
@@ -151,7 +142,7 @@ where
     }
 
     for v in vertices.iter_mut() {
-        v.set_normal(na::Vector3::from_element(0.0));
+        v.set_normal(Vec3::from_element(0.0));
     }
 
     for (i, normal) in triangle_normals.iter().enumerate() {

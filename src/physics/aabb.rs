@@ -127,7 +127,7 @@ impl AABB {
             let mut facing_dir = I32Vec3::default();
             facing_dir[facing_comp] = inter_relative[facing_comp].signum() as i32;
 
-            let facing = Facing::from_direction(facing_dir).unwrap();
+            let facing = Facing::from_direction(&facing_dir).unwrap();
 
             Some(AABBRayIntersection { facing, point: inter })
         } else {

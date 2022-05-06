@@ -1,6 +1,6 @@
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
-use crate::game::overworld::block_model::{PackedVertex, Vertex};
+use crate::game::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::registry::Registry;
@@ -11,7 +11,7 @@ use entity_data::{EntityBuilder, EntityId, EntityStorage};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
-use nalgebra_glm::{I32Vec2, TVec3};
+use nalgebra_glm::{TVec3, U8Vec3, Vec2, Vec4};
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::VecDeque;
 use std::convert::TryInto;
@@ -34,6 +34,11 @@ pub fn size(level: u32) -> u64 {
 
 fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     let p = pos.map(|v| (v > 0) as usize + (v == SIZE - 1) as usize);
+    p.x * 9 + p.y * 3 + p.z
+}
+
+fn neighbour_index_from_aligned_pos(pos: &TVec3<usize>) -> usize {
+    let p = pos.map(|v| (v > 1) as usize + (v == SIZE) as usize);
     p.x * 9 + p.y * 3 + p.z
 }
 
@@ -462,32 +467,30 @@ impl Cluster {
 
     pub fn propagate_outer_lighting(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
         let size = SIZE as i32;
-        let b = side_offset.map(|v| v == -size || v == size);
 
-        if glm::all(&b) {
-            // Corner
-            let m = side_offset.map(|v| (v > 0) as u32);
-            let n = side_offset.map(|v| (v < 0) as u32);
+        if side_offset.abs().sum() != size {
+            // Not a side but corner or edge offset
+            return;
+        }
 
-            let dst_p = m * (ALIGNED_SIZE - 1) as u32;
-            let src_p = (n * (SIZE as u32 - 1)).add_scalar(1);
-            let dst_index = aligned_block_index(&glm::convert(dst_p));
-            let src_index = aligned_block_index(&glm::convert(src_p));
+        fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
+            let dx = (d.x != 0) as usize;
+            let dy = (d.y != 0) as usize;
+            let dz = (d.z != 0) as usize;
+            let x = k * dy + k * dz + v * (d.x > 0) as usize;
+            let y = k * dx + l * dz + v * (d.y > 0) as usize;
+            let z = l * dx + l * dy + v * (d.z > 0) as usize;
+            TVec3::new(x, y, z)
+        }
 
-            self.intrinsic_data[dst_index].light_level = side_cluster.intrinsic_data[src_index].light_level;
-            self.light_addition_cache.push_back(glm::convert(dst_p));
-        } else if b.x && b.y || b.x && b.z || b.y && b.z {
-            // Edge
-            fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
-                m.map(|v| k * (v == 0) as usize + s * (v > 0) as usize)
-            }
+        // Direction towards side cluster
+        let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
+        let dir_inv = -dir;
 
-            let m = side_offset.map(|v| -1 * (v < 0) as i32 + 1 * (v >= SIZE as i32) as i32);
-            let n = -m;
-
-            for k in 0..SIZE {
-                let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
-                let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
+        for k in 0..SIZE {
+            for l in 0..SIZE {
+                let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
+                let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
                 let dst_index = aligned_block_index(&dst_p);
                 let src_index = aligned_block_index(&src_p);
 
@@ -495,42 +498,14 @@ impl Cluster {
                     side_cluster.intrinsic_data[src_index].light_level;
                 self.light_addition_cache.push_back(dst_p);
             }
-        } else {
-            // Side
-            fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
-                let dx = (d.x != 0) as usize;
-                let dy = (d.y != 0) as usize;
-                let dz = (d.z != 0) as usize;
-                let x = k * dy + k * dz + v * (d.x > 0) as usize;
-                let y = k * dx + l * dz + v * (d.y > 0) as usize;
-                let z = l * dx + l * dy + v * (d.z > 0) as usize;
-                TVec3::new(x, y, z)
-            }
-
-            // Direction towards side cluster
-            let dir = side_offset.map(|v| (v == (SIZE as i32)) as i32 - (v == -(SIZE as i32)) as i32);
-            let dir_inv = -dir;
-
-            for k in 0..SIZE {
-                for l in 0..SIZE {
-                    let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
-                    let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
-                    let dst_index = aligned_block_index(&dst_p);
-                    let src_index = aligned_block_index(&src_p);
-
-                    self.intrinsic_data[dst_index].light_level =
-                        side_cluster.intrinsic_data[src_index].light_level;
-                    self.light_addition_cache.push_back(dst_p);
-                }
-            }
         }
 
-        self.propagate_pending_lighting()
+        self.propagate_pending_lighting();
     }
 
     /// Propagates lighting from boundaries into the cluster
     fn propagate_pending_lighting(&mut self) {
-        const MAX_BOUNDARY: i32 = (SIZE + 1) as i32;
+        const MAX_BOUNDARY: i32 = (ALIGNED_SIZE - 1) as i32;
 
         while let Some(curr_pos) = self.light_addition_cache.pop_front() {
             let curr_index = aligned_block_index(&curr_pos);
@@ -563,6 +538,7 @@ impl Cluster {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
                     *level = LightLevel::from_vec(new_color);
 
+                    self.side_changed[neighbour_index_from_aligned_pos(&rel_pos)] = true;
                     self.light_addition_cache.push_back(glm::convert(rel_pos));
                 }
             }
@@ -623,6 +599,160 @@ impl Cluster {
         }
     }
 
+    #[inline]
+    fn calc_quad_lighting(&self, block_pos: &I32Vec3, quad: &mut [Vertex; 4], facing: Facing) {
+        const RELATIVE_SIDES: [[I32Vec3; 4]; 6] = [
+            [
+                Facing::NegativeY.direction(),
+                Facing::NegativeZ.direction(),
+                Facing::PositiveY.direction(),
+                Facing::PositiveZ.direction(),
+            ],
+            [
+                Facing::NegativeY.direction(),
+                Facing::NegativeZ.direction(),
+                Facing::PositiveY.direction(),
+                Facing::PositiveZ.direction(),
+            ],
+            [
+                Facing::NegativeX.direction(),
+                Facing::NegativeZ.direction(),
+                Facing::PositiveX.direction(),
+                Facing::PositiveZ.direction(),
+            ],
+            [
+                Facing::NegativeX.direction(),
+                Facing::NegativeZ.direction(),
+                Facing::PositiveX.direction(),
+                Facing::PositiveZ.direction(),
+            ],
+            [
+                Facing::NegativeX.direction(),
+                Facing::NegativeY.direction(),
+                Facing::PositiveX.direction(),
+                Facing::PositiveY.direction(),
+            ],
+            [
+                Facing::NegativeX.direction(),
+                Facing::NegativeY.direction(),
+                Facing::PositiveX.direction(),
+                Facing::PositiveY.direction(),
+            ],
+        ];
+
+        #[inline]
+        fn calc_weights(weight_indices: &[usize; 8], v_comps: &[f32; 12]) -> Vec4 {
+            Vec4::new(
+                v_comps[weight_indices[0]] * v_comps[weight_indices[1]],
+                v_comps[weight_indices[2]] * v_comps[weight_indices[3]],
+                v_comps[weight_indices[4]] * v_comps[weight_indices[5]],
+                v_comps[weight_indices[6]] * v_comps[weight_indices[7]],
+            )
+        }
+
+        fn blend_lighting(base: LightLevel, mut neighbours: [LightLevel; 3]) -> Vec3 {
+            for n in &mut neighbours {
+                if n.is_zero() {
+                    *n = base;
+                }
+            }
+
+            glm::convert::<_, Vec3>(
+                base.components()
+                    + neighbours[0].components()
+                    + neighbours[1].components()
+                    + neighbours[2].components(),
+            ) / (LightLevel::MAX_COMPONENT_VALUE as f32)
+                * 0.25
+        }
+
+        let sides = &RELATIVE_SIDES[facing as usize];
+
+        // FIXME: if block shape is not of full block, rel_pos = block_pos.
+        let dir = facing.direction();
+        let rel_pos = block_pos.add_scalar(1) + dir;
+
+        let base = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos))];
+        let side0 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0]))];
+        let side1 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1]))];
+        let side2 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2]))];
+        let side3 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3]))];
+
+        let corner01 =
+            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0] + sides[1]))];
+        let corner12 =
+            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1] + sides[2]))];
+        let corner23 =
+            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2] + sides[3]))];
+        let corner30 =
+            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3] + sides[0]))];
+
+        // if min >= Vec3::from_element(1e-5) || max <= Vec3::from_element(1.0 - 1e-5) {
+        // Do bilinear interpolation because the quad is not covering full block face.
+
+        let lights = [
+            blend_lighting(
+                base.light_level,
+                [side0.light_level, side1.light_level, corner01.light_level],
+            ),
+            blend_lighting(
+                base.light_level,
+                [side1.light_level, side2.light_level, corner12.light_level],
+            ),
+            blend_lighting(
+                base.light_level,
+                [side3.light_level, side0.light_level, corner30.light_level],
+            ),
+            blend_lighting(
+                base.light_level,
+                [side2.light_level, side3.light_level, corner23.light_level],
+            ),
+        ];
+
+        let facing_comp = dir.iamax();
+        let vi = (facing_comp + 1) % 3;
+        let vj = (facing_comp + 2) % 3;
+
+        for v in quad {
+            let ij = Vec2::new(v.position[vi], v.position[vj]);
+            let inv_v = Vec2::from_element(1.0) - ij;
+            let weights = [inv_v.x * inv_v.y, ij.x * inv_v.y, inv_v.x * ij.y, ij.x * ij.y];
+
+            let lighting = lights[0] * weights[0]
+                + lights[1] * weights[1]
+                + lights[2] * weights[2]
+                + lights[3] * weights[3];
+
+            v.lighting = LightLevel::from_color(lighting).bits();
+        }
+
+        // quad[vert_ids[0]].lighting = blend_lighting(
+        //     base.light_level,
+        //     [side0.light_level, side1.light_level, corner01.light_level],
+        // )
+        //     .bits();
+        // quad[vert_ids[1]].lighting = blend_lighting(
+        //     base.light_level,
+        //     [side1.light_level, side2.light_level, corner12.light_level],
+        // )
+        //     .bits();
+        // quad[vert_ids[2]].lighting = blend_lighting(
+        //     base.light_level,
+        //     [side2.light_level, side3.light_level, corner23.light_level],
+        // )
+        //     .bits();
+        // quad[vert_ids[3]].lighting = blend_lighting(
+        //     base.light_level,
+        //     [side3.light_level, side0.light_level, corner30.light_level],
+        // )
+        //     .bits();
+
+        // } else {
+        // The quad covers full block face.
+        // let lighting = neighbour_index_to_dir();
+        // }
+    }
+
     pub fn update_mesh(&self) {
         #[inline]
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
@@ -654,14 +784,25 @@ impl Cluster {
                         .unwrap();
 
                     if !model.get_inner_quads().is_empty() {
-                        // For inner quads use the light level of the current block
-                        let aligned_pos = pos.add_scalar(1);
-                        let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
-                        let light_level = intrinsics[index].light_level;
+                        // TODO: REMOVE: For inner quads use the light level of the current block
+                        // let aligned_pos = pos.add_scalar(1);
+                        // let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
+                        // let light_level = intrinsics[index].light_level;
 
-                        for mut v in model.get_inner_quads().iter().cloned() {
-                            v.lighting = light_level.bits();
-                            vertices.push(v.pack());
+                        for mut quad in model.get_inner_quads().chunks_exact(4) {
+                            let mut quad: [Vertex; 4] = quad.try_into().unwrap();
+                            let normal = engine::utils::calc_triangle_normal(
+                                &quad[0].position,
+                                &quad[1].position,
+                                &quad[2].position,
+                            );
+
+                            self.calc_quad_lighting(&pos, &mut quad, Facing::from_normal_closest(&normal));
+
+                            for mut v in quad {
+                                v.normal = normal;
+                                vertices.push(v.pack());
+                            }
                         }
                     }
 
@@ -677,31 +818,34 @@ impl Cluster {
                             continue;
                         }
 
-                        for v in model.get_quads_by_facing(facing).chunks_exact(4) {
-                            let mut v: [Vertex; 4] = v[0..4].try_into().unwrap();
+                        for quad in model.get_quads_by_facing(facing).chunks_exact(4) {
+                            let mut quad: [Vertex; 4] = quad.try_into().unwrap();
 
-                            for v in &mut v {
+                            let normal = engine::utils::calc_triangle_normal(
+                                &quad[0].position,
+                                &quad[1].position,
+                                &quad[2].position,
+                            );
+
+                            self.calc_quad_lighting(&pos, &mut quad, facing);
+
+                            for v in &mut quad {
                                 let neighbours = self.get_vertex_neighbours(&pos, &v.position, facing);
-
                                 v.position += posf;
-
-                                // v[0].normal = glm::vec3(1.0, 1.0, 0.0);
-                                // v[1].normal = glm::vec3(0.0, 1.0, 1.0);
-                                // v[2].normal = glm::vec3(1.0, 0.0, 1.0);
-                                // v[3].normal = glm::vec3(1.0, 0.0, 0.0);
+                                v.normal = normal;
                                 v.ao = neighbours.calculate_ao();
-                                v.lighting = neighbours.calculate_lighting(intrinsic);
+                                // v.lighting = neighbours.calculate_lighting(intrinsic);
                             }
 
-                            if v[1].ao != v[2].ao {
-                                let vc = v;
-                                v[1] = vc[0];
-                                v[3] = vc[1];
-                                v[0] = vc[2];
-                                v[2] = vc[3];
+                            if quad[1].ao != quad[2].ao || quad[1].lighting != quad[2].lighting {
+                                let vc = quad;
+                                quad[1] = vc[0];
+                                quad[3] = vc[1];
+                                quad[0] = vc[2];
+                                quad[2] = vc[3];
                             }
 
-                            vertices.extend(v.map(|v| v.pack()));
+                            vertices.extend(quad.map(|v| v.pack()));
                         }
                     }
                 }

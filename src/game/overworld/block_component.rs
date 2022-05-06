@@ -1,4 +1,4 @@
-use nalgebra_glm::I32Vec3;
+use nalgebra_glm::{I32Vec3, Vec3};
 use std::mem;
 
 #[repr(u8)]
@@ -39,7 +39,7 @@ impl Facing {
         unsafe { mem::transmute(v) }
     }
 
-    pub fn from_direction(dir: I32Vec3) -> Option<Facing> {
+    pub fn from_direction(dir: &I32Vec3) -> Option<Facing> {
         if dir.abs().sum() == 1 {
             Some(Self::from_u8(
                 (dir.x == 1) as u8
@@ -51,6 +51,14 @@ impl Facing {
         } else {
             None
         }
+    }
+
+    pub fn from_normal_closest(dir: &Vec3) -> Facing {
+        let largest_i = dir.iamax();
+        let mut dir = I32Vec3::default();
+        dir[largest_i] = dir[largest_i].signum();
+
+        Self::from_direction(&dir).unwrap()
     }
 
     pub fn mirror(&self) -> Facing {

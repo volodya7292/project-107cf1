@@ -8,6 +8,7 @@ use engine::vertex_impl;
 use glm::BVec3;
 use nalgebra_glm as glm;
 use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
+use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -236,4 +237,43 @@ impl BlockModel {
     pub fn side_quads_range(&self) -> [Range<usize>; 6] {
         self.side_quads_range.clone()
     }
+    //
+    // pub fn occludes_side_of_other(&self, other: &Self, facing: Facing) -> bool {
+    //     let self_range = &self.side_quads_range[facing as usize];
+    //     let other_range = &other.side_quads_range[facing.mirror() as usize];
+    //     let mut occluded_other_quads: SmallVec<[bool; 32]> = smallvec![false; other_range.len()];
+    //
+    //     for (self_quad_i, self_quad) in self.quads[self_range.clone()].iter().enumerate() {
+    //         let (mut self_min, mut self_max) = self_quad.vertices
+    //             .iter()
+    //             .fold((self_quad.vertices[0], self_quad.vertices[0]), |(min, max), v| {
+    //                 (min.inf(&v), max.sup(&v))
+    //             });
+    //
+    //         for (other_quad_i, other_quad) in other.quads[other_range.clone()].iter().enumerate()
+    //         {
+    //             if occluded_other_quads[other_quad_i] {
+    //                 continue;
+    //             }
+    //
+    //             let (other_min, other_max) = other_quad.vertices.iter().fold(
+    //                 (other_quad.vertices[0], other_quad.vertices[0]),
+    //                 |(min, max), v| (min.inf(&v), max.sup(&v)),
+    //             );
+    //
+    //             // occluded_other_quads[other_quad_i] = (other_min - self_min).add_scalar(1e-6)
+    //             //     >= Vec3::from_element(0.0)
+    //             //     && (self_max - other_max).add_scalar(1e-6) >= Vec3::from_element(0.0);
+    //         }
+    //
+    //        occluded_other_quads[] (self_min - self_max).abs() <= Vec3::from_element(1e-6)
+    //     }
+    //
+    //     if all_transparent {
+    //         // If all quads are transparent, they can't occlude anything
+    //         return false;
+    //     }
+    //
+    //     occluded_other_quads.iter().all(|v| *v)
+    // }
 }

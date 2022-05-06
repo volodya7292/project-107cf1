@@ -3,7 +3,9 @@ use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::{BlockModel, ContentType, Vertex};
 use crate::game::overworld::occluder::Occluder;
 use crate::physics::aabb::AABB;
-use nalgebra_glm::Vec2;
+use bit_vec::BitVec;
+use nalgebra_glm::{Vec2, Vec3};
+use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
 #[derive(Copy, Clone)]
@@ -82,6 +84,7 @@ pub struct TexturedBlockModel {
     side_quad_vertices: [Range<usize>; 6],
     inner_quad_vertices: Range<usize>,
     occluder: Occluder,
+    quads_transparency: BitVec,
     aabbs: Vec<AABB>,
 }
 
@@ -93,6 +96,7 @@ impl TexturedBlockModel {
             side_quad_vertices: model.side_quads_range(),
             inner_quad_vertices: model.inner_quads_range(),
             occluder: model.occluder(),
+            quads_transparency: quad_materials.iter().map(|m| m.transparent).collect(),
             aabbs: model.aabbs().to_vec(),
         };
 
