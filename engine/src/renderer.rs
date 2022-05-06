@@ -1216,11 +1216,12 @@ impl Renderer {
             self.vertex_mesh_updates
                 .keys()
                 .map(|v| {
-                    let transform = transforms.get(*v).unwrap();
-                    (
-                        *v,
-                        (transform.position - self.relative_camera_pos).magnitude_squared(),
-                    )
+                    let distance = if let Some(transform) = transforms.get(*v) {
+                        (transform.position - self.relative_camera_pos).magnitude_squared()
+                    } else {
+                        65535.0
+                    };
+                    (*v, distance)
                 })
                 .collect()
         };
