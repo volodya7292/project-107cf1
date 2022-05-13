@@ -4,8 +4,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 use vk_wrapper as vkw;
-use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{BufferHandle, Format};
 
 #[derive(Debug)]
 pub enum Error {
@@ -120,31 +118,31 @@ macro_rules! vertex_impl {
 }
 
 impl VertexMember for u32 {
-    fn vk_format() -> Format {
+    fn vk_format() -> vkw::Format {
         vkw::Format::R32_UINT
     }
 }
 
 impl VertexMember for f32 {
-    fn vk_format() -> Format {
+    fn vk_format() -> vkw::Format {
         vkw::Format::R32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector2<f32> {
-    fn vk_format() -> Format {
+    fn vk_format() -> vkw::Format {
         vkw::Format::RG32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector3<f32> {
-    fn vk_format() -> Format {
+    fn vk_format() -> vkw::Format {
         vkw::Format::RGB32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector4<u32> {
-    fn vk_format() -> Format {
+    fn vk_format() -> vkw::Format {
         vkw::Format::RGBA32_UINT
     }
 }
@@ -162,16 +160,16 @@ pub trait InstanceImpl: VertexImpl {
 impl<T: VertexImpl> InstanceImpl for T {}
 
 impl VertexImpl for () {
-    fn attributes() -> Vec<(u32, Format)> {
+    fn attributes() -> Vec<(u32, vkw::Format)> {
         vec![]
     }
 
-    fn member_info(_: &str) -> Option<(u32, Format)> {
+    fn member_info(_: &str) -> Option<(u32, vkw::Format)> {
         None
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct Sphere {
     center: na::Vector3<f32>,
     radius: f32,
@@ -189,16 +187,15 @@ impl Sphere {
 
 #[derive(Default)]
 pub struct RawVertexMesh {
-    indexed: bool,
+    pub(crate) indexed: bool,
     pub(crate) staging_buffer: Option<vkw::HostBuffer<u8>>,
-    pub(crate) buffer: Option<vkw::DeviceBuffer>,
     _vertex_size: u32,
     pub(crate) vertex_count: u32,
-    index_count: u32,
+    pub(crate) index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
     sphere: Sphere,
-    bindings: Vec<(BufferHandle, u64)>,
-    indices_offset: u64,
+    pub(crate) binding_offsets: Vec<u64>,
+    pub(crate) indices_offset: u64,
 }
 
 impl RawVertexMesh {
@@ -353,16 +350,6 @@ impl VertexMeshCreate for vkw::Device {
                 .create_host_buffer::<u8>(vkw::BufferUsageFlags::TRANSFER_SRC, buffer_size as u64)
                 .unwrap();
 
-            let mut usage_flags = vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::VERTEX;
-            if indexed {
-                usage_flags |= vkw::BufferUsageFlags::INDEX;
-            }
-
-            // Create device buffer
-            let buffer = self
-                .create_device_buffer(usage_flags, 1, buffer_size as u64)
-                .unwrap();
-
             // Copy vertices
             let attribs = VertexT::attributes();
             let mut bindings = vec![];
@@ -383,8 +370,8 @@ impl VertexMeshCreate for vkw::Device {
                     }
                 }
 
-                // Set binging buffers
-                bindings.push((buffer.handle(), buffer_offset as u64));
+                // Set binging offsets
+                bindings.push(buffer_offset as u64);
             }
 
             // Copy instances
@@ -405,8 +392,8 @@ impl VertexMeshCreate for vkw::Device {
                     }
                 }
 
-                // Set binging buffers
-                bindings.push((buffer.handle(), buffer_offset as u64));
+                // Set binging offsets
+                bindings.push(buffer_offset as u64);
             }
 
             // Copy indices
@@ -456,13 +443,12 @@ impl VertexMeshCreate for vkw::Device {
             RawVertexMesh {
                 indexed,
                 staging_buffer: Some(staging_buffer),
-                buffer: Some(buffer),
                 _vertex_size: mem::size_of::<VertexT>() as u32,
                 vertex_count: vertices.len() as u32,
                 index_count: indices.len() as u32,
                 aabb,
                 sphere: Sphere { center, radius },
-                bindings,
+                binding_offsets: bindings,
                 indices_offset: indices_offset as u64,
             }
         };
@@ -472,22 +458,5 @@ impl VertexMeshCreate for vkw::Device {
             _type_marker2: PhantomData,
             raw: Arc::new(raw),
         })
-    }
-}
-
-pub trait VertexMeshCmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>);
-}
-
-impl VertexMeshCmdList for vkw::CmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
-        if vertex_mesh.indexed && vertex_mesh.index_count > 0 {
-            self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-            self.bind_index_buffer(vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
-            self.draw_indexed(vertex_mesh.index_count, 0, 0);
-        } else if vertex_mesh.vertex_count > 0 {
-            self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-            self.draw(vertex_mesh.vertex_count, 0);
-        }
     }
 }

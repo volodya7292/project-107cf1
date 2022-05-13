@@ -97,7 +97,7 @@ impl RendererComponentEvents<'_> {
 
         for event in events {
             match event {
-                scene_storage::Event::Created(entity) => {
+                Event::Created(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
                     let signature =
                         &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;
@@ -122,7 +122,7 @@ impl RendererComponentEvents<'_> {
                     );
                     self.renderables.insert(entity, renderable);
                 }
-                scene_storage::Event::Modified(entity) => {
+                Event::Modified(entity) => {
                     let renderer_comp = renderer_comps.get_mut_unmarked(entity).unwrap();
                     let signature =
                         &self.material_pipelines[renderer_comp.mat_pipeline as usize].main_signature;

@@ -108,6 +108,16 @@ impl BufferBarrier {
         self.0.dst_queue_family_index = dst_queue.family_index;
         self
     }
+
+    pub fn offset(mut self, offset: u64) -> Self {
+        self.0.offset = offset;
+        self
+    }
+
+    pub fn size(mut self, size: u64) -> Self {
+        self.0.size = size;
+        self
+    }
 }
 
 pub struct HostBuffer<T> {

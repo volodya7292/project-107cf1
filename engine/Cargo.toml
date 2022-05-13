@@ -23,6 +23,7 @@ parking_lot = "0.12"
 indexmap = "1.8"
 raw-window-handle = "0.3"
 winit = "0.26"
+range-alloc = "0.1"
 vk-wrapper = { path = "../vk-wrapper" }
 
 [target.'cfg(target_os = "macos")'.dependencies]

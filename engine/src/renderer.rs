@@ -25,16 +25,17 @@ use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
+use range_alloc::RangeAllocator;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::collections::hash_map;
 use std::fmt::{Display, Formatter};
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, iter, mem, slice};
 use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
-use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
@@ -176,11 +177,15 @@ pub struct Renderer {
     /// global parents are not in order, but all the children are.
     ordered_entities: Vec<Entity>,
     renderables: HashMap<Entity, Renderable>,
-    vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
+    gvb_vertex_meshes: HashMap<usize, GVBVertexMesh>,
+    entity_vertex_meshes: HashMap<Entity, usize>,
     pub(crate) material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
+    global_vertex_buffer: DeviceBuffer,
+    // Allocator for `global_vertex_buffer`
+    gvb_allocator: RangeAllocator<u64>,
 }
 
 #[derive(Copy, Clone)]
@@ -290,7 +295,16 @@ pub(crate) enum BufferUpdate {
 
 pub(crate) struct VMBufferUpdate {
     pub entity: Entity,
-    pub mesh: Arc<RawVertexMesh>,
+    pub mesh_ptr: usize,
+}
+
+pub(crate) struct GVBVertexMesh {
+    /// A reference to RawVertexMesh must be held to prevent using still allocated GVB ranges.
+    pub raw: Arc<RawVertexMesh>,
+    pub ref_count: u32,
+    pub gvb_range: Range<u64>,
+    pub gvb_binding_offsets: SmallVec<[u64; 6]>,
+    pub gvb_indices_offset: u64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -725,6 +739,18 @@ impl Renderer {
             .unwrap(),
         ];
 
+        let gvb_size = 512 * 1024 * 1024;
+        let global_vertex_buffer = device
+            .create_device_buffer(
+                BufferUsageFlags::TRANSFER_DST
+                    | BufferUsageFlags::VERTEX
+                    | BufferUsageFlags::INDEX
+                    | BufferUsageFlags::STORAGE,
+                1,
+                gvb_size,
+            )
+            .unwrap();
+
         // Update pipeline inputs
         unsafe {
             device.update_descriptor_set(
@@ -849,12 +875,14 @@ impl Renderer {
             compose_desc,
             material_pipelines: vec![],
             uniform_buffer_basic,
-            // device_buffers: SlotVec::new(),
-            vertex_meshes: Default::default(),
+            entity_vertex_meshes: Default::default(),
             vertex_mesh_updates: Default::default(),
             vertex_mesh_pending_updates: vec![],
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
+            global_vertex_buffer,
+            gvb_allocator: RangeAllocator::new(0..gvb_size),
+            gvb_vertex_meshes: Default::default(),
         };
         renderer.on_resize(size);
 
@@ -1017,13 +1045,13 @@ impl Renderer {
     }
 
     /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
-    pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-        self.vertex_mesh_updates.contains_key(&entity)
-            || self
-                .vertex_mesh_pending_updates
-                .iter()
-                .any(|v| v.entity == entity)
-    }
+    // pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
+    //     self.vertex_mesh_updates.contains_key(&entity)
+    //         || self
+    //             .vertex_mesh_pending_updates
+    //             .iter()
+    //             .any(|v| v.entity == entity)
+    // }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
     unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
@@ -1150,10 +1178,12 @@ impl Renderer {
         if !self.vertex_mesh_pending_updates.is_empty() {
             let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
             unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
+            self.transfer_submit[1].wait().unwrap();
         }
 
         let t00 = Instant::now();
 
+        let mut to_remove_vertex_meshes = HashMap::with_capacity(1024);
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
             renderer_comps: self.scene.storage::<component::RenderConfig>(),
@@ -1164,9 +1194,11 @@ impl Renderer {
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
-            vertex_meshes: &mut self.vertex_meshes,
+            gvb_vertex_meshes: &mut self.gvb_vertex_meshes,
+            entity_vertex_meshes: &mut self.entity_vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
-            buffer_updates: &mut self.vertex_mesh_updates,
+            vertex_mesh_updates: &mut self.vertex_mesh_updates,
+            to_remove_vertex_meshes: &mut to_remove_vertex_meshes,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             parent_comps: self.scene.storage::<Parent>(),
@@ -1190,9 +1222,9 @@ impl Renderer {
             timings.batch0_hierarchy_propag = (t3 - t2).as_secs_f64();
 
             // Wait for previous transfers before committing them
-            if !self.vertex_mesh_pending_updates.is_empty() {
-                s.spawn(|_| self.transfer_submit[1].wait().unwrap());
-            }
+            // if !self.vertex_mesh_pending_updates.is_empty() {
+            //     s.spawn(|_| self.transfer_submit[1].wait().unwrap());
+            // }
         });
 
         let t11 = Instant::now();
@@ -1210,34 +1242,20 @@ impl Renderer {
         // Before updating new buffers, collect all the completed updates to commit them
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
 
-        // Sort by distance to perform updates of the nearest vertex meshes first
-        let mut sorted_buffer_updates_entities: Vec<_> = {
-            let transforms = self.scene.storage_read::<GlobalTransform>();
-            self.vertex_mesh_updates
-                .keys()
-                .map(|v| {
-                    let distance = if let Some(transform) = transforms.get(*v) {
-                        (transform.position - self.relative_camera_pos).magnitude_squared()
-                    } else {
-                        65535.0
-                    };
-                    (*v, distance)
-                })
-                .collect()
-        };
-        sorted_buffer_updates_entities.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
             transfer_submit: &mut self.transfer_submit,
-            buffer_updates: &mut self.vertex_mesh_updates,
-            sorted_buffer_updates_entities: &sorted_buffer_updates_entities,
+            vertex_mesh_updates: &mut self.vertex_mesh_updates,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
+            global_vertex_buffer: &self.global_vertex_buffer,
+            gvb_vertex_meshes: &mut self.gvb_vertex_meshes,
+            gvb_allocator: &mut self.gvb_allocator,
         };
         let commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
-            vertex_meshes: &mut self.vertex_meshes,
+            entity_vertex_meshes: &mut self.entity_vertex_meshes,
+            to_remove_vertex_meshes: &mut to_remove_vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
         };
 
@@ -1255,7 +1273,17 @@ impl Renderer {
             timings.batch1_updates_commit = (t3 - t2).as_secs_f64();
         });
 
-        // FIXME: VMA: parallel invocations (when creating Cluster meshes) of `vkAllocateMemory` causes huge stutters
+        // Remove unused meshes
+        for (mesh_ptr, remove_refs_n) in to_remove_vertex_meshes {
+            let mesh = self.gvb_vertex_meshes.get_mut(&mesh_ptr).unwrap();
+
+            if mesh.ref_count > remove_refs_n {
+                mesh.ref_count -= remove_refs_n;
+            } else {
+                self.gvb_allocator.free_range(mesh.gvb_range.clone());
+                self.gvb_vertex_meshes.remove(&mesh_ptr);
+            }
+        }
 
         let t11 = Instant::now();
         timings.systems_batch1 = (t11 - t00).as_secs_f64();
@@ -1338,6 +1366,24 @@ impl Renderer {
         timings
     }
 
+    fn bind_and_draw_vertex_mesh(&self, cl: &mut CmdList, vertex_mesh: &GVBVertexMesh) {
+        let gvb_handle = self.global_vertex_buffer.handle();
+        let binding_offsets: SmallVec<[_; 6]> = vertex_mesh
+            .gvb_binding_offsets
+            .iter()
+            .map(|v| (gvb_handle, *v))
+            .collect();
+
+        if vertex_mesh.raw.indexed && vertex_mesh.raw.index_count > 0 {
+            cl.bind_vertex_buffers(0, &binding_offsets);
+            cl.bind_index_buffer(&self.global_vertex_buffer, vertex_mesh.gvb_indices_offset);
+            cl.draw_indexed(vertex_mesh.raw.index_count, 0, 0);
+        } else if vertex_mesh.raw.vertex_count > 0 {
+            cl.bind_vertex_buffers(0, &*binding_offsets);
+            cl.draw(vertex_mesh.raw.vertex_count, 0);
+        }
+    }
+
     fn record_depth_cmd_lists(&mut self) -> u32 {
         let global_transform_comps = self.scene.storage_read::<GlobalTransform>();
         let renderer_comps = self.scene.storage_read::<component::RenderConfig>();
@@ -1388,20 +1434,21 @@ impl Renderer {
                         continue;
                     }
 
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
-                    if vertex_mesh.is_none() {
+                    let vertex_mesh_ptr = self.entity_vertex_meshes.get(&renderable_id);
+                    if vertex_mesh_ptr.is_none() {
                         continue;
                     }
 
                     let global_transform = transform.unwrap();
                     let renderer = renderer.unwrap();
-                    let vertex_mesh = vertex_mesh.unwrap();
+                    let vertex_mesh_ptr = vertex_mesh_ptr.unwrap();
+                    let vertex_mesh = &self.gvb_vertex_meshes[vertex_mesh_ptr];
 
-                    if vertex_mesh.vertex_count == 0 {
+                    if vertex_mesh.raw.vertex_count == 0 {
                         continue;
                     }
 
-                    let sphere = vertex_mesh.sphere();
+                    let sphere = vertex_mesh.raw.sphere();
                     let center = sphere.center() + global_transform.position_f32();
                     let radius = sphere.radius() * global_transform.scale.max();
 
@@ -1436,7 +1483,7 @@ impl Renderer {
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    self.bind_and_draw_vertex_mesh(&mut cl, vertex_mesh);
                 }
 
                 cl.end().unwrap();
@@ -1485,7 +1532,8 @@ impl Renderer {
                     let renderable = &self.renderables[&renderable_id];
 
                     let renderer = renderer_comps.get(renderable_id).unwrap();
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id).unwrap();
+                    let vertex_mesh_ptr = self.entity_vertex_meshes[&renderable_id];
+                    let vertex_mesh = &self.gvb_vertex_meshes[&vertex_mesh_ptr];
 
                     let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
@@ -1503,7 +1551,7 @@ impl Renderer {
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    self.bind_and_draw_vertex_mesh(&mut cl, vertex_mesh);
                 }
 
                 cl.end().unwrap();

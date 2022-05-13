@@ -1,21 +1,24 @@
 use crate::ecs::component;
-use crate::ecs::scene_storage;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
+use crate::ecs::scene::Entity;
+use crate::ecs::scene_storage::{ComponentStorageImpl, LockedStorage};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::VMBufferUpdate;
+use crate::renderer::{GVBVertexMesh, VMBufferUpdate};
 use crate::utils::HashMap;
 use parking_lot::Mutex;
+use range_alloc::RangeAllocator;
 use std::sync::Arc;
 use vk_wrapper as vkw;
-use vk_wrapper::WaitSemaphore;
+use vk_wrapper::{DeviceBuffer, WaitSemaphore};
 
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
     pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
-    pub buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub sorted_buffer_updates_entities: &'a Vec<(Entity, f64)>,
+    pub vertex_mesh_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
+    pub global_vertex_buffer: &'a DeviceBuffer,
+    pub gvb_vertex_meshes: &'a mut HashMap<usize, GVBVertexMesh>,
+    pub gvb_allocator: &'a mut RangeAllocator<u64>,
 }
 
 impl GpuBuffersUpdate<'_> {
@@ -36,44 +39,67 @@ impl GpuBuffersUpdate<'_> {
             g_cl.begin(true).unwrap();
 
             let mut total_copy_size = 0;
-            let mut transfer_barriers = Vec::with_capacity(self.buffer_updates.len());
+            let mut transfer_barriers = Vec::with_capacity(self.vertex_mesh_updates.len());
             let mut graphics_barriers = Vec::with_capacity(transfer_barriers.len());
 
-            for (entity, _) in self.sorted_buffer_updates_entities {
-                let mesh = self.buffer_updates.remove(entity).unwrap();
+            for _ in 0..self.vertex_mesh_updates.len() {
+                let entity = *self.vertex_mesh_updates.keys().next().unwrap();
+                let raw_mesh = self.vertex_mesh_updates.remove(&entity).unwrap();
+                let src_buffer = raw_mesh.staging_buffer.as_ref().unwrap();
+                let mesh_ptr = src_buffer.as_ptr() as usize;
 
-                if mesh.staging_buffer.is_none() {
-                    self.pending_buffer_updates.push(VMBufferUpdate {
-                        entity: *entity,
-                        mesh,
-                    });
+                if self.gvb_vertex_meshes.contains_key(&mesh_ptr) {
+                    self.pending_buffer_updates
+                        .push(VMBufferUpdate { entity, mesh_ptr });
+                    // The vertex mesh update is already processed (multiple entities may use the same mesh)
                     continue;
                 }
 
-                let src_buffer = mesh.staging_buffer.as_ref().unwrap();
-                let dst_buffer = mesh.buffer.as_ref().unwrap();
+                let gvb_range = self.gvb_allocator.allocate_range(src_buffer.size()).unwrap();
+                let gvb_mesh = GVBVertexMesh {
+                    raw: Arc::clone(&raw_mesh),
+                    ref_count: 1,
+                    gvb_range: gvb_range.clone(),
+                    gvb_binding_offsets: raw_mesh
+                        .binding_offsets
+                        .iter()
+                        .map(|v| gvb_range.start + *v)
+                        .collect(),
+                    gvb_indices_offset: gvb_range.start + raw_mesh.indices_offset,
+                };
+                let gvb_range = &gvb_mesh.gvb_range;
 
-                t_cl.copy_raw_host_buffer_to_device(&src_buffer.raw(), 0, dst_buffer, 0, src_buffer.size());
+                t_cl.copy_raw_host_buffer_to_device(
+                    &src_buffer.raw(),
+                    0,
+                    self.global_vertex_buffer,
+                    gvb_range.start,
+                    src_buffer.size(),
+                );
 
                 transfer_barriers.push(
-                    dst_buffer
+                    self.global_vertex_buffer
                         .barrier()
                         .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
+                        .offset(gvb_range.start)
+                        .size(gvb_range.end - gvb_range.start)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
                 graphics_barriers.push(
-                    dst_buffer
+                    self.global_vertex_buffer
                         .barrier()
+                        .offset(gvb_range.start)
+                        .size(gvb_range.end - gvb_range.start)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
 
+                self.gvb_vertex_meshes.insert(mesh_ptr, gvb_mesh);
+                self.pending_buffer_updates
+                    .push(VMBufferUpdate { entity, mesh_ptr });
+
                 total_copy_size += src_buffer.size();
-                self.pending_buffer_updates.push(VMBufferUpdate {
-                    entity: *entity,
-                    mesh,
-                });
 
                 if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
                     break;
@@ -113,8 +139,9 @@ impl GpuBuffersUpdate<'_> {
 
 pub(crate) struct CommitBufferUpdates<'a> {
     pub updates: Vec<VMBufferUpdate>,
-    pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
+    pub entity_vertex_meshes: &'a mut HashMap<Entity, usize>,
+    pub to_remove_vertex_meshes: &'a mut HashMap<usize, u32>,
+    pub vertex_mesh_comps: LockedStorage<'a, component::VertexMesh>,
 }
 
 impl CommitBufferUpdates<'_> {
@@ -122,8 +149,14 @@ impl CommitBufferUpdates<'_> {
         let vertex_mesh_comps = self.vertex_mesh_comps.read();
 
         for update in self.updates {
+            // Check if update is still relevant (some entity is still using it)
             if vertex_mesh_comps.contains(update.entity) {
-                self.vertex_meshes.insert(update.entity, update.mesh);
+                let prev_mesh_ptr = self.entity_vertex_meshes.insert(update.entity, update.mesh_ptr);
+
+                if let Some(prev_mesh_ptr) = prev_mesh_ptr {
+                    let remove_refs_n = self.to_remove_vertex_meshes.entry(prev_mesh_ptr).or_insert(0);
+                    *remove_refs_n += 1;
+                }
             }
         }
     }
