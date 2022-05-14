@@ -3,7 +3,6 @@ use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event, LockedStora
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::renderer::GVBVertexMesh;
 use crate::utils::HashMap;
-use range_alloc::RangeAllocator;
 use std::collections::hash_map;
 use std::sync::Arc;
 

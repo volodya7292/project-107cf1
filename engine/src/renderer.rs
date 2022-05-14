@@ -1870,89 +1870,90 @@ impl Renderer {
         let adapter = device.get_adapter();
         let surface = &self.surface;
 
-        if adapter.is_surface_valid(surface).unwrap() {
-            if self.surface_changed {
-                let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+        if !adapter.is_surface_valid(surface).unwrap() {
+            return timings;
+        }
 
-                self.sw_framebuffers.clear();
+        // Wait for previous frame completion
+        self.final_submit[0].wait().unwrap();
+        self.final_submit[1].wait().unwrap();
 
-                self.swapchain = Some(
-                    device
-                        .create_swapchain(
-                            &self.surface,
-                            self.surface_size,
-                            self.settings.fps_limit == FPSLimit::VSync,
-                            if self.settings.prefer_triple_buffering {
-                                3
-                            } else {
-                                2
-                            },
-                            self.swapchain.take(),
-                        )
-                        .unwrap(),
-                );
+        if self.surface_changed {
+            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+            let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
-                let signal_sem = &[SignalSemaphore {
-                    semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
-                    signal_value: 0,
-                }];
+            self.sw_framebuffers.clear();
 
-                self.final_submit[0]
-                    .set(&[SubmitInfo::new(
-                        &[WaitSemaphore {
-                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                            wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            wait_value: 0,
-                        }],
-                        &[Arc::clone(&self.final_cl[0])],
-                        if graphics_queue == present_queue {
-                            signal_sem
+            self.swapchain = Some(
+                device
+                    .create_swapchain(
+                        &self.surface,
+                        self.surface_size,
+                        self.settings.fps_limit == FPSLimit::VSync,
+                        if self.settings.prefer_triple_buffering {
+                            3
                         } else {
-                            &[]
+                            2
                         },
-                    )])
-                    .unwrap();
+                        self.swapchain.take(),
+                    )
+                    .unwrap(),
+            );
 
-                self.create_main_framebuffers();
-                self.surface_changed = false;
-            }
+            let signal_sem = &[SignalSemaphore {
+                semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
+                signal_value: 0,
+            }];
 
-            let acquire_result = self.swapchain.as_ref().unwrap().acquire_image();
+            self.final_submit[0]
+                .set(&[SubmitInfo::new(
+                    &[WaitSemaphore {
+                        semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
+                        wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                        wait_value: 0,
+                    }],
+                    &[Arc::clone(&self.final_cl[0])],
+                    if graphics_queue == present_queue {
+                        signal_sem
+                    } else {
+                        &[]
+                    },
+                )])
+                .unwrap();
 
-            match acquire_result {
-                Ok((sw_image, suboptimal)) => {
-                    self.surface_changed |= suboptimal;
+            self.create_main_framebuffers();
+            self.surface_changed = false;
+        }
 
-                    // Note: wait for render completion before on_update()
-                    // to not destroy DeviceBuffers after entity deletion in on_update()
-                    self.final_submit[0].wait().unwrap();
-                    self.final_submit[1].wait().unwrap();
+        let acquire_result = self.swapchain.as_ref().unwrap().acquire_image();
 
-                    timings.update = self.on_update();
-                    timings.render = self.on_render(&sw_image);
+        match acquire_result {
+            Ok((sw_image, suboptimal)) => {
+                self.surface_changed |= suboptimal;
 
-                    let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-                    let present_result = present_queue.present(sw_image);
+                timings.update = self.on_update();
+                timings.render = self.on_render(&sw_image);
 
-                    match present_result {
-                        Ok(suboptimal) => {
-                            self.surface_changed |= suboptimal;
-                        }
-                        Err(swapchain::Error::IncompatibleSurface) => {
-                            self.surface_changed = true;
-                        }
-                        _ => {
-                            present_result.unwrap();
-                        }
+                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+                let present_result = present_queue.present(sw_image);
+
+                match present_result {
+                    Ok(suboptimal) => {
+                        self.surface_changed |= suboptimal;
+                    }
+                    Err(swapchain::Error::IncompatibleSurface) => {
+                        self.surface_changed = true;
+                    }
+                    _ => {
+                        present_result.unwrap();
                     }
                 }
-                Err(swapchain::Error::IncompatibleSurface) => {
-                    self.surface_changed = true;
-                }
-                _ => {
-                    acquire_result.unwrap();
-                }
+            }
+            Err(swapchain::Error::IncompatibleSurface) => {
+                self.surface_changed = true;
+            }
+            _ => {
+                acquire_result.unwrap();
             }
         }
 
