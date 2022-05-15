@@ -1,8 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
 
-#extension GL_EXT_scalar_block_layout : require
-
-layout(local_size_x = 32) in;
+layout(local_size_x = THREAD_GROUP_1D_WIDTH) in;
 
 layout(std430, binding = 0) readonly buffer IndexBuffer {
     uint indices[];
@@ -11,7 +11,7 @@ layout(scalar, binding = 1) readonly buffer VertexBuffer {
     vec3 vertices[];
 };
 layout(std430, binding = 2) writeonly buffer MortonCodes {
-    uvec2 morton_codes[];
+    MortonCode morton_codes[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -60,5 +60,9 @@ void main() {
     vec3 center = (v0 + v1 + v2) * ONE_THIRD;
     uint code = morton3D(center);
 
-    morton_codes[triangle_id] = uvec2(code, triangle_id);
+    MortonCode morton_code;
+    morton_code.code = code;
+    morton_code.element_id = triangle_id;
+
+    morton_codes[triangle_id] = morton_code;
 }

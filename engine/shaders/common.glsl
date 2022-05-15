@@ -1,9 +1,10 @@
 #extension GL_EXT_shader_8bit_storage : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_scalar_block_layout : require
 
-#define THREAD_GROUP_WIDTH 8
-#define THREAD_GROUP_HEIGHT 8
-#define THREAD_GROUP_1D_WIDTH (THREAD_GROUP_WIDTH * THREAD_GROUP_HEIGHT)
+//#define THREAD_GROUP_WIDTH 8
+//#define THREAD_GROUP_HEIGHT 8
+#define THREAD_GROUP_1D_WIDTH 32
 
 #define M_PI 3.1415927f
 #define SQRT_2 1.4142136f
@@ -49,6 +50,11 @@ struct Camera {
 struct PerFrameInfo {
     Camera camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
+};
+
+struct MortonCode {
+    uint code;
+    uint element_id;
 };
 
 #ifdef FN_TEXTURE_ATLAS

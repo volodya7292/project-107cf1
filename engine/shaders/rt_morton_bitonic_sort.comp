@@ -1,4 +1,6 @@
 #version 450 core
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
 
 // This shader implements a sorting network.
 // It is follows the alternative notation for bitonic sorting networks, as given at:
@@ -17,7 +19,7 @@
 layout(local_size_x_id = 0) in;// Set value for local_size_x via specialization constant with id 0
 
 layout(binding = 0) buffer SortData {
-    uvec2 value[];
+    MortonCode value[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -28,29 +30,25 @@ layout(push_constant) uniform PushConstants {
 
 // Workgroup local memory. We use this to minimise round-trips to global memory.
 // It allows us to evaluate a sorting network of up to 1024 with one shader invocation.
-shared uvec2 local_value[gl_WorkGroupSize.x * 2];
+shared MortonCode local_value[gl_WorkGroupSize.x * 2];
 
 
 // naive comparison
-bool is_greater(in const uvec2 left, in const uvec2 right){
-    return left[0] > right[0];
+bool compare_fn(in const uint left, in const uint right){
+    return left > right;
 }
 
-    // Pick comparison funtion: for colors we want to compare perceptual brightness
-    // instead of a naive straight integer value comparison.
-    #define COMPARE is_greater
-
 void global_compare_and_swap(ivec2 idx) {
-    if (idx.x < params.n_values && idx.y < params.n_values && COMPARE(value[idx.x], value[idx.y])) {
-        uvec2 tmp = value[idx.x];
+    if (idx.x < params.n_values && idx.y < params.n_values && compare_fn(value[idx.x].code, value[idx.y].code)) {
+        MortonCode tmp = value[idx.x];
         value[idx.x] = value[idx.y];
         value[idx.y] = tmp;
     }
 }
 
 void local_compare_and_swap(ivec2 idx) {
-    if (COMPARE(local_value[idx.x], local_value[idx.y])) {
-        uvec2 tmp = local_value[idx.x];
+    if (compare_fn(local_value[idx.x].code, local_value[idx.y].code)) {
+        MortonCode tmp = local_value[idx.x];
         local_value[idx.x] = local_value[idx.y];
         local_value[idx.y] = tmp;
     }
