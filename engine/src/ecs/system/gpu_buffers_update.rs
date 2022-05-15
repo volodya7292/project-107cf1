@@ -2,7 +2,7 @@ use crate::ecs::component;
 use crate::ecs::scene::Entity;
 use crate::ecs::scene_storage::{ComponentStorageImpl, LockedStorage};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::{GVBVertexMesh, VMBufferUpdate};
+use crate::renderer::{GBVertexMesh, VMBufferUpdate};
 use crate::utils::HashMap;
 use parking_lot::Mutex;
 use range_alloc::RangeAllocator;
@@ -16,9 +16,9 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
     pub vertex_mesh_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
-    pub global_vertex_buffer: &'a DeviceBuffer,
-    pub gvb_vertex_meshes: &'a mut HashMap<usize, GVBVertexMesh>,
-    pub gvb_allocator: &'a mut RangeAllocator<u64>,
+    pub global_buffer: &'a DeviceBuffer,
+    pub gb_vertex_meshes: &'a mut HashMap<usize, GBVertexMesh>,
+    pub gb_allocator: &'a mut RangeAllocator<u64>,
 }
 
 impl GpuBuffersUpdate<'_> {
@@ -48,54 +48,54 @@ impl GpuBuffersUpdate<'_> {
                 let src_buffer = raw_mesh.staging_buffer.as_ref().unwrap();
                 let mesh_ptr = src_buffer.as_ptr() as usize;
 
-                if self.gvb_vertex_meshes.contains_key(&mesh_ptr) {
+                if self.gb_vertex_meshes.contains_key(&mesh_ptr) {
                     self.pending_buffer_updates
                         .push(VMBufferUpdate { entity, mesh_ptr });
                     // The vertex mesh update is already processed (multiple entities may use the same mesh)
                     continue;
                 }
 
-                let gvb_range = self.gvb_allocator.allocate_range(src_buffer.size()).unwrap();
-                let gvb_mesh = GVBVertexMesh {
+                let gb_range = self.gb_allocator.allocate_range(src_buffer.size()).unwrap();
+                let gb_mesh = GBVertexMesh {
                     raw: Arc::clone(&raw_mesh),
                     ref_count: 1,
-                    gvb_range: gvb_range.clone(),
-                    gvb_binding_offsets: raw_mesh
+                    gb_range: gb_range.clone(),
+                    gb_binding_offsets: raw_mesh
                         .binding_offsets
                         .iter()
-                        .map(|v| gvb_range.start + *v)
+                        .map(|v| gb_range.start + *v)
                         .collect(),
-                    gvb_indices_offset: gvb_range.start + raw_mesh.indices_offset,
+                    gb_indices_offset: gb_range.start + raw_mesh.indices_offset,
                 };
-                let gvb_range = &gvb_mesh.gvb_range;
+                let gb_range = &gb_mesh.gb_range;
 
                 t_cl.copy_raw_host_buffer_to_device(
                     &src_buffer.raw(),
                     0,
-                    self.global_vertex_buffer,
-                    gvb_range.start,
+                    self.global_buffer,
+                    gb_range.start,
                     src_buffer.size(),
                 );
 
                 transfer_barriers.push(
-                    self.global_vertex_buffer
+                    self.global_buffer
                         .barrier()
                         .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
-                        .offset(gvb_range.start)
-                        .size(gvb_range.end - gvb_range.start)
+                        .offset(gb_range.start)
+                        .size(gb_range.end - gb_range.start)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
                 graphics_barriers.push(
-                    self.global_vertex_buffer
+                    self.global_buffer
                         .barrier()
-                        .offset(gvb_range.start)
-                        .size(gvb_range.end - gvb_range.start)
+                        .offset(gb_range.start)
+                        .size(gb_range.end - gb_range.start)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
 
-                self.gvb_vertex_meshes.insert(mesh_ptr, gvb_mesh);
+                self.gb_vertex_meshes.insert(mesh_ptr, gb_mesh);
                 self.pending_buffer_updates
                     .push(VMBufferUpdate { entity, mesh_ptr });
 

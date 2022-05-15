@@ -151,7 +151,7 @@ pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence,
 }
 
 impl Device {
-    pub fn get_adapter(&self) -> &Arc<Adapter> {
+    pub fn adapter(&self) -> &Arc<Adapter> {
         &self.wrapper.adapter
     }
 
@@ -1362,15 +1362,38 @@ impl Device {
         }))
     }
 
+    /// Specializations constant format: (constant_id, constant_value).
     pub fn create_compute_pipeline(
         self: &Arc<Self>,
         signature: &Arc<PipelineSignature>,
+        specialization_consts: &[(u32, u32)],
     ) -> Result<Arc<Pipeline>, vk::Result> {
-        // Stage
+        let mut spec_consts = specialization_consts.to_vec();
+        spec_consts.sort_by_key(|v| v.0);
+        spec_consts.dedup_by_key(|v| v.0);
+
+        let spec_data: Vec<u32> = spec_consts.iter().map(|v| v.1).collect();
+        let spec_infos: Vec<_> = spec_consts
+            .iter()
+            .enumerate()
+            .map(|(i, v)| vk::SpecializationMapEntry {
+                constant_id: v.0,
+                offset: (i * 4) as u32,
+                size: 4,
+            })
+            .collect();
+        let spec_data_u8 =
+            unsafe { slice::from_raw_parts(spec_data.as_ptr() as *const u8, spec_data.len() * 4) };
+
+        let specialization = vk::SpecializationInfo::builder()
+            .map_entries(&spec_infos)
+            .data(spec_data_u8);
+
         let stage_info = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE)
             .module(signature.shaders[&ShaderStage::COMPUTE].native)
             .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+            .specialization_info(&specialization)
             .build();
 
         let create_info = vk::ComputePipelineCreateInfo::builder()

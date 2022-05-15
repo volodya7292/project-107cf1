@@ -5,6 +5,7 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
+mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene::Scene;
@@ -13,6 +14,7 @@ use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
 use crate::renderer::camera::{Camera, Frustum};
 use crate::renderer::material_pipeline::UniformStruct;
+use crate::renderer::module::ray_tracing::RayTracingModule;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::resource_file::ResourceRef;
 use crate::utils;
@@ -177,15 +179,17 @@ pub struct Renderer {
     /// global parents are not in order, but all the children are.
     ordered_entities: Vec<Entity>,
     renderables: HashMap<Entity, Renderable>,
-    gvb_vertex_meshes: HashMap<usize, GVBVertexMesh>,
+    gb_vertex_meshes: HashMap<usize, GBVertexMesh>,
     entity_vertex_meshes: HashMap<Entity, usize>,
     pub(crate) material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
-    global_vertex_buffer: DeviceBuffer,
-    // Allocator for `global_vertex_buffer`
-    gvb_allocator: RangeAllocator<u64>,
+    global_buffer: DeviceBuffer,
+    // Allocator for `global_buffer`
+    gb_allocator: RangeAllocator<u64>,
+
+    ray_tracing: RayTracingModule,
 }
 
 #[derive(Copy, Clone)]
@@ -298,13 +302,13 @@ pub(crate) struct VMBufferUpdate {
     pub mesh_ptr: usize,
 }
 
-pub(crate) struct GVBVertexMesh {
-    /// A reference to RawVertexMesh must be held to prevent using still allocated GVB ranges.
+pub(crate) struct GBVertexMesh {
+    /// A reference to RawVertexMesh must be held to prevent using still allocated GB ranges.
     pub raw: Arc<RawVertexMesh>,
     pub ref_count: u32,
-    pub gvb_range: Range<u64>,
-    pub gvb_binding_offsets: SmallVec<[u64; 6]>,
-    pub gvb_indices_offset: u64,
+    pub gb_range: Range<u64>,
+    pub gb_binding_offsets: SmallVec<[u64; 6]>,
+    pub gb_indices_offset: u64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -455,8 +459,12 @@ lazy_static! {
 ];
 }
 
-fn calc_group_count(thread_count: u32) -> u32 {
-    (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
+pub fn calc_group_count(thread_count: u32) -> u32 {
+    calc_group_count2(thread_count, COMPUTE_LOCAL_THREADS)
+}
+
+pub fn calc_group_count2(thread_count: u32, local_size: u32) -> u32 {
+    (thread_count + local_size - 1) / local_size
 }
 
 impl Renderer {
@@ -558,7 +566,9 @@ impl Renderer {
         let depth_pyramid_signature = device
             .create_pipeline_signature(&[depth_pyramid_compute], &[])
             .unwrap();
-        let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
+        let depth_pyramid_pipeline = device
+            .create_compute_pipeline(&depth_pyramid_signature, &[])
+            .unwrap();
 
         // Cull pipeline
         // -----------------------------------------------------------------------------------------------------------------
@@ -566,7 +576,7 @@ impl Renderer {
             .create_shader(include_bytes!("../shaders/build/cull.comp.spv"), &[], &[])
             .unwrap();
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
-        let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
+        let cull_pipeline = device.create_compute_pipeline(&cull_signature, &[]).unwrap();
         let mut cull_pool = cull_signature.create_pool(0, 1).unwrap();
         let cull_descriptor = cull_pool.alloc().unwrap();
 
@@ -739,15 +749,15 @@ impl Renderer {
             .unwrap(),
         ];
 
-        let gvb_size = 512 * 1024 * 1024;
-        let global_vertex_buffer = device
+        let gb_size = 512 * 1024 * 1024;
+        let global_buffer = device
             .create_device_buffer(
                 BufferUsageFlags::TRANSFER_DST
                     | BufferUsageFlags::VERTEX
                     | BufferUsageFlags::INDEX
                     | BufferUsageFlags::STORAGE,
                 1,
-                gvb_size,
+                gb_size,
             )
             .unwrap();
 
@@ -816,6 +826,8 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
+        let ray_tracing = RayTracingModule::new(device, &global_buffer);
+
         // TODO: allocate buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
             scene,
@@ -880,9 +892,10 @@ impl Renderer {
             vertex_mesh_pending_updates: vec![],
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
-            global_vertex_buffer,
-            gvb_allocator: RangeAllocator::new(0..gvb_size),
-            gvb_vertex_meshes: Default::default(),
+            global_buffer,
+            gb_allocator: RangeAllocator::new(0..gb_size),
+            gb_vertex_meshes: Default::default(),
+            ray_tracing,
         };
         renderer.on_resize(size);
 
@@ -1194,7 +1207,7 @@ impl Renderer {
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
-            gvb_vertex_meshes: &mut self.gvb_vertex_meshes,
+            gb_vertex_meshes: &mut self.gb_vertex_meshes,
             entity_vertex_meshes: &mut self.entity_vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             vertex_mesh_updates: &mut self.vertex_mesh_updates,
@@ -1248,9 +1261,9 @@ impl Renderer {
             transfer_submit: &mut self.transfer_submit,
             vertex_mesh_updates: &mut self.vertex_mesh_updates,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
-            global_vertex_buffer: &self.global_vertex_buffer,
-            gvb_vertex_meshes: &mut self.gvb_vertex_meshes,
-            gvb_allocator: &mut self.gvb_allocator,
+            global_buffer: &self.global_buffer,
+            gb_vertex_meshes: &mut self.gb_vertex_meshes,
+            gb_allocator: &mut self.gb_allocator,
         };
         let commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
@@ -1275,13 +1288,13 @@ impl Renderer {
 
         // Remove unused meshes
         for (mesh_ptr, remove_refs_n) in to_remove_vertex_meshes {
-            let mesh = self.gvb_vertex_meshes.get_mut(&mesh_ptr).unwrap();
+            let mesh = self.gb_vertex_meshes.get_mut(&mesh_ptr).unwrap();
 
             if mesh.ref_count > remove_refs_n {
                 mesh.ref_count -= remove_refs_n;
             } else {
-                self.gvb_allocator.free_range(mesh.gvb_range.clone());
-                self.gvb_vertex_meshes.remove(&mesh_ptr);
+                self.gb_allocator.free_range(mesh.gb_range.clone());
+                self.gb_vertex_meshes.remove(&mesh_ptr);
             }
         }
 
@@ -1366,17 +1379,17 @@ impl Renderer {
         timings
     }
 
-    fn bind_and_draw_vertex_mesh(&self, cl: &mut CmdList, vertex_mesh: &GVBVertexMesh) {
-        let gvb_handle = self.global_vertex_buffer.handle();
+    fn bind_and_draw_vertex_mesh(&self, cl: &mut CmdList, vertex_mesh: &GBVertexMesh) {
+        let gb_handle = self.global_buffer.handle();
         let binding_offsets: SmallVec<[_; 6]> = vertex_mesh
-            .gvb_binding_offsets
+            .gb_binding_offsets
             .iter()
-            .map(|v| (gvb_handle, *v))
+            .map(|v| (gb_handle, *v))
             .collect();
 
         if vertex_mesh.raw.indexed && vertex_mesh.raw.index_count > 0 {
             cl.bind_vertex_buffers(0, &binding_offsets);
-            cl.bind_index_buffer(&self.global_vertex_buffer, vertex_mesh.gvb_indices_offset);
+            cl.bind_index_buffer(&self.global_buffer, vertex_mesh.gb_indices_offset);
             cl.draw_indexed(vertex_mesh.raw.index_count, 0, 0);
         } else if vertex_mesh.raw.vertex_count > 0 {
             cl.bind_vertex_buffers(0, &*binding_offsets);
@@ -1442,7 +1455,7 @@ impl Renderer {
                     let global_transform = transform.unwrap();
                     let renderer = renderer.unwrap();
                     let vertex_mesh_ptr = vertex_mesh_ptr.unwrap();
-                    let vertex_mesh = &self.gvb_vertex_meshes[vertex_mesh_ptr];
+                    let vertex_mesh = &self.gb_vertex_meshes[vertex_mesh_ptr];
 
                     if vertex_mesh.raw.vertex_count == 0 {
                         continue;
@@ -1533,7 +1546,7 @@ impl Renderer {
 
                     let renderer = renderer_comps.get(renderable_id).unwrap();
                     let vertex_mesh_ptr = self.entity_vertex_meshes[&renderable_id];
-                    let vertex_mesh = &self.gvb_vertex_meshes[&vertex_mesh_ptr];
+                    let vertex_mesh = &self.gb_vertex_meshes[&vertex_mesh_ptr];
 
                     let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
@@ -1867,7 +1880,7 @@ impl Renderer {
     pub fn on_draw(&mut self) -> RendererTimings {
         let mut timings = RendererTimings::default();
         let device = Arc::clone(&self.device);
-        let adapter = device.get_adapter();
+        let adapter = device.adapter();
         let surface = &self.surface;
 
         if !adapter.is_surface_valid(surface).unwrap() {

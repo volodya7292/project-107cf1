@@ -33,7 +33,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
             if entry.is_dir() {
                 continue;
             }
-            let ext = entry.extension().unwrap().to_str().unwrap();
+            let ext = entry.extension().map_or("", |v| v.to_str().unwrap());
 
             if ext == "vert" || ext == "frag" || ext == "geom" || ext == "comp" {
                 let stripped = entry.strip_prefix(src_dir.to_str().unwrap()).unwrap();

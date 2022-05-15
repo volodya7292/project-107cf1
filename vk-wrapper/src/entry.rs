@@ -116,7 +116,6 @@ impl Entry {
             required_extensions.push("VK_EXT_debug_utils");
             preferred_extensions.push("VK_EXT_validation_features");
         }
-        required_extensions.push("VK_KHR_surface");
 
         // Filter layers
         let enabled_layers = utils::filter_names(&available_layers, &required_layers, true).unwrap();

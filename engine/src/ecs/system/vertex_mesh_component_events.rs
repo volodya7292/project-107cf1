@@ -1,13 +1,13 @@
 use crate::ecs::component;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event, LockedStorage};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::GVBVertexMesh;
+use crate::renderer::GBVertexMesh;
 use crate::utils::HashMap;
 use std::collections::hash_map;
 use std::sync::Arc;
 
 pub(crate) struct VertexMeshCompEvents<'a> {
-    pub gvb_vertex_meshes: &'a mut HashMap<usize, GVBVertexMesh>,
+    pub gb_vertex_meshes: &'a mut HashMap<usize, GBVertexMesh>,
     pub entity_vertex_meshes: &'a mut HashMap<Entity, usize>,
     pub vertex_mesh_comps: LockedStorage<'a, component::VertexMesh>,
     pub vertex_mesh_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
@@ -30,7 +30,7 @@ impl VertexMeshCompEvents<'_> {
                     if let Some(staging_buffer) = &vm.0.staging_buffer {
                         let mesh_ptr = staging_buffer.as_ptr() as usize;
 
-                        match self.gvb_vertex_meshes.entry(mesh_ptr) {
+                        match self.gb_vertex_meshes.entry(mesh_ptr) {
                             hash_map::Entry::Occupied(mut e) => {
                                 e.get_mut().ref_count += 1;
                             }

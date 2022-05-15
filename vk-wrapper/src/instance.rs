@@ -120,9 +120,10 @@ impl Instance {
             let required_extensions = [
                 "VK_KHR_swapchain",
                 "VK_KHR_timeline_semaphore",
-                "VK_EXT_descriptor_indexing",
                 "VK_KHR_8bit_storage",
                 "VK_KHR_shader_float16_int8",
+                "VK_EXT_descriptor_indexing",
+                "VK_EXT_scalar_block_layout",
             ];
             let preferred_extensions = ["VK_KHR_portability_subset"];
 
@@ -137,8 +138,13 @@ impl Instance {
 
             // Check features
             // ------------------------------------------------------------------------------------
+            let mut available_scalar_features = vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT::default();
+
             let mut available_shader_float16_int8_features =
                 vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR::default();
+            available_shader_float16_int8_features.p_next = &mut available_scalar_features
+                as *mut vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT
+                as *mut c_void;
 
             let mut available_8bit_storage_features = vk::PhysicalDevice8BitStorageFeaturesKHR::default();
             available_8bit_storage_features.p_next = &mut available_shader_float16_int8_features
@@ -167,6 +173,7 @@ impl Instance {
             let available_features = available_features2.features;
 
             let mut enabled_features = vk::PhysicalDeviceFeatures::default();
+            let mut enabled_scalar_features = vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT::default();
             let mut enabled_shader_float16_int8_features =
                 vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR::default();
             let mut enabled_8bit_storage_features = vk::PhysicalDevice8BitStorageFeaturesKHR::default();
@@ -194,6 +201,11 @@ impl Instance {
                 shader_storage_buffer_array_dynamic_indexing,
                 shader_storage_image_array_dynamic_indexing,
                 texture_compression_bc
+            );
+            require_features!(
+                available_scalar_features,
+                enabled_scalar_features,
+                scalar_block_layout
             );
             require_features!(available_ts_features, enabled_ts_features, timeline_semaphore);
             require_features!(
@@ -277,9 +289,10 @@ impl Instance {
             adapters.push(Arc::new(Adapter {
                 instance: Arc::clone(self),
                 native: p_device,
-                _props: props,
+                props,
                 enabled_extensions,
                 features: enabled_features,
+                scalar_features: enabled_scalar_features,
                 desc_features: enabled_desc_features,
                 ts_features: enabled_ts_features,
                 storage8bit_features: enabled_8bit_storage_features,

@@ -84,7 +84,7 @@ unsafe impl Send for RawHostBuffer {}
 
 unsafe impl Sync for RawHostBuffer {}
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
 
@@ -119,6 +119,9 @@ impl BufferBarrier {
         self
     }
 }
+
+unsafe impl Send for BufferBarrier {}
+unsafe impl Sync for BufferBarrier {}
 
 pub struct HostBuffer<T> {
     pub(crate) _type_marker: PhantomData<T>,
