@@ -21,7 +21,7 @@ impl MortonCodesForTrianglesModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_morton_codes_for_triangles.comp.spv"),
+                include_bytes!("../../../shaders/build/rt_morton_codes_for_triangles.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -34,11 +34,7 @@ impl MortonCodesForTrianglesModule {
         unsafe {
             device.update_descriptor_set(
                 descriptor,
-                &[
-                    pool.create_binding(0, 0, BindingRes::Buffer(global_buffer.handle())),
-                    pool.create_binding(1, 0, BindingRes::Buffer(global_buffer.handle())),
-                    pool.create_binding(2, 0, BindingRes::Buffer(global_buffer.handle())),
-                ],
+                &[pool.create_binding(0, 0, BindingRes::Buffer(global_buffer.handle()))],
             );
         }
 

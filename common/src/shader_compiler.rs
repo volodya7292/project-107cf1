@@ -26,86 +26,117 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
         Err(_) => HashMap::new(),
     };
 
-    let pattern = src_dir.to_str().unwrap().to_owned() + "/**/*";
-
-    for entry in glob::glob(&pattern).unwrap() {
+    for entry in src_dir.read_dir().unwrap() {
         if let Ok(entry) = entry {
+            let entry = entry.path();
             if entry.is_dir() {
                 continue;
             }
+
             let ext = entry.extension().map_or("", |v| v.to_str().unwrap());
 
-            if ext == "vert" || ext == "frag" || ext == "geom" || ext == "comp" {
-                let stripped = entry.strip_prefix(src_dir.to_str().unwrap()).unwrap();
-                let dst_path_s =
-                    dst_dir.to_str().unwrap().to_owned() + "/" + stripped.to_str().unwrap() + ".spv";
-                let dst_path = Path::new(&dst_path_s);
+            if ext != "vert" && ext != "frag" && ext != "comp" && ext != "hlsl" {
+                continue;
+            }
 
-                // Get new metadata
-                let entry_metadata = fs::metadata(&entry).unwrap();
-                let new_ts = TSMetaData {
-                    modified: entry_metadata.modified().unwrap(),
-                };
+            let stripped = entry.strip_prefix(src_dir.to_str().unwrap()).unwrap();
+            let dst_path_s = dst_dir.to_str().unwrap().to_owned() + "/" + stripped.to_str().unwrap() + ".spv";
+            let dst_path = Path::new(&dst_path_s);
 
-                // Check for modification
-                let modified;
-                match timestamps.entry(entry.to_str().unwrap().to_owned()) {
-                    hash_map::Entry::Occupied(a) => {
-                        modified = &new_ts.modified > &a.get().modified;
-                    }
-                    hash_map::Entry::Vacant(a) => {
-                        a.insert(new_ts);
-                        modified = true;
-                    }
+            // Get new metadata
+            let entry_metadata = entry.metadata().unwrap();
+            let new_ts = TSMetaData {
+                modified: entry_metadata.modified().unwrap(),
+            };
+
+            // Check for modification
+            let modified;
+            match timestamps.entry(entry.to_str().unwrap().to_owned()) {
+                hash_map::Entry::Occupied(a) => {
+                    modified = &new_ts.modified > &a.get().modified;
                 }
+                hash_map::Entry::Vacant(a) => {
+                    a.insert(new_ts);
+                    modified = true;
+                }
+            }
 
-                if !modified && dst_path.exists() {
+            if !modified && dst_path.exists() {
+                continue;
+            }
+
+            fs::create_dir_all(dst_path.parent().unwrap()).unwrap();
+
+            let entry_str = entry.to_str().unwrap();
+
+            let mut cmd = if ext == "hlsl" {
+                let name = entry.file_name().unwrap().to_str().unwrap();
+                let name_without_hlsl = Path::new(name.strip_suffix(".hlsl").unwrap());
+                let ty = if let Some(ty) = name_without_hlsl.extension() {
+                    ty.to_str().unwrap()
+                } else {
                     continue;
-                }
+                };
+                let target = match ty {
+                    "vert" => "vs_6_0",
+                    "frag" => "ps_6_0",
+                    "comp" => "cs_6_0",
+                    _ => panic!("Unsupported shader type"),
+                };
+                let mut cmd = Command::new("dxc");
 
-                fs::create_dir_all(dst_path.parent().unwrap()).unwrap();
-
-                let entry_str = entry.to_str().unwrap();
-
-                let mut cmd = &mut Command::new("glslangValidator");
-                cmd = cmd
-                    .arg("--spirv-val")
+                cmd.arg("-spirv")
+                    .arg("-fvk-use-scalar-layout")
+                    .arg("-fspv-target-env=vulkan1.1")
+                    .arg("-T")
+                    .arg(target)
+                    .arg("-Fo")
+                    .arg(dst_path_s.clone())
+                    .arg(entry_str);
+                cmd
+            } else {
+                let mut cmd = Command::new("glslangValidator");
+                cmd.arg("--spirv-val")
                     .arg("--target-env")
                     .arg("vulkan1.1")
+                    .arg("-e")
+                    .arg("main")
                     .arg("-o")
                     .arg(dst_path_s.clone())
                     .arg("-V")
                     .arg(entry_str);
 
                 if cfg!(debug_assertions) {
-                    cmd = cmd.arg("-g").arg("-Od");
+                    cmd.arg("-g").arg("-Od");
                 }
+                cmd
+            };
+
+            let output = cmd.output().unwrap();
+            println!("{}", String::from_utf8_lossy(&output.stdout));
+
+            if !output.status.success() {
+                println!("{}", String::from_utf8_lossy(&output.stderr));
+                panic!("Failed to compile shader: {:?}", cmd);
+            }
+
+            // Optimize shader
+            if !cfg!(debug_assertions) {
+                let mut cmd = &mut Command::new("spirv-opt");
+                cmd = cmd
+                    .arg(dst_path_s.clone())
+                    .arg("-o")
+                    .arg(dst_path_s.clone())
+                    .arg("--target-env=vulkan1.1")
+                    .arg("--skip-validation")
+                    .arg("--preserve-bindings")
+                    .arg("-O");
 
                 let output = cmd.output().unwrap();
                 println!("{}", String::from_utf8_lossy(&output.stdout));
 
                 if !output.status.success() {
-                    panic!("Failed to compile shader");
-                }
-
-                // Optimize shader
-                if !cfg!(debug_assertions) {
-                    let mut cmd = &mut Command::new("spirv-opt");
-                    cmd = cmd
-                        .arg(dst_path_s.clone())
-                        .arg("-o")
-                        .arg(dst_path_s.clone())
-                        .arg("--target-env=vulkan1.1")
-                        .arg("--skip-validation")
-                        .arg("--preserve-bindings")
-                        .arg("-O");
-
-                    let output = cmd.output().unwrap();
-                    println!("{}", String::from_utf8_lossy(&output.stdout));
-
-                    if !output.status.success() {
-                        panic!("Failed to optimize shader");
-                    }
+                    panic!("Failed to optimize shader");
                 }
             }
         }

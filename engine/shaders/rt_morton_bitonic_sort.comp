@@ -17,6 +17,7 @@
 #define eBigDisperse 3
 
 layout(local_size_x_id = 0) in;// Set value for local_size_x via specialization constant with id 0
+layout(constant_id = 0) const int WORK_GROUP_SIZE = 1024;
 
 layout(binding = 0) buffer SortData {
     MortonCode value[];
@@ -30,7 +31,7 @@ layout(push_constant) uniform PushConstants {
 
 // Workgroup local memory. We use this to minimise round-trips to global memory.
 // It allows us to evaluate a sorting network of up to 1024 with one shader invocation.
-shared MortonCode local_value[gl_WorkGroupSize.x * 2];
+shared MortonCode local_value[WORK_GROUP_SIZE * 2];
 
 
 // naive comparison
