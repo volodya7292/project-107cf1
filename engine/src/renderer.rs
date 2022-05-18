@@ -381,7 +381,8 @@ pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 
 pub const MAX_OBJECT_COUNT: u32 = 65535;
 pub const MAX_MATERIAL_COUNT: u32 = 4096;
-pub const COMPUTE_LOCAL_THREADS: u32 = 32;
+pub const COMPUTE_LOCAL_THREADS_1D: u32 = 64;
+pub const COMPUTE_LOCAL_THREADS_2D: u32 = 8;
 pub const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
 
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
@@ -459,11 +460,15 @@ lazy_static! {
 ];
 }
 
-pub fn calc_group_count(thread_count: u32) -> u32 {
-    calc_group_count2(thread_count, COMPUTE_LOCAL_THREADS)
+pub fn calc_group_count_1d(thread_count: u32) -> u32 {
+    calc_group_count(thread_count, COMPUTE_LOCAL_THREADS_1D)
 }
 
-pub fn calc_group_count2(thread_count: u32, local_size: u32) -> u32 {
+pub fn calc_group_count_2d(thread_count: u32) -> u32 {
+    calc_group_count(thread_count, COMPUTE_LOCAL_THREADS_2D)
+}
+
+pub fn calc_group_count(thread_count: u32, local_size: u32) -> u32 {
     (thread_count + local_size - 1) / local_size
 }
 
@@ -1630,7 +1635,11 @@ impl Renderer {
                 };
                 cl.push_constants(&self.depth_pyramid_signature, &constants);
 
-                cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
+                cl.dispatch(
+                    calc_group_count_2d(out_size.0),
+                    calc_group_count_2d(out_size.1),
+                    1,
+                );
 
                 cl.barrier_image(
                     PipelineStageFlags::COMPUTE,
@@ -1695,7 +1704,7 @@ impl Renderer {
             };
             cl.push_constants(&self.cull_signature, &constants);
 
-            cl.dispatch(calc_group_count(frustum_visible_objects), 1, 1);
+            cl.dispatch(calc_group_count_1d(frustum_visible_objects), 1, 1);
 
             cl.barrier_buffer(
                 PipelineStageFlags::COMPUTE,

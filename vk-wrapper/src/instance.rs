@@ -55,6 +55,9 @@ impl Instance {
             {
                 continue;
             }
+            if props.limits.max_compute_work_group_size[0] < 1024 {
+                continue;
+            }
 
             // Check queue families
             // ------------------------------------------------------------------------------------

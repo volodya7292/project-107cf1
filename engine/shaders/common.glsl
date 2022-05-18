@@ -2,9 +2,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #extension GL_EXT_scalar_block_layout : require
 
-//#define THREAD_GROUP_WIDTH 8
-//#define THREAD_GROUP_HEIGHT 8
-#define THREAD_GROUP_1D_WIDTH 32
+#define THREAD_GROUP_WIDTH 8
+#define THREAD_GROUP_HEIGHT 8
+#define THREAD_GROUP_1D_WIDTH 64
 
 #define M_PI 3.1415927f
 #define SQRT_2 1.4142136f

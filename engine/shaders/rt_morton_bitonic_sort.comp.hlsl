@@ -1,6 +1,4 @@
-#version 450 core
-#extension GL_GOOGLE_include_directive : require
-#include "common.glsl"
+#include "common.hlsl"
 
 // This shader implements a sorting network.
 // It is follows the alternative notation for bitonic sorting networks, as given at:
@@ -16,38 +14,41 @@
 #define eBigFlip 2
 #define eBigDisperse 3
 
-layout(local_size_x_id = 0) in;// Set value for local_size_x via specialization constant with id 0
-layout(constant_id = 0) const int WORK_GROUP_SIZE = 1024;
+static const uint WORK_GROUP_SIZE = 1024;
 
-layout(binding = 0) buffer SortData {
-    MortonCode value[];
-};
-
-layout(push_constant) uniform PushConstants {
+struct PushConstants {
     uint h;
     uint algorithm;
     uint n_values;
-} params;
+    uint data_offset;
+};
+
+RWByteAddressBuffer buffer : register(u0);
+
+[[vk::push_constant]]
+PushConstants params;
 
 // Workgroup local memory. We use this to minimise round-trips to global memory.
 // It allows us to evaluate a sorting network of up to 1024 with one shader invocation.
-shared MortonCode local_value[WORK_GROUP_SIZE * 2];
-
+groupshared MortonCode local_value[WORK_GROUP_SIZE * 2];
 
 // naive comparison
-bool compare_fn(in const uint left, in const uint right){
+bool compare_fn(in const uint left, in const uint right) {
     return left > right;
 }
 
-void global_compare_and_swap(ivec2 idx) {
-    if (idx.x < params.n_values && idx.y < params.n_values && compare_fn(value[idx.x].code, value[idx.y].code)) {
-        MortonCode tmp = value[idx.x];
-        value[idx.x] = value[idx.y];
-        value[idx.y] = tmp;
+void global_compare_and_swap(uint2 idx) {
+    uint2 gptr = params.data_offset.xx + idx * sizeof(MortonCode);
+    MortonCode valX = buffer.Load<MortonCode>(gptr.x);
+    MortonCode valY = buffer.Load<MortonCode>(gptr.y);
+
+    if (idx.x < params.n_values && idx.y < params.n_values && compare_fn(valX.code, valY.code)) {
+        buffer.Store(gptr.x, valY);
+        buffer.Store(gptr.y, valX);
     }
 }
 
-void local_compare_and_swap(ivec2 idx) {
+void local_compare_and_swap(uint2 idx) {
     if (compare_fn(local_value[idx.x].code, local_value[idx.y].code)) {
         MortonCode tmp = local_value[idx.x];
         local_value[idx.x] = local_value[idx.y];
@@ -56,37 +57,33 @@ void local_compare_and_swap(ivec2 idx) {
 }
 
 // Performs full-height flip (h height) over globally available indices.
-void big_flip(in uint h) {
-    uint t_prime = gl_GlobalInvocationID.x;
+void big_flip(in uint h, uint t_prime : SV_DispatchThreadID) {
     uint half_h = h >> 1;// Note: h >> 1 is equivalent to h / 2
 
     uint q = ((2 * t_prime) / h) * h;
     uint x = q     + (t_prime % half_h);
     uint y = q + h - (t_prime % half_h) - 1;
 
-    global_compare_and_swap(ivec2(x, y));
+    global_compare_and_swap(uint2(x, y));
 }
 
 // Performs full-height disperse (h height) over globally available indices.
-void big_disperse(in uint h) {
-    uint t_prime = gl_GlobalInvocationID.x;
-
+void big_disperse(in uint h, uint t_prime : SV_DispatchThreadID) {
     uint half_h = h >> 1;// Note: h >> 1 is equivalent to h / 2
 
     uint q = ((2 * t_prime) / h) * h;
     uint x = q + (t_prime % (half_h));
     uint y = q + (t_prime % (half_h)) + half_h;
 
-    global_compare_and_swap(ivec2(x, y));
+    global_compare_and_swap(uint2(x, y));
 }
 
 // Performs full-height flip (h height) over locally available indices.
-void local_flip(in uint h) {
-    uint t = gl_LocalInvocationID.x;
-    barrier();
+void local_flip(in uint h, in uint t : SV_GroupThreadID) {
+    GroupMemoryBarrierWithGroupSync();
 
     uint half_h = h >> 1;// Note: h >> 1 is equivalent to h / 2
-    ivec2 indices = ivec2(h * ((2 * t) / h)) + ivec2(t % half_h, h - 1 - (t % half_h));
+    uint2 indices = (h * ((2 * t) / h)).xx + int2(t % half_h, h - 1 - (t % half_h));
 
     local_compare_and_swap(indices);
 }
@@ -94,29 +91,29 @@ void local_flip(in uint h) {
 // Performs progressively diminishing disperse operations (starting with height h)
 // on locally available indices: e.g. h==8 -> 8 : 4 : 2.
 // One disperse operation for every time we can divide h by 2.
-void local_disperse(in uint h) {
-    uint t = gl_LocalInvocationID.x;
-
+void local_disperse(in uint h, in uint t : SV_GroupThreadID) {
     for (; h > 1; h /= 2) {
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
 
         uint half_h = h >> 1;// Note: h >> 1 is equivalent to h / 2
-        ivec2 indices = ivec2(h * ((2 * t) / h)) + ivec2(t % half_h, half_h + (t % half_h));
+        uint2 indices = (h * ((2 * t) / h)).xx + int2(t % half_h, half_h + (t % half_h));
 
         local_compare_and_swap(indices);
     }
 }
 
-void local_bitonic_merge_sort(uint h) {
+void local_bitonic_merge_sort(uint h, in uint t : SV_GroupThreadID) {
     for (uint hh = 2; hh <= h; hh <<= 1) { // note:  h <<= 1 is same as h *= 2
-        local_flip(hh);
-        local_disperse(hh/2);
+        local_flip(hh, t);
+        local_disperse(hh/2, t);
     }
 }
 
-void main(){
-    uint t = gl_LocalInvocationID.x;
-    uint offset = gl_WorkGroupSize.x * 2 * gl_WorkGroupID.x;// we can use offset if we have more than one invocation.
+[numthreads(WORK_GROUP_SIZE, 1, 1)]
+void main(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupId) {
+    uint t_prime = DTid.x;
+    uint t = GTid.x;
+    uint offset = WORK_GROUP_SIZE * 2 * Gid.x;// we can use offset if we have more than one invocation.
 
     if (params.algorithm <= eLocalDisperse) {
         // In case this shader executes a `local_` algorithm, we must
@@ -124,31 +121,30 @@ void main(){
         if (offset+t*2+1 >= params.n_values) {
             return;
         }
-        local_value[t*2]   = value[offset+t*2];
-        local_value[t*2+1] = value[offset+t*2+1];
+        local_value[t*2]   = buffer.Load<MortonCode>(params.data_offset + offset+t*2 * sizeof(MortonCode));
+        local_value[t*2+1] = buffer.Load<MortonCode>(params.data_offset + offset+t*2+1 * sizeof(MortonCode));
     }
 
     switch (params.algorithm) {
         case eLocalBitonicMergeSort:
-        local_bitonic_merge_sort(params.h);
+        local_bitonic_merge_sort(params.h, t);
         break;
         case eLocalDisperse:
-        local_disperse(params.h);
+        local_disperse(params.h, t);
         break;
         case eBigFlip:
-        big_flip(params.h);
+        big_flip(params.h, t_prime);
         break;
         case eBigDisperse:
-        big_disperse(params.h);
+        big_disperse(params.h, t_prime);
         break;
     }
 
     // Write local memory back to buffer in case we pulled in the first place.
-
     if (params.algorithm <= eLocalDisperse) {
-        barrier();
+        GroupMemoryBarrierWithGroupSync();
         // push to global memory
-        value[offset+t*2]   = local_value[t*2];
-        value[offset+t*2+1] = local_value[t*2+1];
+        buffer.Store(params.data_offset + offset+t*2 * sizeof(MortonCode), local_value[t*2]);
+        buffer.Store(params.data_offset + offset+t*2+1 * sizeof(MortonCode), local_value[t*2+1]);
     }
 }

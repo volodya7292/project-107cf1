@@ -1,4 +1,4 @@
-use crate::renderer::calc_group_count2;
+use crate::renderer::calc_group_count;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
@@ -6,11 +6,12 @@ use vk_wrapper::{
     Pipeline, PipelineStageFlags,
 };
 
+const WORK_GROUP_SIZE: u32 = 1024;
+
 pub struct MortonBitonicSort {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
-    work_group_size_x: u32,
     gb_barrier: BufferBarrier,
 }
 
@@ -38,22 +39,13 @@ impl MortonBitonicSort {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_morton_bitonic_sort.comp.spv"),
+                include_bytes!("../../../shaders/build/rt_morton_bitonic_sort.comp.hlsl.spv"),
                 &[],
                 &[],
             )
             .unwrap();
         let signature = device.create_pipeline_signature(&[shader], &[]).unwrap();
-
-        // Note: allow maximum of 1024 threads per work group.
-        // Minimum shared memory is 16384 bytes => 16384 / 8 = 2048 uvec2 elements.
-        // Therefore divide by 2 (see glsl shared memory size) to get a limit of 1024 threads.
-        let max_work_group_size = device.adapter().props().limits.max_compute_work_group_size;
-        let work_group_size_x = max_work_group_size[0].min(1024);
-
-        let pipeline = device
-            .create_compute_pipeline(&signature, &[(0, work_group_size_x)])
-            .unwrap();
+        let pipeline = device.create_compute_pipeline(&signature, &[]).unwrap();
 
         let mut pool = signature.create_pool(0, 1).unwrap();
         let descriptor = pool.alloc().unwrap();
@@ -68,7 +60,6 @@ impl MortonBitonicSort {
             pipeline,
             pool,
             descriptor,
-            work_group_size_x,
             gb_barrier: global_buffer.barrier(),
         }
     }
@@ -78,8 +69,8 @@ impl MortonBitonicSort {
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let mut h = self.work_group_size_x * 2;
-            let work_group_count = calc_group_count2(payload.n_codes, self.work_group_size_x * 2);
+            let mut h = WORK_GROUP_SIZE * 2;
+            let work_group_count = calc_group_count(payload.n_codes, WORK_GROUP_SIZE * 2);
 
             let buf_offset = payload.morton_codes_offset as u64;
             let buf_size = (payload.n_codes * 8) as u64; // sizeof(uvec2) = 8
@@ -114,7 +105,7 @@ impl MortonBitonicSort {
 
                 let mut hh = h / 2;
                 while hh > 1 {
-                    if hh <= self.work_group_size_x * 2 {
+                    if hh <= WORK_GROUP_SIZE * 2 {
                         execute(hh, MBSAlgorithm::LocalDisperse);
                     } else {
                         execute(hh, MBSAlgorithm::BigDisperse);

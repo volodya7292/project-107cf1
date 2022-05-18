@@ -1,4 +1,4 @@
-use crate::renderer::calc_group_count;
+use crate::renderer::calc_group_count_1d;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
@@ -50,7 +50,7 @@ impl MortonCodesForTrianglesModule {
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let groups = calc_group_count(payload.n_triangles);
+            let groups = calc_group_count_1d(payload.n_triangles);
             cl.push_constants(self.pipeline.signature(), payload);
             cl.dispatch(groups, 1, 1);
         }

@@ -2,11 +2,6 @@
 
 RWByteAddressBuffer buffer : register(u0);
 
-struct GOVNO {
-    float3 pos;
-    uint govno;
-};
-
 struct PushConstants {
     uint indices_offset;
     uint vertices_offset;
@@ -48,7 +43,7 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     }
 
     uint first_index_ptr = params.indices_offset + triangle_id * 3 * INDEX_SIZE;
-    uint3 v_ptrs = buffer.Load<uint3>(first_index_ptr) * VERTEX_SIZE + params.vertices_offset;
+    uint3 v_ptrs = params.vertices_offset.xxx + buffer.Load<uint3>(first_index_ptr) * VERTEX_SIZE;
 
     float3 v0 = buffer.Load<float3>(v_ptrs[0]);
     float3 v1 = buffer.Load<float3>(v_ptrs[1]);

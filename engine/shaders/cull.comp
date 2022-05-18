@@ -8,7 +8,7 @@ struct CullObject {
     uint _pad[3];
 };
 
-layout(local_size_x = 32) in;
+layout(local_size_x = THREAD_GROUP_1D_WIDTH) in;
 
 layout(binding = 0) uniform sampler2D depthPyramid;
 
