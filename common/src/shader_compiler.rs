@@ -88,6 +88,8 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                 cmd.arg("-spirv")
                     .arg("-fvk-use-scalar-layout")
                     .arg("-fspv-target-env=vulkan1.1")
+                    .arg("-HV")
+                    .arg("2021")
                     .arg("-T")
                     .arg(target)
                     .arg("-Fo")

@@ -1,3 +1,4 @@
+use crate::renderer::module::lbvh_generation::LBVHGenerationModule;
 use crate::renderer::module::morton_bitonic_sort::MortonBitonicSort;
 use crate::renderer::module::morton_codes_for_triangles::MortonCodesForTrianglesModule;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use vk_wrapper::{
 pub struct RayTracingModule {
     mct: MortonCodesForTrianglesModule,
     mbs: MortonBitonicSort,
+    bvh_gen: LBVHGenerationModule,
 }
 
 impl RayTracingModule {
@@ -16,6 +18,7 @@ impl RayTracingModule {
         Self {
             mct: MortonCodesForTrianglesModule::new(device, global_buffer),
             mbs: MortonBitonicSort::new(device, global_buffer),
+            bvh_gen: LBVHGenerationModule::new(device, global_buffer),
         }
     }
 
