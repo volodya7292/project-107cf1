@@ -29,7 +29,7 @@ struct MBSPayload {
 }
 
 #[repr(C)]
-struct MBSPushConstants {
+struct PushConstants {
     h: u32,
     algorithm: MBSAlgorithm,
     n_values: u32,
@@ -83,7 +83,7 @@ impl MortonBitonicSort {
                 .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
 
             let mut execute = |h: u32, alg: MBSAlgorithm| {
-                let mut consts = MBSPushConstants {
+                let mut consts = PushConstants {
                     h,
                     algorithm: alg,
                     n_values: payload.n_codes,

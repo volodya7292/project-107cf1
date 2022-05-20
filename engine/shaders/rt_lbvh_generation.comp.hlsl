@@ -1,4 +1,4 @@
-#include "common.hlsl"
+#include "common.hlsli"
 
 struct Node {
     uint element_id;

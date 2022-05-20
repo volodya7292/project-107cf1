@@ -1,4 +1,4 @@
-#include "common.hlsl"
+#include "common.hlsli"
 
 // This shader implements a sorting network.
 // It is follows the alternative notation for bitonic sorting networks, as given at:

@@ -12,6 +12,21 @@ struct MortonCode {
     uint element_id;
 };
 
+struct Bounds {
+    float3 p_min;
+    float3 p_max;
+};
+
+#define LBVHNode_bounds_offset 0
+
+struct LBVHNode {
+    Bounds bounds;
+    uint element_index;
+    uint parent;
+    uint child_a;
+    uint child_b;
+};
+
 template<typename T>
 struct SubGlobalBuffer {
     RWByteAddressBuffer buffer;
