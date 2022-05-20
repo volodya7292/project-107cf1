@@ -9,8 +9,8 @@ struct PushConstants {
     uint n_triangles;
 };
 
-const uint INDEX_SIZE = sizeof(uint);
-const uint VERTEX_SIZE = sizeof(float3);
+static const uint INDEX_SIZE = sizeof(uint);
+static const uint VERTEX_SIZE = sizeof(float3);
 
 [[vk::push_constant]]
 PushConstants params;

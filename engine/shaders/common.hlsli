@@ -37,6 +37,11 @@ struct SubGlobalBuffer {
     }
 
     void Store(uint index, T item) {
-        return buffer.Store(offset + index * sizeof(T), item);
+        buffer.Store(offset + index * sizeof(T), item);
+    }
+
+    template<typename S>
+    void StoreWithOffset(uint index, uint byte_offset, S item) {
+        buffer.Store(offset + index * sizeof(T) + byte_offset, item);
     }
 };

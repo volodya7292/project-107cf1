@@ -1,4 +1,6 @@
 use std::collections::{hash_map, HashMap};
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::SystemTime;
@@ -16,6 +18,8 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
     let out_dir = env::var("OUT_DIR").unwrap();
     let ts_path_s = out_dir + "/shader_timestamps";
     let ts_path = Path::new(&ts_path_s);
+
+    let mut log_file = File::create(dst_dir.join("output.log")).unwrap();
 
     // Read timestamp file
     let mut timestamps: HashMap<String, TSMetaData> = match fs::File::open(ts_path) {
@@ -115,10 +119,12 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
             };
 
             let output = cmd.output().unwrap();
+            log_file.write(&output.stdout).unwrap();
+            log_file.write(&output.stderr).unwrap();
             println!("{}", String::from_utf8_lossy(&output.stdout));
+            println!("{}", String::from_utf8_lossy(&output.stderr));
 
             if !output.status.success() {
-                println!("{}", String::from_utf8_lossy(&output.stderr));
                 panic!("Failed to compile shader: {:?}", cmd);
             }
 
@@ -135,6 +141,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                     .arg("-O");
 
                 let output = cmd.output().unwrap();
+                log_file.write(&output.stdout).unwrap();
                 println!("{}", String::from_utf8_lossy(&output.stdout));
 
                 if !output.status.success() {
