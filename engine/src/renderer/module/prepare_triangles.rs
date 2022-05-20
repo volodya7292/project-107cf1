@@ -1,23 +1,27 @@
 use crate::renderer::calc_group_count_1d;
+use nalgebra_glm::Vec3;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct MortonCodesForTrianglesModule {
+pub struct PrepareTrianglesModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct MCTPayload {
+struct PrepareTrianglesPayload {
     indices_offset: u32,
     vertices_offset: u32,
     morton_codes_offset: u32,
+    nodes_offset: u32,
     n_triangles: u32,
+    mesh_bound_min: Vec3,
+    mesh_bound_max: Vec3,
 }
 
-impl MortonCodesForTrianglesModule {
+impl PrepareTrianglesModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
@@ -45,7 +49,7 @@ impl MortonCodesForTrianglesModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[MCTPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[PrepareTrianglesPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
