@@ -4,3 +4,4 @@
 /target
 /res/shaders
 /work_dir
+**/*.DS_Store

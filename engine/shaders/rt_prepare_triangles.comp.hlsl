@@ -14,8 +14,8 @@ struct PushConstants {
     float3 mesh_bound_max;
 };
 
-static const uint INDEX_SIZE = sizeof(uint);
-static const uint VERTEX_SIZE = sizeof(float3);
+#define INDEX_SIZE sizeof(uint)
+#define VERTEX_SIZE sizeof(float3)
 
 [[vk::push_constant]]
 PushConstants params;

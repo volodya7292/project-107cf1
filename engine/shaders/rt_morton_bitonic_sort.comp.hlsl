@@ -14,7 +14,7 @@
 #define eBigFlip 2
 #define eBigDisperse 3
 
-static const uint WORK_GROUP_SIZE = 1024;
+#define WORK_GROUP_SIZE 1024
 
 struct PushConstants {
     uint h;

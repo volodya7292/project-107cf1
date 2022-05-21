@@ -12,6 +12,9 @@
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/vk-wrapper/target" />
       <excludeFolder url="file://$MODULE_DIR$/engine/target" />
+      <excludeFolder url="file://$MODULE_DIR$/engine/shaders/build" />
+      <excludeFolder url="file://$MODULE_DIR$/res/shaders" />
+      <excludeFolder url="file://$MODULE_DIR$/work_dir" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
