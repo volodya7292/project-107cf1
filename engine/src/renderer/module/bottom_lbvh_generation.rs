@@ -3,23 +3,24 @@ use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct LeafAABBsForLBVHsModule {
+pub struct LBVHGenerationModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct LALPayload {
-    top_nodes_offset: u32,
+pub struct LBVHGenPayload {
+    morton_codes_offset: u32,
+    nodes_offset: u32,
     n_elements: u32,
 }
 
-impl LeafAABBsForLBVHsModule {
+impl LBVHGenerationModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_leaf_aabbs_for_lbvhs.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_bottom_lbvh_generation.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -43,7 +44,7 @@ impl LeafAABBsForLBVHsModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[LALPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[LBVHGenPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 

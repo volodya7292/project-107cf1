@@ -28,26 +28,10 @@ struct SubGlobalBuffer {
     }
 };
 
-
-// Expands a 10-bit integer into 30 bits
-// by inserting 2 zeros after each bit.
-inline uint3 mortonExpandBits(uint3 v) {
-    v = (v * 0x00010001u) & 0xFF0000FFu;
-    v = (v * 0x00000101u) & 0x0F00F00Fu;
-    v = (v * 0x00000011u) & 0xC30C30C3u;
-    v = (v * 0x00000005u) & 0x49249249u;
-    return v;
-}
-
-// Calculates a 30-bit Morton code for the
-// given 3D point located within the unit cube [0,1].
-inline uint morton3D(float3 p) {
-    uint3 upoint = uint3(clamp(p * 1024.0, 0.0, 1023.0));
-    uint3 ex = mortonExpandBits(upoint);
-    return ex.x * 4 + ex.y * 2 + ex.z;
-}
-
-inline float3 mortonComputeCenter(float3 cmin, float3 cmax, float3 min, float3 max) {
+// Calculates center point (within the unit cube [0,1]) of an inner AABB inside outer AABB
+// cmin, cmax: outer AABB
+// min, max: inner AABB
+inline float3 aabbComputeCenter(float3 cmin, float3 cmax, float3 min, float3 max) {
 	float3 len = cmax - cmin;
 
 	float3 tmpMin = (min - cmin) / len;
@@ -61,11 +45,6 @@ inline float3 mortonComputeCenter(float3 cmin, float3 cmax, float3 min, float3 m
 }
 
 // ----------------------------------------------------------------------
-
-struct MortonCode {
-    uint code;
-    uint element_id;
-};
 
 struct Bounds {
     float3 p_min;
@@ -81,7 +60,7 @@ struct Bounds {
 #define LBVHNode_bounds_offset 0
 struct LBVHNode {
     Bounds bounds;
-    uint element_index;
+    uint element_id;
     uint parent;
     uint child_a;
     uint child_b;

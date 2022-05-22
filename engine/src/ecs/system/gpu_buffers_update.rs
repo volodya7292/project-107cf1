@@ -2,10 +2,11 @@ use crate::ecs::component;
 use crate::ecs::scene::Entity;
 use crate::ecs::scene_storage::{ComponentStorageImpl, LockedStorage};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::{GBVertexMesh, VMBufferUpdate};
+use crate::renderer::{GBVertexMesh, LBVHNode, VMBufferUpdate};
 use crate::utils::HashMap;
 use parking_lot::Mutex;
 use range_alloc::RangeAllocator;
+use std::mem;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::{DeviceBuffer, WaitSemaphore};
@@ -55,7 +56,15 @@ impl GpuBuffersUpdate<'_> {
                     continue;
                 }
 
-                let gb_range = self.gb_allocator.allocate_range(src_buffer.size()).unwrap();
+                let n_triangles = raw_mesh.index_count / 3;
+                let triangle_buffer_size = src_buffer.size();
+                let node_buffer_size = (n_triangles * 2 - 1) as u64 * (mem::size_of::<LBVHNode>() as u64);
+
+                let gb_range = self
+                    .gb_allocator
+                    .allocate_range(triangle_buffer_size + node_buffer_size)
+                    .unwrap();
+
                 let gb_mesh = GBVertexMesh {
                     raw: Arc::clone(&raw_mesh),
                     ref_count: 1,
@@ -66,6 +75,7 @@ impl GpuBuffersUpdate<'_> {
                         .map(|v| gb_range.start + *v)
                         .collect(),
                     gb_indices_offset: gb_range.start + raw_mesh.indices_offset,
+                    gb_rt_nodes_offset: gb_range.start + triangle_buffer_size,
                 };
                 let gb_range = &gb_mesh.gb_range;
 

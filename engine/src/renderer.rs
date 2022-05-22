@@ -5,6 +5,7 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
+mod helpers;
 mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
@@ -23,6 +24,7 @@ use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use material_pipeline::{MaterialPipelineSet, PipelineConfig};
+pub(crate) use module::ray_tracing::LBVHNode;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
@@ -309,6 +311,8 @@ pub(crate) struct GBVertexMesh {
     pub gb_range: Range<u64>,
     pub gb_binding_offsets: SmallVec<[u64; 6]>,
     pub gb_indices_offset: u64,
+    /// Where LBVH nodes are stored
+    pub gb_rt_nodes_offset: u64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -923,236 +927,6 @@ impl Renderer {
         &mut self.active_camera
     }
 
-    pub fn load_texture_into_atlas(
-        &mut self,
-        texture_index: u32,
-        atlas_type: TextureAtlasType,
-        res_ref: ResourceRef,
-    ) {
-        let res_data = res_ref.read().unwrap();
-
-        let mut t = basis_universal::Transcoder::new();
-        t.prepare_transcoding(&res_data).unwrap();
-
-        let img_info = t.image_info(&res_data, 0).unwrap();
-        let width = img_info.m_width;
-        let height = img_info.m_height;
-
-        if !utils::is_pow_of_2(width as u64)
-            || width != height
-            || width < (self.settings.texture_quality as u32)
-        {
-            return;
-        }
-
-        let mipmaps: Vec<_> = (0..img_info.m_total_levels)
-            .map(|i| {
-                t.transcode_image_level(
-                    &res_data,
-                    atlas_type.basis_decode_type(),
-                    TranscodeParameters {
-                        image_index: 0,
-                        level_index: i,
-                        decode_flags: None,
-                        output_row_pitch_in_blocks_or_pixels: None,
-                        output_rows_in_pixels: None,
-                    },
-                )
-                .unwrap()
-            })
-            .collect();
-
-        t.end_transcoding();
-
-        let first_level = UInt::log2(width / (self.settings.texture_quality as u32));
-        let last_level = UInt::log2(width / 4); // BC block size = 4x4
-
-        self.texture_atlases[atlas_type as usize]
-            .set_texture(
-                texture_index,
-                &mipmaps[(first_level as usize)..(last_level as usize + 1)],
-            )
-            .unwrap();
-    }
-
-    /// Returns id of registered material pipeline.
-    pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
-        assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
-
-        let main_signature = self
-            .device
-            .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
-
-        let vertex_shader = Arc::clone(shaders.iter().find(|v| v.stage() == ShaderStage::VERTEX).unwrap());
-        let depth_signature = self
-            .device
-            .create_pipeline_signature(&[vertex_shader], &*ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
-
-        let mut pipeline_set = MaterialPipelineSet {
-            device: Arc::clone(&self.device),
-            main_signature: Arc::clone(&main_signature),
-            pipelines: Default::default(),
-            uniform_buffer_size: mem::size_of::<T>() as u32,
-            uniform_buffer_model_offset: T::model_offset(),
-        };
-
-        pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ,
-            &PipelineConfig {
-                render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ_WRITE,
-            &PipelineConfig {
-                render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: true,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_SOLID,
-            &PipelineConfig {
-                render_pass: &self.g_render_pass,
-                signature: &main_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_TRANSLUCENT,
-            &PipelineConfig {
-                render_pass: &self.g_render_pass,
-                signature: &main_signature,
-                subpass_index: 0,
-                cull_back_faces: false,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-
-        if let hash_map::Entry::Vacant(e) = self.g_per_pipeline_pools.entry(main_signature) {
-            let pool = e.key().create_pool(1, 16).unwrap();
-            e.insert(pool);
-        }
-
-        let mat_pipelines = &mut self.material_pipelines;
-        mat_pipelines.push(pipeline_set);
-        (mat_pipelines.len() - 1) as u32
-    }
-
-    pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
-        assert!(id < MAX_MATERIAL_COUNT);
-        self.material_updates.insert(id, info);
-    }
-
-    /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
-    // pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-    //     self.vertex_mesh_updates.contains_key(&entity)
-    //         || self
-    //             .vertex_mesh_pending_updates
-    //             .iter()
-    //             .any(|v| v.entity == entity)
-    // }
-
-    /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
-    unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
-        if updates.is_empty() {
-            return;
-        }
-
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
-        let update_count = updates.len();
-        let staging_size = self.staging_buffer.size();
-        let mut used_size = 0;
-        let mut i = 0;
-
-        while i < update_count {
-            {
-                let mut cl = self.staging_cl.lock();
-                cl.begin(true).unwrap();
-
-                while i < update_count {
-                    let update = &updates[i];
-
-                    let (copy_size, new_used_size) = match update {
-                        BufferUpdate::Type1(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                        BufferUpdate::Type2(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                    };
-
-                    if new_used_size > staging_size {
-                        used_size = 0;
-                        break;
-                    }
-
-                    match update {
-                        BufferUpdate::Type1(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-                            cl.copy_buffer_to_device(
-                                &self.staging_buffer,
-                                used_size,
-                                &update.buffer,
-                                update.offset,
-                                copy_size,
-                            );
-                        }
-                        BufferUpdate::Type2(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-
-                            let regions: SmallVec<[CopyRegion; 64]> = update
-                                .regions
-                                .iter()
-                                .map(|region| {
-                                    CopyRegion::new(
-                                        used_size + region.src_offset(),
-                                        region.dst_offset(),
-                                        region.size(),
-                                    )
-                                })
-                                .collect();
-
-                            cl.copy_buffer_regions_to_device_bytes(
-                                &self.staging_buffer,
-                                &update.buffer,
-                                &regions,
-                            );
-                        }
-                    }
-
-                    used_size = new_used_size;
-                    i += 1;
-                }
-
-                cl.end().unwrap();
-            }
-
-            let submit = &mut self.staging_submit;
-            graphics_queue.submit(submit).unwrap();
-            submit.wait().unwrap();
-        }
-    }
-
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -1192,7 +966,6 @@ impl Renderer {
         if !self.vertex_mesh_pending_updates.is_empty() {
             let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
             unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
-            self.transfer_submit[1].wait().unwrap();
         }
 
         let t00 = Instant::now();
@@ -1236,13 +1009,17 @@ impl Renderer {
             timings.batch0_hierarchy_propag = (t3 - t2).as_secs_f64();
 
             // Wait for previous transfers before committing them
-            // if !self.vertex_mesh_pending_updates.is_empty() {
-            //     s.spawn(|_| self.transfer_submit[1].wait().unwrap());
-            // }
+            if !self.vertex_mesh_pending_updates.is_empty() {
+                s.spawn(|_| self.transfer_submit[1].wait().unwrap());
+            }
         });
 
         let t11 = Instant::now();
         timings.systems_batch0 = (t11 - t00).as_secs_f64();
+        let t00 = Instant::now();
+
+        // Before updating new buffers, collect all the completed updates to commit them
+        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
             uniform_buffer_updates: &mut uniform_buffers_updates,
@@ -1250,12 +1027,6 @@ impl Renderer {
             renderer_comps: self.scene.storage::<component::RenderConfig>(),
             renderables: &self.renderables,
         };
-
-        let t00 = Instant::now();
-
-        // Before updating new buffers, collect all the completed updates to commit them
-        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
-
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
@@ -1378,24 +1149,6 @@ impl Renderer {
         timings.total = (total_t1 - total_t0).as_secs_f64();
 
         timings
-    }
-
-    fn bind_and_draw_vertex_mesh(&self, cl: &mut CmdList, vertex_mesh: &GBVertexMesh) {
-        let gb_handle = self.global_buffer.handle();
-        let binding_offsets: SmallVec<[_; 6]> = vertex_mesh
-            .gb_binding_offsets
-            .iter()
-            .map(|v| (gb_handle, *v))
-            .collect();
-
-        if vertex_mesh.raw.indexed && vertex_mesh.raw.index_count > 0 {
-            cl.bind_vertex_buffers(0, &binding_offsets);
-            cl.bind_index_buffer(&self.global_buffer, vertex_mesh.gb_indices_offset);
-            cl.draw_indexed(vertex_mesh.raw.index_count, 0, 0);
-        } else if vertex_mesh.raw.vertex_count > 0 {
-            cl.bind_vertex_buffers(0, &*binding_offsets);
-            cl.draw(vertex_mesh.raw.vertex_count, 0);
-        }
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {

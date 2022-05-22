@@ -1,4 +1,5 @@
 #include "common.hlsli"
+#include "morton.hlsli"
 
 // Computes bounds and morton code for each triangle in a mesh
 
@@ -38,7 +39,7 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     bounds.p_min = min(v0, min(v1, v2));
     bounds.p_max = max(v0, max(v1, v2));
 
-    float3 center = mortonComputeCenter(params.mesh_bound_min, params.mesh_bound_max, bounds.p_min, bounds.p_max);
+    float3 center = aabbComputeCenter(params.mesh_bound_min, params.mesh_bound_max, bounds.p_min, bounds.p_max);
     uint code = morton3D(center);
 
     MortonCode morton_code;
