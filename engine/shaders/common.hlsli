@@ -70,6 +70,12 @@ struct MortonCode {
 struct Bounds {
     float3 p_min;
     float3 p_max;
+
+    inline Bounds combine(Bounds other) {
+        other.p_min = min(p_min, other.p_min);
+        other.p_max = max(p_max, other.p_max);
+        return other;
+    }
 };
 
 #define LBVHNode_bounds_offset 0

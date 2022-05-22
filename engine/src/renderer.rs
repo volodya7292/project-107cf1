@@ -461,15 +461,11 @@ lazy_static! {
 }
 
 pub fn calc_group_count_1d(thread_count: u32) -> u32 {
-    calc_group_count(thread_count, COMPUTE_LOCAL_THREADS_1D)
+    UInt::div_ceil(thread_count, COMPUTE_LOCAL_THREADS_1D)
 }
 
 pub fn calc_group_count_2d(thread_count: u32) -> u32 {
-    calc_group_count(thread_count, COMPUTE_LOCAL_THREADS_2D)
-}
-
-pub fn calc_group_count(thread_count: u32, local_size: u32) -> u32 {
-    (thread_count + local_size - 1) / local_size
+    UInt::div_ceil(thread_count, COMPUTE_LOCAL_THREADS_2D)
 }
 
 impl Renderer {
@@ -968,8 +964,8 @@ impl Renderer {
 
         t.end_transcoding();
 
-        let first_level = UInt::log2(&(width / (self.settings.texture_quality as u32)));
-        let last_level = UInt::log2(&(width / 4)); // BC block size = 4x4
+        let first_level = UInt::log2(width / (self.settings.texture_quality as u32));
+        let last_level = UInt::log2(width / 4); // BC block size = 4x4
 
         self.texture_atlases[atlas_type as usize]
             .set_texture(

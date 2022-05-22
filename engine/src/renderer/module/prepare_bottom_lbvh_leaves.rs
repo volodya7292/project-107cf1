@@ -4,23 +4,28 @@ use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct AABBsForLBVHsModule {
+pub struct PrepareBottomLBVHLeavesModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct AABBsForLBVHsPayload {
-    top_nodes_offset: u32,
-    n_elements: u32,
+struct PBLLPayload {
+    indices_offset: u32,
+    vertices_offset: u32,
+    morton_codes_offset: u32,
+    nodes_offset: u32,
+    n_triangles: u32,
+    mesh_bound_min: Vec3,
+    mesh_bound_max: Vec3,
 }
 
-impl AABBsForLBVHsModule {
+impl PrepareBottomLBVHLeavesModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_aabbs_for_lbvhs.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_prepare_bottom_lbvh_leaves.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -44,12 +49,12 @@ impl AABBsForLBVHsModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[AABBsForLBVHsPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[PBLLPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_elements);
+            let groups = calc_group_count_1d(payload.n_triangles);
             cl.push_constants(self.pipeline.signature(), payload);
             cl.dispatch(groups, 1, 1);
         }

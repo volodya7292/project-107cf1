@@ -15,6 +15,10 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
     let src_dir = src_dir.as_ref();
     let dst_dir = dst_dir.as_ref();
 
+    if !dst_dir.exists() {
+        fs::create_dir(dst_dir).unwrap();
+    }
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let ts_path_s = out_dir + "/shader_timestamps";
     let ts_path = Path::new(&ts_path_s);
