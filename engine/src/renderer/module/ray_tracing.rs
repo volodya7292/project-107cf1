@@ -5,6 +5,7 @@ use crate::renderer::module::morton_bitonic_sort::MortonBitonicSortModule;
 use crate::renderer::module::top_lbvh_bounds::TopLBVHBoundsModule;
 use crate::renderer::module::top_lbvh_generation::TopLBVHGenModule;
 use crate::renderer::module::top_lbvh_leaf_bounds::TopLBVHLeafBoundsModule;
+use crate::renderer::module::top_lbvh_node_bounds::TopLBVHNodeBoundsModule;
 use crate::renderer::module::top_lbvh_prepare_leaves::TopLBVHPrepareLeavesModule;
 use nalgebra_glm::{Mat4, Vec3};
 use std::sync::Arc;
@@ -30,16 +31,17 @@ use vk_wrapper::{
 //    6. Compute bounds for each node.
 
 pub struct RayTracingModule {
-    mbs: MortonBitonicSortModule,
+    bitonic_sort: MortonBitonicSortModule,
 
-    pbll: BottomLBVHPrepareLeavesModule,
-    blg: BottomLBVHGenModule,
-    blnb: BottomLBVHNodeBoundsModule,
+    bl_prepare_leaves: BottomLBVHPrepareLeavesModule,
+    bl_gen: BottomLBVHGenModule,
+    bl_node_bounds: BottomLBVHNodeBoundsModule,
 
-    tllb: TopLBVHLeafBoundsModule,
-    tlb: TopLBVHBoundsModule,
-    tlpl: TopLBVHPrepareLeavesModule,
-    tlg: TopLBVHGenModule,
+    tl_leaf_bounds: TopLBVHLeafBoundsModule,
+    tl_bounds: TopLBVHBoundsModule,
+    tl_prepare_leaves: TopLBVHPrepareLeavesModule,
+    tl_gen: TopLBVHGenModule,
+    tl_node_bounds: TopLBVHNodeBoundsModule,
 }
 
 #[repr(C)]
@@ -78,14 +80,15 @@ struct TopLBVHNode {
 impl RayTracingModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         Self {
-            pbll: BottomLBVHPrepareLeavesModule::new(device, global_buffer),
-            mbs: MortonBitonicSortModule::new(device, global_buffer),
-            blg: BottomLBVHGenModule::new(device, global_buffer),
-            blnb: BottomLBVHNodeBoundsModule::new(device, global_buffer),
-            tllb: TopLBVHLeafBoundsModule::new(device, global_buffer),
-            tlb: TopLBVHBoundsModule::new(device, global_buffer),
-            tlpl: TopLBVHPrepareLeavesModule::new(device, global_buffer),
-            tlg: TopLBVHGenModule::new(device, global_buffer),
+            bl_prepare_leaves: BottomLBVHPrepareLeavesModule::new(device, global_buffer),
+            bitonic_sort: MortonBitonicSortModule::new(device, global_buffer),
+            bl_gen: BottomLBVHGenModule::new(device, global_buffer),
+            bl_node_bounds: BottomLBVHNodeBoundsModule::new(device, global_buffer),
+            tl_leaf_bounds: TopLBVHLeafBoundsModule::new(device, global_buffer),
+            tl_bounds: TopLBVHBoundsModule::new(device, global_buffer),
+            tl_prepare_leaves: TopLBVHPrepareLeavesModule::new(device, global_buffer),
+            tl_gen: TopLBVHGenModule::new(device, global_buffer),
+            tl_node_bounds: TopLBVHNodeBoundsModule::new(device, global_buffer),
         }
     }
 

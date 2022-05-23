@@ -76,6 +76,7 @@ struct LBVHInstance {
     Bounds bounds;
 };
 
+#define TopLBVHNode_instance_offset 0
 struct TopLBVHNode {
     LBVHInstance instance;
     uint parent;
