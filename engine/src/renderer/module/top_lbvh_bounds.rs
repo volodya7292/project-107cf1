@@ -8,14 +8,14 @@ use vk_wrapper::{
 
 const WORK_GROUP_SIZE: u32 = 512;
 
-pub struct SceneBoundingBox {
+pub struct TopLBVHBoundsModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
     gb_barrier: BufferBarrier,
 }
 
-struct SBBPayload {
+struct TLBPayload {
     top_nodes_offset: u32,
     temp_aabbs_offset: u32,
     n_elements: u32,
@@ -29,11 +29,11 @@ struct PushConstants {
     iteration: u32,
 }
 
-impl SceneBoundingBox {
+impl TopLBVHBoundsModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_scene_bounding_box.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_top_lbvh_bounds.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -58,7 +58,7 @@ impl SceneBoundingBox {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[SBBPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[TLBPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 

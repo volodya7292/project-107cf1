@@ -1,9 +1,9 @@
 mod bottom_lbvh_generation;
-mod bounds_for_bottom_lbvh;
-mod leaf_bounds_for_top_lbvh;
+mod bottom_lbvh_node_bounds;
+mod bottom_lbvh_prepare_leaves;
 mod morton_bitonic_sort;
-mod prepare_bottom_lbvh_leaves;
-mod prepare_top_lbvh_leaves;
-mod scene_bounding_box;
+mod top_lbvh_bounds;
+mod top_lbvh_leaf_bounds;
+mod top_lbvh_prepare_leaves;
 
 pub mod ray_tracing;

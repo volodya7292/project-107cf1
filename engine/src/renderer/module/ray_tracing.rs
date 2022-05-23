@@ -1,10 +1,10 @@
 use crate::renderer::module::bottom_lbvh_generation::LBVHGenerationModule;
-use crate::renderer::module::bounds_for_bottom_lbvh::BoundsForBottomLBVHModule;
-use crate::renderer::module::leaf_bounds_for_top_lbvh::LeafBoundsForTopLBVHModule;
+use crate::renderer::module::bottom_lbvh_node_bounds::BottomLBVHNodeBoundsModule;
+use crate::renderer::module::bottom_lbvh_prepare_leaves::BottomLBVHPrepareLeavesModule;
 use crate::renderer::module::morton_bitonic_sort::MortonBitonicSort;
-use crate::renderer::module::prepare_bottom_lbvh_leaves::PrepareBottomLBVHLeavesModule;
-use crate::renderer::module::prepare_top_lbvh_leaves::PrepareTopLBVHLeavesModule;
-use crate::renderer::module::scene_bounding_box::SceneBoundingBox;
+use crate::renderer::module::top_lbvh_bounds::TopLBVHBoundsModule;
+use crate::renderer::module::top_lbvh_leaf_bounds::TopLBVHLeafBoundsModule;
+use crate::renderer::module::top_lbvh_prepare_leaves::TopLBVHPrepareLeavesModule;
 use nalgebra_glm::{Mat4, Vec3};
 use std::sync::Arc;
 use vk_wrapper::{
@@ -31,13 +31,13 @@ use vk_wrapper::{
 pub struct RayTracingModule {
     mbs: MortonBitonicSort,
 
-    pbll: PrepareBottomLBVHLeavesModule,
+    pbll: BottomLBVHPrepareLeavesModule,
     bvh_gen: LBVHGenerationModule,
-    bounds_bottom_lbvh: BoundsForBottomLBVHModule,
+    bounds_bottom_lbvh: BottomLBVHNodeBoundsModule,
 
-    aabbs_for_lbvhs: LeafBoundsForTopLBVHModule,
-    scene_bounds: SceneBoundingBox,
-    ptll: PrepareTopLBVHLeavesModule,
+    aabbs_for_lbvhs: TopLBVHLeafBoundsModule,
+    scene_bounds: TopLBVHBoundsModule,
+    ptll: TopLBVHPrepareLeavesModule,
 }
 
 #[repr(C)]
@@ -77,13 +77,13 @@ struct TopLBVHNode {
 impl RayTracingModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         Self {
-            pbll: PrepareBottomLBVHLeavesModule::new(device, global_buffer),
+            pbll: BottomLBVHPrepareLeavesModule::new(device, global_buffer),
             mbs: MortonBitonicSort::new(device, global_buffer),
             bvh_gen: LBVHGenerationModule::new(device, global_buffer),
-            bounds_bottom_lbvh: BoundsForBottomLBVHModule::new(device, global_buffer),
-            aabbs_for_lbvhs: LeafBoundsForTopLBVHModule::new(device, global_buffer),
-            scene_bounds: SceneBoundingBox::new(device, global_buffer),
-            ptll: PrepareTopLBVHLeavesModule::new(device, global_buffer),
+            bounds_bottom_lbvh: BottomLBVHNodeBoundsModule::new(device, global_buffer),
+            aabbs_for_lbvhs: TopLBVHLeafBoundsModule::new(device, global_buffer),
+            scene_bounds: TopLBVHBoundsModule::new(device, global_buffer),
+            ptll: TopLBVHPrepareLeavesModule::new(device, global_buffer),
         }
     }
 

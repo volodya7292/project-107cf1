@@ -56,8 +56,8 @@ impl HierarchyPropagation<'_> {
             let global_transform = if global_transform_changed {
                 let model_transform = transform_comps.get(entity).unwrap();
 
-                let new_global_transform: GlobalTransform =
-                    parent_global_transform.combine(model_transform).into();
+                let new_global_transform =
+                    GlobalTransform::new(parent_global_transform.transform.combine(model_transform));
 
                 global_transform_comps.set(entity, new_global_transform);
                 new_global_transform

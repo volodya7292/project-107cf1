@@ -4,14 +4,14 @@ use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct PrepareBottomLBVHLeavesModule {
+pub struct BottomLBVHPrepareLeavesModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct PBLLPayload {
+struct BLPLPayload {
     indices_offset: u32,
     vertices_offset: u32,
     morton_codes_offset: u32,
@@ -21,11 +21,11 @@ struct PBLLPayload {
     mesh_bound_max: Vec3,
 }
 
-impl PrepareBottomLBVHLeavesModule {
+impl BottomLBVHPrepareLeavesModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_prepare_bottom_lbvh_leaves.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_bottom_lbvh_prepare_leaves.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -49,7 +49,7 @@ impl PrepareBottomLBVHLeavesModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[PBLLPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[BLPLPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 

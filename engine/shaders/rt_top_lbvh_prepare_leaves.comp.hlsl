@@ -1,4 +1,5 @@
 #include "common.hlsli"
+#include "morton.hlsli"
 
 // Computes morton code for each TopLBVHNode in the scene
 
@@ -28,7 +29,7 @@ void main(uint3 DTid : SV_DispatchThreadID) {
 
     Bounds bounds = buffer.Load<TopLBVHNode>(nodes_leaves_offset + element_id * sizeof(TopLBVHNode)).bounds;
 
-    float3 center = mortonComputeCenter(params.scene_bound_min, params.scene_bound_max, bounds.p_min, bounds.p_max);
+    float3 center = aabbComputeCenter(params.scene_bound_min, params.scene_bound_max, bounds.p_min, bounds.p_max);
     uint code = morton3D(center);
 
     MortonCode morton_code;

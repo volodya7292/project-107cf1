@@ -3,23 +3,23 @@ use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct BoundsForBottomLBVHModule {
+pub struct TopLBVHLeafBoundsModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-pub struct BoundsForBLBVHPayload {
-    nodes_offset: u32,
-    n_triangles: u32,
+struct TLLBPayload {
+    top_nodes_offset: u32,
+    n_elements: u32,
 }
 
-impl BoundsForBottomLBVHModule {
+impl TopLBVHLeafBoundsModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_bounds_for_bottom_lbvh.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_top_lbvh_leaf_bounds.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -43,12 +43,12 @@ impl BoundsForBottomLBVHModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BoundsForBLBVHPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[TLLBPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_triangles);
+            let groups = calc_group_count_1d(payload.n_elements);
             cl.push_constants(self.pipeline.signature(), payload);
             cl.dispatch(groups, 1, 1);
         }

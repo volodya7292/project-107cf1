@@ -1,29 +1,25 @@
 use crate::renderer::calc_group_count_1d;
-use nalgebra_glm::Vec3;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct PrepareTopLBVHLeavesModule {
+pub struct BottomLBVHNodeBoundsModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct PTLLPayload {
-    morton_codes_offset: u32,
-    top_nodes_offset: u32,
-    n_elements: u32,
-    scene_bound_min: Vec3,
-    scene_bound_max: Vec3,
+pub struct BLNBPayload {
+    nodes_offset: u32,
+    n_triangles: u32,
 }
 
-impl PrepareTopLBVHLeavesModule {
+impl BottomLBVHNodeBoundsModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_prepare_top_lbvh_leaves.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_bottom_lbvh_node_bounds.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -47,12 +43,12 @@ impl PrepareTopLBVHLeavesModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[PTLLPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BLNBPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_elements);
+            let groups = calc_group_count_1d(payload.n_triangles);
             cl.push_constants(self.pipeline.signature(), payload);
             cl.dispatch(groups, 1, 1);
         }

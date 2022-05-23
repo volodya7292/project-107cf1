@@ -177,12 +177,13 @@ pub struct Renderer {
     vertex_mesh_updates: HashMap<Entity, Arc<RawVertexMesh>>,
     vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
 
-    /// Entities ordered in respect to children order inside `Children` components:
+    /// Entities ordered in respect to order of children inside `Children` components:
     /// global parents are not in order, but all the children are.
     ordered_entities: Vec<Entity>,
     renderables: HashMap<Entity, Renderable>,
     gb_vertex_meshes: HashMap<usize, GBVertexMesh>,
     entity_vertex_meshes: HashMap<Entity, usize>,
+
     pub(crate) material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
@@ -1216,8 +1217,8 @@ impl Renderer {
                     }
 
                     let sphere = vertex_mesh.raw.sphere();
-                    let center = sphere.center() + global_transform.position_f32();
-                    let radius = sphere.radius() * global_transform.scale.max();
+                    let center = sphere.center() + global_transform.transform.position_f32();
+                    let radius = sphere.radius() * global_transform.transform.scale.max();
 
                     if !renderer.visible || !frustum.is_sphere_visible(&center, radius) {
                         continue;

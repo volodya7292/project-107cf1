@@ -25,12 +25,12 @@ impl GlobalTransformEvents<'_> {
         renderables: &HashMap<Entity, Renderable>,
     ) {
         if let Some(renderer) = renderer {
-            let matrix = global_transform.matrix_f32();
+            let matrix = global_transform.transform.matrix_f32();
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
             let renderable = &renderables[&entity];
 
-            if let crate::renderer::BufferUpdate::Type2(upd) = &mut buffer_updates[0] {
+            if let BufferUpdate::Type2(upd) = &mut buffer_updates[0] {
                 let src_offset = upd.data.len();
                 upd.data.extend_from_slice(matrix_bytes);
                 upd.regions.push(vkw::CopyRegion::new(

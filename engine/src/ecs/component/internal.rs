@@ -1,7 +1,7 @@
 use crate::ecs::component::Transform;
 use crate::ecs::scene_storage::Entity;
 use crate::utils::IndexSet;
-use std::ops::Deref;
+use nalgebra_glm::Mat4;
 
 pub struct Parent(pub Entity);
 
@@ -11,18 +11,21 @@ pub struct Children {
 }
 
 #[derive(Copy, Clone, Default)]
-pub struct GlobalTransform(Transform);
-
-impl From<Transform> for GlobalTransform {
-    fn from(transform: Transform) -> Self {
-        Self(transform)
-    }
+pub struct GlobalTransform {
+    pub transform: Transform,
+    pub matrix: Mat4,
+    pub matrix_inverse: Mat4,
 }
 
-impl Deref for GlobalTransform {
-    type Target = Transform;
+impl GlobalTransform {
+    pub fn new(transform: Transform) -> Self {
+        let matrix = transform.matrix_f32();
+        let matrix_inverse = matrix.try_inverse().unwrap_or(Default::default());
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+        Self {
+            transform,
+            matrix,
+            matrix_inverse,
+        }
     }
 }

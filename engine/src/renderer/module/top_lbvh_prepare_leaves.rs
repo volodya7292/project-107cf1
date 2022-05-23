@@ -1,25 +1,29 @@
 use crate::renderer::calc_group_count_1d;
+use nalgebra_glm::Vec3;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct LeafBoundsForTopLBVHModule {
+pub struct TopLBVHPrepareLeavesModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-struct LBTLPayload {
+struct TLPLPayload {
+    morton_codes_offset: u32,
     top_nodes_offset: u32,
     n_elements: u32,
+    scene_bound_min: Vec3,
+    scene_bound_max: Vec3,
 }
 
-impl LeafBoundsForTopLBVHModule {
+impl TopLBVHPrepareLeavesModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_leaf_aabbs_for_lbvhs.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_top_lbvh_prepare_leaves.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -43,7 +47,7 @@ impl LeafBoundsForTopLBVHModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[LBTLPayload]) {
+    fn dispatch(&self, cl: &mut CmdList, payloads: &[TLPLPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
