@@ -3,7 +3,7 @@
 #define WORK_GROUP_SIZE 512
 
 struct PushConstants {
-	uint top_nodes_offset;
+	uint instances_offset;
 	uint temp_aabbs_offset;
     uint n_elements;
 	uint iteration;
@@ -27,16 +27,12 @@ void main(uint3 Gid : SV_GroupId, uint3 GTid : SV_GroupThreadId) {
         return;
     }
 
-	// Leaves go after internal nodes. 
-    // The number of internal nodes are one less than the number of leaves.
-    uint nodes_leaves_offset = params.top_nodes_offset + (params.n_elements - 1) * sizeof(TopLBVHNode); 
-
 	uint global_step = pow(WORK_GROUP_SIZE, params.iteration);
 
 	// Load bounds into groupshared memory
 	if (params.iteration == 0) {
- 	   	Bounds b0 = buffer.Load<TopLBVHNode>(nodes_leaves_offset + (group_start + t*2) * sizeof(TopLBVHNode)).bounds;
-    	Bounds b1 = buffer.Load<TopLBVHNode>(nodes_leaves_offset + (group_start + t*2+1) * sizeof(TopLBVHNode)).bounds;
+ 	   	Bounds b0 = buffer.Load<LBVHInstance>(params.instances_offset + (group_start + t*2) * sizeof(LBVHInstance)).bounds;
+    	Bounds b1 = buffer.Load<LBVHInstance>(params.instances_offset + (group_start + t*2+1) * sizeof(LBVHInstance)).bounds;
 		group_bounds[t] = b0.combine(b1);
 	} else {
 		Bounds b0 = buffer.Load<Bounds>(params.temp_aabbs_offset + (group_start + t*2) * global_step * sizeof(Bounds));

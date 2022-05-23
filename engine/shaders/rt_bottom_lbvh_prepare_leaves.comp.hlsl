@@ -9,7 +9,7 @@ struct PushConstants {
     uint indices_offset;
     uint vertices_offset;
     uint morton_codes_offset;
-    uint nodes_offset;
+    uint leaf_bounds_offset;
     uint n_triangles;
     float3 mesh_bound_min;
     float3 mesh_bound_max;
@@ -39,6 +39,7 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     bounds.p_min = min(v0, min(v1, v2));
     bounds.p_max = max(v0, max(v1, v2));
 
+
     float3 center = aabbComputeCenter(params.mesh_bound_min, params.mesh_bound_max, bounds.p_min, bounds.p_max);
     uint code = morton3D(center);
 
@@ -46,12 +47,9 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     morton_code.code = code;
     morton_code.element_id = triangle_id;
 
-    // Leaves go after internal nodes. 
-    // The number of internal nodes are one less than the number of leaves.
-    uint nodes_leaves_offset = params.nodes_offset + (params.n_triangles - 1) * sizeof(LBVHNode); 
 
     // Store triangle's bounds
-    buffer.Store(nodes_leaves_offset + triangle_id * sizeof(LBVHNode) + LBVHNode_bounds_offset, bounds);
+    buffer.Store(params.leaf_bounds_offset + triangle_id * sizeof(Bounds), bounds);
     // Store triangle's morton code 
     buffer.Store(params.morton_codes_offset + triangle_id * sizeof(MortonCode), morton_code);
 }

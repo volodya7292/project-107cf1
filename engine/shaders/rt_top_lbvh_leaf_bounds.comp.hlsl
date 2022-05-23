@@ -5,7 +5,7 @@
 RWByteAddressBuffer buffer : register(u0);
 
 struct PushConstants {
-    uint top_nodes_offset;
+    uint instances_offset;
     uint n_elements;
 };
 
@@ -19,12 +19,8 @@ void main(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    // Leaves go after internal nodes. 
-    // The number of internal nodes are one less than the number of leaves.
-    uint nodes_leaves_offset = params.top_nodes_offset + (params.n_elements - 1) * sizeof(TopLBVHNode); 
-
-    LBVHInstance instance = buffer.Load<TopLBVHNode>(nodes_leaves_offset + element_id * sizeof(TopLBVHNode)).instance;
-    Bounds bb = buffer.Load<LBVHNode>(instance.nodes_offset).bounds;
+    LBVHInstance instance = buffer.Load<LBVHInstance>(params.instances_offset + element_id * sizeof(LBVHInstance));
+    Bounds bb = instance.bounds;
 
     float3 vertices[8] = {
 		float3(bb.p_min.x, bb.p_min.y, bb.p_min.z),
@@ -49,5 +45,5 @@ void main(uint3 DTid : SV_DispatchThreadID) {
 	}
 
     // Store bounds of the LBVH instance
-    buffer.Store(nodes_leaves_offset + element_id * sizeof(TopLBVHNode) + TopLBVHNode_bounds_offset, bounds);
+    buffer.Store(params.instances_offset + element_id * sizeof(LBVHInstance) + LBVHInstance_bounds_offset, bounds);
 }

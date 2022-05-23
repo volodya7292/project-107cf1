@@ -15,7 +15,7 @@ struct BLPLPayload {
     indices_offset: u32,
     vertices_offset: u32,
     morton_codes_offset: u32,
-    nodes_offset: u32,
+    leaf_bounds_offset: u32,
     n_triangles: u32,
     mesh_bound_min: Vec3,
     mesh_bound_max: Vec3,

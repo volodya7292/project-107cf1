@@ -6,8 +6,8 @@ RWByteAddressBuffer mem : register(u0);
 
 struct PushConstants {
     uint morton_codes_offset;
-    uint nodes_offset;
-    uint leaf_bounds_offset;
+    uint top_nodes_offset;
+    uint instances_offset;
     uint n_elements;
 };
 
@@ -22,12 +22,12 @@ void main(uint3 DTid : SV_DispatchThreadId) {
     if (idx >= max_nodes)
         return;
 
-    LBVHNode node = mem.Load<LBVHNode>(params.nodes_offset + idx * sizeof(LBVHNode));
+    TopLBVHNode node = mem.Load<TopLBVHNode>(params.top_nodes_offset + idx * sizeof(TopLBVHNode));
 
     if (idx < params.n_elements) {
         // Leaf node
-        node.element_id = mem.Load<MortonCode>(params.morton_codes_offset + idx * sizeof(MortonCode)).element_id;
-        node.bounds = mem.Load<Bounds>(params.leaf_bounds_offset + idx * sizeof(Bounds));
+        uint instance_id = mem.Load<MortonCode>(params.morton_codes_offset + idx * sizeof(MortonCode)).element_id;
+        node.instance = mem.Load<LBVHInstance>(params.instances_offset + instance_id * sizeof(LBVHInstance));
     } else {
         // Internal node
         uint internal_idx = idx - params.n_elements;
@@ -50,8 +50,8 @@ void main(uint3 DTid : SV_DispatchThreadId) {
             node.child_b = params.n_elements + split + 1;
         }
 
-        node.element_id = -1;
+        node.instance.nodes_offset = -1;
     }
 
-    mem.Store(params.nodes_offset + idx * sizeof(LBVHNode), node);
+    mem.Store(params.top_nodes_offset + idx * sizeof(TopLBVHNode), node);
 }

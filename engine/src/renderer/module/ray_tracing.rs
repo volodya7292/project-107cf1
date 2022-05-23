@@ -62,13 +62,12 @@ struct LBVHInstance {
     nodes_offset: u32,
     transform: Mat4,
     transform_inverse: Mat4,
+    bounds: Bounds,
 }
 
 #[repr(C)]
 struct TopLBVHNode {
     instance: LBVHInstance,
-    bounds: Bounds,
-    element_id: u32,
     parent: u32,
     child_a: u32,
     child_b: u32,

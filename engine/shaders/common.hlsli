@@ -66,18 +66,18 @@ struct LBVHNode {
     uint child_b;
 };
 
+#define LBVHInstance_bounds_offset (4 * 3 + 64 * 2)
 struct LBVHInstance {
     uint indices_offset;
     uint vertices_offset;
     uint nodes_offset;
     float4x4 transform;
     float4x4 transform_inverse;
+    Bounds bounds;
 };
 
-#define TopLBVHNode_bounds_offset sizeof(LBVHInstance)
 struct TopLBVHNode {
     LBVHInstance instance;
-    Bounds bounds;
     uint parent;
     uint child_a;
     uint child_b;

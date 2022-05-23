@@ -13,6 +13,7 @@ pub struct LBVHGenerationModule {
 pub struct LBVHGenPayload {
     morton_codes_offset: u32,
     nodes_offset: u32,
+    leaf_bounds_offset: u32,
     n_elements: u32,
 }
 
