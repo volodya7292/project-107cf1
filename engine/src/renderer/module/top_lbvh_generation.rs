@@ -3,25 +3,25 @@ use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
-pub struct BottomLBVHGenModule {
+pub struct TopLBVHGenModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
 #[repr(C)]
-pub struct BLGPayload {
+pub struct TLGPayload {
     morton_codes_offset: u32,
     nodes_offset: u32,
     leaf_bounds_offset: u32,
     n_elements: u32,
 }
 
-impl BottomLBVHGenModule {
+impl TopLBVHGenModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
-                include_bytes!("../../../shaders/build/rt_bottom_lbvh_generation.comp.hlsl.spv"),
+                include_bytes!("../../../shaders/build/rt_top_lbvh_generation.comp.hlsl.spv"),
                 &[],
                 &[],
             )
@@ -45,7 +45,7 @@ impl BottomLBVHGenModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BLGPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[TLGPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 

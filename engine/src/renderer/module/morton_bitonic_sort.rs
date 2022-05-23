@@ -8,7 +8,7 @@ use vk_wrapper::{
 
 const WORK_GROUP_SIZE: u32 = 1024;
 
-pub struct MortonBitonicSort {
+pub struct MortonBitonicSortModule {
     pipeline: Arc<Pipeline>,
     pool: DescriptorPool,
     descriptor: DescriptorSet,
@@ -35,7 +35,7 @@ struct PushConstants {
     n_values: u32,
 }
 
-impl MortonBitonicSort {
+impl MortonBitonicSortModule {
     pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
         let shader = device
             .create_shader(
