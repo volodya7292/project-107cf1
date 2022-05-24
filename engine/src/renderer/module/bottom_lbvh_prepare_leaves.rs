@@ -11,14 +11,14 @@ pub struct BottomLBVHPrepareLeavesModule {
 }
 
 #[repr(C)]
-struct BLPLPayload {
-    indices_offset: u32,
-    vertices_offset: u32,
-    morton_codes_offset: u32,
-    leaf_bounds_offset: u32,
-    n_triangles: u32,
-    mesh_bound_min: Vec3,
-    mesh_bound_max: Vec3,
+pub struct BLPLPayload {
+    pub indices_offset: u32,
+    pub vertices_offset: u32,
+    pub morton_codes_offset: u32,
+    pub leaf_bounds_offset: u32,
+    pub n_triangles: u32,
+    pub mesh_bound_min: Vec3,
+    pub mesh_bound_max: Vec3,
 }
 
 impl BottomLBVHPrepareLeavesModule {
@@ -49,7 +49,7 @@ impl BottomLBVHPrepareLeavesModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[BLPLPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BLPLPayload]) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 

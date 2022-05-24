@@ -29,8 +29,6 @@ layout(location = 0) in Output {
     vec3 world_pos;
     vec3 surface_normal;
     uint material_id;
-    float ao;
-    vec3 light;
 } vs_in;
 
 vec2 triplan_coord[3];
@@ -136,9 +134,10 @@ void main() {
     uint material_id;
     sample_material(vs_in.material_id, vs_in.tex_uv, mat);
 
-    vec3 combined_light = min(vec3(1.0), ambient_light + vs_in.light);
+//    vec3 combined_light = min(vec3(1.0), ambient_light + vs_in.light);
 
-    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
+    vec3 diffuse = mat.diffuse.rgb;
+//    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
     // vec3 diffuse = vec3(1.0) * (0.75 + vs_in.ao * 0.25);
     // diffuse = vs_in.surface_normal;
 

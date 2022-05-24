@@ -173,6 +173,7 @@ impl Device {
         elem_size: u64,
         size: u64,
         mem_usage: gpu_alloc::UsageFlags,
+        name: &str,
     ) -> Result<Buffer, DeviceError> {
         if elem_size == 0 {
             return Err(DeviceError::ZeroBufferElementSize);
@@ -216,6 +217,14 @@ impl Device {
             (native_buffer, memory_block)
         };
 
+        unsafe {
+            self.wrapper.debug_set_object_name(
+                vk::ObjectType::BUFFER,
+                buffer.as_raw(),
+                &format!("{}-buffer", name),
+            )?;
+        }
+
         self.total_used_dev_memory
             .fetch_add(used_dev_memory as usize, atomic::Ordering::Relaxed);
 
@@ -243,6 +252,7 @@ impl Device {
             gpu_alloc::UsageFlags::HOST_ACCESS
                 | gpu_alloc::UsageFlags::DOWNLOAD
                 | gpu_alloc::UsageFlags::UPLOAD,
+            "",
         )?;
         let p_data = unsafe {
             buffer
@@ -273,6 +283,26 @@ impl Device {
             element_size,
             size,
             gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+            "",
+        )?;
+        Ok(DeviceBuffer {
+            buffer: Arc::new(buffer),
+        })
+    }
+
+    pub fn create_device_buffer_named(
+        self: &Arc<Self>,
+        usage: BufferUsageFlags,
+        element_size: u64,
+        size: u64,
+        name: &str,
+    ) -> Result<DeviceBuffer, DeviceError> {
+        let buffer = self.create_buffer(
+            usage,
+            element_size,
+            size,
+            gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+            name,
         )?;
         Ok(DeviceBuffer {
             buffer: Arc::new(buffer),
@@ -689,7 +719,7 @@ impl Device {
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
-            std::slice::from_raw_parts(
+            slice::from_raw_parts(
                 code.as_ptr() as *const u32,
                 code.len() / std::mem::size_of::<u32>(),
             )

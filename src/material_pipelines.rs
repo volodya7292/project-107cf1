@@ -35,8 +35,8 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
             &device,
             &resources.get("shaders/cluster.vert.spv").unwrap().read().unwrap(),
             &[
-                ("inPack1", vkw::Format::RGBA32_UINT),
-                ("inPack2", vkw::Format::R32_UINT),
+                ("inPosition", vkw::Format::RGB32_FLOAT),
+                ("inPack0", vkw::Format::RGB32_UINT),
             ],
         )
         .unwrap();

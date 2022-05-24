@@ -7,27 +7,17 @@ use engine::renderer::vertex_mesh::VertexPositionImpl;
 use engine::vertex_impl;
 use glm::BVec3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
+use nalgebra_glm::{U32Vec2, U32Vec3, UVec3, UVec4, Vec2, Vec3};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct PackedVertex {
-    pack1: UVec4,
-    pack2: u32,
+    position: Vec3,
+    pack0: UVec3,
 }
-vertex_impl!(PackedVertex, pack1, pack2);
-
-impl VertexPositionImpl for PackedVertex {
-    fn position(&self) -> Vec3 {
-        Vec3::new(
-            ((self.pack1[0] >> 16) & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
-            (self.pack1[0] & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
-            ((self.pack1[1] >> 16) & 0xffff) as f32 / 65535.0 * (cluster::SIZE as f32),
-        )
-    }
-}
+vertex_impl!(PackedVertex, position, pack0);
 
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Vertex {
@@ -41,22 +31,18 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn pack(&self) -> PackedVertex {
-        let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (cluster::SIZE as f32) * 65535.0);
         let enc_normal: U32Vec3 =
             glm::convert_unchecked(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0));
         let enc_tex_uv: U32Vec2 = glm::convert_unchecked(self.tex_uv / 64.0 * 65535.0);
 
-        let pack1_0 = ((enc_pos[0] & 0xffff) << 16) | (enc_pos[1] & 0xffff);
-        let pack1_1 = ((enc_pos[2] & 0xffff) << 16) | ((enc_normal[0] & 0xff) << 8) | (enc_normal[1] & 0xff);
-        let pack1_2 =
-            ((enc_normal[2] & 0xff) << 24) | ((self.ao as u32 & 0xff) << 16) | (self.material_id & 0xffff);
-        let pack1_3 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
-
-        let pack2_4 = self.lighting as u32;
+        let pack0_0 =
+            ((enc_normal[0] & 0xff) << 24) | ((enc_normal[1] & 0xff) << 16) | ((enc_normal[2] & 0xff) << 8);
+        let pack0_1 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
+        let pack0_2 = self.material_id & 0xffff;
 
         PackedVertex {
-            pack1: UVec4::new(pack1_0, pack1_1, pack1_2, pack1_3),
-            pack2: pack2_4,
+            position: self.position,
+            pack0: UVec3::new(pack0_0, pack0_1, pack0_2),
         }
     }
 }

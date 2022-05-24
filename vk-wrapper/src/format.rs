@@ -1,8 +1,10 @@
+use crate::DeviceError;
 use ahash::AHashMap;
 use ahash::AHashSet;
 use ash::vk;
 use ash::vk::FormatFeatureFlags;
 use lazy_static::lazy_static;
+use spirv_cross::spirv;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Format(pub(crate) vk::Format);
@@ -37,6 +39,7 @@ lazy_static! {
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RG32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGB32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::RGB32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGBA32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
     ]
     .into_iter()

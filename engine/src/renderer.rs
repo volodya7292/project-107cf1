@@ -6,7 +6,7 @@ pub mod material_pipeline;
 pub mod vertex_mesh;
 pub mod camera;
 mod helpers;
-mod module;
+pub(crate) mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene::Scene;
@@ -18,8 +18,8 @@ use crate::renderer::material_pipeline::UniformStruct;
 use crate::renderer::module::ray_tracing::RayTracingModule;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::resource_file::ResourceRef;
-use crate::utils;
 use crate::utils::{HashMap, UInt};
+use crate::{utils, HashSet};
 use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
@@ -72,6 +72,7 @@ pub struct UpdateTimings {
     pub batch1_buffer_updates: f64,
     pub batch1_updates_commit: f64,
     pub uniform_buffers_update: f64,
+    pub rt_as_construct: f64,
     pub total: f64,
 }
 
@@ -93,11 +94,12 @@ pub struct RendererTimings {
 impl Display for RendererTimings {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} || depth_rec {:.5} \
+            "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} | rt_as_construct {:.5} || depth_rec {:.5} \
             | depth_exec {:.5} | color_rec {:.5} | color_exec {:.5} || upd_total {:.5} | render_total {:.5}",
             self.update.systems_batch0,
             self.update.systems_batch1,
             self.update.uniform_buffers_update,
+            self.update.rt_as_construct,
             self.render.depth_record,
             self.render.depth_exec,
             self.render.color_record,
@@ -190,7 +192,7 @@ pub struct Renderer {
     uniform_buffer_offsets: IndexPool,
     global_buffer: DeviceBuffer,
     // Allocator for `global_buffer`
-    gb_allocator: RangeAllocator<u64>,
+    gb_allocator: RangeAllocator<u32>,
 
     ray_tracing: RayTracingModule,
 }
@@ -309,11 +311,11 @@ pub(crate) struct GBVertexMesh {
     /// A reference to RawVertexMesh must be held to prevent using still allocated GB ranges.
     pub raw: Arc<RawVertexMesh>,
     pub ref_count: u32,
-    pub gb_range: Range<u64>,
-    pub gb_binding_offsets: SmallVec<[u64; 6]>,
-    pub gb_indices_offset: u64,
+    pub gb_range: Range<u32>,
+    pub gb_binding_offsets: SmallVec<[u32; 6]>,
+    pub gb_indices_offset: u32,
     /// Where LBVH nodes are stored
-    pub gb_rt_nodes_offset: u64,
+    pub gb_rt_nodes_offset: u32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -755,15 +757,16 @@ impl Renderer {
             .unwrap(),
         ];
 
-        let gb_size = 512 * 1024 * 1024;
+        let gb_size: u32 = 512 * 1024 * 1024;
         let global_buffer = device
-            .create_device_buffer(
+            .create_device_buffer_named(
                 BufferUsageFlags::TRANSFER_DST
                     | BufferUsageFlags::VERTEX
                     | BufferUsageFlags::INDEX
                     | BufferUsageFlags::STORAGE,
                 1,
-                gb_size,
+                gb_size as u64,
+                "global",
             )
             .unwrap();
 
@@ -956,12 +959,12 @@ impl Renderer {
             self.relative_camera_pos = DVec3::default();
         }
 
-        let mut buffer_updates = vec![];
-        let mut uniform_buffers_updates = [BufferUpdate::Type2(BufferUpdate2 {
+        let mut uniform_buffer_updates = BufferUpdate2 {
             buffer: self.uniform_buffer_basic.handle(),
             data: smallvec![],
             regions: vec![],
-        })];
+        };
+        let mut buffer_updates = vec![];
 
         // Asynchronously acquire buffers from transfer queue to render queue
         if !self.vertex_mesh_pending_updates.is_empty() {
@@ -971,6 +974,7 @@ impl Renderer {
 
         let t00 = Instant::now();
 
+        let mut dirty_meshes = Vec::with_capacity(1024);
         let mut to_remove_vertex_meshes = HashMap::with_capacity(1024);
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
@@ -1023,7 +1027,7 @@ impl Renderer {
         let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
-            uniform_buffer_updates: &mut uniform_buffers_updates,
+            uniform_buffer_updates: &mut uniform_buffer_updates,
             global_transform_comps: self.scene.storage::<GlobalTransform>(),
             renderer_comps: self.scene.storage::<component::RenderConfig>(),
             renderables: &self.renderables,
@@ -1041,8 +1045,9 @@ impl Renderer {
         let commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
             entity_vertex_meshes: &mut self.entity_vertex_meshes,
-            to_remove_vertex_meshes: &mut to_remove_vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
+            to_remove_vertex_meshes: &mut to_remove_vertex_meshes,
+            updated_meshes: &mut dirty_meshes,
         };
 
         rayon::scope(|s| {
@@ -1073,6 +1078,7 @@ impl Renderer {
 
         let t11 = Instant::now();
         timings.systems_batch1 = (t11 - t00).as_secs_f64();
+        let t00 = Instant::now();
 
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
@@ -1138,13 +1144,30 @@ impl Renderer {
             }));
         }
 
-        unsafe {
-            self.update_device_buffers(&buffer_updates);
-            self.update_device_buffers(&uniform_buffers_updates);
+        buffer_updates.push(BufferUpdate::Type2(uniform_buffer_updates));
+
+        unsafe { self.update_device_buffers(&buffer_updates) };
+
+        let t11 = Instant::now();
+        timings.uniform_buffers_update = (t11 - t00).as_secs_f64();
+        let t00 = Instant::now();
+
+        // Perform raytracing acceleration structures construction
+        // -------------------------------------------------------------------------------------------------------------
+        let res = self.ray_tracing.on_update(
+            Arc::clone(&self.staging_cl),
+            &mut self.staging_submit,
+            &mut self.gb_allocator,
+            &self.gb_vertex_meshes,
+            &dirty_meshes,
+        );
+        if let Err(e) = res {
+            eprintln!("Ray tracing AS construction error: {}", e);
         }
 
-        let t1 = Instant::now();
-        timings.uniform_buffers_update = (t1 - t11).as_secs_f64();
+        let t11 = Instant::now();
+        timings.rt_as_construct = (t11 - t00).as_secs_f64();
+        // -------------------------------------------------------------------------------------------------------------
 
         let total_t1 = Instant::now();
         timings.total = (total_t1 - total_t0).as_secs_f64();

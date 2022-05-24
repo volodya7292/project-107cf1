@@ -130,11 +130,11 @@ impl Entry {
         let enabled_extensions_raw: Vec<*const c_char> =
             enabled_extensions.iter().map(|name| name.as_ptr()).collect();
 
-        let ext_supported =
-            |name: &str| -> bool { enabled_extensions.contains(&CString::new(name).unwrap()) };
+        // let ext_supported =
+        //     |name: &str| -> bool { enabled_extensions.contains(&CString::new(name).unwrap()) };
 
         // Validation features
-        let enabled_val_features = [vk::ValidationFeatureEnableEXT::BEST_PRACTICES];
+        // let enabled_val_features = [vk::ValidationFeatureEnableEXT::BEST_PRACTICES];
 
         // Infos
         let mut info = vk::InstanceCreateInfo::builder()
@@ -152,16 +152,16 @@ impl Entry {
                     | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
             )
             .pfn_user_callback(Some(vk_debug_callback));
-        let mut val_features_info =
-            vk::ValidationFeaturesEXT::builder().enabled_validation_features(&enabled_val_features);
+        // let mut val_features_info =
+        //     vk::ValidationFeaturesEXT::builder().enabled_validation_features(&enabled_val_features);
 
         // Push extension structures
         if cfg!(debug_assertions) {
             info = info.push_next(&mut debug_msg_info);
         }
-        if ext_supported("VK_EXT_validation_features") {
-            info = info.push_next(&mut val_features_info);
-        }
+        // if ext_supported("VK_EXT_validation_features") {
+        //     info = info.push_next(&mut val_features_info);
+        // }
 
         let native_instance = unsafe { self.ash_entry.create_instance(&info, None)? };
 

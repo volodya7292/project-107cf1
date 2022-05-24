@@ -19,7 +19,7 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
     pub global_buffer: &'a DeviceBuffer,
     pub gb_vertex_meshes: &'a mut HashMap<usize, GBVertexMesh>,
-    pub gb_allocator: &'a mut RangeAllocator<u64>,
+    pub gb_allocator: &'a mut RangeAllocator<u32>,
 }
 
 impl GpuBuffersUpdate<'_> {
@@ -57,13 +57,17 @@ impl GpuBuffersUpdate<'_> {
                 }
 
                 let n_triangles = raw_mesh.index_count / 3;
-                let triangle_buffer_size = src_buffer.size();
-                let node_buffer_size = (n_triangles * 2 - 1) as u64 * (mem::size_of::<LBVHNode>() as u64);
+                let triangle_buffer_size = src_buffer.size() as u32;
+                let node_buffer_size = (n_triangles * 2 - 1) * (mem::size_of::<LBVHNode>() as u32);
 
                 let gb_range = self
                     .gb_allocator
-                    .allocate_range(triangle_buffer_size + node_buffer_size)
-                    .unwrap();
+                    .allocate_range(triangle_buffer_size + node_buffer_size);
+                if gb_range.is_err() {
+                    eprintln!("Couldn't allocate memory for vertex mesh: global buffer is not large enough!");
+                    break;
+                }
+                let gb_range = gb_range.unwrap();
 
                 let gb_mesh = GBVertexMesh {
                     raw: Arc::clone(&raw_mesh),
@@ -72,9 +76,9 @@ impl GpuBuffersUpdate<'_> {
                     gb_binding_offsets: raw_mesh
                         .binding_offsets
                         .iter()
-                        .map(|v| gb_range.start + *v)
+                        .map(|v| gb_range.start + *v as u32)
                         .collect(),
-                    gb_indices_offset: gb_range.start + raw_mesh.indices_offset,
+                    gb_indices_offset: gb_range.start + raw_mesh.indices_offset as u32,
                     gb_rt_nodes_offset: gb_range.start + triangle_buffer_size,
                 };
                 let gb_range = &gb_mesh.gb_range;
@@ -83,7 +87,7 @@ impl GpuBuffersUpdate<'_> {
                     &src_buffer.raw(),
                     0,
                     self.global_buffer,
-                    gb_range.start,
+                    gb_range.start as u64,
                     src_buffer.size(),
                 );
 
@@ -91,16 +95,16 @@ impl GpuBuffersUpdate<'_> {
                     self.global_buffer
                         .barrier()
                         .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
-                        .offset(gb_range.start)
-                        .size(gb_range.end - gb_range.start)
+                        .offset(gb_range.start as u64)
+                        .size((gb_range.end - gb_range.start) as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
                 graphics_barriers.push(
                     self.global_buffer
                         .barrier()
-                        .offset(gb_range.start)
-                        .size(gb_range.end - gb_range.start)
+                        .offset(gb_range.start as u64)
+                        .size((gb_range.end - gb_range.start) as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
@@ -150,8 +154,9 @@ impl GpuBuffersUpdate<'_> {
 pub(crate) struct CommitBufferUpdates<'a> {
     pub updates: Vec<VMBufferUpdate>,
     pub entity_vertex_meshes: &'a mut HashMap<Entity, usize>,
-    pub to_remove_vertex_meshes: &'a mut HashMap<usize, u32>,
     pub vertex_mesh_comps: LockedStorage<'a, component::VertexMesh>,
+    pub to_remove_vertex_meshes: &'a mut HashMap<usize, u32>,
+    pub updated_meshes: &'a mut Vec<usize>,
 }
 
 impl CommitBufferUpdates<'_> {
@@ -162,6 +167,7 @@ impl CommitBufferUpdates<'_> {
             // Check if update is still relevant (some entity is still using it)
             if vertex_mesh_comps.contains(update.entity) {
                 let prev_mesh_ptr = self.entity_vertex_meshes.insert(update.entity, update.mesh_ptr);
+                self.updated_meshes.push(update.mesh_ptr);
 
                 if let Some(prev_mesh_ptr) = prev_mesh_ptr {
                     let remove_refs_n = self.to_remove_vertex_meshes.entry(prev_mesh_ptr).or_insert(0);

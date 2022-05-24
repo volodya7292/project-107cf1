@@ -8,12 +8,31 @@ use crate::resource_file::ResourceRef;
 use crate::utils::UInt;
 use crate::{utils, Renderer};
 use basis_universal::TranscodeParameters;
+use range_alloc::RangeAllocationError;
 use smallvec::SmallVec;
 use std::collections::hash_map;
+use std::fmt::{Display, Formatter};
 use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{CmdList, CopyRegion, Queue, Shader, ShaderStage};
+
+pub enum RendererError {
+    // The global buffer is not large enough to contain necessary data
+    NotEnoughGBMemory(RangeAllocationError<u32>),
+}
+
+impl From<RangeAllocationError<u32>> for RendererError {
+    fn from(e: RangeAllocationError<u32>) -> Self {
+        Self::NotEnoughGBMemory(e)
+    }
+}
+
+impl Display for RendererError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Not enough memory inside global buffer")
+    }
+}
 
 impl Renderer {
     pub fn load_texture_into_atlas(
@@ -174,71 +193,70 @@ impl Renderer {
         let mut i = 0;
 
         while i < update_count {
-            {
-                let mut cl = self.staging_cl.lock();
-                cl.begin(true).unwrap();
+            let mut cl = self.staging_cl.lock();
+            cl.begin(true).unwrap();
 
-                while i < update_count {
-                    let update = &updates[i];
+            while i < update_count {
+                let update = &updates[i];
 
-                    let (copy_size, new_used_size) = match update {
-                        BufferUpdate::Type1(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                        BufferUpdate::Type2(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                    };
-
-                    if new_used_size > staging_size {
-                        used_size = 0;
-                        break;
+                let (copy_size, new_used_size) = match update {
+                    BufferUpdate::Type1(update) => {
+                        let copy_size = update.data.len() as u64;
+                        assert!(copy_size <= staging_size);
+                        (copy_size, used_size + copy_size)
                     }
-
-                    match update {
-                        BufferUpdate::Type1(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-                            cl.copy_buffer_to_device(
-                                &self.staging_buffer,
-                                used_size,
-                                &update.buffer,
-                                update.offset,
-                                copy_size,
-                            );
-                        }
-                        BufferUpdate::Type2(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-
-                            let regions: SmallVec<[CopyRegion; 64]> = update
-                                .regions
-                                .iter()
-                                .map(|region| {
-                                    CopyRegion::new(
-                                        used_size + region.src_offset(),
-                                        region.dst_offset(),
-                                        region.size(),
-                                    )
-                                })
-                                .collect();
-
-                            cl.copy_buffer_regions_to_device_bytes(
-                                &self.staging_buffer,
-                                &update.buffer,
-                                &regions,
-                            );
-                        }
+                    BufferUpdate::Type2(update) => {
+                        let copy_size = update.data.len() as u64;
+                        assert!(copy_size <= staging_size);
+                        (copy_size, used_size + copy_size)
                     }
+                };
 
-                    used_size = new_used_size;
-                    i += 1;
+                if new_used_size > staging_size {
+                    used_size = 0;
+                    break;
                 }
 
-                cl.end().unwrap();
+                match update {
+                    BufferUpdate::Type1(update) => {
+                        self.staging_buffer.write(used_size as u64, &update.data);
+                        cl.copy_buffer_to_device(
+                            &self.staging_buffer,
+                            used_size,
+                            &update.buffer,
+                            update.offset,
+                            copy_size,
+                        );
+                    }
+                    BufferUpdate::Type2(update) => {
+                        self.staging_buffer.write(used_size as u64, &update.data);
+
+                        let regions: SmallVec<[CopyRegion; 64]> = update
+                            .regions
+                            .iter()
+                            .map(|region| {
+                                CopyRegion::new(
+                                    used_size + region.src_offset(),
+                                    region.dst_offset(),
+                                    region.size(),
+                                )
+                            })
+                            .collect();
+
+                        cl.copy_buffer_regions_to_device_bytes(
+                            &self.staging_buffer,
+                            &update.buffer,
+                            &regions,
+                        );
+                    }
+                }
+
+                used_size = new_used_size;
+                i += 1;
             }
+
+            cl.end().unwrap();
+            drop(cl);
 
             let submit = &mut self.staging_submit;
             graphics_queue.submit(submit).unwrap();
@@ -251,12 +269,12 @@ impl Renderer {
         let binding_offsets: SmallVec<[_; 6]> = vertex_mesh
             .gb_binding_offsets
             .iter()
-            .map(|v| (gb_handle, *v))
+            .map(|v| (gb_handle, *v as u64))
             .collect();
 
         if vertex_mesh.raw.indexed && vertex_mesh.raw.index_count > 0 {
             cl.bind_vertex_buffers(0, &binding_offsets);
-            cl.bind_index_buffer(&self.global_buffer, vertex_mesh.gb_indices_offset);
+            cl.bind_index_buffer(&self.global_buffer, vertex_mesh.gb_indices_offset as u64);
             cl.draw_indexed(vertex_mesh.raw.index_count, 0, 0);
         } else if vertex_mesh.raw.vertex_count > 0 {
             cl.bind_vertex_buffers(0, &*binding_offsets);
