@@ -96,7 +96,7 @@ impl GpuBuffersUpdate<'_> {
                         .barrier()
                         .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
                         .offset(gb_range.start as u64)
-                        .size((gb_range.end - gb_range.start) as u64)
+                        .size(gb_range.len() as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
@@ -104,7 +104,7 @@ impl GpuBuffersUpdate<'_> {
                     self.global_buffer
                         .barrier()
                         .offset(gb_range.start as u64)
-                        .size((gb_range.end - gb_range.start) as u64)
+                        .size(gb_range.len() as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );

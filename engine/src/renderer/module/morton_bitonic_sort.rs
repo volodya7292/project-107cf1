@@ -1,4 +1,3 @@
-use crate::utils::UInt;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
@@ -10,7 +9,7 @@ const WORK_GROUP_SIZE: u32 = 1024;
 
 pub struct MortonBitonicSortModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
     gb_barrier: BufferBarrier,
 }
@@ -23,9 +22,9 @@ enum MBSAlgorithm {
     BigDisperse = 3,
 }
 
-struct MBSPayload {
-    morton_codes_offset: u32,
-    n_codes: u32,
+pub struct MBSPayload {
+    pub morton_codes_offset: u32,
+    pub n_codes: u32,
 }
 
 #[repr(C)]
@@ -33,6 +32,7 @@ struct PushConstants {
     h: u32,
     algorithm: MBSAlgorithm,
     n_values: u32,
+    data_offset: u32,
 }
 
 impl MortonBitonicSortModule {
@@ -58,63 +58,64 @@ impl MortonBitonicSortModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
             gb_barrier: global_buffer.barrier(),
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[MBSPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &MBSPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let mut h = WORK_GROUP_SIZE * 2;
-            let work_group_count = UInt::div_ceil(payload.n_codes, WORK_GROUP_SIZE * 2);
+        let aligned_n_elements = payload.n_codes.next_power_of_two();
+        let work_group_count = (aligned_n_elements / 2) / WORK_GROUP_SIZE;
 
-            let buf_offset = payload.morton_codes_offset as u64;
-            let buf_size = (payload.n_codes * 8) as u64; // sizeof(uvec2) = 8
-            let buf_barrier = self
-                .gb_barrier
-                .clone()
-                .offset(buf_offset)
-                .size(buf_size)
-                .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
+        let buf_offset = payload.morton_codes_offset as u64;
+        let buf_size = (payload.n_codes * 8) as u64; // sizeof(uvec2) = 8
+        let buf_barrier = self
+            .gb_barrier
+            .clone()
+            .offset(buf_offset)
+            .size(buf_size)
+            .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
+            .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
 
-            let mut execute = |h: u32, alg: MBSAlgorithm| {
-                let mut consts = PushConstants {
-                    h,
-                    algorithm: alg,
-                    n_values: payload.n_codes,
-                };
-                cl.push_constants(self.pipeline.signature(), &consts);
-                cl.dispatch(work_group_count, 1, 1);
-                cl.barrier_buffer(
-                    PipelineStageFlags::COMPUTE,
-                    PipelineStageFlags::COMPUTE,
-                    &[buf_barrier],
-                );
+        let mut execute = |h: u32, alg: MBSAlgorithm| {
+            let consts = PushConstants {
+                h,
+                algorithm: alg,
+                n_values: payload.n_codes,
+                data_offset: payload.morton_codes_offset,
             };
+            cl.push_constants(self.pipeline.signature(), &consts);
+            cl.dispatch(work_group_count, 1, 1);
+            cl.barrier_buffer(
+                PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::COMPUTE,
+                &[buf_barrier],
+            );
+        };
 
-            execute(h, MBSAlgorithm::LocalBitonicMergeSort);
-            h *= 2;
+        let mut h = WORK_GROUP_SIZE * 2;
+        execute(h, MBSAlgorithm::LocalBitonicMergeSort);
+        h *= 2;
 
-            while h <= payload.n_codes {
-                execute(h, MBSAlgorithm::BigFlip);
+        while h <= aligned_n_elements {
+            execute(h, MBSAlgorithm::BigFlip);
 
-                let mut hh = h / 2;
-                while hh > 1 {
-                    if hh <= WORK_GROUP_SIZE * 2 {
-                        execute(hh, MBSAlgorithm::LocalDisperse);
-                    } else {
-                        execute(hh, MBSAlgorithm::BigDisperse);
-                    }
-                    hh /= 2;
+            let mut hh = h / 2;
+            while hh > 1 {
+                if hh <= WORK_GROUP_SIZE * 2 {
+                    execute(hh, MBSAlgorithm::LocalDisperse);
+                    break;
+                } else {
+                    execute(hh, MBSAlgorithm::BigDisperse);
                 }
-
-                h *= 2;
+                hh /= 2;
             }
+
+            h *= 2;
         }
     }
 }

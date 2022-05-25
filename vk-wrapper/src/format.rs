@@ -1,10 +1,8 @@
-use crate::DeviceError;
 use ahash::AHashMap;
 use ahash::AHashSet;
 use ash::vk;
 use ash::vk::FormatFeatureFlags;
 use lazy_static::lazy_static;
-use spirv_cross::spirv;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Format(pub(crate) vk::Format);

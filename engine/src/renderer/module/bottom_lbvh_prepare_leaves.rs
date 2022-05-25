@@ -49,14 +49,13 @@ impl BottomLBVHPrepareLeavesModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BLPLPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &BLPLPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_triangles);
-            cl.push_constants(self.pipeline.signature(), payload);
-            cl.dispatch(groups, 1, 1);
-        }
+        let groups = calc_group_count_1d(payload.n_triangles);
+
+        cl.push_constants(self.pipeline.signature(), payload);
+        cl.dispatch(groups, 1, 1);
     }
 }

@@ -498,7 +498,10 @@ impl Renderer {
         let available_threads = rayon::current_num_threads();
 
         let staging_buffer = device
-            .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
+            .create_host_buffer(
+                BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
+                0x800000,
+            )
             .unwrap();
         let per_frame_uniform_buffer = device
             .create_device_buffer(
@@ -761,6 +764,7 @@ impl Renderer {
         let global_buffer = device
             .create_device_buffer_named(
                 BufferUsageFlags::TRANSFER_DST
+                    | BufferUsageFlags::TRANSFER_SRC
                     | BufferUsageFlags::VERTEX
                     | BufferUsageFlags::INDEX
                     | BufferUsageFlags::STORAGE,
@@ -1158,6 +1162,8 @@ impl Renderer {
             Arc::clone(&self.staging_cl),
             &mut self.staging_submit,
             &mut self.gb_allocator,
+            &self.global_buffer,
+            &mut self.staging_buffer,
             &self.gb_vertex_meshes,
             &dirty_meshes,
         );
