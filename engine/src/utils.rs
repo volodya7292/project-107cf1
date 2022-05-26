@@ -34,18 +34,17 @@ pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
-pub const fn make_mul_of(n: u32, m: u32) -> u32 {
-    ((n + m - 1) / m) * m
-}
-
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {
     // TODO: remove when std log2 is stable
     fn log2(self) -> Self;
+    // TODO: remove when std log is stable
     fn log(self, base: Self) -> Self;
     // TODO: remove when std div_ceil is stable
     fn div_ceil(self, other: Self) -> Self;
+    // TODO: remove when std next_multiple_of is stable
+    fn make_mul_of(self, m: Self) -> Self;
 }
 
 pub trait Int {}
@@ -77,6 +76,10 @@ macro_rules! uint_impl {
 
             fn div_ceil(self, other: Self) -> Self {
                 (self + other - 1) / other
+            }
+
+            fn make_mul_of(self, m: Self) -> Self {
+                ((self + m - 1) / m) * m
             }
         }
     )*)

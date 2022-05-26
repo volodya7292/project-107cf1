@@ -704,6 +704,14 @@ impl CmdList {
         }
     }
 
+    pub fn clear_buffer2(&mut self, buffer: &impl BufferHandleImpl, offset: u64, size: u64, value: u32) {
+        unsafe {
+            self.device_wrapper
+                .native
+                .cmd_fill_buffer(self.native, buffer.handle().0, offset, size, value);
+        }
+    }
+
     pub fn clear_image(&mut self, image: &Arc<Image>, layout: ImageLayout, color: ClearValue) {
         let range = vk::ImageSubresourceRange {
             aspect_mask: image.wrapper.aspect,

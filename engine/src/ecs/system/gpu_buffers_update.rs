@@ -1,15 +1,15 @@
 use crate::ecs::component;
 use crate::ecs::scene::Entity;
 use crate::ecs::scene_storage::{ComponentStorageImpl, LockedStorage};
+use crate::renderer::helpers::LargeBuffer;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::renderer::{GBVertexMesh, LBVHNode, VMBufferUpdate};
 use crate::utils::HashMap;
 use parking_lot::Mutex;
-use range_alloc::RangeAllocator;
 use std::mem;
 use std::sync::Arc;
 use vk_wrapper as vkw;
-use vk_wrapper::{DeviceBuffer, WaitSemaphore};
+use vk_wrapper::WaitSemaphore;
 
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
@@ -17,9 +17,8 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
     pub vertex_mesh_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
-    pub global_buffer: &'a DeviceBuffer,
+    pub global_buffer: &'a mut LargeBuffer,
     pub gb_vertex_meshes: &'a mut HashMap<usize, GBVertexMesh>,
-    pub gb_allocator: &'a mut RangeAllocator<u32>,
 }
 
 impl GpuBuffersUpdate<'_> {
@@ -61,33 +60,32 @@ impl GpuBuffersUpdate<'_> {
                 let node_buffer_size = (n_triangles * 2 - 1) * (mem::size_of::<LBVHNode>() as u32);
 
                 let gb_range = self
-                    .gb_allocator
-                    .allocate_range(triangle_buffer_size + node_buffer_size);
+                    .global_buffer
+                    .allocate(triangle_buffer_size + node_buffer_size);
                 if gb_range.is_err() {
                     eprintln!("Couldn't allocate memory for vertex mesh: global buffer is not large enough!");
                     break;
                 }
-                let gb_range = gb_range.unwrap();
+                let gb_alloc = gb_range.unwrap();
 
                 let gb_mesh = GBVertexMesh {
                     raw: Arc::clone(&raw_mesh),
                     ref_count: 1,
-                    gb_range: gb_range.clone(),
+                    gb_alloc: gb_alloc.clone(),
                     gb_binding_offsets: raw_mesh
                         .binding_offsets
                         .iter()
-                        .map(|v| gb_range.start + *v as u32)
+                        .map(|v| gb_alloc.start() + *v as u32)
                         .collect(),
-                    gb_indices_offset: gb_range.start + raw_mesh.indices_offset as u32,
-                    gb_rt_nodes_offset: gb_range.start + triangle_buffer_size,
+                    gb_indices_offset: gb_alloc.start() + raw_mesh.indices_offset as u32,
+                    gb_rt_nodes_offset: gb_alloc.start() + triangle_buffer_size,
                 };
-                let gb_range = &gb_mesh.gb_range;
 
                 t_cl.copy_raw_host_buffer_to_device(
                     &src_buffer.raw(),
                     0,
                     self.global_buffer,
-                    gb_range.start as u64,
+                    gb_alloc.start() as u64,
                     src_buffer.size(),
                 );
 
@@ -95,16 +93,16 @@ impl GpuBuffersUpdate<'_> {
                     self.global_buffer
                         .barrier()
                         .src_access_mask(vkw::AccessFlags::TRANSFER_WRITE)
-                        .offset(gb_range.start as u64)
-                        .size(gb_range.len() as u64)
+                        .offset(gb_alloc.start() as u64)
+                        .size(gb_alloc.len() as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );
                 graphics_barriers.push(
                     self.global_buffer
                         .barrier()
-                        .offset(gb_range.start as u64)
-                        .size(gb_range.len() as u64)
+                        .offset(gb_alloc.start() as u64)
+                        .size(gb_alloc.len() as u64)
                         .src_queue(transfer_queue)
                         .dst_queue(graphics_queue),
                 );

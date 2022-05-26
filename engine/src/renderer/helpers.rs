@@ -8,15 +8,119 @@ use crate::resource_file::ResourceRef;
 use crate::utils::UInt;
 use crate::{utils, Renderer};
 use basis_universal::TranscodeParameters;
-use range_alloc::RangeAllocationError;
+use range_alloc::{RangeAllocationError, RangeAllocator};
 use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::fmt::{Display, Formatter};
 use std::mem;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{CmdList, CopyRegion, Queue, Shader, ShaderStage};
+use vk_wrapper::{
+    BufferHandle, BufferUsageFlags, CmdList, CopyRegion, Device, DeviceBuffer, DeviceError, Queue, Shader,
+    ShaderStage,
+};
 
+pub struct LargeBuffer {
+    buffer: DeviceBuffer,
+    allocator: RangeAllocator<u32>,
+    alignment: u32,
+}
+
+impl BufferHandleImpl for LargeBuffer {
+    fn handle(&self) -> BufferHandle {
+        self.buffer.handle()
+    }
+}
+
+#[derive(Clone)]
+pub struct LargeBufferAllocation {
+    range: Range<u32>,
+    aligned_offset: u32,
+    len: u32,
+}
+
+impl LargeBufferAllocation {
+    pub fn start(&self) -> u32 {
+        self.aligned_offset
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+}
+
+impl LargeBuffer {
+    pub fn new(
+        device: &Arc<Device>,
+        usage: BufferUsageFlags,
+        size: u32,
+        name: &str,
+    ) -> Result<Self, DeviceError> {
+        let limits = device.adapter().props().limits;
+        let mut alignment = 1;
+
+        if usage.contains(BufferUsageFlags::UNIFORM) {
+            alignment = alignment.make_mul_of(limits.min_uniform_buffer_offset_alignment as u32);
+        }
+        if usage.contains(BufferUsageFlags::STORAGE) {
+            alignment = alignment.make_mul_of(limits.min_storage_buffer_offset_alignment as u32);
+        }
+
+        let buffer = device.create_device_buffer_named(usage, 1, size as u64, name)?;
+        let allocator = RangeAllocator::new(0..size);
+
+        Ok(Self {
+            buffer,
+            allocator,
+            alignment: alignment as u32,
+        })
+    }
+
+    pub fn allocate(&mut self, size: u32) -> Result<LargeBufferAllocation, RendererError> {
+        let size_with_align = size + self.alignment - 1;
+        let range = self.allocator.allocate_range(size_with_align)?;
+        let aligned_offset = range.start.make_mul_of(self.alignment);
+
+        Ok(LargeBufferAllocation {
+            range,
+            aligned_offset,
+            len: size,
+        })
+    }
+
+    pub fn allocate_multiple(&mut self, sizes: &[u32]) -> Result<Vec<LargeBufferAllocation>, RendererError> {
+        let mut allocs = Vec::with_capacity(sizes.len());
+
+        for size in sizes {
+            match self.allocate(*size) {
+                Ok(alloc) => allocs.push(alloc),
+                Err(err) => {
+                    for alloc in allocs {
+                        self.free(alloc);
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Ok(allocs)
+    }
+
+    pub fn free(&mut self, alloc: LargeBufferAllocation) {
+        self.allocator.free_range(alloc.range);
+    }
+}
+
+impl Deref for LargeBuffer {
+    type Target = DeviceBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+#[derive(Debug)]
 pub enum RendererError {
     // The global buffer is not large enough to contain necessary data
     NotEnoughGBMemory(RangeAllocationError<u32>),

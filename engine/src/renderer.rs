@@ -5,7 +5,7 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
-mod helpers;
+pub(crate) mod helpers;
 pub(crate) mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
@@ -14,27 +14,23 @@ pub use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
 use crate::renderer::camera::{Camera, Frustum};
-use crate::renderer::material_pipeline::UniformStruct;
+use crate::renderer::helpers::{LargeBuffer, LargeBufferAllocation};
 use crate::renderer::module::ray_tracing::RayTracingModule;
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::resource_file::ResourceRef;
+use crate::utils;
 use crate::utils::{HashMap, UInt};
-use crate::{utils, HashSet};
-use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
+use basis_universal::TranscoderTextureFormat;
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
-use material_pipeline::{MaterialPipelineSet, PipelineConfig};
+use material_pipeline::MaterialPipelineSet;
 pub(crate) use module::ray_tracing::LBVHNode;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
-use range_alloc::RangeAllocator;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::collections::hash_map;
 use std::fmt::{Display, Formatter};
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, iter, mem, slice};
@@ -45,9 +41,8 @@ use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
     HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Shader, ShaderBinding,
-    ShaderStage, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage,
-    WaitSemaphore,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, ShaderBinding, ShaderStage,
+    SignalSemaphore, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 // Notes
@@ -190,9 +185,7 @@ pub struct Renderer {
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
-    global_buffer: DeviceBuffer,
-    // Allocator for `global_buffer`
-    gb_allocator: RangeAllocator<u32>,
+    global_buffer: LargeBuffer,
 
     ray_tracing: RayTracingModule,
 }
@@ -311,7 +304,7 @@ pub(crate) struct GBVertexMesh {
     /// A reference to RawVertexMesh must be held to prevent using still allocated GB ranges.
     pub raw: Arc<RawVertexMesh>,
     pub ref_count: u32,
-    pub gb_range: Range<u32>,
+    pub gb_alloc: LargeBufferAllocation,
     pub gb_binding_offsets: SmallVec<[u32; 6]>,
     pub gb_indices_offset: u32,
     /// Where LBVH nodes are stored
@@ -761,18 +754,17 @@ impl Renderer {
         ];
 
         let gb_size: u32 = 512 * 1024 * 1024;
-        let global_buffer = device
-            .create_device_buffer_named(
-                BufferUsageFlags::TRANSFER_DST
-                    | BufferUsageFlags::TRANSFER_SRC
-                    | BufferUsageFlags::VERTEX
-                    | BufferUsageFlags::INDEX
-                    | BufferUsageFlags::STORAGE,
-                1,
-                gb_size as u64,
-                "global",
-            )
-            .unwrap();
+        let global_buffer = LargeBuffer::new(
+            &device,
+            BufferUsageFlags::TRANSFER_DST
+                | BufferUsageFlags::TRANSFER_SRC
+                | BufferUsageFlags::VERTEX
+                | BufferUsageFlags::INDEX
+                | BufferUsageFlags::STORAGE,
+            gb_size,
+            "global",
+        )
+        .unwrap();
 
         // Update pipeline inputs
         unsafe {
@@ -906,7 +898,6 @@ impl Renderer {
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
             global_buffer,
-            gb_allocator: RangeAllocator::new(0..gb_size),
             gb_vertex_meshes: Default::default(),
             ray_tracing,
         };
@@ -1042,9 +1033,8 @@ impl Renderer {
             transfer_submit: &mut self.transfer_submit,
             vertex_mesh_updates: &mut self.vertex_mesh_updates,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
-            global_buffer: &self.global_buffer,
+            global_buffer: &mut self.global_buffer,
             gb_vertex_meshes: &mut self.gb_vertex_meshes,
-            gb_allocator: &mut self.gb_allocator,
         };
         let commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
@@ -1075,8 +1065,8 @@ impl Renderer {
             if mesh.ref_count > remove_refs_n {
                 mesh.ref_count -= remove_refs_n;
             } else {
-                self.gb_allocator.free_range(mesh.gb_range.clone());
-                self.gb_vertex_meshes.remove(&mesh_ptr);
+                let mesh = self.gb_vertex_meshes.remove(&mesh_ptr).unwrap();
+                self.global_buffer.free(mesh.gb_alloc);
             }
         }
 
@@ -1158,18 +1148,17 @@ impl Renderer {
 
         // Perform raytracing acceleration structures construction
         // -------------------------------------------------------------------------------------------------------------
-        let res = self.ray_tracing.on_update(
-            Arc::clone(&self.staging_cl),
-            &mut self.staging_submit,
-            &mut self.gb_allocator,
-            &self.global_buffer,
-            &mut self.staging_buffer,
-            &self.gb_vertex_meshes,
-            &dirty_meshes,
-        );
-        if let Err(e) = res {
-            eprintln!("Ray tracing AS construction error: {}", e);
-        }
+        // let res = self.ray_tracing.on_update(
+        //     Arc::clone(&self.staging_cl),
+        //     &mut self.staging_submit,
+        //     &mut self.global_buffer,
+        //     &mut self.staging_buffer,
+        //     &self.gb_vertex_meshes,
+        //     &dirty_meshes,
+        // );
+        // if let Err(e) = res {
+        //     eprintln!("Ray tracing AS construction error: {}", e);
+        // }
 
         let t11 = Instant::now();
         timings.rt_as_construct = (t11 - t00).as_secs_f64();
