@@ -52,6 +52,8 @@ use vk_wrapper::{
 //   - Incorrect indices of vertex mesh.
 //
 // Swapchain creation error cause may be *out of device memory*.
+//
+// HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
@@ -1148,17 +1150,17 @@ impl Renderer {
 
         // Perform raytracing acceleration structures construction
         // -------------------------------------------------------------------------------------------------------------
-        // let res = self.ray_tracing.on_update(
-        //     Arc::clone(&self.staging_cl),
-        //     &mut self.staging_submit,
-        //     &mut self.global_buffer,
-        //     &mut self.staging_buffer,
-        //     &self.gb_vertex_meshes,
-        //     &dirty_meshes,
-        // );
-        // if let Err(e) = res {
-        //     eprintln!("Ray tracing AS construction error: {}", e);
-        // }
+        let res = self.ray_tracing.on_update(
+            Arc::clone(&self.staging_cl),
+            &mut self.staging_submit,
+            &mut self.global_buffer,
+            &mut self.staging_buffer,
+            &self.gb_vertex_meshes,
+            &dirty_meshes,
+        );
+        if let Err(e) = res {
+            eprintln!("Ray tracing AS construction error: {}", e);
+        }
 
         let t11 = Instant::now();
         timings.rt_as_construct = (t11 - t00).as_secs_f64();
@@ -1444,7 +1446,7 @@ impl Renderer {
                 0,
                 frustum_visible_objects as u64,
             );
-            cl.clear_buffer(&self.visibility_buffer, 0);
+            cl.fill_buffer(&self.visibility_buffer, 0);
 
             cl.barrier_buffer(
                 PipelineStageFlags::TRANSFER,

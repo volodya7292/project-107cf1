@@ -1,4 +1,6 @@
+use crate::renderer::module::ray_tracing::Bounds;
 use crate::utils::UInt;
+use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
@@ -69,7 +71,7 @@ impl TopLBVHBoundsModule {
                 .gb_barrier
                 .clone()
                 .offset(payload.temp_aabbs_offset as u64)
-                .size((iter_count * 24) as u64)
+                .size(iter_count as u64 * mem::size_of::<Bounds>() as u64)
                 .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
                 .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
 

@@ -5,7 +5,7 @@
 #define FLT_MAX 3.402823466e+38f
 
 // Counts the number of leading zeros
-uint clz(uint v) {
+inline uint clz(uint v) {
     return 31 - firstbithigh(v);
 }
 
@@ -14,17 +14,38 @@ struct SubGlobalBuffer {
     RWByteAddressBuffer buffer;
     uint offset;
 
-    T Load(uint index) {
+    inline T Load(uint index) {
         return buffer.Load<T>(offset + index * sizeof(T));
     }
 
-    void Store(uint index, T item) {
+    template<typename S>
+    inline S LoadWithOffset(uint index, uint byte_offset) {
+        return buffer.Load<S>(offset + index * sizeof(T) + byte_offset);
+    }
+
+    inline void Store(uint index, T item) {
         buffer.Store(offset + index * sizeof(T), item);
     }
 
     template<typename S>
-    void StoreWithOffset(uint index, uint byte_offset, S item) {
+    inline void StoreWithOffset(uint index, uint byte_offset, S item) {
         buffer.Store(offset + index * sizeof(T) + byte_offset, item);
+    }
+
+    inline uint AtomicAdd(uint index, uint byte_offset, uint value) {
+        uint original;
+        buffer.InterlockedAdd(offset + index * sizeof(T) + byte_offset, value, original);
+        return original;
+    }
+
+    inline uint AtomicLoad(uint index, uint byte_offset) {
+        return AtomicAdd(index, byte_offset, 0);
+    }
+
+    inline uint AtomicExchange(uint index, uint byte_offset, uint value) {
+        uint original;
+        buffer.InterlockedExchange(offset + index * sizeof(T) + byte_offset, value, original);
+        return original;
     }
 };
 
@@ -33,6 +54,11 @@ struct SubGlobalBuffer {
 // min, max: inner AABB
 inline float3 aabbComputeCenter(float3 cmin, float3 cmax, float3 min, float3 max) {
 	float3 len = cmax - cmin;
+
+    for (uint i = 0; i < 3; i++) {
+        if (len[i] == 0)
+            len[i] = 1;
+    }
 
 	float3 tmpMin = (min - cmin) / len;
 	float3 tmpMax = (max - cmin) / len;
@@ -58,6 +84,10 @@ struct Bounds {
 };
 
 #define LBVHNode_bounds_offset 0
+#define LBVHNode_element_id_offset sizeof(Bounds)
+#define LBVHNode_parent_offset (sizeof(Bounds) + 4)
+#define LBVHNode_child_a_offset (sizeof(Bounds) + 8)
+#define LBVHNode_child_b_offset (sizeof(Bounds) + 12)
 struct LBVHNode {
     Bounds bounds;
     uint element_id;
@@ -66,7 +96,8 @@ struct LBVHNode {
     uint child_b;
 };
 
-#define LBVHInstance_bounds_offset (4 * 3 + 64 * 2)
+#define LBVHInstance_nodes_offset_offset (sizeof(uint) * 2)
+#define LBVHInstance_bounds_offset (sizeof(uint) * 3 + sizeof(float4x4) * 2)
 struct LBVHInstance {
     uint indices_offset;
     uint vertices_offset;
@@ -77,6 +108,9 @@ struct LBVHInstance {
 };
 
 #define TopLBVHNode_instance_offset 0
+#define TopLBVHNode_parent_offset sizeof(LBVHInstance)
+#define TopLBVHNode_child_a_offset (sizeof(LBVHInstance) + sizeof(uint))
+#define TopLBVHNode_child_b_offset (sizeof(LBVHInstance) + sizeof(uint) * 2)
 struct TopLBVHNode {
     LBVHInstance instance;
     uint parent;

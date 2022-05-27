@@ -12,7 +12,7 @@ pub struct TopLBVHNodeBoundsModule {
 #[repr(C)]
 pub struct TLNBPayload {
     top_nodes_offset: u32,
-    n_triangles: u32,
+    n_leaves: u32,
 }
 
 impl TopLBVHNodeBoundsModule {
@@ -48,7 +48,7 @@ impl TopLBVHNodeBoundsModule {
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_triangles);
+            let groups = calc_group_count_1d(payload.n_leaves);
             cl.push_constants(self.pipeline.signature(), payload);
             cl.dispatch(groups, 1, 1);
         }

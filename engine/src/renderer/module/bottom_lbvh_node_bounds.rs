@@ -1,7 +1,14 @@
-use crate::renderer::calc_group_count_1d;
+use crate::renderer::{calc_group_count_1d, LBVHNode};
+use crate::utils::UInt;
+use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
+use vk_wrapper::{
+    AccessFlags, BindingRes, BufferBarrier, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer,
+    Pipeline,
+};
+
+const WORK_GROUP_SIZE: u32 = 512;
 
 pub struct BottomLBVHNodeBoundsModule {
     pipeline: Arc<Pipeline>,
@@ -11,8 +18,9 @@ pub struct BottomLBVHNodeBoundsModule {
 
 #[repr(C)]
 pub struct BLNBPayload {
-    nodes_offset: u32,
-    n_triangles: u32,
+    pub nodes_offset: u32,
+    pub atomic_counters_offset: u32,
+    pub n_triangles: u32,
 }
 
 impl BottomLBVHNodeBoundsModule {
@@ -43,14 +51,12 @@ impl BottomLBVHNodeBoundsModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[BLNBPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &BLNBPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_triangles);
-            cl.push_constants(self.pipeline.signature(), payload);
-            cl.dispatch(groups, 1, 1);
-        }
+        let groups = calc_group_count_1d(payload.n_triangles);
+        cl.push_constants(self.pipeline.signature(), payload);
+        cl.dispatch(groups, 1, 1);
     }
 }

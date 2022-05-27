@@ -692,7 +692,7 @@ impl CmdList {
         };
     }
 
-    pub fn clear_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
+    pub fn fill_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
         unsafe {
             self.device_wrapper.native.cmd_fill_buffer(
                 self.native,
@@ -704,7 +704,7 @@ impl CmdList {
         }
     }
 
-    pub fn clear_buffer2(&mut self, buffer: &impl BufferHandleImpl, offset: u64, size: u64, value: u32) {
+    pub fn fill_buffer2(&mut self, buffer: &impl BufferHandleImpl, offset: u64, size: u64, value: u32) {
         unsafe {
             self.device_wrapper
                 .native

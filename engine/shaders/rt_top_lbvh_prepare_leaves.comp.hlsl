@@ -1,4 +1,3 @@
-#include "common.hlsli"
 #include "morton.hlsli"
 
 // Computes morton code for each TopLBVHNode in the scene

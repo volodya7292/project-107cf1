@@ -125,8 +125,9 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
             let output = cmd.output().unwrap();
             log_file.write(&output.stdout).unwrap();
             log_file.write(&output.stderr).unwrap();
-            println!("{}", String::from_utf8_lossy(&output.stdout));
-            println!("{}", String::from_utf8_lossy(&output.stderr));
+
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            print!("{}", String::from_utf8_lossy(&output.stderr));
 
             if !output.status.success() {
                 panic!("Failed to compile shader: {:?}", cmd);
@@ -146,7 +147,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
 
                 let output = cmd.output().unwrap();
                 log_file.write(&output.stdout).unwrap();
-                println!("{}", String::from_utf8_lossy(&output.stdout));
+                print!("{}", String::from_utf8_lossy(&output.stdout));
 
                 if !output.status.success() {
                     panic!("Failed to optimize shader");

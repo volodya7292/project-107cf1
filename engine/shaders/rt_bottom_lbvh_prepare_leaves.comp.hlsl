@@ -1,4 +1,3 @@
-#include "common.hlsli"
 #include "morton.hlsli"
 
 // Computes bounds and morton code for each triangle in a mesh
@@ -9,7 +8,7 @@ struct PushConstants {
     uint indices_offset;
     uint vertices_offset;
     uint morton_codes_offset;
-    uint leaf_bounds_offset;
+    uint nodes_offset;
     uint n_triangles;
     float3 mesh_bound_min;
     float3 mesh_bound_max;
@@ -35,21 +34,26 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     float3 v1 = buffer.Load<float3>(v_ptrs[1]);
     float3 v2 = buffer.Load<float3>(v_ptrs[2]);
 
-    Bounds bounds;
-    bounds.p_min = min(v0, min(v1, v2));
-    bounds.p_max = max(v0, max(v1, v2));
+    LBVHNode node;
+    node.bounds.p_min = min(v0, min(v1, v2));
+    node.bounds.p_max = max(v0, max(v1, v2));
+    node.element_id = -1;
+    node.parent = -1;
+    node.child_a = -1;
+    node.child_b = -1;
 
-
-    float3 center = aabbComputeCenter(params.mesh_bound_min, params.mesh_bound_max, bounds.p_min, bounds.p_max);
+    float3 center = aabbComputeCenter(params.mesh_bound_min, params.mesh_bound_max,
+        node.bounds.p_min, node.bounds.p_max);
     uint code = morton3D(center);
 
     MortonCode morton_code;
     morton_code.code = code;
     morton_code.element_id = triangle_id;
 
+    uint leaves_offset = params.nodes_offset + (params.n_triangles - 1) * sizeof(LBVHNode);
 
-    // Store triangle's bounds
-    buffer.Store(params.leaf_bounds_offset + triangle_id * sizeof(Bounds), bounds);
+    // Store triangle's prepared node
+    buffer.Store(leaves_offset + triangle_id * sizeof(LBVHNode), node);
     // Store triangle's morton code 
     buffer.Store(params.morton_codes_offset + triangle_id * sizeof(MortonCode), morton_code);
 }

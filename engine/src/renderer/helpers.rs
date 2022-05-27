@@ -58,7 +58,8 @@ impl LargeBuffer {
         name: &str,
     ) -> Result<Self, DeviceError> {
         let limits = device.adapter().props().limits;
-        let mut alignment = 1;
+        // Minimum alignment for RWByteAddressBuffer addressing is 4 bytes
+        let mut alignment = 4;
 
         if usage.contains(BufferUsageFlags::UNIFORM) {
             alignment = alignment.make_mul_of(limits.min_uniform_buffer_offset_alignment as u32);

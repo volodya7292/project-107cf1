@@ -1,12 +1,13 @@
 use crate::renderer::calc_group_count_1d;
+use crate::renderer::helpers::LargeBuffer;
 use nalgebra_glm::Vec3;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
+use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, Pipeline};
 
 pub struct BottomLBVHPrepareLeavesModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
@@ -15,14 +16,14 @@ pub struct BLPLPayload {
     pub indices_offset: u32,
     pub vertices_offset: u32,
     pub morton_codes_offset: u32,
-    pub leaf_bounds_offset: u32,
+    pub nodes_offset: u32,
     pub n_triangles: u32,
     pub mesh_bound_min: Vec3,
     pub mesh_bound_max: Vec3,
 }
 
 impl BottomLBVHPrepareLeavesModule {
-    pub fn new(device: &Arc<Device>, global_buffer: &DeviceBuffer) -> Self {
+    pub fn new(device: &Arc<Device>, global_buffer: &LargeBuffer) -> Self {
         let shader = device
             .create_shader(
                 include_bytes!("../../../shaders/build/rt_bottom_lbvh_prepare_leaves.comp.hlsl.spv"),
@@ -44,7 +45,7 @@ impl BottomLBVHPrepareLeavesModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
         }
     }
