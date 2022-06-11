@@ -308,6 +308,7 @@ pub(crate) struct GBVertexMesh {
     pub ref_count: u32,
     pub gb_alloc: LargeBufferAllocation,
     pub gb_binding_offsets: SmallVec<[u32; 6]>,
+    pub gb_position_binding_offset: u32,
     pub gb_indices_offset: u32,
     /// Where LBVH nodes are stored
     pub gb_rt_nodes_offset: u32,
@@ -495,7 +496,7 @@ impl Renderer {
         let staging_buffer = device
             .create_host_buffer(
                 BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
-                0x800000,
+                0x800000, // 8 MB
             )
             .unwrap();
         let per_frame_uniform_buffer = device
@@ -1157,6 +1158,8 @@ impl Renderer {
             &mut self.staging_buffer,
             &self.gb_vertex_meshes,
             &dirty_meshes,
+            &self.entity_vertex_meshes,
+            &self.scene,
         );
         if let Err(e) = res {
             eprintln!("Ray tracing AS construction error: {}", e);

@@ -6,11 +6,12 @@ pub mod thread_pool;
 pub mod value_noise;
 
 use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+use core::slice;
 use nalgebra_glm::{DVec3, Vec3};
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
-use std::thread;
 use std::time::{Duration, Instant};
+use std::{mem, thread};
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
@@ -199,4 +200,8 @@ pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
     while Instant::now() < end_t {
         thread::sleep(single_sleep_period);
     }
+}
+
+pub unsafe fn slice_as_bytes<T>(slice: &[T]) -> &[u8] {
+    slice::from_raw_parts(slice.as_ptr() as *const u8, mem::size_of::<T>() * slice.len())
 }

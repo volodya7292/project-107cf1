@@ -77,6 +77,7 @@ impl GpuBuffersUpdate<'_> {
                         .iter()
                         .map(|v| gb_alloc.start() + *v as u32)
                         .collect(),
+                    gb_position_binding_offset: gb_alloc.start() + raw_mesh.position_binding_offset as u32,
                     gb_indices_offset: gb_alloc.start() + raw_mesh.indices_offset as u32,
                     gb_rt_nodes_offset: gb_alloc.start() + triangle_buffer_size,
                 };
