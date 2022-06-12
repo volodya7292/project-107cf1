@@ -17,15 +17,15 @@ pub struct TopLBVHBoundsModule {
     gb_barrier: BufferBarrier,
 }
 
-struct TLBPayload {
-    top_nodes_offset: u32,
-    temp_aabbs_offset: u32,
-    n_elements: u32,
+pub struct TLBPayload {
+    pub instances_offset: u32,
+    pub temp_aabbs_offset: u32,
+    pub n_elements: u32,
 }
 
 #[repr(C)]
 struct PushConstants {
-    top_nodes_offset: u32,
+    instances_offset: u32,
     temp_aabbs_offset: u32,
     n_elements: u32,
     iteration: u32,
@@ -60,43 +60,43 @@ impl TopLBVHBoundsModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[TLBPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &TLBPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let iter_count = UInt::log(payload.n_elements, WORK_GROUP_SIZE);
+        let iter_count = (payload.n_elements as f64).log(WORK_GROUP_SIZE as f64).ceil() as u32;
 
-            let buf_barrier = self
-                .gb_barrier
-                .clone()
-                .offset(payload.temp_aabbs_offset as u64)
-                .size(iter_count as u64 * mem::size_of::<Bounds>() as u64)
-                .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
+        let buf_barrier = self
+            .gb_barrier
+            .clone()
+            .offset(payload.temp_aabbs_offset as u64)
+            .size(
+                UInt::div_ceil(payload.n_elements, WORK_GROUP_SIZE) as u64 * mem::size_of::<Bounds>() as u64,
+            )
+            .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
+            .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
 
-            let mut n_elements = payload.n_elements;
+        let mut n_elements = payload.n_elements;
 
-            for i in 0..iter_count {
-                let mut consts = PushConstants {
-                    top_nodes_offset: payload.top_nodes_offset,
-                    temp_aabbs_offset: payload.temp_aabbs_offset,
-                    n_elements: payload.n_elements,
-                    iteration: i,
-                };
+        for i in 0..iter_count {
+            let consts = PushConstants {
+                instances_offset: payload.instances_offset,
+                temp_aabbs_offset: payload.temp_aabbs_offset,
+                n_elements,
+                iteration: i,
+            };
 
-                let work_group_count = UInt::div_ceil(n_elements, WORK_GROUP_SIZE);
+            let work_group_count = UInt::div_ceil(n_elements, WORK_GROUP_SIZE);
 
-                cl.push_constants(self.pipeline.signature(), &consts);
-                cl.dispatch(work_group_count, 1, 1);
-                cl.barrier_buffer(
-                    PipelineStageFlags::COMPUTE,
-                    PipelineStageFlags::COMPUTE,
-                    &[buf_barrier],
-                );
+            cl.push_constants(self.pipeline.signature(), &consts);
+            cl.dispatch(work_group_count, 1, 1);
+            cl.barrier_buffer(
+                PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::COMPUTE,
+                &[buf_barrier],
+            );
 
-                n_elements = work_group_count;
-            }
+            n_elements = work_group_count;
         }
     }
 }

@@ -240,7 +240,7 @@ impl Device {
         })
     }
 
-    pub fn create_host_buffer<T>(
+    pub fn create_host_buffer<T: Copy>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,

@@ -366,7 +366,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_to_device<T>(
+    pub fn copy_buffer_to_device<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         src_element_index: u64,
@@ -393,7 +393,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_regions_to_device<T>(
+    pub fn copy_buffer_regions_to_device<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         dst_buffer: &impl BufferHandleImpl,
@@ -428,7 +428,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_regions_to_device_bytes<T>(
+    pub fn copy_buffer_regions_to_device_bytes<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         dst_buffer: &impl BufferHandleImpl,
@@ -478,7 +478,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_to_host<T>(
+    pub fn copy_buffer_to_host<T: Copy>(
         &mut self,
         src_buffer: &impl BufferHandleImpl,
         src_element_index: u64,
@@ -670,7 +670,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_query_pool_results_to_host<T>(
+    pub fn copy_query_pool_results_to_host<T: Copy>(
         &mut self,
         query_pool: &Arc<QueryPool>,
         first_query: u32,

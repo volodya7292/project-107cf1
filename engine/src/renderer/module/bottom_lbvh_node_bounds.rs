@@ -1,6 +1,5 @@
 use crate::renderer::{calc_group_count_1d, LBVHNode};
 use crate::utils::UInt;
-use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{

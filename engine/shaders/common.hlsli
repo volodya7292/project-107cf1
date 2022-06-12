@@ -9,6 +9,10 @@ inline uint clz(uint v) {
     return 31 - firstbithigh(v);
 }
 
+inline uint div_ceil(uint a, uint b) {
+    return (a + b - 1) / b;
+}
+
 template<typename T>
 struct SubGlobalBuffer {
     RWByteAddressBuffer buffer;

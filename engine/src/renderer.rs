@@ -366,6 +366,7 @@ struct DepthPyramidConstants {
     out_size: Vec2,
 }
 
+#[derive(Copy, Clone)]
 #[repr(C)]
 struct CullObject {
     sphere: Vec4,

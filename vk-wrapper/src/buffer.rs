@@ -123,13 +123,13 @@ impl BufferBarrier {
 unsafe impl Send for BufferBarrier {}
 unsafe impl Sync for BufferBarrier {}
 
-pub struct HostBuffer<T> {
+pub struct HostBuffer<T: Copy> {
     pub(crate) _type_marker: PhantomData<T>,
     pub(crate) buffer: Arc<Buffer>,
     pub(crate) p_data: *mut u8,
 }
 
-impl<'a, T> IntoIterator for &'a HostBuffer<T> {
+impl<'a, T: Copy> IntoIterator for &'a HostBuffer<T> {
     type Item = &'a mut T;
     type IntoIter = HostBufferIterator<'a, T>;
 
@@ -166,7 +166,7 @@ impl<'a, T> Iterator for HostBufferIterator<'a, T> {
     }
 }
 
-impl<T> Index<usize> for HostBuffer<T> {
+impl<T: Copy> Index<usize> for HostBuffer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -185,7 +185,7 @@ impl<T> Index<usize> for HostBuffer<T> {
     }
 }
 
-impl<T> IndexMut<usize> for HostBuffer<T> {
+impl<T: Copy> IndexMut<usize> for HostBuffer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         if index as u64 >= self.buffer.size {
             panic!(
@@ -201,7 +201,7 @@ impl<T> IndexMut<usize> for HostBuffer<T> {
     }
 }
 
-impl<T> HostBuffer<T> {
+impl<T: Copy> HostBuffer<T> {
     pub fn raw(&self) -> RawHostBuffer {
         RawHostBuffer(Arc::clone(&self.buffer))
     }
@@ -250,6 +250,11 @@ impl<T> HostBuffer<T> {
         }
     }
 
+    /// Safety: byte_offset + sizeof(S) must be <= `self.size()`
+    pub unsafe fn read_bytes<S: Copy>(&self, byte_offset: usize) -> &S {
+        &*(self.p_data.add(byte_offset) as *const S)
+    }
+
     pub fn write(&mut self, first_element: u64, elements: &[T]) {
         if first_element + elements.len() as u64 > self.buffer.size {
             panic!(
@@ -282,6 +287,16 @@ impl<T> HostBuffer<T> {
         }
     }
 
+    /// Safety: byte_offset + sizeof(S) must be <= `self.size()`
+    pub unsafe fn write_bytes<S: Copy>(&self, byte_offset: usize, s: S) {
+        ptr::copy_nonoverlapping(
+            &s as *const S as *const u8,
+            self.p_data.add(byte_offset),
+            mem::size_of::<S>(),
+        );
+        mem::forget(s);
+    }
+
     pub fn barrier(&self) -> BufferBarrier {
         BufferBarrier(
             vk::BufferMemoryBarrier::builder()
@@ -295,15 +310,15 @@ impl<T> HostBuffer<T> {
     }
 }
 
-impl<T> BufferHandleImpl for HostBuffer<T> {
+impl<T: Copy> BufferHandleImpl for HostBuffer<T> {
     fn handle(&self) -> BufferHandle {
         BufferHandle(self.buffer.native)
     }
 }
 
-unsafe impl<T> Send for HostBuffer<T> {}
+unsafe impl<T: Copy> Send for HostBuffer<T> {}
 
-unsafe impl<T> Sync for HostBuffer<T> {}
+unsafe impl<T: Copy> Sync for HostBuffer<T> {}
 
 pub struct DeviceBuffer {
     pub(crate) buffer: Arc<Buffer>,

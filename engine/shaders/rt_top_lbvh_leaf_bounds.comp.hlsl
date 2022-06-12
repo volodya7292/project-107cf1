@@ -39,7 +39,7 @@ void main(uint3 DTid : SV_DispatchThreadID) {
 
     [unroll]
 	for (uint i = 0; i < 8; i++) {
-		vertices[i] = mul(instance.transform, float4(vertices[i], 1)).xyz;
+		vertices[i] = mul(float4(vertices[i], 1), instance.transform).xyz;
 		bounds.p_min = min(bounds.p_min, vertices[i]);
 		bounds.p_max = max(bounds.p_max, vertices[i]);
 	}
