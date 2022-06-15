@@ -18,5 +18,6 @@ ash-window = "0.9"
 raw-window-handle = "0.3"
 gpu-alloc = "0.5"
 gpu-alloc-ash = "0.4"
+vma = { path = "../vma" }
 spirv_cross = { version = "0.23", features = ["glsl"] }
 range-alloc = "0.1"

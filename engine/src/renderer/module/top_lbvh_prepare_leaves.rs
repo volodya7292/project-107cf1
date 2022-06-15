@@ -11,12 +11,11 @@ pub struct TopLBVHPrepareLeavesModule {
 }
 
 #[repr(C)]
-struct TLPLPayload {
-    morton_codes_offset: u32,
-    top_nodes_offset: u32,
-    n_elements: u32,
-    scene_bound_min: Vec3,
-    scene_bound_max: Vec3,
+pub struct TLPLPayload {
+    pub morton_codes_offset: u32,
+    pub instances_offset: u32,
+    pub scene_bounds_offset: u32,
+    pub n_leaves: u32,
 }
 
 impl TopLBVHPrepareLeavesModule {
@@ -47,14 +46,12 @@ impl TopLBVHPrepareLeavesModule {
         }
     }
 
-    fn dispatch(&self, cl: &mut CmdList, payloads: &[TLPLPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &TLPLPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_elements);
-            cl.push_constants(self.pipeline.signature(), payload);
-            cl.dispatch(groups, 1, 1);
-        }
+        let groups = calc_group_count_1d(payload.n_leaves);
+        cl.push_constants(self.pipeline.signature(), payload);
+        cl.dispatch(groups, 1, 1);
     }
 }

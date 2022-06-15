@@ -114,6 +114,7 @@ impl Entry {
         if cfg!(debug_assertions) {
             required_layers.push("VK_LAYER_KHRONOS_validation");
             required_extensions.push("VK_EXT_debug_utils");
+            preferred_extensions.push("VK_KHR_portability_enumeration");
             preferred_extensions.push("VK_EXT_validation_features");
         }
 
@@ -138,6 +139,9 @@ impl Entry {
 
         // Infos
         let mut info = vk::InstanceCreateInfo::builder()
+            // TODO: use enum variant instead of number
+            // 1 = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
+            .flags(vk::InstanceCreateFlags::from_raw(1))
             .application_info(&app_info)
             .enabled_layer_names(&enabled_layers_raw)
             .enabled_extension_names(&enabled_extensions_raw);

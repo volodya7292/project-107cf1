@@ -757,8 +757,9 @@ impl Renderer {
             .unwrap(),
         ];
 
+        // TODO: resize according to needs
         let gb_size: u32 = 512 * 1024 * 1024;
-        let global_buffer = LargeBuffer::new(
+        let mut global_buffer = LargeBuffer::new(
             &device,
             BufferUsageFlags::TRANSFER_DST
                 | BufferUsageFlags::TRANSFER_SRC
@@ -835,9 +836,9 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
-        let ray_tracing = RayTracingModule::new(device, &global_buffer);
+        let ray_tracing = RayTracingModule::new(device, &mut global_buffer);
 
-        // TODO: allocate buffers with capacity of MAX_OBJECTS
+        // TODO: allocate respective buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
             scene,
             active_camera,

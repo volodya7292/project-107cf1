@@ -29,7 +29,7 @@ void main(uint3 DTid : SV_DispatchThreadId) {
         uint instance_id = mem.Load<MortonCode>(params.morton_codes_offset + idx * sizeof(MortonCode)).element_id;
         LBVHInstance instance = mem.Load<LBVHInstance>(params.instances_offset + instance_id * sizeof(LBVHInstance));
 
-        // Store leaf data
+        // Store instance data inside TopLBVHNode
         nodes.StoreWithOffset(idx, TopLBVHNode_instance_offset, instance);
     } else {
         // Internal node
