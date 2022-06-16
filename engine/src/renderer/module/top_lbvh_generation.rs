@@ -11,10 +11,10 @@ pub struct TopLBVHGenModule {
 
 #[repr(C)]
 pub struct TLGPayload {
-    morton_codes_offset: u32,
-    top_nodes_offset: u32,
-    instances_offset: u32,
-    n_elements: u32,
+    pub morton_codes_offset: u32,
+    pub top_nodes_offset: u32,
+    pub instances_offset: u32,
+    pub n_leaves: u32,
 }
 
 impl TopLBVHGenModule {
@@ -45,14 +45,14 @@ impl TopLBVHGenModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[TLGPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &TLGPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_elements);
-            cl.push_constants(self.pipeline.signature(), payload);
-            cl.dispatch(groups, 1, 1);
-        }
+        let n_nodes = payload.n_leaves * 2 - 1;
+        let groups = calc_group_count_1d(n_nodes);
+
+        cl.push_constants(self.pipeline.signature(), payload);
+        cl.dispatch(groups, 1, 1);
     }
 }

@@ -22,12 +22,15 @@ void main(uint3 DTid : SV_DispatchThreadId) {
         return;
 
     SubGlobalBuffer<MortonCode> morton_codes = {mem, params.morton_codes_offset};
+    SubGlobalBuffer<LBVHInstance> instances = {mem, params.instances_offset};
     SubGlobalBuffer<TopLBVHNode> nodes = {mem, params.top_nodes_offset};
 
     if (idx >= params.n_leaves - 1) {
+        uint leaf_idx = idx - (params.n_leaves - 1);
+
         // Leaf node
-        uint instance_id = mem.Load<MortonCode>(params.morton_codes_offset + idx * sizeof(MortonCode)).element_id;
-        LBVHInstance instance = mem.Load<LBVHInstance>(params.instances_offset + instance_id * sizeof(LBVHInstance));
+        uint instance_id = morton_codes.Load(leaf_idx).element_id;
+        LBVHInstance instance = instances.Load(instance_id);
 
         // Store instance data inside TopLBVHNode
         nodes.StoreWithOffset(idx, TopLBVHNode_instance_offset, instance);

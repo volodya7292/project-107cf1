@@ -7,6 +7,7 @@ RWByteAddressBuffer buffer : register(u0);
 struct PushConstants {
     uint morton_codes_offset;
     uint instances_offset;
+    uint top_nodes_offset;
     uint scene_bounds_offset;
     uint n_leaves;
 };
@@ -33,4 +34,11 @@ void main(uint3 DTid : SV_DispatchThreadID) {
 
     // Store triangle's morton code 
     buffer.Store(params.morton_codes_offset + element_id * sizeof(MortonCode), morton_code);
+
+    uint leaves_offset = params.top_nodes_offset + (params.n_leaves - 1) * sizeof(TopLBVHNode);
+
+    // Store empty realtionship data 
+    buffer.Store<uint>(leaves_offset + element_id * sizeof(TopLBVHNode) + TopLBVHNode_parent_offset, -1);
+    buffer.Store<uint>(leaves_offset + element_id * sizeof(TopLBVHNode) + TopLBVHNode_child_a_offset, -1);
+    buffer.Store<uint>(leaves_offset + element_id * sizeof(TopLBVHNode) + TopLBVHNode_child_b_offset, -1);
 }

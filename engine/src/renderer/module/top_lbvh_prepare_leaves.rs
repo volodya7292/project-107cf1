@@ -14,6 +14,7 @@ pub struct TopLBVHPrepareLeavesModule {
 pub struct TLPLPayload {
     pub morton_codes_offset: u32,
     pub instances_offset: u32,
+    pub top_nodes_offset: u32,
     pub scene_bounds_offset: u32,
     pub n_leaves: u32,
 }

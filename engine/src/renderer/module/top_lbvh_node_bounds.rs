@@ -11,8 +11,9 @@ pub struct TopLBVHNodeBoundsModule {
 
 #[repr(C)]
 pub struct TLNBPayload {
-    top_nodes_offset: u32,
-    n_leaves: u32,
+    pub top_nodes_offset: u32,
+    pub atomic_counters_offset: u32,
+    pub n_leaves: u32,
 }
 
 impl TopLBVHNodeBoundsModule {
@@ -43,14 +44,12 @@ impl TopLBVHNodeBoundsModule {
         }
     }
 
-    pub fn dispatch(&self, cl: &mut CmdList, payloads: &[TLNBPayload]) {
+    pub fn dispatch(&self, cl: &mut CmdList, payload: &TLNBPayload) {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        for payload in payloads {
-            let groups = calc_group_count_1d(payload.n_leaves);
-            cl.push_constants(self.pipeline.signature(), payload);
-            cl.dispatch(groups, 1, 1);
-        }
+        let groups = calc_group_count_1d(payload.n_leaves);
+        cl.push_constants(self.pipeline.signature(), payload);
+        cl.dispatch(groups, 1, 1);
     }
 }

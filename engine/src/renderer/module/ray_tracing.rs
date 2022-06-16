@@ -7,9 +7,9 @@ use crate::renderer::module::bottom_lbvh_node_bounds::{BLNBPayload, BottomLBVHNo
 use crate::renderer::module::bottom_lbvh_prepare_leaves::{BLPLPayload, BottomLBVHPrepareLeavesModule};
 use crate::renderer::module::morton_bitonic_sort::{MBSPayload, MortonBitonicSortModule};
 use crate::renderer::module::top_lbvh_bounds::{TLBPayload, TopLBVHBoundsModule};
-use crate::renderer::module::top_lbvh_generation::TopLBVHGenModule;
+use crate::renderer::module::top_lbvh_generation::{TLGPayload, TopLBVHGenModule};
 use crate::renderer::module::top_lbvh_leaf_bounds::{TLLBPayload, TopLBVHLeafBoundsModule};
-use crate::renderer::module::top_lbvh_node_bounds::TopLBVHNodeBoundsModule;
+use crate::renderer::module::top_lbvh_node_bounds::{TLNBPayload, TopLBVHNodeBoundsModule};
 use crate::renderer::module::top_lbvh_prepare_leaves::{TLPLPayload, TopLBVHPrepareLeavesModule};
 use crate::renderer::{GBVertexMesh, Renderable};
 use crate::utils::{slice_as_bytes, HashMap};
@@ -81,6 +81,7 @@ pub struct LBVHNode {
     child_b: u32,
 }
 
+#[derive(Debug)]
 #[repr(C)]
 struct LBVHInstance {
     indices_offset: u32,
@@ -91,6 +92,7 @@ struct LBVHInstance {
     bounds: Bounds,
 }
 
+#[derive(Debug)]
 #[repr(C)]
 struct TopLBVHNode {
     instance: LBVHInstance,
@@ -136,17 +138,23 @@ impl RayTracingModule {
         }
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
         let gb_barrier = global_buffer.barrier();
+        let mut n_instances = entity_vertex_meshes.len() as u32;
+
+        if n_instances > SCENE_MAX_INSTANCES {
+            eprintln!("Max instances of BLBVH is reached! n_instances = {}", n_instances);
+            n_instances = SCENE_MAX_INSTANCES;
+        }
 
         let mut allocs = global_buffer.allocate_multiple(&[
             BLBVH_MAX_TRIANGLES * mem::size_of::<MortonCode>() as u32,
             BLBVH_MAX_TRIANGLES * mem::size_of::<u32>() as u32,
-            SCENE_MAX_INSTANCES * mem::size_of::<LBVHInstance>() as u32,
             SCENE_MAX_INSTANCES * mem::size_of::<Bounds>() as u32,
+            n_instances * mem::size_of::<LBVHInstance>() as u32,
         ])?;
         let morton_codes_range = &allocs[0];
         let atomics_range = &allocs[1];
-        let instances_range = &allocs[2];
-        let temp_bounds_range = &allocs[3];
+        let temp_bounds_range = &allocs[2];
+        let instances_range = &allocs[3];
 
         // TODO: implement construction for non-indexed meshes
 
@@ -164,7 +172,7 @@ impl RayTracingModule {
 
             let nodes_range_len = n_nodes as u64 * mem::size_of::<LBVHNode>() as u64;
             let morton_codes_len = n_triangles as u64 * mem::size_of::<MortonCode>() as u64;
-            let atomics_len = n_triangles as u64 * mem::size_of::<u32>() as u64;
+            let atomics_len = n_triangles as u64 * mem::size_of::<u32>() as u64 - 1;
 
             if n_triangles > BLBVH_MAX_TRIANGLES {
                 eprintln!(
@@ -195,8 +203,6 @@ impl RayTracingModule {
                 mesh_bound_max: gvb_mesh.raw.aabb.1,
             };
             self.bl_prepare_leaves.dispatch(&mut cl, &blpl_payload);
-
-            // println!("{:?}", &gvb_mesh.raw.aabb);
 
             cl.barrier_buffer(
                 PipelineStageFlags::COMPUTE,
@@ -281,7 +287,8 @@ impl RayTracingModule {
 
         // Build Top-level (scene) LBVH
         // -------------------------------------------------------------------------------------------------------------
-        let n_instances = entity_vertex_meshes.len();
+        let morton_codes_len = n_instances as u64 * mem::size_of::<MortonCode>() as u64;
+        let atomics_len = n_instances as u64 * mem::size_of::<u32>() as u64;
 
         // Build instance buffer and upload it to GPU
         let g_transforms = scene.storage_read::<GlobalTransform>();
@@ -348,9 +355,8 @@ impl RayTracingModule {
         let payload = TLBPayload {
             instances_offset: instances_range.start(),
             temp_aabbs_offset: temp_bounds_range.start(),
-            n_elements: instances.len() as u32,
+            n_elements: n_instances,
         };
-        cl.debug_full_memory_barrier();
         self.tl_bounds.dispatch(&mut cl, &payload);
 
         cl.barrier_buffer(
@@ -363,45 +369,102 @@ impl RayTracingModule {
                 .dst_access_mask(AccessFlags::SHADER_READ)],
         );
 
-        // cl.barrier_buffer(
-        //     PipelineStageFlags::COMPUTE,
-        //     PipelineStageFlags::TRANSFER,
-        //     &[gb_barrier
-        //         .offset(temp_bounds_range.start() as u64)
-        //         .size(temp_bounds_range.len() as u64)
-        //         .src_access_mask(AccessFlags::SHADER_WRITE)
-        //         .dst_access_mask(AccessFlags::TRANSFER_READ)],
-        // );
-        // cl.copy_buffer_to_host(
-        //     global_buffer,
-        //     temp_bounds_range.start() as u64,
-        //     staging_buffer,
-        //     0,
-        //     mem::size_of::<Bounds>() as u64,
-        // );
-
         // 3. Prepare top-level leaves
         let payload = TLPLPayload {
             morton_codes_offset: morton_codes_range.start(),
             instances_offset: instances_range.start(),
+            top_nodes_offset: self.scene_lbvh_nodes_range.start(),
             scene_bounds_offset: temp_bounds_range.start(),
-            n_leaves: instances.len() as u32,
+            n_leaves: n_instances,
         };
         self.tl_prepare_leaves.dispatch(&mut cl, &payload);
 
+        cl.barrier_buffer(
+            PipelineStageFlags::COMPUTE,
+            PipelineStageFlags::COMPUTE,
+            &[
+                gb_barrier
+                    .offset(morton_codes_range.start() as u64)
+                    .size(morton_codes_len)
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE),
+                gb_barrier
+                    .offset(self.scene_lbvh_nodes_range.start() as u64)
+                    .size(self.scene_lbvh_nodes_range.len() as u64)
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE),
+            ],
+        );
+
         // 4. Sort morton codes
+        let payload = MBSPayload {
+            morton_codes_offset: morton_codes_range.start(),
+            n_codes: n_instances,
+        };
+        self.bitonic_sort.dispatch(&mut cl, &payload);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::COMPUTE,
+            PipelineStageFlags::COMPUTE,
+            &[gb_barrier
+                .offset(morton_codes_range.start() as u64)
+                .size(morton_codes_len)
+                .src_access_mask(AccessFlags::SHADER_WRITE)
+                .dst_access_mask(AccessFlags::SHADER_READ)],
+        );
 
         // 5. Generate hierarchy
+        let payload = TLGPayload {
+            morton_codes_offset: morton_codes_range.start(),
+            top_nodes_offset: self.scene_lbvh_nodes_range.start(),
+            instances_offset: instances_range.start(),
+            n_leaves: n_instances,
+        };
+        self.tl_gen.dispatch(&mut cl, &payload);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::COMPUTE,
+            PipelineStageFlags::COMPUTE | PipelineStageFlags::TRANSFER,
+            &[
+                gb_barrier
+                    .offset(self.scene_lbvh_nodes_range.start() as u64)
+                    .size(self.scene_lbvh_nodes_range.len() as u64)
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE),
+                gb_barrier
+                    .offset(atomics_range.start() as u64)
+                    .size(atomics_len)
+                    .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::TRANSFER_WRITE),
+            ],
+        );
+
+        // Fill atomics buffer with zeros for the step 6.
+        cl.fill_buffer2(global_buffer, atomics_range.start() as u64, atomics_len, 0);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::COMPUTE,
+            &[gb_barrier
+                .offset(atomics_range.start() as u64)
+                .size(atomics_len)
+                .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)],
+        );
 
         // 6. Compute bounds for each internal node
+        let payload = TLNBPayload {
+            top_nodes_offset: self.scene_lbvh_nodes_range.start(),
+            atomic_counters_offset: atomics_range.start(),
+            n_leaves: n_instances,
+        };
+        cl.debug_full_memory_barrier();
+        self.tl_node_bounds.dispatch(&mut cl, &payload);
 
         cl.end().unwrap();
         drop(cl);
         unsafe { graphics_queue.submit(staging_submit).unwrap() };
         staging_submit.wait().unwrap();
-
-        // let scene_bb = unsafe { staging_buffer.read_bytes::<Bounds>(0) };
-        // println!("{:?}", scene_bb);
 
         for alloc in allocs {
             global_buffer.free(alloc);

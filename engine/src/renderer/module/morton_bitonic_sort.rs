@@ -1,3 +1,4 @@
+use crate::utils::UInt;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
@@ -69,7 +70,7 @@ impl MortonBitonicSortModule {
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
         let aligned_n_elements = payload.n_codes.next_power_of_two();
-        let work_group_count = (aligned_n_elements / 2) / WORK_GROUP_SIZE;
+        let work_group_count = UInt::div_ceil(aligned_n_elements / 2, WORK_GROUP_SIZE);
 
         let buf_offset = payload.morton_codes_offset as u64;
         let buf_size = (payload.n_codes * 8) as u64; // sizeof(uvec2) = 8
