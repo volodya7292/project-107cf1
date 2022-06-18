@@ -1129,7 +1129,11 @@ impl Renderer {
                 .enumerate()
                 .map(|(i, (id, info))| {
                     data.push(info);
-                    CopyRegion::new(i as u64 * mat_size, id as u64 * mat_size, mat_size)
+                    CopyRegion::new(
+                        i as u64 * mat_size,
+                        id as u64 * mat_size,
+                        mat_size.try_into().unwrap(),
+                    )
                 })
                 .collect();
 
@@ -1940,14 +1944,17 @@ impl Renderer {
                 .unwrap(),
         );
 
-        self.ray_tracing.set_output_image(Arc::clone(
-            self.g_framebuffer
-                .as_ref()
-                .unwrap()
-                .get_image(0)
-                .as_ref()
-                .unwrap(),
-        ));
+        self.ray_tracing.update_descriptors(
+            Arc::clone(
+                self.g_framebuffer
+                    .as_ref()
+                    .unwrap()
+                    .get_image(0)
+                    .as_ref()
+                    .unwrap(),
+            ),
+            &self.per_frame_ub,
+        );
 
         // self.translucency_head_image = Some(
         //     self.device

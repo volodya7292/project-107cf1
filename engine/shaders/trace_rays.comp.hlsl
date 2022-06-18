@@ -8,17 +8,35 @@ struct PushConstants {
     uint top_nodes_offset;
 };
 
+ConstantBuffer<PerFrameInfo> frame_info : register(b2);
+
 [[vk::push_constant]]
 PushConstants params;
+
+void primary_ray(uint2 screen_size, float2 screen_pixel_pos, out float3 ray_orig, out float3 ray_dir) {
+	const float ct = tan((60.0 * 3.14 / 180.0) / 2.0f);
+	const float2 screenPos = (screen_pixel_pos / (float2)screen_size * 2.0f - 1.0f) * float2(ct * ((float)screen_size.x / screen_size.y), -ct);
+
+	ray_orig = frame_info.camera.pos.xyz;
+	ray_dir = mul(float4(normalize(float3(screenPos, -1)), 1.0), frame_info.camera.view).xyz;
+}
 
 [numthreads(THREAD_GROUP_WIDTH, THREAD_GROUP_HEIGHT, 1)]
 void main(uint3 DTid : SV_DispatchThreadID) {
     if (any(DTid.xy > params.resolution)) {
         return;
     }
-    rt_top_nodes_offset = params.top_nodes_offset;
 
-    float4 a = mem.Load<float4>(0);
+    float3 ray_orig, ray_dir;
+    primary_ray(params.resolution, DTid.xy, ray_orig, ray_dir);
 
-    output[DTid.xy] = clamp(a, 1.0, 1.0);
+    TriangleIntersection inter = trace_ray(ray_orig, ray_dir, params.top_nodes_offset);
+    // float4 a = mem.Load<float4>(0);
+
+    // rt_top_traversal_stack[uint(params.resolution.x)] = 3;
+
+    float4 a = inter.intersected ? 1.xxxx : float4(0, 0, 0, 1);
+
+    // output[DTid.xy] = float4(ray_dir, 1) * clamp(a, 1.0, 1.0);
+    output[DTid.xy] = a;
 }

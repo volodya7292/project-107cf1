@@ -56,15 +56,19 @@ impl RayTracerModule {
         }
     }
 
-    pub fn update_descriptor(&mut self, output_image: Arc<Image>) {
+    pub fn update_descriptors(&mut self, output_image: Arc<Image>, frame_info_buf: &DeviceBuffer) {
         unsafe {
             self.device.update_descriptor_set(
                 self.descriptor,
-                &[self.pool.create_binding(
-                    1,
-                    0,
-                    BindingRes::ImageView(Arc::clone(output_image.view()), ImageLayout::GENERAL),
-                )],
+                &[
+                    self.pool.create_binding(
+                        1,
+                        0,
+                        BindingRes::ImageView(Arc::clone(output_image.view()), ImageLayout::GENERAL),
+                    ),
+                    self.pool
+                        .create_binding(2, 0, BindingRes::Buffer(frame_info_buf.handle())),
+                ],
             );
         }
         let size = output_image.size_2d();

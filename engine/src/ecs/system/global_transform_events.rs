@@ -37,7 +37,7 @@ impl GlobalTransformEvents<'_> {
                 src_offset as u64,
                 renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE
                     + renderer.uniform_buffer_offset_model as u64,
-                matrix_bytes.len() as u64,
+                (matrix_bytes.len() as u64).try_into().unwrap(),
             ));
         }
     }

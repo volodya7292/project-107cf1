@@ -76,6 +76,22 @@ inline float3 aabbComputeCenter(float3 cmin, float3 cmax, float3 min, float3 max
 
 // ----------------------------------------------------------------------
 
+struct Camera {
+    float4 pos;
+    float4 dir;
+    float4x4 proj;
+    float4x4 view;
+    float4x4 proj_view;
+    float z_near;
+    float fovy;
+    uint2 _pad;
+};
+
+struct PerFrameInfo {
+    Camera camera;
+    uint4 tex_atlas_info; // .x: tile size in pixels
+};
+
 struct Bounds {
     float3 p_min;
     float3 p_max;
@@ -84,6 +100,21 @@ struct Bounds {
         other.p_min = min(p_min, other.p_min);
         other.p_max = max(p_max, other.p_max);
         return other;
+    }
+
+    inline bool intersect_ray(float3 orig, float3 dir) {
+		const float3 inv_dir = rcp(dir);
+
+		const float3 t0 = (p_min.xyz - orig) * inv_dir;
+		const float3 t1 = (p_max.xyz - orig) * inv_dir;
+
+		const float3 tmin = min(t0, t1);
+		const float3 tmax = max(t0, t1);
+
+        const float max_comp = max(tmin[0], max(tmin[1], tmin[2]));
+        const float min_comp = min(tmax[0], min(tmax[1], tmax[2]));
+
+        return max_comp <= min_comp; 
     }
 };
 
@@ -121,3 +152,4 @@ struct TopLBVHNode {
     uint child_a;
     uint child_b;
 };
+

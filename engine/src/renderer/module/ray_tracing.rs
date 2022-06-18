@@ -18,7 +18,9 @@ use nalgebra_glm::{Mat4, Vec3};
 use parking_lot::Mutex;
 use std::mem;
 use std::sync::Arc;
-use vk_wrapper::{AccessFlags, CmdList, Device, HostBuffer, Image, PipelineStageFlags, Queue, SubmitPacket};
+use vk_wrapper::{
+    AccessFlags, CmdList, Device, DeviceBuffer, HostBuffer, Image, PipelineStageFlags, Queue, SubmitPacket,
+};
 
 // Scene acceleration structure construction pipeline:
 //
@@ -82,7 +84,7 @@ pub struct LBVHNode {
     child_b: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 #[repr(C)]
 struct LBVHInstance {
     indices_offset: u32,
@@ -93,7 +95,7 @@ struct LBVHInstance {
     bounds: Bounds,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 #[repr(C)]
 struct TopLBVHNode {
     instance: LBVHInstance,
@@ -463,6 +465,34 @@ impl RayTracingModule {
         cl.debug_full_memory_barrier();
         self.tl_node_bounds.dispatch(&mut cl, &payload);
 
+        if instances.is_empty() {
+            unsafe {
+                staging_buffer.write_bytes(
+                    0,
+                    TopLBVHNode {
+                        instance: LBVHInstance {
+                            indices_offset: 0,
+                            vertices_offset: 0,
+                            nodes_offset: u32::MAX,
+                            transform: Default::default(),
+                            transform_inverse: Default::default(),
+                            bounds: Default::default(),
+                        },
+                        parent: u32::MAX,
+                        child_a: u32::MAX,
+                        child_b: u32::MAX,
+                    },
+                );
+            }
+            cl.copy_buffer_to_device(
+                staging_buffer,
+                0,
+                global_buffer,
+                self.scene_lbvh_nodes_range.start() as u64,
+                mem::size_of::<TopLBVHNode>() as u64,
+            );
+        }
+
         cl.end().unwrap();
         drop(cl);
         unsafe { graphics_queue.submit(staging_submit).unwrap() };
@@ -475,8 +505,8 @@ impl RayTracingModule {
         Ok(())
     }
 
-    pub fn set_output_image(&mut self, output_image: Arc<Image>) {
-        self.ray_tracer.update_descriptor(output_image);
+    pub fn update_descriptors(&mut self, output_image: Arc<Image>, frame_info_buf: &DeviceBuffer) {
+        self.ray_tracer.update_descriptors(output_image, frame_info_buf);
     }
 
     pub fn trace_rays(&self, cl: &mut CmdList) {

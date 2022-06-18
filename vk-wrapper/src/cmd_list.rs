@@ -9,6 +9,7 @@ use crate::{DescriptorSet, RawHostBuffer};
 use ash::vk;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 
@@ -25,11 +26,11 @@ pub struct CmdList {
 pub struct CopyRegion(vk::BufferCopy);
 
 impl CopyRegion {
-    pub fn new(src_offset: u64, dst_offset: u64, size: u64) -> CopyRegion {
+    pub fn new(src_offset: u64, dst_offset: u64, size: NonZeroU64) -> CopyRegion {
         CopyRegion(vk::BufferCopy {
             src_offset,
             dst_offset,
-            size,
+            size: size.get(),
         })
     }
 
@@ -705,6 +706,9 @@ impl CmdList {
     }
 
     pub fn fill_buffer2(&mut self, buffer: &impl BufferHandleImpl, offset: u64, size: u64, value: u32) {
+        if size == 0 {
+            return;
+        }
         unsafe {
             self.device_wrapper
                 .native

@@ -343,7 +343,7 @@ impl Renderer {
                                 CopyRegion::new(
                                     used_size + region.src_offset(),
                                     region.dst_offset(),
-                                    region.size(),
+                                    (region.size() as u64).try_into().unwrap(),
                                 )
                             })
                             .collect();
