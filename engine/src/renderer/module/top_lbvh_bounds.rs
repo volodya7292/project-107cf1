@@ -12,7 +12,7 @@ const WORK_GROUP_SIZE: u32 = 512;
 
 pub struct TopLBVHBoundsModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
     gb_barrier: BufferBarrier,
 }
@@ -54,7 +54,7 @@ impl TopLBVHBoundsModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
             gb_barrier: global_buffer.barrier(),
         }

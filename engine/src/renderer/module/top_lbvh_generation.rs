@@ -5,7 +5,7 @@ use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, Dev
 
 pub struct TopLBVHGenModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
@@ -40,7 +40,7 @@ impl TopLBVHGenModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
         }
     }

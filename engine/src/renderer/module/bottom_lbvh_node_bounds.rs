@@ -1,17 +1,11 @@
-use crate::renderer::{calc_group_count_1d, LBVHNode};
-use crate::utils::UInt;
+use crate::renderer::calc_group_count_1d;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{
-    AccessFlags, BindingRes, BufferBarrier, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer,
-    Pipeline,
-};
-
-const WORK_GROUP_SIZE: u32 = 512;
+use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
 pub struct BottomLBVHNodeBoundsModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
@@ -45,7 +39,7 @@ impl BottomLBVHNodeBoundsModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
         }
     }

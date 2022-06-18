@@ -6,20 +6,19 @@ use crate::renderer::module::bottom_lbvh_generation::{BLGPayload, BottomLBVHGenM
 use crate::renderer::module::bottom_lbvh_node_bounds::{BLNBPayload, BottomLBVHNodeBoundsModule};
 use crate::renderer::module::bottom_lbvh_prepare_leaves::{BLPLPayload, BottomLBVHPrepareLeavesModule};
 use crate::renderer::module::morton_bitonic_sort::{MBSPayload, MortonBitonicSortModule};
+use crate::renderer::module::ray_tracer::{RTPayload, RayTracerModule};
 use crate::renderer::module::top_lbvh_bounds::{TLBPayload, TopLBVHBoundsModule};
 use crate::renderer::module::top_lbvh_generation::{TLGPayload, TopLBVHGenModule};
 use crate::renderer::module::top_lbvh_leaf_bounds::{TLLBPayload, TopLBVHLeafBoundsModule};
 use crate::renderer::module::top_lbvh_node_bounds::{TLNBPayload, TopLBVHNodeBoundsModule};
 use crate::renderer::module::top_lbvh_prepare_leaves::{TLPLPayload, TopLBVHPrepareLeavesModule};
-use crate::renderer::{GBVertexMesh, Renderable};
+use crate::renderer::GBVertexMesh;
 use crate::utils::{slice_as_bytes, HashMap};
 use nalgebra_glm::{Mat4, Vec3};
 use parking_lot::Mutex;
+use std::mem;
 use std::sync::Arc;
-use std::{mem, slice};
-use vk_wrapper::{
-    AccessFlags, CmdList, Device, DeviceBuffer, HostBuffer, PipelineStageFlags, Queue, SubmitPacket,
-};
+use vk_wrapper::{AccessFlags, CmdList, Device, HostBuffer, Image, PipelineStageFlags, Queue, SubmitPacket};
 
 // Scene acceleration structure construction pipeline:
 //
@@ -55,6 +54,8 @@ pub struct RayTracingModule {
     tl_prepare_leaves: TopLBVHPrepareLeavesModule,
     tl_gen: TopLBVHGenModule,
     tl_node_bounds: TopLBVHNodeBoundsModule,
+
+    ray_tracer: RayTracerModule,
 }
 
 #[derive(Debug)]
@@ -109,6 +110,7 @@ impl RayTracingModule {
 
         Self {
             device: Arc::clone(device),
+            scene_lbvh_nodes_range,
             bl_prepare_leaves: BottomLBVHPrepareLeavesModule::new(device, global_buffer),
             bitonic_sort: MortonBitonicSortModule::new(device, global_buffer),
             bl_gen: BottomLBVHGenModule::new(device, global_buffer),
@@ -118,7 +120,7 @@ impl RayTracingModule {
             tl_prepare_leaves: TopLBVHPrepareLeavesModule::new(device, global_buffer),
             tl_gen: TopLBVHGenModule::new(device, global_buffer),
             tl_node_bounds: TopLBVHNodeBoundsModule::new(device, global_buffer),
-            scene_lbvh_nodes_range,
+            ray_tracer: RayTracerModule::new(device, global_buffer),
         }
     }
 
@@ -145,7 +147,7 @@ impl RayTracingModule {
             n_instances = SCENE_MAX_INSTANCES;
         }
 
-        let mut allocs = global_buffer.allocate_multiple(&[
+        let allocs = global_buffer.allocate_multiple(&[
             BLBVH_MAX_TRIANGLES * mem::size_of::<MortonCode>() as u32,
             BLBVH_MAX_TRIANGLES * mem::size_of::<u32>() as u32,
             SCENE_MAX_INSTANCES * mem::size_of::<Bounds>() as u32,
@@ -172,7 +174,7 @@ impl RayTracingModule {
 
             let nodes_range_len = n_nodes as u64 * mem::size_of::<LBVHNode>() as u64;
             let morton_codes_len = n_triangles as u64 * mem::size_of::<MortonCode>() as u64;
-            let atomics_len = n_triangles as u64 * mem::size_of::<u32>() as u64 - 1;
+            let atomics_len = (n_triangles as u64 - 1) * mem::size_of::<u32>() as u64;
 
             if n_triangles > BLBVH_MAX_TRIANGLES {
                 eprintln!(
@@ -471,5 +473,16 @@ impl RayTracingModule {
         }
 
         Ok(())
+    }
+
+    pub fn set_output_image(&mut self, output_image: Arc<Image>) {
+        self.ray_tracer.update_descriptor(output_image);
+    }
+
+    pub fn trace_rays(&self, cl: &mut CmdList) {
+        let payload = RTPayload {
+            top_nodes_offset: self.scene_lbvh_nodes_range.start(),
+        };
+        self.ray_tracer.dispatch(cl, &payload);
     }
 }

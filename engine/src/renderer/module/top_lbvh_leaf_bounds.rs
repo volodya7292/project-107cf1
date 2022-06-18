@@ -5,7 +5,7 @@ use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, Dev
 
 pub struct TopLBVHLeafBoundsModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
@@ -38,7 +38,7 @@ impl TopLBVHLeafBoundsModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
         }
     }

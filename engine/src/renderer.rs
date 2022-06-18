@@ -1521,7 +1521,7 @@ impl Renderer {
                 &[self.compose_pool.create_binding(
                     0,
                     0,
-                    BindingRes::Image(Arc::clone(albedo), ImageLayout::SHADER_READ),
+                    BindingRes::Image(Arc::clone(albedo), ImageLayout::GENERAL),
                 )],
             )
         };
@@ -1530,8 +1530,6 @@ impl Renderer {
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            // Note: Do not render anything in final cl except copying some image into swapchain image.
-            // Uniform/vertex  may be being updated at this moment.
             let mut cl = self.final_cl[0].lock();
             cl.begin(true).unwrap();
 
@@ -1556,32 +1554,56 @@ impl Renderer {
                 ClearValue::ColorU32([0xffffffff; 4]),
             );*/
 
-            cl.begin_render_pass(
-                &self.g_render_pass,
-                self.g_framebuffer.as_ref().unwrap(),
-                &[
-                    ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0]),
-                    ClearValue::Undefined,
-                    ClearValue::Undefined,
-                    ClearValue::Undefined,
-                    ClearValue::Undefined,
-                    ClearValue::ColorU32([0xffffffff; 4]),
-                ],
-                true,
-            );
-            cl.execute_secondary(&self.g_secondary_cls);
-            cl.end_render_pass();
-
             cl.barrier_image(
-                PipelineStageFlags::ALL_GRAPHICS,
-                PipelineStageFlags::ALL_GRAPHICS,
+                PipelineStageFlags::TOP_OF_PIPE,
+                PipelineStageFlags::COMPUTE,
                 &[albedo
                     .barrier()
-                    .src_access_mask(AccessFlags::MEMORY_WRITE)
-                    .dst_access_mask(AccessFlags::MEMORY_READ)
-                    .old_layout(ImageLayout::SHADER_READ)
-                    .new_layout(ImageLayout::SHADER_READ)],
+                    .dst_access_mask(AccessFlags::SHADER_WRITE)
+                    .old_layout(ImageLayout::UNDEFINED)
+                    .new_layout(ImageLayout::GENERAL)],
             );
+
+            // Trace rays
+            self.ray_tracing.trace_rays(&mut cl);
+
+            cl.barrier_image(
+                PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::PIXEL_SHADER,
+                &[albedo
+                    .barrier()
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .old_layout(ImageLayout::GENERAL)
+                    .new_layout(ImageLayout::GENERAL)],
+            );
+
+            // cl.begin_render_pass(
+            //     &self.g_render_pass,
+            //     self.g_framebuffer.as_ref().unwrap(),
+            //     &[
+            //         ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0]),
+            //         ClearValue::Undefined,
+            //         ClearValue::Undefined,
+            //         ClearValue::Undefined,
+            //         ClearValue::Undefined,
+            //         ClearValue::ColorU32([0xffffffff; 4]),
+            //     ],
+            //     true,
+            // );
+            // cl.execute_secondary(&self.g_secondary_cls);
+            // cl.end_render_pass();
+            //
+            // cl.barrier_image(
+            //     PipelineStageFlags::ALL_GRAPHICS,
+            //     PipelineStageFlags::ALL_GRAPHICS,
+            //     &[albedo
+            //         .barrier()
+            //         .src_access_mask(AccessFlags::MEMORY_WRITE)
+            //         .dst_access_mask(AccessFlags::MEMORY_READ)
+            //         .old_layout(ImageLayout::SHADER_READ)
+            //         .new_layout(ImageLayout::SHADER_READ)],
+            // );
 
             cl.begin_render_pass(
                 self.sw_render_pass.as_ref().unwrap(),
@@ -1890,7 +1912,9 @@ impl Renderer {
                         (
                             0,
                             ImageMod::AdditionalUsage(
-                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ImageUsageFlags::INPUT_ATTACHMENT
+                                    | ImageUsageFlags::SAMPLED
+                                    | ImageUsageFlags::STORAGE,
                             ),
                         ),
                         (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
@@ -1915,6 +1939,15 @@ impl Renderer {
                 )
                 .unwrap(),
         );
+
+        self.ray_tracing.set_output_image(Arc::clone(
+            self.g_framebuffer
+                .as_ref()
+                .unwrap()
+                .get_image(0)
+                .as_ref()
+                .unwrap(),
+        ));
 
         // self.translucency_head_image = Some(
         //     self.device
@@ -1992,7 +2025,7 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        // Safe pipeline cache
+        // Save pipeline cache
         let pl_cache = self.device.get_pipeline_cache().unwrap();
         fs::write(*PIPELINE_CACHE_FILENAME, pl_cache).unwrap();
 

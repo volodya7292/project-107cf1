@@ -1,12 +1,11 @@
 use crate::renderer::calc_group_count_1d;
-use nalgebra_glm::Vec3;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Pipeline};
 
 pub struct TopLBVHPrepareLeavesModule {
     pipeline: Arc<Pipeline>,
-    pool: DescriptorPool,
+    _pool: DescriptorPool,
     descriptor: DescriptorSet,
 }
 
@@ -42,7 +41,7 @@ impl TopLBVHPrepareLeavesModule {
 
         Self {
             pipeline,
-            pool,
+            _pool: pool,
             descriptor,
         }
     }
