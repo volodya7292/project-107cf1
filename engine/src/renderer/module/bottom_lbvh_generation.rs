@@ -12,6 +12,7 @@ pub struct BottomLBVHGenModule {
 #[repr(C)]
 pub struct BLGPayload {
     pub morton_codes_offset: u32,
+    pub leaves_bounds_offset: u32,
     pub nodes_offset: u32,
     pub n_triangles: u32,
 }

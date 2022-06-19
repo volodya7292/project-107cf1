@@ -79,7 +79,7 @@ impl RayTracerModule {
         cl.bind_pipeline(&self.pipeline);
         cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
-        let payload = PushConstants {
+        let consts = PushConstants {
             resolution: self.resolution,
             top_nodes_offset: payload.top_nodes_offset,
         };
@@ -87,7 +87,7 @@ impl RayTracerModule {
         let groups_x = calc_group_count_2d(ires.x);
         let groups_y = calc_group_count_2d(ires.y);
 
-        cl.push_constants(self.pipeline.signature(), &payload);
+        cl.push_constants(self.pipeline.signature(), &consts);
         cl.dispatch(groups_x, groups_y, 1);
     }
 }

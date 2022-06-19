@@ -6,6 +6,8 @@ pub mod registry;
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::block_model;
+use crate::game::overworld::block_model::PackedVertex;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld_streamer::OverworldStreamer;
@@ -13,15 +15,17 @@ use crate::physics::aabb::{AABBRayIntersection, AABB};
 use crate::physics::MOTION_EPSILON;
 use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
+use engine::ecs::component;
 use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
+use engine::renderer::vertex_mesh::VertexMeshCreate;
 use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
 use engine::{renderer, Application, Input};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, Vec3};
 use overworld::Overworld;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -85,7 +89,7 @@ impl Game {
             block_set_cooldown: 0.0,
             curr_block: main_registry.block_default(),
             change_stream_pos: true,
-            player_collision_enabled: true,
+            player_collision_enabled: false,
             cursor_grab: true,
         };
         program
@@ -139,13 +143,12 @@ impl Application for Game {
             for (index, (ty, res_ref)) in self.registry.registry().textures().iter().enumerate() {
                 renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
             }
-
             for (id, info) in self.registry.registry().materials().iter().enumerate() {
                 renderer.set_material(id as u32, *info);
             }
         }
 
-        self.player_pos = DVec3::new(0.0, 64.0, 0.0);
+        self.player_pos = DVec3::new(0.0, 0.0, 0.0);
 
         let mut overworld_streamer =
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
@@ -155,6 +158,55 @@ impl Application for Game {
         overworld_streamer.set_y_render_distance(256);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
+
+        let scene = renderer.scene();
+        let tri = scene.create_entity();
+        scene.storage_write::<component::Transform>().set(
+            tri,
+            component::Transform::new(
+                // DVec3::new(-0.5, -0.5, -0.5),
+                DVec3::default(),
+                Vec3::from_element(0.0),
+                Vec3::from_element(1.0),
+            ),
+        );
+        scene.storage_write::<component::RenderConfig>().set(
+            tri,
+            component::RenderConfig::new(renderer, mat_pipelines.cluster(), false),
+        );
+
+        let vertices: Vec<_> = block_model::cube_quads(Vec3::from_element(0.0), Vec3::from_element(1.0))
+            .iter()
+            .map(|q| {
+                q.vertices().iter().map(|v| PackedVertex {
+                    position: *v,
+                    pack0: Default::default(),
+                })
+            })
+            .flatten()
+            .collect();
+
+        let mut indices = vec![0; vertices.len() / 4 * 6];
+        for i in (0..indices.len()).step_by(6) {
+            let ind = (i / 6 * 4) as u32;
+            indices[i] = ind;
+            indices[i + 1] = ind + 2;
+            indices[i + 2] = ind + 1;
+            indices[i + 3] = ind + 2;
+            indices[i + 4] = ind + 3;
+            indices[i + 5] = ind + 1;
+        }
+
+        scene.storage_write::<component::VertexMesh>().set(
+            tri,
+            component::VertexMesh::new(
+                &renderer
+                    .device()
+                    .create_vertex_mesh(&vertices, Some(&indices[0..18]))
+                    .unwrap()
+                    .raw(),
+            ),
+        );
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -423,7 +475,7 @@ pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBo
     let mut streamer = streamer.lock();
 
     // let t0 = Instant::now();
-    streamer.update();
+    // streamer.update();
     // let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 

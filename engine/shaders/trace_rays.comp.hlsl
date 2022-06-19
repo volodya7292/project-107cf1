@@ -19,6 +19,7 @@ void primary_ray(uint2 screen_size, float2 screen_pixel_pos, out float3 ray_orig
 
 	ray_orig = frame_info.camera.pos.xyz;
 	ray_dir = mul(float4(normalize(float3(screenPos, -1)), 1.0), frame_info.camera.view).xyz;
+    // ray_dir = -ray_dir;
 }
 
 [numthreads(THREAD_GROUP_WIDTH, THREAD_GROUP_HEIGHT, 1)]
@@ -35,7 +36,9 @@ void main(uint3 DTid : SV_DispatchThreadID) {
 
     // rt_top_traversal_stack[uint(params.resolution.x)] = 3;
 
-    float4 a = inter.intersected ? 1.xxxx : float4(0, 0, 0, 1);
+
+
+    float4 a = inter.intersected ? float4(inter.inter_point + 0.5, 1) : float4(0, 0, 0, 1);
 
     // output[DTid.xy] = float4(ray_dir, 1) * clamp(a, 1.0, 1.0);
     output[DTid.xy] = a;

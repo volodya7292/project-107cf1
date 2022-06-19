@@ -5,6 +5,7 @@ RWByteAddressBuffer mem : register(u0);
 
 struct PushConstants {
     uint morton_codes_offset;
+    uint leaves_bounds_offset;
     uint nodes_offset;
     uint n_triangles;
 };
@@ -22,14 +23,18 @@ void main(uint3 DTid : SV_DispatchThreadId) {
 
     SubGlobalBuffer<MortonCode> morton_codes = {mem, params.morton_codes_offset};
     SubGlobalBuffer<LBVHNode> nodes = {mem, params.nodes_offset};
+    SubGlobalBuffer<Bounds> leaves_bounds = {mem, params.leaves_bounds_offset};
 
     if (idx >= params.n_triangles - 1) {
         // Leaf node
         uint leaf_idx = idx - (params.n_triangles - 1);
         uint element_id = morton_codes.Load(leaf_idx).element_id;
+        Bounds bounds = leaves_bounds.Load(element_id);
 
         // Store element_id
         nodes.StoreWithOffset(idx, LBVHNode_element_id_offset, element_id);
+        // Store bounds
+        nodes.StoreWithOffset(idx, LBVHNode_bounds_offset, bounds);
     } else {
         // Internal node
         uint2 range = mortonDetermineRange(idx, params.n_triangles, params.morton_codes_offset);

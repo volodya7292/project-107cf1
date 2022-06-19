@@ -8,8 +8,8 @@
 #define INTERSECTION_FLAG_TEXCOORD    1 << 1
 
 // Maximum number of triangles in a bottom LBVH = 1024^2 = 2^10
-static uint rt_bottom_traversal_stack[16];
-static uint rt_top_traversal_stack[16];
+static uint rt_bottom_traversal_stack[32];
+static uint rt_top_traversal_stack[32];
 
 struct TriInterInput {
     float3 ray_orig;
@@ -49,13 +49,14 @@ TriangleIntersection rt_intersect_triangle(in TriInterInput input) {
     float3 pvec = cross(input.ray_dir, edge2);
     float det = dot(edge1, pvec);
 
-    if (det < 0)
+    if (det > 0)
         // if the determinant is negative, the triangle is backfacing
         return inter;
 
-    if (abs(det) < RT_EPSILON)
-        // if the determinant is 0, the ray misses the triangle
-        return inter;
+    // Note: use this when backfacing culling is disabled
+    // if (abs(det) < RT_EPSILON)
+    //     // if the determinant is 0, the ray misses the triangle
+    //     return inter;
     
     float inv_det = 1.0 / det;
     
@@ -70,6 +71,8 @@ TriangleIntersection rt_intersect_triangle(in TriInterInput input) {
         return inter;
 
     float t = dot(edge2, qvec) * inv_det;
+    if (t < 0)
+        return inter;
 
     inter.intersected = true;
     inter.distance = t;
@@ -96,8 +99,10 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
 
     SubGlobalBuffer<LBVHNode> nodes = {mem, instance.nodes_offset};
 
-    ray_orig = mul(instance.transform_inverse, float4(ray_orig, 1)).xyz;
-    ray_dir = mul(instance.transform_inverse, float4(ray_dir, 0)).xyz;
+    // ray_orig = mul(instance.transform_inverse, float4(ray_orig, 1)).xyz;
+    // ray_dir = mul(instance.transform_inverse, float4(ray_dir, 0)).xyz;
+    ray_orig = mul(float4(ray_orig, 1), instance.transform_inverse).xyz;
+    ray_dir = mul(float4(ray_dir, 0), instance.transform_inverse).xyz;
 
     rt_bottom_traversal_stack[0] = -1;
 
@@ -114,27 +119,20 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
 
     if (!curr_node.bounds.intersect_ray(ray_orig, ray_dir)) {
         return min_inter;
-    } else if (curr_node.element_id != -1) {
+    }
+    if (curr_node.element_id != -1) {
         tri_inter_in.triangle_id = curr_node.element_id;
         TriangleIntersection inter = rt_intersect_triangle(tri_inter_in);
         if (inter.intersected)
             min_inter = inter;
     }
 
-    uint i = 0;
-
     [loop]
-    while (curr_node_id != -1) {
+    while (true) {
         bool traverse_a = false;
         bool traverse_b = false;
         uint child_a_id = curr_node.child_a;
         uint child_b_id = curr_node.child_b;
-
-        i++;
-
-        if (i > 16) {
-            break;
-        }
 
         if (child_a_id != -1) {
             LBVHNode node_a = nodes.Load(child_a_id);
@@ -144,7 +142,7 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
                     tri_inter_in.triangle_id = node_a.element_id;
                     TriangleIntersection inter = rt_intersect_triangle(tri_inter_in);
 
-                    if (inter.distance < min_inter.distance) {
+                    if (inter.intersected && inter.distance < min_inter.distance) {
                         min_inter = inter;
                     }
                 } else {
@@ -161,7 +159,7 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
                     tri_inter_in.triangle_id = node_b.element_id;
                     TriangleIntersection inter = rt_intersect_triangle(tri_inter_in);
 
-                    if (inter.distance < min_inter.distance) {
+                    if (inter.intersected && inter.distance < min_inter.distance) {
                         min_inter = inter;
                     }
                 } else {
@@ -180,6 +178,12 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
                 // push to stack
                 rt_bottom_traversal_stack[stack_index++] = child_b_id;
             }
+        }
+
+        if (curr_node_id != -1) {
+            curr_node = nodes.Load(curr_node_id); 
+        } else {
+            break;
         }
     }
 
@@ -206,21 +210,20 @@ TriangleIntersection trace_ray(float3 ray_orig, float3 ray_dir, uint rt_top_node
     if (!curr_node.instance.bounds.intersect_ray(ray_orig, ray_dir)) {
         return min_inter;
     }
-
-    uint i = 0;
+    if (curr_node.instance.nodes_offset != -1) {
+        TriangleIntersection inter = rt_intersect_bottom_lbvh(ray_orig, ray_dir, curr_node.instance);
+        if (inter.intersected) {
+            min_inter = inter;
+            inter_mesh_transform = curr_node.instance.transform;
+        }
+    }
 
     [loop]
-    while (curr_node_id != -1) {
+    while (true) {
         bool traverse_a = false;
         bool traverse_b = false;
         uint child_a_id = curr_node.child_a;
         uint child_b_id = curr_node.child_b;
-
-        if (i > 16) {
-            break;
-        }
-
-        i++;
 
         if (child_a_id != -1) {
             TopLBVHNode node_a = top_nodes.Load(child_a_id);
@@ -255,7 +258,7 @@ TriangleIntersection trace_ray(float3 ray_orig, float3 ray_dir, uint rt_top_node
                         inter_mesh_transform = node_b.instance.transform;
                     }
                 } else {
-                    traverse_a = true;
+                    traverse_b = true;
                 }
             }
         }
@@ -270,11 +273,19 @@ TriangleIntersection trace_ray(float3 ray_orig, float3 ray_dir, uint rt_top_node
                 rt_top_traversal_stack[stack_index++] = child_b_id;
             }
         }
+
+        if (curr_node_id != -1) {
+            curr_node = top_nodes.Load(curr_node_id); 
+        } else {
+            break;
+        }
     }
 
     if (min_inter.intersected) {
-        min_inter.normal = mul(inter_mesh_transform, float4(min_inter.normal, 0)).xyz;
-        min_inter.inter_point = mul(inter_mesh_transform, float4(min_inter.inter_point, 1)).xyz;
+        // min_inter.normal = mul(inter_mesh_transform, float4(min_inter.normal, 0)).xyz;
+        // min_inter.inter_point = mul(inter_mesh_transform, float4(min_inter.inter_point, 1)).xyz;
+        min_inter.normal = mul(float4(min_inter.normal, 0), inter_mesh_transform).xyz;
+        min_inter.inter_point = mul(float4(min_inter.inter_point, 1), inter_mesh_transform).xyz;
     }
 
     return min_inter;

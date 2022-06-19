@@ -9,13 +9,11 @@ struct PushConstants {
     uint vertices_offset;
     uint morton_codes_offset;
     uint nodes_offset;
+    uint leaves_bounds_offset;
     uint n_triangles;
     float3 mesh_bound_min;
     float3 mesh_bound_max;
 };
-
-#define INDEX_SIZE sizeof(uint)
-#define VERTEX_SIZE sizeof(float3)
 
 [[vk::push_constant]]
 PushConstants params;
@@ -27,16 +25,22 @@ void main(uint3 DTid : SV_DispatchThreadID) {
         return;
     }
 
-    uint first_index_ptr = params.indices_offset + triangle_id * 3 * INDEX_SIZE;
-    uint3 v_ptrs = params.vertices_offset.xxx + buffer.Load<uint3>(first_index_ptr) * VERTEX_SIZE;
+    SubGlobalBuffer<uint3> indices = {buffer, params.indices_offset};
+    SubGlobalBuffer<float3> vertices = {buffer, params.vertices_offset};
+    SubGlobalBuffer<LBVHNode> nodes = {buffer, params.nodes_offset};
+    SubGlobalBuffer<Bounds> leaves_bounds = {buffer, params.leaves_bounds_offset};
+    SubGlobalBuffer<MortonCode> morton_codes = {buffer, params.morton_codes_offset};
 
-    float3 v0 = buffer.Load<float3>(v_ptrs[0]);
-    float3 v1 = buffer.Load<float3>(v_ptrs[1]);
-    float3 v2 = buffer.Load<float3>(v_ptrs[2]);
+    uint3 tri_indices = indices.Load(triangle_id);
+    float3 v0 = vertices.Load(tri_indices[0]);
+    float3 v1 = vertices.Load(tri_indices[1]);
+    float3 v2 = vertices.Load(tri_indices[2]);
+
+    Bounds bounds;
+    bounds.p_min = min(v0, min(v1, v2));
+    bounds.p_max = max(v0, max(v1, v2));
 
     LBVHNode node;
-    node.bounds.p_min = min(v0, min(v1, v2));
-    node.bounds.p_max = max(v0, max(v1, v2));
     node.element_id = -1;
     node.parent = -1;
     node.child_a = -1;
@@ -50,10 +54,12 @@ void main(uint3 DTid : SV_DispatchThreadID) {
     morton_code.code = code;
     morton_code.element_id = triangle_id;
 
-    uint leaves_offset = params.nodes_offset + (params.n_triangles - 1) * sizeof(LBVHNode);
+    uint leaves_start = params.n_triangles - 1;
 
     // Store triangle's prepared node
-    buffer.Store(leaves_offset + triangle_id * sizeof(LBVHNode), node);
+    nodes.Store(leaves_start + triangle_id, node);
     // Store triangle's morton code 
-    buffer.Store(params.morton_codes_offset + triangle_id * sizeof(MortonCode), morton_code);
+    morton_codes.Store(triangle_id, morton_code);
+    // Store bounds
+    leaves_bounds.Store(triangle_id, bounds);
 }

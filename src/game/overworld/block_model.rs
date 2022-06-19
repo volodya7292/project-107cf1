@@ -14,8 +14,8 @@ use std::ops::Range;
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct PackedVertex {
-    position: Vec3,
-    pack0: UVec3,
+    pub position: Vec3,
+    pub pack0: UVec3,
 }
 vertex_impl!(PackedVertex, position, pack0);
 
