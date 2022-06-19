@@ -39,7 +39,7 @@ use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowBuilder};
 
-const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
+const DEF_WINDOW_SIZE: (u32, u32) = (230, 130);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
@@ -148,7 +148,7 @@ impl Application for Game {
             }
         }
 
-        self.player_pos = DVec3::new(0.0, 0.0, 0.0);
+        self.player_pos = DVec3::new(0.0, 64.0, 0.0);
 
         let mut overworld_streamer =
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
@@ -159,54 +159,54 @@ impl Application for Game {
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
 
-        let scene = renderer.scene();
-        let tri = scene.create_entity();
-        scene.storage_write::<component::Transform>().set(
-            tri,
-            component::Transform::new(
-                // DVec3::new(-0.5, -0.5, -0.5),
-                DVec3::default(),
-                Vec3::from_element(0.0),
-                Vec3::from_element(1.0),
-            ),
-        );
-        scene.storage_write::<component::RenderConfig>().set(
-            tri,
-            component::RenderConfig::new(renderer, mat_pipelines.cluster(), false),
-        );
-
-        let vertices: Vec<_> = block_model::cube_quads(Vec3::from_element(0.0), Vec3::from_element(1.0))
-            .iter()
-            .map(|q| {
-                q.vertices().iter().map(|v| PackedVertex {
-                    position: *v,
-                    pack0: Default::default(),
-                })
-            })
-            .flatten()
-            .collect();
-
-        let mut indices = vec![0; vertices.len() / 4 * 6];
-        for i in (0..indices.len()).step_by(6) {
-            let ind = (i / 6 * 4) as u32;
-            indices[i] = ind;
-            indices[i + 1] = ind + 2;
-            indices[i + 2] = ind + 1;
-            indices[i + 3] = ind + 2;
-            indices[i + 4] = ind + 3;
-            indices[i + 5] = ind + 1;
-        }
-
-        scene.storage_write::<component::VertexMesh>().set(
-            tri,
-            component::VertexMesh::new(
-                &renderer
-                    .device()
-                    .create_vertex_mesh(&vertices, Some(&indices[0..18]))
-                    .unwrap()
-                    .raw(),
-            ),
-        );
+        // let scene = renderer.scene();
+        // let tri = scene.create_entity();
+        // scene.storage_write::<component::Transform>().set(
+        //     tri,
+        //     component::Transform::new(
+        //         // DVec3::new(-0.5, -0.5, -0.5),
+        //         DVec3::default(),
+        //         Vec3::from_element(0.0),
+        //         Vec3::from_element(1.0),
+        //     ),
+        // );
+        // scene.storage_write::<component::RenderConfig>().set(
+        //     tri,
+        //     component::RenderConfig::new(renderer, mat_pipelines.cluster(), false),
+        // );
+        //
+        // let vertices: Vec<_> = block_model::cube_quads(Vec3::from_element(0.0), Vec3::from_element(1.0))
+        //     .iter()
+        //     .map(|q| {
+        //         q.vertices().iter().map(|v| PackedVertex {
+        //             position: *v,
+        //             pack0: Default::default(),
+        //         })
+        //     })
+        //     .flatten()
+        //     .collect();
+        //
+        // let mut indices = vec![0; vertices.len() / 4 * 6];
+        // for i in (0..indices.len()).step_by(6) {
+        //     let ind = (i / 6 * 4) as u32;
+        //     indices[i] = ind;
+        //     indices[i + 1] = ind + 2;
+        //     indices[i + 2] = ind + 1;
+        //     indices[i + 3] = ind + 2;
+        //     indices[i + 4] = ind + 3;
+        //     indices[i + 5] = ind + 1;
+        // }
+        //
+        // scene.storage_write::<component::VertexMesh>().set(
+        //     tri,
+        //     component::VertexMesh::new(
+        //         &renderer
+        //             .device()
+        //             .create_vertex_mesh(&vertices, Some(&indices[0..18]))
+        //             .unwrap()
+        //             .raw(),
+        //     ),
+        // );
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -475,7 +475,7 @@ pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBo
     let mut streamer = streamer.lock();
 
     // let t0 = Instant::now();
-    // streamer.update();
+    streamer.update();
     // let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 

@@ -8,8 +8,8 @@
 #define INTERSECTION_FLAG_TEXCOORD    1 << 1
 
 // Maximum number of triangles in a bottom LBVH = 1024^2 = 2^10
-static uint rt_bottom_traversal_stack[32];
-static uint rt_top_traversal_stack[32];
+static uint rt_bottom_traversal_stack[16];
+static uint rt_top_traversal_stack[16];
 
 struct TriInterInput {
     float3 ray_orig;
@@ -54,9 +54,9 @@ TriangleIntersection rt_intersect_triangle(in TriInterInput input) {
         return inter;
 
     // Note: use this when backfacing culling is disabled
-    // if (abs(det) < RT_EPSILON)
-    //     // if the determinant is 0, the ray misses the triangle
-    //     return inter;
+    if (abs(det) < RT_EPSILON)
+        // if the determinant is 0, the ray misses the triangle
+        return inter;
     
     float inv_det = 1.0 / det;
     

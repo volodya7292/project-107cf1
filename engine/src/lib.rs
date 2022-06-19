@@ -99,6 +99,7 @@ impl Engine {
 
         let event_loop = EventLoop::new();
         let main_window = app.on_engine_start(&event_loop);
+        let window_size = main_window.inner_size();
 
         let vke = vkw::Entry::new().unwrap();
         let instance = vke.create_instance(program_name, &main_window).unwrap();
@@ -111,7 +112,7 @@ impl Engine {
 
         let mut renderer = Renderer::new(
             &surface,
-            (1280, 720),
+            (window_size.width, window_size.height),
             Default::default(),
             &device,
             max_texture_count,
