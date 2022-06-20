@@ -103,9 +103,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                     .arg("-Fo")
                     .arg(dst_path_s.clone())
                     .arg(entry_str);
-                if cfg!(debug_assertions) {
-                    cmd.arg("-Od");
-                } else {
+                if !cfg!(debug_assertions) {
                     cmd.arg("-O3");
                 }
                 cmd

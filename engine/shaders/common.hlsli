@@ -102,7 +102,7 @@ struct Bounds {
         return other;
     }
 
-    inline bool intersect_ray(float3 orig, float3 dir) {
+    inline bool intersect_ray(float3 orig, float3 dir, out float distance) {
 		const float3 inv_dir = rcp(dir);
 
 		const float3 t0 = (p_min.xyz - orig) * inv_dir;
@@ -113,6 +113,8 @@ struct Bounds {
 
         const float max_comp = max(tmin[0], max(tmin[1], tmin[2]));
         const float min_comp = min(tmax[0], min(tmax[1], tmax[2]));
+
+        distance = max_comp * (max_comp > 0);
 
         return max_comp <= min_comp; 
     }

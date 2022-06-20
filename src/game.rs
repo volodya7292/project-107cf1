@@ -39,7 +39,7 @@ use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowBuilder};
 
-const DEF_WINDOW_SIZE: (u32, u32) = (230, 130);
+const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
