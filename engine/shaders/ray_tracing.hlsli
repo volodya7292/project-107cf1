@@ -7,26 +7,24 @@
 // #define INTERSECTION_FLAG_NORMAL      1 << 0
 #define INTERSECTION_FLAG_TEXCOORD    1 << 1
 
-struct NodeInter {
-    uint id;
-    float distance;
-};
-
 // Maximum number of triangles in a bottom LBVH = 1024^2 = 2^20
 #define BLBVH_MAX_TRAVERSAL_DEPTH 20
 // Maximum number of instances in a top LBVH = 2^16
 #define TLBVH_MAX_TRAVERSAL_DEPTH 16
 
-
+struct NodeInter {
+    uint id;
+    float distance;
+};
 
 struct TriInterInput {
     float3 ray_orig;
     float3 ray_dir;
-    uint indices_offset;
-    uint vertices_offset;
-    uint tex_coords_offset;
-    uint triangle_id;
-    uint flags;
+    uint   indices_offset;
+    uint   vertices_offset;
+    uint   tex_coords_offset;
+    uint   triangle_id;
+    uint   flags;
 };
 
 struct TriangleIntersection {
@@ -201,7 +199,6 @@ TriangleIntersection rt_intersect_bottom_lbvh(float3 ray_orig, float3 ray_dir, L
             break;
         }
     }
-
 
     return min_inter;
 }
