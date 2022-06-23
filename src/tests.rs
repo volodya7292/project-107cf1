@@ -28,32 +28,32 @@ fn test_with_device() {
 fn cluster_facing() {
     use crate::game::overworld::block_component::Facing;
 
-    assert!(Facing::from_direction(I32Vec3::new(-1, 0, 1)).is_none());
-    assert!(Facing::from_direction(I32Vec3::new(1, 0, 1)).is_none());
-    assert!(Facing::from_direction(I32Vec3::new(0, 0, 0)).is_none());
+    assert!(Facing::from_direction(&I32Vec3::new(-1, 0, 1)).is_none());
+    assert!(Facing::from_direction(&I32Vec3::new(1, 0, 1)).is_none());
+    assert!(Facing::from_direction(&I32Vec3::new(0, 0, 0)).is_none());
 
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(-1, 0, 0)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(-1, 0, 0)).unwrap(),
         Facing::NegativeX
     );
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(1, 0, 0)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(1, 0, 0)).unwrap(),
         Facing::PositiveX
     );
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(0, -1, 0)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(0, -1, 0)).unwrap(),
         Facing::NegativeY
     );
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(0, 1, 0)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(0, 1, 0)).unwrap(),
         Facing::PositiveY
     );
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(0, 0, -1)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(0, 0, -1)).unwrap(),
         Facing::NegativeZ
     );
     assert_eq!(
-        Facing::from_direction(I32Vec3::new(0, 0, 1)).unwrap(),
+        Facing::from_direction(&I32Vec3::new(0, 0, 1)).unwrap(),
         Facing::PositiveZ
     );
 

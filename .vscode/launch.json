@@ -7,7 +7,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Launch ",
+      "name": "Launch",
       "cargo": {
         "args": [
           "build",

@@ -225,6 +225,10 @@ impl Cluster {
         changed_sides
     }
 
+    pub fn get_changed_sides(&self) -> [bool; 27] {
+        self.side_changed
+    }
+
     /// Returns block data at `pos`
     pub fn get(&self, pos: &U32Vec3) -> BlockData {
         #[cold]

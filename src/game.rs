@@ -145,7 +145,7 @@ impl Application for Game {
             }
         }
 
-        self.player_pos = DVec3::new(0.0, 64.0, 0.0);
+        self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_streamer =
             OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);

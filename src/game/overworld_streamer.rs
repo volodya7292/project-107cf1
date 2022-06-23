@@ -422,7 +422,7 @@ impl OverworldStreamer {
                     let changed_dir: I64Vec3 = glm::convert(cluster::neighbour_index_to_dir(i));
 
                     let p0 = pos / (cluster::SIZE as i64);
-                    let p1 = pos / (cluster::SIZE as i64) + changed_dir;
+                    let p1 = p0 + changed_dir;
 
                     let min = p0.inf(&p1);
                     let max = p0.sup(&p1);
@@ -554,6 +554,7 @@ impl OverworldStreamer {
                     })
                     .collect();
 
+                let ocluster = Arc::clone(ocluster);
                 let pos = *pos;
                 let mesh_can_be_updated = Arc::clone(&rcluster.mesh_can_be_updated);
                 let curr_updating_clusters_n = Arc::clone(&self.curr_clusters_intrinsics_updating_n);
@@ -624,6 +625,15 @@ impl OverworldStreamer {
 
                                 // Paste intrinsics from `neighbour_cluster` into `cluster`
                                 cluster.paste_outer_intrinsics(&neighbour_cluster, offset);
+
+                                // If either cluster has been changed, mark OverworldCluster as changed
+                                // to handle it in further updates of OverworldStreamer.
+                                if cluster.get_changed_sides().iter().any(|v| *v) {
+                                    ocluster.changed.store(true, MO_RELAXED);
+                                }
+                                if neighbour_cluster.get_changed_sides().iter().any(|v| *v) {
+                                    neighbour.changed.store(true, MO_RELAXED);
+                                }
                             } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
                                 let offset = neighbour_pos - pos;
                                 cluster.clear_outer_intrinsics(
@@ -645,6 +655,8 @@ impl OverworldStreamer {
                     curr_updating_clusters_n.fetch_sub(1, MO_RELEASE);
                 });
             }
+
+            println!("-------------------------------------------------------------");
 
             // Schedule task of updating clusters vertex meshes
             for (pos, _) in &keys {
