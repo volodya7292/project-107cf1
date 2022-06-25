@@ -24,6 +24,7 @@ indexmap = "1.8"
 raw-window-handle = "0.3"
 winit = "0.26"
 vk-wrapper = { path = "../vk-wrapper" }
+msdfgen = { path = "../msdfgen" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22"

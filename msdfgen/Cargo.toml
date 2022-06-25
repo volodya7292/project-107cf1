@@ -1,0 +1,11 @@
+[package]
+name = "msdfgen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cxx = "1.0"
+rusttype = "0.9"
+
+[build-dependencies]
+cxx-build = "1.0"

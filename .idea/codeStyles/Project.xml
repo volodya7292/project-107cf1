@@ -4,9 +4,6 @@
     <RsCodeStyleSettings>
       <option name="SPACE_AROUND_ASSOC_TYPE_BINDING" value="true" />
     </RsCodeStyleSettings>
-    <clangFormatSettings>
-      <option name="ENABLED" value="true" />
-    </clangFormatSettings>
     <codeStyleSettings language="Rust">
       <option name="RIGHT_MARGIN" value="120" />
     </codeStyleSettings>
