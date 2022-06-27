@@ -16,6 +16,7 @@ pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 pub type IndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 pub type IndexMap<T> = indexmap::IndexMap<T, ahash::RandomState>;
+pub type LruCache<K, V> = lru::LruCache<K, V, ahash::RandomState>;
 
 pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
@@ -41,7 +42,7 @@ pub const fn make_mul_of(n: u32, m: u32) -> u32 {
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {
-    fn log2(&self) -> Self;
+    fn log2(self) -> Self;
 }
 
 pub trait Int {}
@@ -50,7 +51,7 @@ macro_rules! uint_impl {
     ($($t: ty)*) => ($(
         impl UInt for $t {
             // TODO: remove when std log2 is stable
-            fn log2(&self) -> Self {
+            fn log2(self) -> Self {
                 <$t>::BITS as $t - self.leading_zeros() as $t - 1
             }
         }

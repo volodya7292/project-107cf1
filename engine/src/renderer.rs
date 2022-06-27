@@ -5,6 +5,8 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
+mod helpers;
+mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene::Scene;
@@ -12,22 +14,19 @@ pub use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
 use crate::renderer::camera::{Camera, Frustum};
-use crate::renderer::material_pipeline::UniformStruct;
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::resource_file::ResourceRef;
 use crate::utils;
-use crate::utils::{HashMap, UInt};
-use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
+use crate::utils::HashMap;
+use basis_universal::TranscoderTextureFormat;
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
-use material_pipeline::{MaterialPipelineSet, PipelineConfig};
+use material_pipeline::MaterialPipelineSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::collections::hash_map;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,9 +39,8 @@ use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
     HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Shader, ShaderBinding,
-    ShaderStage, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage,
-    WaitSemaphore,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, ShaderBinding, ShaderStage,
+    SignalSemaphore, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 // Notes
@@ -52,6 +50,9 @@ use vk_wrapper::{
 //   - Incorrect indices of vertex mesh.
 //
 // Swapchain creation error cause may be *out of device memory*.
+//
+// HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
+//
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
@@ -345,6 +346,7 @@ struct DepthPyramidConstants {
     out_size: Vec2,
 }
 
+#[derive(Copy, Clone)]
 #[repr(C)]
 struct CullObject {
     sphere: Vec4,
@@ -881,236 +883,6 @@ impl Renderer {
         &mut self.active_camera
     }
 
-    pub fn load_texture_into_atlas(
-        &mut self,
-        texture_index: u32,
-        atlas_type: TextureAtlasType,
-        res_ref: ResourceRef,
-    ) {
-        let res_data = res_ref.read().unwrap();
-
-        let mut t = basis_universal::Transcoder::new();
-        t.prepare_transcoding(&res_data).unwrap();
-
-        let img_info = t.image_info(&res_data, 0).unwrap();
-        let width = img_info.m_width;
-        let height = img_info.m_height;
-
-        if !utils::is_pow_of_2(width as u64)
-            || width != height
-            || width < (self.settings.texture_quality as u32)
-        {
-            return;
-        }
-
-        let mipmaps: Vec<_> = (0..img_info.m_total_levels)
-            .map(|i| {
-                t.transcode_image_level(
-                    &res_data,
-                    atlas_type.basis_decode_type(),
-                    TranscodeParameters {
-                        image_index: 0,
-                        level_index: i,
-                        decode_flags: None,
-                        output_row_pitch_in_blocks_or_pixels: None,
-                        output_rows_in_pixels: None,
-                    },
-                )
-                .unwrap()
-            })
-            .collect();
-
-        t.end_transcoding();
-
-        let first_level = UInt::log2(&(width / (self.settings.texture_quality as u32)));
-        let last_level = UInt::log2(&(width / 4)); // BC block size = 4x4
-
-        self.texture_atlases[atlas_type as usize]
-            .set_texture(
-                texture_index,
-                &mipmaps[(first_level as usize)..(last_level as usize + 1)],
-            )
-            .unwrap();
-    }
-
-    /// Returns id of registered material pipeline.
-    pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
-        assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
-
-        let main_signature = self
-            .device
-            .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
-
-        let vertex_shader = Arc::clone(shaders.iter().find(|v| v.stage() == ShaderStage::VERTEX).unwrap());
-        let depth_signature = self
-            .device
-            .create_pipeline_signature(&[vertex_shader], &*ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
-
-        let mut pipeline_set = MaterialPipelineSet {
-            device: Arc::clone(&self.device),
-            main_signature: Arc::clone(&main_signature),
-            pipelines: Default::default(),
-            uniform_buffer_size: mem::size_of::<T>() as u32,
-            uniform_buffer_model_offset: T::model_offset(),
-        };
-
-        pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ,
-            &PipelineConfig {
-                render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ_WRITE,
-            &PipelineConfig {
-                render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: true,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_SOLID,
-            &PipelineConfig {
-                render_pass: &self.g_render_pass,
-                signature: &main_signature,
-                subpass_index: 0,
-                cull_back_faces: true,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_TRANSLUCENT,
-            &PipelineConfig {
-                render_pass: &self.g_render_pass,
-                signature: &main_signature,
-                subpass_index: 0,
-                cull_back_faces: false,
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-
-        if let hash_map::Entry::Vacant(e) = self.g_per_pipeline_pools.entry(main_signature) {
-            let pool = e.key().create_pool(1, 16).unwrap();
-            e.insert(pool);
-        }
-
-        let mat_pipelines = &mut self.material_pipelines;
-        mat_pipelines.push(pipeline_set);
-        (mat_pipelines.len() - 1) as u32
-    }
-
-    pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
-        assert!(id < MAX_MATERIAL_COUNT);
-        self.material_updates.insert(id, info);
-    }
-
-    /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
-    pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-        self.vertex_mesh_updates.contains_key(&entity)
-            || self
-                .vertex_mesh_pending_updates
-                .iter()
-                .any(|v| v.entity == entity)
-    }
-
-    /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
-    unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
-        if updates.is_empty() {
-            return;
-        }
-
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
-        let update_count = updates.len();
-        let staging_size = self.staging_buffer.size();
-        let mut used_size = 0;
-        let mut i = 0;
-
-        while i < update_count {
-            {
-                let mut cl = self.staging_cl.lock();
-                cl.begin(true).unwrap();
-
-                while i < update_count {
-                    let update = &updates[i];
-
-                    let (copy_size, new_used_size) = match update {
-                        BufferUpdate::Type1(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                        BufferUpdate::Type2(update) => {
-                            let copy_size = update.data.len() as u64;
-                            assert!(copy_size <= staging_size);
-                            (copy_size, used_size + copy_size)
-                        }
-                    };
-
-                    if new_used_size > staging_size {
-                        used_size = 0;
-                        break;
-                    }
-
-                    match update {
-                        BufferUpdate::Type1(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-                            cl.copy_buffer_to_device(
-                                &self.staging_buffer,
-                                used_size,
-                                &update.buffer,
-                                update.offset,
-                                copy_size,
-                            );
-                        }
-                        BufferUpdate::Type2(update) => {
-                            self.staging_buffer.write(used_size as u64, &update.data);
-
-                            let regions: SmallVec<[CopyRegion; 64]> = update
-                                .regions
-                                .iter()
-                                .map(|region| {
-                                    CopyRegion::new(
-                                        used_size + region.src_offset(),
-                                        region.dst_offset(),
-                                        region.size(),
-                                    )
-                                })
-                                .collect();
-
-                            cl.copy_buffer_regions_to_device_bytes(
-                                &self.staging_buffer,
-                                &update.buffer,
-                                &regions,
-                            );
-                        }
-                    }
-
-                    used_size = new_used_size;
-                    i += 1;
-                }
-
-                cl.end().unwrap();
-            }
-
-            let submit = &mut self.staging_submit;
-            graphics_queue.submit(submit).unwrap();
-            submit.wait().unwrap();
-        }
-    }
-
     pub fn settings(&self) -> &Settings {
         &self.settings
     }
@@ -1139,12 +911,12 @@ impl Renderer {
             self.relative_camera_pos = DVec3::default();
         }
 
-        let mut buffer_updates = vec![];
-        let mut uniform_buffers_updates = [BufferUpdate::Type2(BufferUpdate2 {
+        let mut uniform_buffer_updates = BufferUpdate2 {
             buffer: self.uniform_buffer_basic.handle(),
             data: smallvec![],
             regions: vec![],
-        })];
+        };
+        let mut buffer_updates = vec![];
 
         // Asynchronously acquire buffers from transfer queue to render queue
         if !self.vertex_mesh_pending_updates.is_empty() {
@@ -1199,7 +971,7 @@ impl Renderer {
         timings.systems_batch0 = (t11 - t00).as_secs_f64();
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
-            uniform_buffer_updates: &mut uniform_buffers_updates,
+            uniform_buffer_updates: &mut uniform_buffer_updates,
             global_transform_comps: self.scene.storage::<GlobalTransform>(),
             renderer_comps: self.scene.storage::<component::RenderConfig>(),
             renderables: &self.renderables,
@@ -1309,7 +1081,11 @@ impl Renderer {
                 .enumerate()
                 .map(|(i, (id, info))| {
                     data.push(info);
-                    CopyRegion::new(i as u64 * mat_size, id as u64 * mat_size, mat_size)
+                    CopyRegion::new(
+                        i as u64 * mat_size,
+                        id as u64 * mat_size,
+                        (mat_size as u64).try_into().unwrap(),
+                    )
                 })
                 .collect();
 
@@ -1323,10 +1099,9 @@ impl Renderer {
             }));
         }
 
-        unsafe {
-            self.update_device_buffers(&buffer_updates);
-            self.update_device_buffers(&uniform_buffers_updates);
-        }
+        buffer_updates.push(BufferUpdate::Type2(uniform_buffer_updates));
+
+        unsafe { self.update_device_buffers(&buffer_updates) };
 
         let t1 = Instant::now();
         timings.uniform_buffers_update = (t1 - t11).as_secs_f64();
@@ -1605,7 +1380,7 @@ impl Renderer {
                 0,
                 frustum_visible_objects as u64,
             );
-            cl.clear_buffer(&self.visibility_buffer, 0);
+            cl.fill_buffer(&self.visibility_buffer, 0);
 
             cl.barrier_buffer(
                 PipelineStageFlags::TRANSFER,
@@ -1818,92 +1593,93 @@ impl Renderer {
     pub fn on_draw(&mut self) -> RendererTimings {
         let mut timings = RendererTimings::default();
         let device = Arc::clone(&self.device);
-        let adapter = device.get_adapter();
+        let adapter = device.adapter();
         let surface = &self.surface;
 
-        if adapter.is_surface_valid(surface).unwrap() {
-            if self.surface_changed {
-                let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+        if !adapter.is_surface_valid(surface).unwrap() {
+            return timings;
+        }
 
-                self.sw_framebuffers.clear();
+        // Wait for previous frame completion
+        self.final_submit[0].wait().unwrap();
+        self.final_submit[1].wait().unwrap();
 
-                self.swapchain = Some(
-                    device
-                        .create_swapchain(
-                            &self.surface,
-                            self.surface_size,
-                            self.settings.fps_limit == FPSLimit::VSync,
-                            if self.settings.prefer_triple_buffering {
-                                3
-                            } else {
-                                2
-                            },
-                            self.swapchain.take(),
-                        )
-                        .unwrap(),
-                );
+        if self.surface_changed {
+            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+            let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
-                let signal_sem = &[SignalSemaphore {
-                    semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
-                    signal_value: 0,
-                }];
+            self.sw_framebuffers.clear();
 
-                self.final_submit[0]
-                    .set(&[SubmitInfo::new(
-                        &[WaitSemaphore {
-                            semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                            wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            wait_value: 0,
-                        }],
-                        &[Arc::clone(&self.final_cl[0])],
-                        if graphics_queue == present_queue {
-                            signal_sem
+            self.swapchain = Some(
+                device
+                    .create_swapchain(
+                        &self.surface,
+                        self.surface_size,
+                        self.settings.fps_limit == FPSLimit::VSync,
+                        if self.settings.prefer_triple_buffering {
+                            3
                         } else {
-                            &[]
+                            2
                         },
-                    )])
-                    .unwrap();
+                        self.swapchain.take(),
+                    )
+                    .unwrap(),
+            );
 
-                self.create_main_framebuffers();
-                self.surface_changed = false;
-            }
+            let signal_sem = &[SignalSemaphore {
+                semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
+                signal_value: 0,
+            }];
 
-            let acquire_result = self.swapchain.as_ref().unwrap().acquire_image();
+            self.final_submit[0]
+                .set(&[SubmitInfo::new(
+                    &[WaitSemaphore {
+                        semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
+                        wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                        wait_value: 0,
+                    }],
+                    &[Arc::clone(&self.final_cl[0])],
+                    if graphics_queue == present_queue {
+                        signal_sem
+                    } else {
+                        &[]
+                    },
+                )])
+                .unwrap();
 
-            match acquire_result {
-                Ok((sw_image, suboptimal)) => {
-                    self.surface_changed |= suboptimal;
+            self.create_main_framebuffers();
+            self.surface_changed = false;
+        }
 
-                    // Note: wait for render completion before on_update()
-                    // to not destroy DeviceBuffers after entity deletion in on_update()
-                    self.final_submit[0].wait().unwrap();
-                    self.final_submit[1].wait().unwrap();
+        let acquire_result = self.swapchain.as_ref().unwrap().acquire_image();
 
-                    timings.update = self.on_update();
-                    timings.render = self.on_render(&sw_image);
+        match acquire_result {
+            Ok((sw_image, suboptimal)) => {
+                self.surface_changed |= suboptimal;
 
-                    let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-                    let present_result = present_queue.present(sw_image);
+                timings.update = self.on_update();
+                timings.render = self.on_render(&sw_image);
 
-                    match present_result {
-                        Ok(suboptimal) => {
-                            self.surface_changed |= suboptimal;
-                        }
-                        Err(swapchain::Error::IncompatibleSurface) => {
-                            self.surface_changed = true;
-                        }
-                        _ => {
-                            present_result.unwrap();
-                        }
+                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+                let present_result = present_queue.present(sw_image);
+
+                match present_result {
+                    Ok(suboptimal) => {
+                        self.surface_changed |= suboptimal;
+                    }
+                    Err(swapchain::Error::IncompatibleSurface) => {
+                        self.surface_changed = true;
+                    }
+                    _ => {
+                        present_result.unwrap();
                     }
                 }
-                Err(swapchain::Error::IncompatibleSurface) => {
-                    self.surface_changed = true;
-                }
-                _ => {
-                    acquire_result.unwrap();
-                }
+            }
+            Err(swapchain::Error::IncompatibleSurface) => {
+                self.surface_changed = true;
+            }
+            _ => {
+                acquire_result.unwrap();
             }
         }
 

@@ -9,6 +9,7 @@ use crate::{DescriptorSet, RawHostBuffer};
 use ash::vk;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
 
@@ -25,11 +26,11 @@ pub struct CmdList {
 pub struct CopyRegion(vk::BufferCopy);
 
 impl CopyRegion {
-    pub fn new(src_offset: u64, dst_offset: u64, size: u64) -> CopyRegion {
+    pub fn new(src_offset: u64, dst_offset: u64, size: NonZeroU64) -> CopyRegion {
         CopyRegion(vk::BufferCopy {
             src_offset,
             dst_offset,
-            size,
+            size: size.get(),
         })
     }
 
@@ -366,7 +367,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_to_device<T>(
+    pub fn copy_buffer_to_device<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         src_element_index: u64,
@@ -393,7 +394,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_regions_to_device<T>(
+    pub fn copy_buffer_regions_to_device<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         dst_buffer: &impl BufferHandleImpl,
@@ -401,16 +402,10 @@ impl CmdList {
     ) {
         let regions: SmallVec<[vk::BufferCopy; 128]> = regions
             .iter()
-            .filter_map(|region| {
-                if region.0.size > 0 {
-                    Some(vk::BufferCopy {
-                        src_offset: region.0.src_offset * src_buffer.buffer.aligned_elem_size,
-                        dst_offset: region.0.dst_offset * src_buffer.buffer.aligned_elem_size,
-                        size: region.0.size * src_buffer.buffer.aligned_elem_size,
-                    })
-                } else {
-                    None
-                }
+            .map(|region| vk::BufferCopy {
+                src_offset: region.0.src_offset * src_buffer.buffer.aligned_elem_size,
+                dst_offset: region.0.dst_offset * src_buffer.buffer.aligned_elem_size,
+                size: region.0.size * src_buffer.buffer.aligned_elem_size,
             })
             .collect();
 
@@ -428,7 +423,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_regions_to_device_bytes<T>(
+    pub fn copy_buffer_regions_to_device_bytes<T: Copy>(
         &mut self,
         src_buffer: &HostBuffer<T>,
         dst_buffer: &impl BufferHandleImpl,
@@ -478,7 +473,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_buffer_to_host<T>(
+    pub fn copy_buffer_to_host<T: Copy>(
         &mut self,
         src_buffer: &impl BufferHandleImpl,
         src_element_index: u64,
@@ -516,6 +511,10 @@ impl CmdList {
         dst_mip_level: u32,
         size: (u32, u32),
     ) {
+        if size.0 == 0 || size.1 == 0 {
+            return;
+        }
+
         let region = vk::BufferImageCopy {
             buffer_offset: src_offset,
             buffer_row_length: 0,
@@ -562,6 +561,10 @@ impl CmdList {
         dst_mip_level: u32,
         size: (u32, u32),
     ) {
+        if size.0 == 0 || size.1 == 0 {
+            return;
+        }
+
         let region = vk::ImageCopy {
             src_subresource: vk::ImageSubresourceLayers {
                 aspect_mask: src_image.wrapper.aspect,
@@ -670,7 +673,7 @@ impl CmdList {
         };
     }
 
-    pub fn copy_query_pool_results_to_host<T>(
+    pub fn copy_query_pool_results_to_host<T: Copy>(
         &mut self,
         query_pool: &Arc<QueryPool>,
         first_query: u32,
@@ -692,7 +695,7 @@ impl CmdList {
         };
     }
 
-    pub fn clear_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
+    pub fn fill_buffer(&mut self, buffer: &impl BufferHandleImpl, value: u32) {
         unsafe {
             self.device_wrapper.native.cmd_fill_buffer(
                 self.native,
@@ -701,6 +704,17 @@ impl CmdList {
                 vk::WHOLE_SIZE,
                 value,
             );
+        }
+    }
+
+    pub fn fill_buffer2(&mut self, buffer: &impl BufferHandleImpl, offset: u64, size: u64, value: u32) {
+        if size == 0 {
+            return;
+        }
+        unsafe {
+            self.device_wrapper
+                .native
+                .cmd_fill_buffer(self.native, buffer.handle().0, offset, size, value);
         }
     }
 

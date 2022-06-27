@@ -75,7 +75,7 @@ fn parking_lot_deadlock_detection() {
 }
 
 fn main() {
-    parking_lot_deadlock_detection();
+    // parking_lot_deadlock_detection();
 
     SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)

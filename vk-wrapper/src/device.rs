@@ -151,7 +151,7 @@ pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence,
 }
 
 impl Device {
-    pub fn get_adapter(&self) -> &Arc<Adapter> {
+    pub fn adapter(&self) -> &Arc<Adapter> {
         &self.wrapper.adapter
     }
 
@@ -461,15 +461,7 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(
-            Image::TYPE_2D,
-            format,
-            max_mip_levels,
-            max_anisotropy,
-            usage,
-            (preferred_size.0, preferred_size.1, 1),
-            "",
-        )
+        self.create_image_2d_named(format, max_mip_levels, max_anisotropy, usage, preferred_size, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
@@ -489,6 +481,39 @@ impl Device {
             max_anisotropy,
             usage,
             (preferred_size.0, preferred_size.1, 1),
+            name,
+        )
+    }
+
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
+    pub fn create_image_2d_array(
+        self: &Arc<Self>,
+        format: Format,
+        max_mip_levels: u32,
+        max_anisotropy: f32,
+        usage: ImageUsageFlags,
+        preferred_size: (u32, u32, u32),
+    ) -> Result<Arc<Image>, DeviceError> {
+        self.create_image_2d_array_named(format, max_mip_levels, max_anisotropy, usage, preferred_size, "")
+    }
+
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
+    pub fn create_image_2d_array_named(
+        self: &Arc<Self>,
+        format: Format,
+        max_mip_levels: u32,
+        max_anisotropy: f32,
+        usage: ImageUsageFlags,
+        preferred_size: (u32, u32, u32),
+        name: &str,
+    ) -> Result<Arc<Image>, DeviceError> {
+        self.create_image(
+            Image::TYPE_2D,
+            format,
+            max_mip_levels,
+            max_anisotropy,
+            usage,
+            preferred_size,
             name,
         )
     }

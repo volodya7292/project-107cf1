@@ -21,7 +21,7 @@ impl Structure {
     pub fn new(max_size: U64Vec3, min_spacing: u64, avg_spacing: u64, gen_fn: GenPosFn) -> Structure {
         assert!(avg_spacing > min_spacing);
 
-        let cluster_level = UInt::log2(&max_size.max().next_power_of_two()) as u32;
+        let cluster_level = UInt::log2(max_size.max().next_power_of_two()) as u32;
 
         Structure {
             max_size,

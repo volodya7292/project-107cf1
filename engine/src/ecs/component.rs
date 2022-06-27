@@ -1,4 +1,5 @@
 pub(crate) mod internal;
+pub mod raw_text;
 pub mod render_config;
 pub mod transform;
 pub mod vertex_mesh;

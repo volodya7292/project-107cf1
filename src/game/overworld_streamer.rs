@@ -656,8 +656,6 @@ impl OverworldStreamer {
                 });
             }
 
-            println!("-------------------------------------------------------------");
-
             // Schedule task of updating clusters vertex meshes
             for (pos, _) in &keys {
                 if self.curr_clusters_meshes_updating_n.load(MO_RELAXED) >= max_updating_clusters_in_progress
