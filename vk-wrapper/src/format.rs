@@ -37,6 +37,7 @@ lazy_static! {
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RG32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGB32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::RGBA8_UNORM, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGBA32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
     ]
     .into_iter()

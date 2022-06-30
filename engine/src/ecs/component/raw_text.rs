@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 #[derive(Clone)]
 pub struct FormattedString {
     data: String,
+    /// Font registered in Renderer
     font_id: u32,
     /// Size in world units
     font_size: f32,

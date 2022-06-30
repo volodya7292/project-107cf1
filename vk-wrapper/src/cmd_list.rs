@@ -549,6 +549,54 @@ impl CmdList {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn copy_host_buffer_to_image_2d_array(
+        &mut self,
+        src_buffer: &HostBuffer<u8>,
+        src_offset: u64,
+        dst_image: &Arc<Image>,
+        dst_image_layout: ImageLayout,
+        dst_offset: (u32, u32, u32),
+        dst_mip_level: u32,
+        size: (u32, u32),
+    ) {
+        if size.0 == 0 || size.1 == 0 {
+            return;
+        }
+
+        let region = vk::BufferImageCopy {
+            buffer_offset: src_offset,
+            buffer_row_length: 0,
+            buffer_image_height: 0,
+            image_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: dst_image.wrapper.aspect,
+                mip_level: dst_mip_level,
+                base_array_layer: dst_offset.2,
+                layer_count: 1,
+            },
+            image_offset: vk::Offset3D {
+                x: dst_offset.0 as i32,
+                y: dst_offset.1 as i32,
+                z: 0,
+            },
+            image_extent: vk::Extent3D {
+                width: size.0,
+                height: size.1,
+                depth: 1,
+            },
+        };
+
+        unsafe {
+            self.device_wrapper.native.cmd_copy_buffer_to_image(
+                self.native,
+                src_buffer.buffer.native,
+                dst_image.wrapper.native,
+                dst_image_layout.0,
+                &[region],
+            )
+        };
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn copy_image_2d(
         &mut self,
         src_image: &Arc<Image>,

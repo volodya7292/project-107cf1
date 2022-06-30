@@ -2,13 +2,13 @@ use crate::format::BUFFER_FORMATS;
 use crate::ImageWrapper;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
-use crate::{format, LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{
     utils, BindingType, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
+use crate::{LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
@@ -173,6 +173,7 @@ impl Device {
         elem_size: u64,
         size: u64,
         mem_usage: gpu_alloc::UsageFlags,
+        name: &str,
     ) -> Result<Buffer, DeviceError> {
         if elem_size == 0 {
             return Err(DeviceError::ZeroBufferElementSize);
@@ -213,6 +214,9 @@ impl Device {
                 memory_block.offset(),
             )?;
 
+            self.wrapper
+                .debug_set_object_name(vk::ObjectType::BUFFER, native_buffer.as_raw(), name)?;
+
             (native_buffer, memory_block)
         };
 
@@ -231,10 +235,11 @@ impl Device {
         })
     }
 
-    pub fn create_host_buffer<T>(
+    pub fn create_host_buffer_named<T>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         size: u64,
+        name: &str,
     ) -> Result<HostBuffer<T>, DeviceError> {
         let mut buffer = self.create_buffer(
             usage,
@@ -243,6 +248,7 @@ impl Device {
             gpu_alloc::UsageFlags::HOST_ACCESS
                 | gpu_alloc::UsageFlags::DOWNLOAD
                 | gpu_alloc::UsageFlags::UPLOAD,
+            name,
         )?;
         let p_data = unsafe {
             buffer
@@ -262,27 +268,47 @@ impl Device {
         })
     }
 
-    pub fn create_device_buffer(
+    pub fn create_host_buffer<T>(
+        self: &Arc<Self>,
+        usage: BufferUsageFlags,
+        size: u64,
+    ) -> Result<HostBuffer<T>, DeviceError> {
+        self.create_host_buffer_named(usage, size, "")
+    }
+
+    pub fn create_device_buffer_named(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         element_size: u64,
         size: u64,
+        name: &str,
     ) -> Result<DeviceBuffer, DeviceError> {
         let buffer = self.create_buffer(
             usage,
             element_size,
             size,
             gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+            name,
         )?;
         Ok(DeviceBuffer {
             buffer: Arc::new(buffer),
         })
     }
 
+    pub fn create_device_buffer(
+        self: &Arc<Self>,
+        usage: BufferUsageFlags,
+        element_size: u64,
+        size: u64,
+    ) -> Result<DeviceBuffer, DeviceError> {
+        self.create_device_buffer_named(usage, element_size, size, "")
+    }
+
     /// If max_mip_levels = 0, mip level count is calculated automatically.
     fn create_image(
         self: &Arc<Self>,
         image_type: ImageType,
+        is_array: bool,
         format: Format,
         max_mip_levels: u32,
         max_anisotropy: f32,
@@ -370,7 +396,7 @@ impl Device {
         };
         let bytesize = memory_block.size();
 
-        let aspect = if format == format::DEPTH_FORMAT {
+        let aspect = if format == DEPTH_FORMAT {
             vk::ImageAspectFlags::DEPTH
         } else {
             vk::ImageAspectFlags::COLOR
@@ -432,6 +458,7 @@ impl Device {
             native: image,
             allocation: Some(memory_block),
             bytesize,
+            is_array,
             owned_handle: true,
             ty: image_type,
             format,
@@ -476,6 +503,7 @@ impl Device {
     ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(
             Image::TYPE_2D,
+            false,
             format,
             max_mip_levels,
             max_anisotropy,
@@ -509,6 +537,7 @@ impl Device {
     ) -> Result<Arc<Image>, DeviceError> {
         self.create_image(
             Image::TYPE_2D,
+            true,
             format,
             max_mip_levels,
             max_anisotropy,
@@ -524,7 +553,7 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(Image::TYPE_3D, format, 1, 1.0, usage, preferred_size, "")
+        self.create_image(Image::TYPE_3D, false, format, 1, 1.0, usage, preferred_size, "")
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
@@ -678,6 +707,7 @@ impl Device {
                 native: native_image,
                 allocation: None,
                 bytesize: 0,
+                is_array: false,
                 owned_handle: false,
                 ty: Image::TYPE_2D,
                 format: Format(s_format.format),
@@ -714,7 +744,7 @@ impl Device {
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
-            std::slice::from_raw_parts(
+            slice::from_raw_parts(
                 code.as_ptr() as *const u32,
                 code.len() / std::mem::size_of::<u32>(),
             )

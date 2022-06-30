@@ -23,7 +23,7 @@ parking_lot = "0.12"
 indexmap = "1.8"
 raw-window-handle = "0.3"
 winit = "0.26"
-lru = "0.7"
+font-kit = "0.11"
 vk-wrapper = { path = "../vk-wrapper" }
 msdfgen = { path = "../msdfgen" }
 

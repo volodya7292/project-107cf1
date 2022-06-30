@@ -99,6 +99,7 @@ pub(crate) struct ImageWrapper {
     pub(crate) native: vk::Image,
     pub(crate) allocation: Option<MemoryBlock>,
     pub(crate) bytesize: u64,
+    pub(crate) is_array: bool,
     pub(crate) owned_handle: bool,
     pub(crate) ty: ImageType,
     pub(crate) format: Format,
@@ -109,7 +110,13 @@ pub(crate) struct ImageWrapper {
 impl ImageWrapper {
     pub fn create_view(self: &Arc<Self>, name: &str) -> ImageViewBuilder {
         let ty = match self.ty {
-            ImageType(vk::ImageType::TYPE_2D) => vk::ImageViewType::TYPE_2D,
+            ImageType(vk::ImageType::TYPE_2D) => {
+                if self.is_array {
+                    vk::ImageViewType::TYPE_2D_ARRAY
+                } else {
+                    vk::ImageViewType::TYPE_2D
+                }
+            }
             ImageType(vk::ImageType::TYPE_3D) => vk::ImageViewType::TYPE_3D,
             _ => {
                 unreachable!()

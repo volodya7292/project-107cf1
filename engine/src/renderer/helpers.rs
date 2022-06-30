@@ -1,4 +1,5 @@
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
+use crate::renderer::module::text_renderer::FontSet;
 use crate::renderer::{
     BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, MAX_BASIC_UNIFORM_BLOCK_SIZE,
     MAX_MATERIAL_COUNT, PIPELINE_COLOR_SOLID, PIPELINE_COLOR_TRANSLUCENT, PIPELINE_DEPTH_READ,
@@ -143,6 +144,10 @@ impl Renderer {
         let mat_pipelines = &mut self.material_pipelines;
         mat_pipelines.push(pipeline_set);
         (mat_pipelines.len() - 1) as u32
+    }
+
+    pub fn register_font(&mut self, font_set: FontSet) -> u16 {
+        self.text_renderer.register_font(font_set)
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {

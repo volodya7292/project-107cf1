@@ -14,6 +14,7 @@ pub use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
 use crate::renderer::camera::{Camera, Frustum};
+use crate::renderer::module::text_renderer::TextRendererModule;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::utils;
 use crate::utils::HashMap;
@@ -182,6 +183,8 @@ pub struct Renderer {
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
+
+    text_renderer: TextRendererModule,
 }
 
 #[derive(Copy, Clone)]
@@ -792,6 +795,8 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
+        let text_renderer = TextRendererModule::new(device, &g_render_pass, 0);
+
         // TODO: allocate buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
             scene,
@@ -857,6 +862,7 @@ impl Renderer {
             vertex_mesh_pending_updates: vec![],
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
+            text_renderer,
         };
         renderer.on_resize(size);
 

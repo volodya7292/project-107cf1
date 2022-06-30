@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::ManuallyDrop;
 use std::ops::{Index, IndexMut};
 use std::sync::{atomic, Arc};
-use std::{marker::PhantomData, mem, ptr};
+use std::{marker::PhantomData, mem, ptr, slice};
 
 #[derive(Copy, Clone)]
 pub struct BufferHandle(pub(crate) vk::Buffer);
@@ -203,6 +203,16 @@ impl<T> HostBuffer<T> {
 
     pub fn as_mut_ptr(&mut self) -> *mut T {
         self.p_data as *mut T
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
+        unsafe { slice::from_raw_parts(self.p_data as *const T, self.buffer.size as usize) }
+    }
+
+    pub fn as_mut_slice(&self) -> &mut [T] {
+        assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
+        unsafe { slice::from_raw_parts_mut(self.p_data as *mut T, self.buffer.size as usize) }
     }
 
     pub fn read(&self, first_element: u64, elements: &mut [T]) {
