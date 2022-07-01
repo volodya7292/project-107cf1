@@ -1,7 +1,7 @@
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::Quad;
 use approx::{abs_diff_eq, assert_abs_diff_eq, AbsDiff};
-use engine::vertex_impl;
+use engine::attributes_impl;
 use nalgebra as na;
 use nalgebra_glm::{I32Vec3, Vec3};
 
@@ -10,7 +10,7 @@ struct Vertex {
     position: na::Vector3<f32>,
     tex_coord: na::Vector2<f32>,
 }
-vertex_impl!(Vertex, position, tex_coord);
+attributes_impl!(Vertex, position, tex_coord);
 
 #[test]
 fn test_with_device() {

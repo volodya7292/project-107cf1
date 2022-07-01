@@ -57,12 +57,12 @@ unsafe extern "system" fn vk_debug_callback(
 }
 
 pub fn enumerate_required_window_extensions(
-    window_handle: &dyn raw_window_handle::HasRawWindowHandle,
+    window_handle: &dyn HasRawWindowHandle,
 ) -> Result<Vec<String>, vk::Result> {
     let names = ash_window::enumerate_required_extensions(window_handle)?;
     Ok(names
         .iter()
-        .map(|&name| unsafe { utils::c_ptr_to_string(name.as_ptr()) })
+        .map(|&name| unsafe { utils::c_ptr_to_string(name) })
         .collect())
 }
 

@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 byteorder = "1.4"
-nalgebra = "0.30"
-nalgebra-glm = "0.16"
+nalgebra = "0.31"
+nalgebra-glm = "0.17"
 basis-universal = "0.2"
 rayon = "1.5"
 crossbeam-channel = "0.5"
@@ -21,11 +21,10 @@ rand_distr = "0.4"
 rand_xoshiro = "0.6"
 parking_lot = "0.12"
 indexmap = "1.8"
-raw-window-handle = "0.3"
 winit = "0.26"
 font-kit = "0.11"
 vk-wrapper = { path = "../vk-wrapper" }
-msdfgen = { path = "../msdfgen" }
+msdfgen = { path = "msdfgen" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22"

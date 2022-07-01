@@ -108,7 +108,7 @@ impl Display for RendererTimings {
 pub struct Renderer {
     scene: Scene,
     active_camera: Camera,
-    prev_camera_pos: DVec3,
+    camera_pos_pivot: DVec3,
     relative_camera_pos: DVec3,
 
     surface: Arc<Surface>,
@@ -801,7 +801,7 @@ impl Renderer {
         let mut renderer = Renderer {
             scene,
             active_camera,
-            prev_camera_pos: Default::default(),
+            camera_pos_pivot: Default::default(),
             relative_camera_pos: Default::default(),
             surface: Arc::clone(surface),
             swapchain: None,
@@ -902,10 +902,8 @@ impl Renderer {
         let mut timings = UpdateTimings::default();
         let total_t0 = Instant::now();
         let camera = *self.active_camera();
-        let camera_pos_diff = camera.position() - self.prev_camera_pos;
 
-        self.relative_camera_pos += camera_pos_diff;
-        self.prev_camera_pos = camera.position();
+        self.relative_camera_pos = camera.position() - self.camera_pos_pivot;
 
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
@@ -915,6 +913,7 @@ impl Renderer {
             self.scene.set_global_transform(global_transform);
 
             self.relative_camera_pos = DVec3::default();
+            self.camera_pos_pivot = camera.position();
         }
 
         let mut uniform_buffer_updates = BufferUpdate2 {

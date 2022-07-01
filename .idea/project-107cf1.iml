@@ -8,7 +8,7 @@
       <sourceFolder url="file://$MODULE_DIR$/engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/common/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/macos/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/msdfgen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/engine/msdfgen/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/res-encoder/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/vk-wrapper/target" />

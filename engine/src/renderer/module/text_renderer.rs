@@ -1,9 +1,11 @@
+use crate::ecs::component::raw_text::FontStyle;
+use crate::ecs::scene::Scene;
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
 use crate::HashSet;
 use bit_set::BitSet;
 use font_kit::font::Font;
-use index_pool::IndexPool;
+use nalgebra_glm::{U8Vec4, Vec2, Vec4};
 use rayon::prelude::*;
 use std::collections::hash_map;
 use std::sync::Arc;
@@ -14,17 +16,9 @@ use vk_wrapper::{
 };
 
 const GLYPH_SIZE: u32 = 64;
-// RGBA8
-const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize;
+const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
 const PREFERRED_MAX_GLYPHS: u32 = 1024;
 const MSDF_PX_RANGE: f32 = 4.0;
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-#[repr(u8)]
-pub enum FontStyle {
-    Normal = 0,
-    Italic = 1,
-}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphUID(u64);
@@ -44,11 +38,7 @@ impl GlyphUID {
 
     const fn style(&self) -> FontStyle {
         let v = (self.0 & 0xff) as u8;
-        match v {
-            0 => FontStyle::Normal,
-            1 => FontStyle::Italic,
-            _ => unreachable!(),
-        }
+        FontStyle::from_u8(v)
     }
 }
 
@@ -95,6 +85,13 @@ pub struct TextRendererModule {
 }
 
 #[repr(C)]
+struct GlyphInstance {
+    glyph_index: u32,
+    color: U8Vec4,
+    offset: Vec2,
+}
+
+#[repr(C)]
 struct PushConstants {
     px_range: f32,
 }
@@ -107,9 +104,7 @@ impl TextRendererModule {
                 &[
                     ("inGlyphIndex", Format::R32_UINT),
                     ("inColor", Format::RGBA8_UNORM),
-                    ("inTransformCol0", Format::RGB32_FLOAT),
-                    ("inTransformCol1", Format::RGB32_FLOAT),
-                    ("inTransformCol2", Format::RGB32_FLOAT),
+                    ("inOffset", Format::RG32_FLOAT),
                 ],
                 &[],
             )
@@ -155,7 +150,7 @@ impl TextRendererModule {
             )
             .unwrap();
 
-        let mut pool = signature.create_pool(1, 1).unwrap();
+        let mut pool = signature.create_pool(0, 1).unwrap();
         let descriptor = pool.alloc().unwrap();
         unsafe {
             device.update_descriptor_set(
@@ -193,7 +188,7 @@ impl TextRendererModule {
         let mut free_locations: BitSet = (0..char_locations.capacity()).collect();
         let mut chars_to_load = HashSet::with_capacity(size3d.2 as usize);
         let fonts = vec![fallback_font];
-        println!("fallback {}", fonts[0].normal.full_name());
+
         let atlas_overflow_glyph = {
             let glyph = GlyphUID::new(0, 0, FontStyle::Normal);
             char_locations.insert(
@@ -360,6 +355,8 @@ impl TextRendererModule {
                 .src_access_mask(AccessFlags::TRANSFER_WRITE)],
         );
     }
+
+    pub fn update(&mut self, scene: &mut Scene) {}
 
     pub fn render(&self, cl: &mut CmdList) {
         // cl.bind_pipeline(&self.pipeline);

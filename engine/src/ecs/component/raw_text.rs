@@ -1,5 +1,22 @@
-use nalgebra_glm::{Vec3, Vec4};
+use nalgebra_glm::Vec4;
 use smallvec::SmallVec;
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[repr(u8)]
+pub enum FontStyle {
+    Normal = 0,
+    Italic = 1,
+}
+
+impl FontStyle {
+    pub const fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Normal,
+            1 => Self::Italic,
+            _ => panic!("Incorrect FontStyle value"),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct FormattedString {
@@ -8,6 +25,7 @@ pub struct FormattedString {
     font_id: u32,
     /// Size in world units
     font_size: f32,
+    font_style: FontStyle,
     color: Vec4,
 }
 
@@ -17,6 +35,7 @@ impl FormattedString {
             data,
             font_id: u32::MAX,
             font_size: 1.0,
+            font_style: FontStyle::Normal,
             color: Vec4::from_element(1.0),
         }
     }
@@ -40,9 +59,6 @@ impl FormattedString {
 #[derive(Clone)]
 pub struct TextBlock {
     strings: SmallVec<[FormattedString; 2]>,
-    position: Vec3,
-    rotation: Vec3,
-    scale: Vec3,
     max_width: f32,
     max_height: f32,
 }
@@ -51,9 +67,6 @@ impl TextBlock {
     pub fn new(strings: &[FormattedString]) -> Self {
         Self {
             strings: strings.into(),
-            position: Default::default(),
-            rotation: Default::default(),
-            scale: Vec3::from_element(1.0),
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
         }
@@ -71,13 +84,11 @@ impl TextBlock {
 }
 
 pub struct RawText {
-    blocks: SmallVec<[TextBlock; 1]>,
+    block: TextBlock,
 }
 
 impl RawText {
-    pub fn new(blocks: &[TextBlock]) -> Self {
-        Self {
-            blocks: blocks.into(),
-        }
+    pub fn new(block: TextBlock) -> Self {
+        Self { block }
     }
 }

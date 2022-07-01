@@ -132,3 +132,10 @@ impl Frustum {
         true
     }
 }
+
+pub fn move_xz(rotation: Vec3, front_back: f64, left_right: f64) -> DVec3 {
+    let d = DVec3::new((-rotation.y).sin() as f64, 0.0, (-rotation.y).cos() as f64);
+    let mut motion_delta = -d * (front_back as f64);
+    motion_delta -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * (left_right as f64);
+    motion_delta
+}

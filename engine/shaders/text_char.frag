@@ -7,7 +7,7 @@ layout(location = 1) out vec4 outSpecular;
 layout(location = 2) out vec4 outEmission;
 layout(location = 3) out vec4 outNormal;
 
-layout(set = 1, binding = 0) uniform sampler2DArray msdfArray;
+layout(set = 0, binding = 0) uniform sampler2DArray msdfArray;
 
 layout(location = 0) in Input {
     vec2 inUV;
@@ -17,6 +17,8 @@ layout(location = 0) in Input {
 
 layout(push_constant) uniform PushConstants {
     float pxRange;
+    mat3 transform;
+    mat4 projView;
 } params;
 
 float median(float r, float g, float b) {

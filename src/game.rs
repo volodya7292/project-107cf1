@@ -21,11 +21,12 @@ use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
 use engine::{renderer, Application, Input};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, Vec2};
 use overworld::Overworld;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rayon::ThreadPool;
+use renderer::camera;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::AtomicBool;
 use std::sync::{atomic, Arc};
@@ -41,7 +42,7 @@ pub struct Game {
     resources: Arc<ResourceFile>,
     registry: Arc<MainRegistry>,
 
-    cursor_rel: (i32, i32),
+    cursor_rel: (f64, f64),
     game_tick_finished: Arc<AtomicBool>,
 
     overworld: Overworld,
@@ -62,7 +63,7 @@ pub struct Game {
 
 impl Game {
     const MOVEMENT_SPEED: f64 = 8.0;
-    const MOUSE_SENSITIVITY: f64 = 0.003;
+    const MOUSE_SENSITIVITY: f64 = 0.2;
 
     pub fn init() -> Game {
         let resources = ResourceFile::open("resources").unwrap();
@@ -73,7 +74,7 @@ impl Game {
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),
-            cursor_rel: (0, 0),
+            cursor_rel: (0.0, 0.0),
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
             overworld_streamer: None,
@@ -192,22 +193,20 @@ impl Application for Game {
             let mut motion_delta = DVec3::from_element(0.0);
 
             // Handle rotation
-            let cursor_offset = (
-                self.cursor_rel.0 as f32 * Self::MOUSE_SENSITIVITY as f32,
-                self.cursor_rel.1 as f32 * Self::MOUSE_SENSITIVITY as f32,
-            );
+            let cursor_offset = Vec2::new(self.cursor_rel.0 as f32, self.cursor_rel.1 as f32)
+                * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
 
             let mut rotation = camera.rotation();
-            rotation.x = (rotation.x + cursor_offset.1).clamp(-FRAC_PI_2, FRAC_PI_2);
-            rotation.y += cursor_offset.0;
+            rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
+            rotation.y += cursor_offset.x;
             // rotation.y += delta_time as f32;
 
             camera.set_rotation(rotation);
-            self.cursor_rel = (0, 0);
+            self.cursor_rel = (0.0, 0.0);
 
             // Handle translation
             motion_delta.y += vel_up_down as f64 * ms;
-            motion_delta += engine::utils::camera_move_xz(
+            motion_delta += camera::move_xz(
                 camera.rotation(),
                 vel_front_back as f64 * ms,
                 vel_left_right as f64 * ms,
@@ -409,8 +408,8 @@ impl Application for Game {
             },
             Event::DeviceEvent { device_id: _, event } => match event {
                 DeviceEvent::MouseMotion { delta } => {
-                    self.cursor_rel.0 += delta.0 as i32;
-                    self.cursor_rel.1 += delta.1 as i32;
+                    self.cursor_rel.0 += delta.0;
+                    self.cursor_rel.1 += delta.1;
                 }
                 _ => {}
             },

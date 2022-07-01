@@ -9,8 +9,8 @@ members = [
     "vk-wrapper",
     "engine",
     "engine/macos",
+    "engine/msdfgen",
     "common",
-    "msdfgen",
 ]
 
 [dependencies]
@@ -19,8 +19,8 @@ vk-wrapper = { path = "vk-wrapper" }
 log = "0.4"
 simple_logger = "2.1"
 raw-window-handle = "0.4"
-nalgebra = "0.30"
-nalgebra-glm = "0.16"
+nalgebra = "0.31"
+nalgebra-glm = "0.17"
 image = { version = "0.24", default-features = false, features = ["png"] }
 rayon = "1.5"
 crossbeam-channel = "0.5"

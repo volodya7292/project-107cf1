@@ -3,8 +3,8 @@ use crate::game::overworld::cluster;
 use crate::game::overworld::occluder::Occluder;
 use crate::physics::aabb::AABB;
 use approx::AbsDiffEq;
+use engine::attributes_impl;
 use engine::renderer::vertex_mesh::VertexPositionImpl;
-use engine::vertex_impl;
 use glm::BVec3;
 use nalgebra_glm as glm;
 use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
@@ -17,7 +17,7 @@ pub struct PackedVertex {
     pack1: UVec4,
     pack2: u32,
 }
-vertex_impl!(PackedVertex, pack1, pack2);
+attributes_impl!(PackedVertex, pack1, pack2);
 
 impl VertexPositionImpl for PackedVertex {
     fn position(&self) -> Vec3 {

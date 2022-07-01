@@ -14,12 +14,12 @@ pub enum Error {
 }
 
 pub trait VertexMember {
-    fn vk_format() -> vkw::Format;
+    fn vk_format() -> Format;
 }
 
-pub trait VertexImpl {
-    fn attributes() -> Vec<(u32, vkw::Format)>;
-    fn member_info(name: &str) -> Option<(u32, vkw::Format)>;
+pub trait AttributesImpl {
+    fn attributes() -> Vec<(u32, Format)>;
+    fn member_info(name: &str) -> Option<(u32, Format)>;
 }
 
 pub trait VertexPositionImpl {
@@ -71,9 +71,9 @@ macro_rules! vertex_impl_normal {
 }
 
 #[macro_export]
-macro_rules! vertex_impl {
+macro_rules! attributes_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
-        impl $crate::renderer::vertex_mesh::VertexImpl for $vertex {
+        impl $crate::renderer::vertex_mesh::AttributesImpl for $vertex {
             fn attributes() -> Vec<(u32, vk_wrapper::Format)> {
                 use $crate::renderer::vertex_mesh::VertexMember;
 
@@ -121,35 +121,35 @@ macro_rules! vertex_impl {
 
 impl VertexMember for u32 {
     fn vk_format() -> Format {
-        vkw::Format::R32_UINT
+        Format::R32_UINT
     }
 }
 
 impl VertexMember for f32 {
     fn vk_format() -> Format {
-        vkw::Format::R32_FLOAT
+        Format::R32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector2<f32> {
     fn vk_format() -> Format {
-        vkw::Format::RG32_FLOAT
+        Format::RG32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector3<f32> {
     fn vk_format() -> Format {
-        vkw::Format::RGB32_FLOAT
+        Format::RGB32_FLOAT
     }
 }
 
 impl VertexMember for na::Vector4<u32> {
     fn vk_format() -> Format {
-        vkw::Format::RGBA32_UINT
+        Format::RGBA32_UINT
     }
 }
 
-pub trait InstanceImpl: VertexImpl {
+pub trait InstanceImpl: AttributesImpl {
     fn has_aabb() -> bool {
         false
     }
@@ -159,9 +159,9 @@ pub trait InstanceImpl: VertexImpl {
     }
 }
 
-impl<T: VertexImpl> InstanceImpl for T {}
+impl<T: AttributesImpl> InstanceImpl for T {}
 
-impl VertexImpl for () {
+impl AttributesImpl for () {
     fn attributes() -> Vec<(u32, Format)> {
         vec![]
     }
@@ -212,7 +212,7 @@ impl RawVertexMesh {
 }
 
 #[derive(Default)]
-pub struct VertexMesh<VertexT: VertexImpl, InstanceT: InstanceImpl> {
+pub struct VertexMesh<VertexT: AttributesImpl, InstanceT: InstanceImpl> {
     _type_marker: PhantomData<VertexT>,
     _type_marker2: PhantomData<InstanceT>,
     raw: Arc<RawVertexMesh>,
@@ -220,7 +220,7 @@ pub struct VertexMesh<VertexT: VertexImpl, InstanceT: InstanceImpl> {
 
 impl<VertexT, InstanceT> VertexMesh<VertexT, InstanceT>
 where
-    VertexT: VertexImpl + Clone + Default,
+    VertexT: AttributesImpl + Clone + Default,
     InstanceT: InstanceImpl,
 {
     pub fn raw(&self) -> Arc<RawVertexMesh> {
@@ -302,14 +302,14 @@ where
 }
 
 pub trait VertexMeshCreate {
-    fn create_instanced_vertex_mesh<VertexT, InstanceT: VertexImpl>(
+    fn create_instanced_vertex_mesh<VertexT, InstanceT: AttributesImpl>(
         self: &Arc<Self>,
         vertices: &[VertexT],
         instances: &[InstanceT],
         indices: Option<&[u32]>,
     ) -> Result<VertexMesh<VertexT, InstanceT>, Error>
     where
-        VertexT: VertexImpl + VertexPositionImpl;
+        VertexT: AttributesImpl + VertexPositionImpl;
 
     fn create_vertex_mesh<VertexT>(
         self: &Arc<Self>,
@@ -317,21 +317,21 @@ pub trait VertexMeshCreate {
         indices: Option<&[u32]>,
     ) -> Result<VertexMesh<VertexT, ()>, Error>
     where
-        VertexT: VertexImpl + VertexPositionImpl,
+        VertexT: AttributesImpl + VertexPositionImpl,
     {
         self.create_instanced_vertex_mesh::<VertexT, ()>(vertices, &[], indices)
     }
 }
 
 impl VertexMeshCreate for vkw::Device {
-    fn create_instanced_vertex_mesh<VertexT, InstanceT: VertexImpl>(
+    fn create_instanced_vertex_mesh<VertexT, InstanceT: AttributesImpl>(
         self: &Arc<Self>,
         vertices: &[VertexT],
         instances: &[InstanceT],
         indices: Option<&[u32]>,
     ) -> Result<VertexMesh<VertexT, InstanceT>, Error>
     where
-        VertexT: VertexImpl + VertexPositionImpl,
+        VertexT: AttributesImpl + VertexPositionImpl,
     {
         let indexed = indices.is_some();
         let indices = indices.unwrap_or(&[]);

@@ -6,7 +6,7 @@ pub mod thread_pool;
 pub mod unsafe_slice;
 pub mod value_noise;
 
-use crate::renderer::vertex_mesh::{VertexImpl, VertexNormalImpl, VertexPositionImpl};
+use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra_glm::{DVec3, Vec3};
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
@@ -116,17 +116,10 @@ pub fn calc_triangle_normal(v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Vec3 {
     side0.cross(&side1).normalize()
 }
 
-pub fn camera_move_xz(rotation: Vec3, front_back: f64, left_right: f64) -> DVec3 {
-    let d = DVec3::new((-rotation.y).sin() as f64, 0.0, (-rotation.y).cos() as f64);
-    let mut motion_delta = -d * (front_back as f64);
-    motion_delta -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * (left_right) as f64;
-    motion_delta
-}
-
 /// Calculate interpolated normals using neighbour triangles.
 pub fn calc_smooth_mesh_normals<T>(vertices: &mut [T], indices: &[u32])
 where
-    T: VertexImpl + VertexPositionImpl + VertexNormalImpl,
+    T: AttributesImpl + VertexPositionImpl + VertexNormalImpl,
 {
     let mut vertex_triangle_counts = vec![0_u32; vertices.len()];
     let mut triangle_normals = Vec::<Vec3>::with_capacity(indices.len() / 3);
