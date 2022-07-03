@@ -1,6 +1,5 @@
 use crate::ecs::component;
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
-use crate::ecs::component::Transform;
 use crate::ecs::scene_storage::SceneStorage;
 use crate::ecs::scene_storage::{
     ComponentStorage, ComponentStorageImpl, ComponentStorageMut, LockedStorage, Resources,
@@ -24,19 +23,22 @@ impl Scene {
     pub(crate) fn new() -> Self {
         let mut scene = SceneStorage::new();
 
+        // Internal
         scene.prepare_storage::<Parent>();
         scene.prepare_storage::<Children>();
-        scene.prepare_storage::<component::Transform>().emit_events(true);
         scene.prepare_storage::<GlobalTransform>().emit_events(true);
-        scene
-            .prepare_storage::<component::RenderConfig>()
-            .emit_events(true);
+
+        scene.prepare_storage::<component::Transform>().emit_events(true);
         scene.prepare_storage::<component::VertexMesh>().emit_events(true);
+        scene
+            .prepare_storage::<component::MeshRenderConfig>()
+            .emit_events(true);
+        scene.prepare_storage::<component::SimpleText>().emit_events(true);
 
         let global_parent = scene.create_entity();
         scene
-            .storage_write::<Transform>()
-            .set(global_parent, Transform::default());
+            .storage_write::<component::Transform>()
+            .set(global_parent, component::Transform::default());
 
         Self {
             inner: scene,
@@ -44,13 +46,16 @@ impl Scene {
         }
     }
 
-    pub(crate) fn global_transform(&self) -> Transform {
-        *self.storage_read::<Transform>().get(self.global_parent).unwrap()
+    pub(crate) fn global_transform(&self) -> component::Transform {
+        *self
+            .storage_read::<component::Transform>()
+            .get(self.global_parent)
+            .unwrap()
     }
 
-    pub(crate) fn set_global_transform(&self, transform: Transform) {
+    pub(crate) fn set_global_transform(&self, transform: component::Transform) {
         *self
-            .storage_write::<Transform>()
+            .storage_write::<component::Transform>()
             .get_mut(self.global_parent)
             .unwrap() = transform;
     }

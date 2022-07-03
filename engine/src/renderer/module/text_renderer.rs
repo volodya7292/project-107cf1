@@ -1,14 +1,20 @@
-use crate::ecs::component::raw_text::FontStyle;
-use crate::ecs::scene::Scene;
+use crate::ecs::component;
+use crate::ecs::component::simple_text::{FontStyle, TextStyle};
+use crate::ecs::scene::{Entity, Scene};
+use crate::ecs::scene_storage::{ComponentStorageImpl, Event};
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
 use crate::HashSet;
 use bit_set::BitSet;
-use font_kit::font::Font;
 use nalgebra_glm::{U8Vec4, Vec2, Vec4};
 use rayon::prelude::*;
+use rusttype::Font;
+use smallvec::SmallVec;
 use std::collections::hash_map;
+use std::mem;
 use std::sync::Arc;
+use unicode_normalization::UnicodeNormalization;
+use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     AccessFlags, BindingRes, BufferBarrier, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
     DeviceBuffer, Format, HostBuffer, Image, ImageLayout, ImageUsageFlags, Pipeline, PipelineDepthStencil,
@@ -24,19 +30,20 @@ const MSDF_PX_RANGE: f32 = 4.0;
 pub struct GlyphUID(u64);
 
 impl GlyphUID {
-    const fn new(glyph_id: u32, font_id: u16, style: FontStyle) -> Self {
-        Self(((glyph_id as u64) << 24) | ((font_id as u64) << 8) | (style as u64))
+    fn new(glyph_id: rusttype::GlyphId, font_id: u16, style: FontStyle) -> Self {
+        assert!(mem::size_of_val(&glyph_id.0) <= mem::size_of::<u32>());
+        Self(((glyph_id.0 as u64) << 24) | ((font_id as u64) << 8) | (style as u64))
     }
 
-    const fn glyph_id(&self) -> u32 {
-        (self.0 >> 24) as u32
+    fn glyph_id(&self) -> rusttype::GlyphId {
+        rusttype::GlyphId((self.0 >> 24) as u16)
     }
 
-    const fn font_id(&self) -> u16 {
+    fn font_id(&self) -> u16 {
         ((self.0 >> 8) & 0xffff) as u16
     }
 
-    const fn style(&self) -> FontStyle {
+    fn style(&self) -> FontStyle {
         let v = (self.0 & 0xff) as u8;
         FontStyle::from_u8(v)
     }
@@ -49,39 +56,51 @@ struct GlyphLocation {
 
 #[derive(Clone)]
 pub struct FontSet {
-    normal: Font,
-    italic: Option<Font>,
+    normal: Font<'static>,
+    italic: Option<Font<'static>>,
 }
 
 impl FontSet {
     /// Takes TTF or OTF encoded data
-    fn new(normal: Font, italic: Option<Font>) -> Self {
-        Self { normal, italic }
-    }
-
-    /// Takes TTF or OTF encoded data
     pub fn from_bytes(normal: Vec<u8>, italic: Option<Vec<u8>>) -> Option<Self> {
-        let normal = Font::from_bytes(Arc::new(normal), 0).ok()?;
+        let normal = Font::try_from_vec(normal)?;
         let italic = if let Some(data) = italic {
-            Some(Font::from_bytes(Arc::new(data), 0).ok()?)
+            Some(Font::try_from_vec(data)?)
         } else {
             None
         };
         Some(Self { normal, italic })
     }
+
+    pub fn best_for_style(&self, style: FontStyle) -> &Font {
+        if style == FontStyle::Italic && self.italic.is_some() {
+            self.italic.as_ref().unwrap()
+        } else {
+            &self.normal
+        }
+    }
+}
+
+struct StyledGlyphSequence {
+    glyphs: Vec<GlyphUID>,
+    style: TextStyle,
 }
 
 pub struct TextRendererModule {
     pipeline: Arc<Pipeline>,
     _pool: DescriptorPool,
     descriptor: DescriptorSet,
-    fonts: Vec<FontSet>,
+
     glyph_array: Arc<Image>,
     staging_buffer: HostBuffer<u8>,
+
+    fonts: Vec<FontSet>,
     char_locations: HashMap<GlyphUID, GlyphLocation>,
     free_locations: BitSet,
     chars_to_load: HashSet<GlyphUID>,
     atlas_overflow_glyph: GlyphUID,
+
+    allocated_glyphs: HashMap<Entity, StyledGlyphSequence>,
 }
 
 #[repr(C)]
@@ -99,22 +118,18 @@ struct PushConstants {
 impl TextRendererModule {
     pub fn new(device: &Arc<Device>, render_pass: &Arc<RenderPass>, subpass_index: u32) -> Self {
         let vertex_shader = device
-            .create_shader(
+            .create_vertex_shader(
                 include_bytes!("../../../shaders/build/text_char.vert.spv"),
                 &[
-                    ("inGlyphIndex", Format::R32_UINT),
-                    ("inColor", Format::RGBA8_UNORM),
-                    ("inOffset", Format::RG32_FLOAT),
+                    ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
+                    ("inColor", Format::RGBA8_UNORM, VInputRate::INSTANCE),
+                    ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
                 ],
                 &[],
             )
             .unwrap();
         let pixel_shader = device
-            .create_shader(
-                include_bytes!("../../../shaders/build/text_char.frag.spv"),
-                &[],
-                &[],
-            )
+            .create_pixel_shader(include_bytes!("../../../shaders/build/text_char.frag.spv"), &[])
             .unwrap();
         let signature = device
             .create_pipeline_signature(&[vertex_shader, pixel_shader], &[])
@@ -179,10 +194,11 @@ impl TextRendererModule {
                 font_kit::properties::Properties::new().style(font_kit::properties::Style::Italic),
             )
             .unwrap();
-        let fallback_font = FontSet::new(
-            fallback_normal.load().unwrap(),
-            Some(fallback_italic.load().unwrap()),
-        );
+        let fallback_font = FontSet::from_bytes(
+            fallback_normal.load().unwrap().copy_font_data().unwrap().to_vec(),
+            Some(fallback_italic.load().unwrap().copy_font_data().unwrap().to_vec()),
+        )
+        .unwrap();
 
         let mut char_locations = HashMap::with_capacity(size3d.2 as usize);
         let mut free_locations: BitSet = (0..char_locations.capacity()).collect();
@@ -190,7 +206,7 @@ impl TextRendererModule {
         let fonts = vec![fallback_font];
 
         let atlas_overflow_glyph = {
-            let glyph = GlyphUID::new(0, 0, FontStyle::Normal);
+            let glyph = GlyphUID::new(rusttype::GlyphId(0), 0, FontStyle::Normal);
             char_locations.insert(
                 glyph,
                 GlyphLocation {
@@ -214,6 +230,7 @@ impl TextRendererModule {
             free_locations,
             chars_to_load,
             atlas_overflow_glyph,
+            allocated_glyphs: Default::default(),
         }
     }
 
@@ -232,32 +249,23 @@ impl TextRendererModule {
         style: FontStyle,
         chars: impl Iterator<Item = char>,
     ) -> Vec<GlyphUID> {
+        let chars = chars.nfc();
         let size_hint = chars.size_hint();
         let mut glyphs = Vec::with_capacity(size_hint.1.unwrap_or(size_hint.0));
 
         for c in chars {
-            let font_set = &self.fonts[font_id as usize];
+            let font = self.fonts[font_id as usize].best_for_style(style);
+            let mut g_uid = GlyphUID::new(font.glyph(c).id(), font_id, style);
 
-            let font = if style == FontStyle::Italic && font_set.italic.is_some() {
-                font_set.italic.as_ref().unwrap()
-            } else {
-                &font_set.normal
-            };
+            if g_uid.glyph_id().0 == 0 {
+                // Try fallback font
+                let fallback_font = self.fonts[0].best_for_style(style);
+                g_uid = GlyphUID::new(fallback_font.glyph(c).id(), 0, style);
 
-            let g_uid = font
-                .glyph_for_char(c)
-                .map(|id| GlyphUID::new(id, font_id, style))
-                .or_else(|| {
-                    // Try fallback font
-                    let font_set = &self.fonts[0];
-                    let font = if style == FontStyle::Italic && font_set.italic.is_some() {
-                        font_set.italic.as_ref().unwrap()
-                    } else {
-                        &font_set.normal
-                    };
-                    font.glyph_for_char(c).map(|id| GlyphUID::new(id, 0, style))
-                })
-                .unwrap_or(self.atlas_overflow_glyph);
+                if g_uid.glyph_id().0 == 0 {
+                    g_uid = self.atlas_overflow_glyph;
+                }
+            }
 
             if self.char_locations.contains_key(&g_uid) {
                 glyphs.push(g_uid);
@@ -304,18 +312,14 @@ impl TextRendererModule {
 
         self.chars_to_load.par_iter().for_each(|g| {
             let font_set = &self.fonts[g.font_id() as usize];
-
-            let font = if g.style() == FontStyle::Italic && font_set.italic.is_some() {
-                font_set.italic.as_ref().unwrap()
-            } else {
-                &font_set.normal
-            };
+            let font = font_set.best_for_style(g.style());
+            let glyph = font.glyph(g.glyph_id());
 
             let location = &self.char_locations[g];
             let byte_offset = location.index as usize * GLYPH_BYTE_SIZE;
 
             let output = unsafe { staging_slice.slice_mut(byte_offset..(byte_offset + GLYPH_BYTE_SIZE)) };
-            let _ = msdfgen::generate_msdf(font, g.glyph_id(), GLYPH_SIZE, MSDF_PX_RANGE, output);
+            let _ = msdfgen::generate_msdf(glyph, GLYPH_SIZE, MSDF_PX_RANGE, output);
         });
 
         cl.barrier_image(
@@ -356,7 +360,110 @@ impl TextRendererModule {
         );
     }
 
-    pub fn update(&mut self, scene: &mut Scene) {}
+    fn lay_out_glyphs(
+        &self,
+        seq: &StyledGlyphSequence,
+        max_width: f32,
+        max_height: f32,
+    ) -> Vec<GlyphInstance> {
+        let glyph_instances = Vec::with_capacity(seq.glyphs.len());
+
+        let scale = rusttype::Scale::uniform(1.0);
+        let style = &seq.style;
+
+        let font = self.fonts[style.font_id() as usize].best_for_style(style.font_style());
+        let space_id = font.glyph(' ').id();
+        let v_metrics = font.v_metrics(scale);
+
+        let mut prev_glyph = None::<GlyphUID>;
+        let height = v_metrics.ascent - v_metrics.descent;
+        let mut curr_offset = Vec2::new(0.0, height);
+
+        let mut curr_word = Vec::<GlyphInstance>::with_capacity(30);
+        let mut curr_word_width = 0.0;
+
+        for g in &seq.glyphs {
+            let g_id = g.glyph_id();
+            let glyph = font.glyph(g_id).scaled(scale);
+            let h_metrics = glyph.h_metrics();
+
+            let kerning = prev_glyph
+                .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
+                .unwrap_or(0.0);
+            curr_offset.x += kerning;
+
+            if g_id != space_id {
+                curr_word.push(GlyphInstance {
+                    glyph_index: self.char_locations[g].index,
+                    color: style.color(),
+                    offset: curr_offset,
+                });
+                curr_word_width += kerning + h_metrics.advance_width;
+            } else if !curr_word.is_empty() {
+                let start_x = curr_word[0].offset.x;
+
+                if curr_word_width >= max_width {
+                    // Width of the word exceeds maximum line width => break it into two parts.
+                    // TODO
+                } else if start_x + curr_word_width >= max_width {
+                    // Place the word on a new line
+                    // TODO
+                }
+
+                curr_word.clear();
+            }
+
+            curr_offset.x += h_metrics.advance_width;
+            prev_glyph = Some(*g);
+        }
+
+        todo!();
+
+        glyph_instances
+    }
+
+    // fn allocate_text_glyphs_for_entity(&mut self, entity: Entity, ) {
+    //
+    // }
+
+    fn free_text_glyphs_from_entity(&mut self, entity: Entity) {
+        let seq = self.allocated_glyphs.remove(&entity).unwrap();
+        self.free_glyphs(&seq.glyphs);
+    }
+
+    pub fn update(&mut self, scene: &mut Scene) {
+        let vertex_meshes = scene.storage_read::<component::VertexMesh>();
+        let mut simple_texts = scene.storage_write::<component::SimpleText>();
+
+        let events = simple_texts.events();
+
+        for e in events {
+            match e {
+                Event::Created(e) => {
+                    let simple_text = simple_texts.get(e).unwrap();
+
+                    let style = *simple_text.string().style();
+                    let glyphs = self.allocate_glyphs(
+                        style.font_id(),
+                        style.font_style(),
+                        simple_text.string().data().chars(),
+                    );
+
+                    self.allocated_glyphs
+                        .insert(e, StyledGlyphSequence { glyphs, style });
+
+                    // TODO: make layout
+                }
+                Event::Modified(e) => {
+                    self.free_text_glyphs_from_entity(e);
+                    todo!()
+                }
+                Event::Removed(e) => {
+                    self.free_text_glyphs_from_entity(e);
+                }
+            }
+        }
+    }
 
     pub fn render(&self, cl: &mut CmdList) {
         // cl.bind_pipeline(&self.pipeline);

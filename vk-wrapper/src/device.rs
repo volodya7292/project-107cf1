@@ -1,4 +1,5 @@
 use crate::format::BUFFER_FORMATS;
+use crate::shader::VInputRate;
 use crate::ImageWrapper;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
@@ -736,10 +737,10 @@ impl Device {
         })
     }
 
-    pub fn create_shader(
+    fn create_shader(
         self: &Arc<Self>,
         code: &[u8],
-        input_formats: &[(&str, Format)],
+        vertex_inputs: &HashMap<&str, (Format, Option<VInputRate>)>,
         binding_types: &[(&str, ShaderBindingMod)],
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
@@ -832,19 +833,19 @@ impl Device {
         };
 
         if stage == ShaderStage::VERTEX {
-            for (_, f) in input_formats {
+            for (f, _) in vertex_inputs.values() {
                 if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
                     panic!("Unsupported vertex format is used: {:?}", f);
                 }
             }
         }
 
-        let input_formats: HashMap<&str, Format> = input_formats.iter().cloned().collect();
-        let mut input_locations = HashMap::<u32, Format>::with_capacity(resources.stage_inputs.len());
+        let mut vertex_loc_inputs =
+            HashMap::<u32, (Format, Option<VInputRate>)>::with_capacity(resources.stage_inputs.len());
 
         if stage == ShaderStage::VERTEX {
             for res in resources.stage_inputs {
-                let format = *input_formats
+                let f = *vertex_inputs
                     .get(res.name.as_str())
                     .ok_or(DeviceError::InvalidShader(format!(
                         "Input format for {} not provided!",
@@ -852,7 +853,7 @@ impl Device {
                     )))?;
                 let location = ast.get_decoration(res.id, spirv::Decoration::Location).unwrap();
 
-                input_locations.insert(location, format);
+                vertex_loc_inputs.insert(location, f);
             }
         }
 
@@ -895,11 +896,44 @@ impl Device {
             device: Arc::clone(self),
             native: unsafe { self.wrapper.native.create_shader_module(&create_info, None)? },
             stage,
-            input_locations,
+            vertex_location_inputs: vertex_loc_inputs,
             bindings,
             _push_constants: push_constants,
             push_constants_size,
         }))
+    }
+
+    pub fn create_vertex_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        input_formats: &[(&str, Format, VInputRate)],
+        binding_types: &[(&str, ShaderBindingMod)],
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(
+            code,
+            &input_formats
+                .iter()
+                .cloned()
+                .map(|(name, format, rate)| (name, (format, Some(rate))))
+                .collect(),
+            binding_types,
+        )
+    }
+
+    pub fn create_pixel_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        binding_types: &[(&str, ShaderBindingMod)],
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), binding_types)
+    }
+
+    pub fn create_compute_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        binding_types: &[(&str, ShaderBindingMod)],
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), binding_types)
     }
 
     pub fn create_render_pass(
@@ -1268,13 +1302,13 @@ impl Device {
             .ok_or(DeviceError::InvalidSignature("Vertex shader not provided!"))?;
 
         // Vertex input
-        let vertex_binding_count = vertex_shader.input_locations.len();
+        let vertex_binding_count = vertex_shader.vertex_location_inputs.len();
         let mut vertex_binding_descs =
             vec![vk::VertexInputBindingDescription::default(); vertex_binding_count];
         let mut vertex_attrib_descs =
             vec![vk::VertexInputAttributeDescription::default(); vertex_binding_count];
 
-        for (location, format) in &vertex_shader.input_locations {
+        for (location, (format, _)) in &vertex_shader.vertex_location_inputs {
             let buffer_index = *location;
 
             if !BUFFER_FORMATS[&format].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {

@@ -36,6 +36,7 @@ use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
+use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
@@ -540,11 +541,7 @@ impl Renderer {
         // Depth pyramid pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let depth_pyramid_compute = device
-            .create_shader(
-                include_bytes!("../shaders/build/depth_pyramid.comp.spv"),
-                &[],
-                &[],
-            )
+            .create_compute_shader(include_bytes!("../shaders/build/depth_pyramid.comp.spv"), &[])
             .unwrap();
         let depth_pyramid_signature = device
             .create_pipeline_signature(&[depth_pyramid_compute], &[])
@@ -554,7 +551,7 @@ impl Renderer {
         // Cull pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let cull_compute = device
-            .create_shader(include_bytes!("../shaders/build/cull.comp.spv"), &[], &[])
+            .create_compute_shader(include_bytes!("../shaders/build/cull.comp.spv"), &[])
             .unwrap();
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
         let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
@@ -585,14 +582,10 @@ impl Renderer {
         // Compose pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let quad_vert_shader = device
-            .create_shader(include_bytes!("../shaders/build/quad.vert.spv"), &[], &[])
+            .create_vertex_shader(include_bytes!("../shaders/build/quad.vert.spv"), &[], &[])
             .unwrap();
         let compose_pixel_shader = device
-            .create_shader(
-                include_bytes!("../shaders/build/compose.frag.spv"),
-                &[("", Format::RGBA8_UNORM)],
-                &[],
-            )
+            .create_pixel_shader(include_bytes!("../shaders/build/compose.frag.spv"), &[])
             .unwrap();
         let compose_signature = device
             .create_pipeline_signature(&[quad_vert_shader, compose_pixel_shader], &[])
@@ -916,6 +909,10 @@ impl Renderer {
             self.camera_pos_pivot = camera.position();
         }
 
+        self.text_renderer.update(&mut self.scene);
+
+        // --------------------------------------------------------------------
+
         let mut uniform_buffer_updates = BufferUpdate2 {
             buffer: self.uniform_buffer_basic.handle(),
             data: smallvec![],
@@ -933,7 +930,7 @@ impl Renderer {
 
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
-            renderer_comps: self.scene.storage::<component::RenderConfig>(),
+            renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
             g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
             renderables: &mut self.renderables,
             buffer_updates: &mut buffer_updates,
@@ -978,7 +975,7 @@ impl Renderer {
         let mut global_transform_events_system = system::GlobalTransformEvents {
             uniform_buffer_updates: &mut uniform_buffer_updates,
             global_transform_comps: self.scene.storage::<GlobalTransform>(),
-            renderer_comps: self.scene.storage::<component::RenderConfig>(),
+            renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
             renderables: &self.renderables,
         };
 
@@ -1119,7 +1116,7 @@ impl Renderer {
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
         let global_transform_comps = self.scene.storage_read::<GlobalTransform>();
-        let renderer_comps = self.scene.storage_read::<component::RenderConfig>();
+        let renderer_comps = self.scene.storage_read::<component::MeshRenderConfig>();
 
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();
@@ -1230,7 +1227,7 @@ impl Renderer {
     }
 
     fn record_g_cmd_lists(&self) {
-        let renderer_comps = self.scene.storage_read::<component::RenderConfig>();
+        let renderer_comps = self.scene.storage_read::<component::MeshRenderConfig>();
 
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();

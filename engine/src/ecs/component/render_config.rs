@@ -53,7 +53,7 @@ impl Resource {
     }
 }
 
-pub struct RenderConfig {
+pub struct MeshRenderConfig {
     pub(crate) mat_pipeline: u32,
     pub(crate) uniform_buffer_offset_model: u32,
     /// binding id -> Resource
@@ -62,11 +62,11 @@ pub struct RenderConfig {
     pub(crate) visible: bool,
 }
 
-impl RenderConfig {
-    pub fn new(renderer: &Renderer, mat_pipeline: u32, translucent: bool) -> RenderConfig {
+impl MeshRenderConfig {
+    pub fn new(renderer: &Renderer, mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
         let pipe = &renderer.material_pipelines[mat_pipeline as usize];
 
-        RenderConfig {
+        MeshRenderConfig {
             mat_pipeline,
             uniform_buffer_offset_model: pipe.uniform_buffer_offset_model(),
             resources: Default::default(),

@@ -1,9 +1,3 @@
-use font_kit::error::GlyphLoadingError;
-use font_kit::font::Font;
-use font_kit::hinting::HintingOptions;
-use font_kit::outline::OutlineSink;
-use pathfinder_geometry::line_segment::LineSegment2F;
-use pathfinder_geometry::vector::Vector2F;
 use std::pin::Pin;
 use std::ptr;
 
@@ -52,53 +46,50 @@ mod sys {
 }
 
 impl sys::Vector2 {
-    pub fn from_f32(v: Vector2F, offset: Vector2F, scale: Vector2F) -> Self {
-        let res = offset + v * scale;
+    pub fn from_f32(x: f32, y: f32) -> Self {
         Self {
-            x: res.x() as f64,
-            y: res.y() as f64,
+            x: x as f64,
+            y: y as f64,
         }
     }
 }
 
 struct SysOutlineBuilder<'a> {
-    offset: Vector2F,
-    scale: Vector2F,
-    curr_pos: sys::Vector2,
+    position: sys::Vector2,
     shape: Pin<&'a mut sys::Shape>,
     contour: *mut sys::Contour,
 }
 
-impl OutlineSink for SysOutlineBuilder<'_> {
-    fn move_to(&mut self, to: Vector2F) {
+impl rusttype::OutlineBuilder for SysOutlineBuilder<'_> {
+    fn move_to(&mut self, x: f32, y: f32) {
         if self.contour.is_null() || unsafe { !sys::contour_is_edges_empty(self.contour) } {
             let contour = self.shape.as_mut().addContour();
             self.contour = unsafe { Pin::get_unchecked_mut(contour) };
         }
-        self.curr_pos = sys::Vector2::from_f32(to, self.offset, self.scale);
+        self.position = sys::Vector2::from_f32(x, y);
     }
 
-    fn line_to(&mut self, to: Vector2F) {
-        let endpoint = sys::Vector2::from_f32(to, self.offset, self.scale);
-        if endpoint != self.curr_pos {
-            unsafe { sys::contour_add_edge2(self.contour, self.curr_pos, endpoint) };
-            self.curr_pos = endpoint;
+    fn line_to(&mut self, x: f32, y: f32) {
+        let endpoint = sys::Vector2::from_f32(x, y);
+        if endpoint != self.position {
+            unsafe { sys::contour_add_edge2(self.contour, self.position, endpoint) };
+            self.position = endpoint;
         }
     }
 
-    fn quadratic_curve_to(&mut self, ctrl: Vector2F, to: Vector2F) {
-        let control = sys::Vector2::from_f32(ctrl, self.offset, self.scale);
-        let to = sys::Vector2::from_f32(to, self.offset, self.scale);
-        unsafe { sys::contour_add_edge3(self.contour, self.curr_pos, control, to) };
-        self.curr_pos = to;
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let control = sys::Vector2::from_f32(x1, y1);
+        let to = sys::Vector2::from_f32(x, y);
+        unsafe { sys::contour_add_edge3(self.contour, self.position, control, to) };
+        self.position = to;
     }
 
-    fn cubic_curve_to(&mut self, ctrl: LineSegment2F, to: Vector2F) {
-        let control1 = sys::Vector2::from_f32(ctrl.from(), self.offset, self.scale);
-        let control2 = sys::Vector2::from_f32(ctrl.to(), self.offset, self.scale);
-        let to = sys::Vector2::from_f32(to, self.offset, self.scale);
-        unsafe { sys::contour_add_edge4(self.contour, self.curr_pos, control1, control2, to) };
-        self.curr_pos = to;
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let control1 = sys::Vector2::from_f32(x1, y1);
+        let control2 = sys::Vector2::from_f32(x2, y2);
+        let to = sys::Vector2::from_f32(x, y);
+        unsafe { sys::contour_add_edge4(self.contour, self.position, control1, control2, to) };
+        self.position = to;
     }
 
     fn close(&mut self) {}
@@ -106,29 +97,33 @@ impl OutlineSink for SysOutlineBuilder<'_> {
 
 /// Generates an image of R8G8B8A8 layout with width and height of `size`.
 pub fn generate_msdf(
-    font: &Font,
-    glyph_id: u32,
+    glyph: rusttype::Glyph,
     size: u32,
     px_range: f32,
     output: &mut [u8],
-) -> Result<(), GlyphLoadingError> {
-    let size_f = size as f32;
-    let rect = font.typographic_bounds(glyph_id)?;
-    let scaled_rect = rect * (size_f / font.metrics().units_per_em as f32);
+) -> Result<(), &'static str> {
+    let scaled = glyph.scaled(rusttype::Scale::uniform(1.0));
+    let bounds = scaled
+        .exact_bounding_box()
+        .ok_or("Could not extract glyph bounding box")?;
 
-    let fit_scale = size_f / scaled_rect.width().max(scaled_rect.height());
-    let total_scale = size_f * fit_scale / font.metrics().units_per_em as f32;
+    let render_scale = size as f32 / bounds.width().max(bounds.height());
+    let scaled = scaled
+        .into_unscaled()
+        .scaled(rusttype::Scale::uniform(render_scale));
+
+    let positioned = scaled.positioned(rusttype::Point { x: 0.0, y: 0.0 });
 
     let mut shape = sys::create_shape();
     let mut builder = SysOutlineBuilder {
-        offset: Vector2F::new(-scaled_rect.min_x(), -scaled_rect.min_y() + size_f),
-        scale: Vector2F::new(total_scale, -total_scale),
-        curr_pos: Default::default(),
+        position: Default::default(),
         shape: shape.pin_mut(),
         contour: ptr::null_mut(),
     };
-    dbg!(scaled_rect, builder.scale, builder.offset);
-    font.outline(glyph_id, HintingOptions::None, &mut builder)?;
+
+    if !positioned.build_outline(&mut builder) {
+        return Err("Failed to build glyph outline");
+    }
 
     sys::shape_check_last_contour(shape.pin_mut());
     shape.pin_mut().normalize();
@@ -154,20 +149,21 @@ pub fn generate_msdf(
 // #[test]
 // fn gov() {
 //     let f = std::fs::read("/Users/admin/Downloads/Romanesco-Regular.ttf").unwrap();
-//     let font = Font::from_bytes(std::sync::Arc::new(f), 0).unwrap();
-//     let msdf = generate_msdf(&font, font.glyph_for_char('A').unwrap(), 64, 4.0).unwrap();
+//     let font = rusttype::Font::try_from_bytes(&f).unwrap();
+//     let g = font.glyph('A');
+//     let msdf = generate_msdf(g, 64, 4.0).unwrap();
 //
 //     let mut msdf_b = vec![0_u8; 64 * 64 * 3];
 //     let min = msdf.iter().min_by(|a, b| a.partial_cmp(b).unwrap());
 //     let max = msdf.iter().max_by(|a, b| a.partial_cmp(b).unwrap());
 //
 //     for (f, u) in msdf.iter().zip(&mut msdf_b) {
-//         *u = 255 - (*f * 256.0).clamp(0.0, 255.0) as u8;
+//         *u = (*f * 255.0).clamp(0.0, 255.0) as u8;
 //     }
 //     println!("{:?} {:?}", min, max);
 //
 //     image::save_buffer(
-//         "/Users/admin/Downloads/govno.png",
+//         "/Users/admin/Downloads/govno.jpg",
 //         &msdf_b,
 //         64,
 //         64,

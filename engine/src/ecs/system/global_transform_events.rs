@@ -12,7 +12,7 @@ use vk_wrapper as vkw;
 pub(crate) struct GlobalTransformEvents<'a> {
     pub uniform_buffer_updates: &'a mut BufferUpdate2,
     pub global_transform_comps: scene_storage::LockedStorage<'a, GlobalTransform>,
-    pub renderer_comps: scene_storage::LockedStorage<'a, component::RenderConfig>,
+    pub renderer_comps: scene_storage::LockedStorage<'a, component::MeshRenderConfig>,
     pub renderables: &'a HashMap<Entity, Renderable>,
 }
 
@@ -20,11 +20,11 @@ impl GlobalTransformEvents<'_> {
     fn global_transform_modified(
         entity: Entity,
         global_transform: &GlobalTransform,
-        renderer: Option<&component::RenderConfig>,
+        render_config: Option<&component::MeshRenderConfig>,
         buffer_updates: &mut BufferUpdate2,
         renderables: &HashMap<Entity, Renderable>,
     ) {
-        if let Some(renderer) = renderer {
+        if let Some(config) = render_config {
             let matrix = global_transform.matrix_f32();
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
@@ -36,7 +36,7 @@ impl GlobalTransformEvents<'_> {
             buffer_updates.regions.push(vkw::CopyRegion::new(
                 src_offset as u64,
                 renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE
-                    + renderer.uniform_buffer_offset_model as u64,
+                    + config.uniform_buffer_offset_model as u64,
                 (matrix_bytes.len() as u64).try_into().unwrap(),
             ));
         }

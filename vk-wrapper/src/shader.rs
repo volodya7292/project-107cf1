@@ -15,6 +15,14 @@ impl ShaderStage {
 }
 vk_bitflags_impl!(ShaderStage, vk::ShaderStageFlags);
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct VInputRate(pub(crate) vk::VertexInputRate);
+
+impl VInputRate {
+    pub const VERTEX: Self = Self(vk::VertexInputRate::VERTEX);
+    pub const INSTANCE: Self = Self(vk::VertexInputRate::INSTANCE);
+}
+
 #[derive(Copy, Clone, PartialEq)]
 pub struct ShaderBindingMod(u32);
 
@@ -45,7 +53,7 @@ pub struct Shader {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
-    pub(crate) input_locations: HashMap<u32, Format>,
+    pub(crate) vertex_location_inputs: HashMap<u32, (Format, Option<VInputRate>)>,
     // [location, format]
     pub(crate) bindings: HashMap<String, ShaderBinding>,
     pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,

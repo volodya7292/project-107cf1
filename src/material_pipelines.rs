@@ -4,6 +4,7 @@ use engine::uniform_struct_impl;
 use nalgebra as na;
 use std::sync::Arc;
 use vk_wrapper as vkw;
+use vk_wrapper::shader::VInputRate;
 
 pub struct MaterialPipelines {
     cluster: u32,
@@ -20,9 +21,13 @@ fn create_vertex_shader(
     code: &[u8],
     input_formats: &[(&str, vkw::Format)],
 ) -> Result<Arc<vkw::Shader>, vkw::DeviceError> {
-    device.create_shader(
+    device.create_vertex_shader(
         code,
-        input_formats,
+        &input_formats
+            .iter()
+            .cloned()
+            .map(|(name, format)| (name, format, VInputRate::VERTEX))
+            .collect::<Vec<_>>(),
         &[("per_object_data", vkw::ShaderBindingMod::DYNAMIC_OFFSET)],
     )
 }
@@ -41,9 +46,8 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
         )
         .unwrap();
         let pixel = device
-            .create_shader(
+            .create_pixel_shader(
                 &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
-                &[],
                 &[],
             )
             .unwrap();

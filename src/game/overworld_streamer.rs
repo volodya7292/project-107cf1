@@ -729,7 +729,7 @@ impl OverworldStreamer {
         let mut entities = scene.create_entities(self.clusters_entities_to_add.len() as u32);
 
         let mut transform_comps = scene.storage_write::<component::Transform>();
-        let mut renderer_comps = scene.storage_write::<component::RenderConfig>();
+        let mut render_config_comps = scene.storage_write::<component::MeshRenderConfig>();
         let mut vertex_mesh_comps = scene.storage_write::<component::VertexMesh>();
 
         // Add components to the new entities
@@ -740,10 +740,10 @@ impl OverworldStreamer {
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
-            let renderer_comp = component::RenderConfig::new(&re, self.cluster_mat_pipeline, false);
+            let render_config = component::MeshRenderConfig::new(&re, self.cluster_mat_pipeline, false);
 
             transform_comps.set(entity, transform_comp);
-            renderer_comps.set(entity, renderer_comp);
+            render_config_comps.set(entity, render_config);
 
             self.rclusters.get_mut(pos).unwrap().entity = entity;
         }

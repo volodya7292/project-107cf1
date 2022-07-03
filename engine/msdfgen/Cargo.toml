@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 cxx = "1.0"
-font-kit = "0.11"
-pathfinder_geometry = "0.5"
+rusttype = "0.9"
 
 [build-dependencies]
 cxx-build = "1.0"
