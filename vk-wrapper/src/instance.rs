@@ -189,6 +189,7 @@ impl Instance {
                 available_features,
                 enabled_features,
                 sampler_anisotropy,
+                independent_blend,
                 shader_uniform_buffer_array_dynamic_indexing,
                 shader_sampled_image_array_dynamic_indexing,
                 shader_storage_buffer_array_dynamic_indexing,

@@ -51,6 +51,8 @@ impl MaterialPipelineSet {
                             .depth_test(params.depth_test)
                             .depth_write(params.depth_write),
                         vkw::PipelineRasterization::new().cull_back_faces(params.cull_back_faces),
+                        // TODO: blending
+                        &[],
                         params.signature,
                     )
                     .unwrap();

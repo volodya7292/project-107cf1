@@ -1,4 +1,5 @@
-use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler};
+use crate::sampler::SamplerFilter;
+use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler, SamplerMipmap};
 use ash::vk;
 use bit_set::BitSet;
 use smallvec::SmallVec;
@@ -9,9 +10,8 @@ use std::sync::Arc;
 pub enum BindingRes {
     Buffer(BufferHandle),
     BufferRange(BufferHandle, Range<u64>),
-    Image(Arc<Image>, ImageLayout),
-    ImageView(Arc<ImageView>, ImageLayout),
-    ImageViewSampler(Arc<ImageView>, Arc<Sampler>, ImageLayout),
+    Image(Arc<Image>, Option<Arc<Sampler>>, ImageLayout),
+    ImageView(Arc<ImageView>, Option<Arc<Sampler>>, ImageLayout),
 }
 
 pub struct Binding {
@@ -211,27 +211,75 @@ impl Device {
                         write_info =
                             write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
                     }
-                    BindingRes::Image(image, layout) => {
+
+                    BindingRes::Image(image, sampler, layout) => {
+                        let adapter = self.adapter();
+                        let sampler = sampler
+                            .as_ref()
+                            .map(|sampler| {
+                                if (sampler.mag_filter == SamplerFilter::LINEAR
+                                    && !adapter.is_linear_filter_supported(
+                                        image.wrapper.format.0,
+                                        image.wrapper.tiling,
+                                    ))
+                                    || (sampler.min_filter == SamplerFilter::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image.wrapper.format.0,
+                                            image.wrapper.tiling,
+                                        ))
+                                    || (sampler.mipmap == SamplerMipmap::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image.wrapper.format.0,
+                                            image.wrapper.tiling,
+                                        ))
+                                {
+                                    // The sampler is not supported, do not use sampler
+                                    self.default_sampler.native
+                                } else {
+                                    sampler.native
+                                }
+                            })
+                            .unwrap_or(self.default_sampler.native);
+
                         native_image_infos.push(vk::DescriptorImageInfo {
-                            sampler: image.sampler.native,
+                            sampler,
                             image_view: image.view.native,
                             image_layout: layout.0,
                         });
                         write_info =
                             write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
                     }
-                    BindingRes::ImageView(image_view, layout) => {
+                    BindingRes::ImageView(image_view, sampler, layout) => {
+                        let adapter = self.adapter();
+                        let sampler = sampler
+                            .as_ref()
+                            .map(|sampler| {
+                                if (sampler.mag_filter == SamplerFilter::LINEAR
+                                    && !adapter.is_linear_filter_supported(
+                                        image_view.image_wrapper.format.0,
+                                        image_view.image_wrapper.tiling,
+                                    ))
+                                    || (sampler.min_filter == SamplerFilter::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image_view.image_wrapper.format.0,
+                                            image_view.image_wrapper.tiling,
+                                        ))
+                                    || (sampler.mipmap == SamplerMipmap::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image_view.image_wrapper.format.0,
+                                            image_view.image_wrapper.tiling,
+                                        ))
+                                {
+                                    // The sampler is not supported, do not use sampler
+                                    self.default_sampler.native
+                                } else {
+                                    sampler.native
+                                }
+                            })
+                            .unwrap_or(self.default_sampler.native);
+
                         native_image_infos.push(vk::DescriptorImageInfo {
-                            sampler: Default::default(),
-                            image_view: image_view.native,
-                            image_layout: layout.0,
-                        });
-                        write_info =
-                            write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-                    }
-                    BindingRes::ImageViewSampler(image_view, sampler, layout) => {
-                        native_image_infos.push(vk::DescriptorImageInfo {
-                            sampler: sampler.native,
+                            sampler,
                             image_view: image_view.native,
                             image_layout: layout.0,
                         });

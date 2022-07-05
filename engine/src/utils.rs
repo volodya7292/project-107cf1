@@ -7,7 +7,7 @@ pub mod unsafe_slice;
 pub mod value_noise;
 
 use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
-use nalgebra_glm::{DVec3, Vec3};
+use nalgebra_glm::Vec3;
 pub use slice_split::SliceSplitImpl;
 use std::sync::atomic;
 use std::thread;

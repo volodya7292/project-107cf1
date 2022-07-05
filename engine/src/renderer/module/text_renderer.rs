@@ -1,24 +1,27 @@
 use crate::ecs::component;
-use crate::ecs::component::simple_text::{FontStyle, TextStyle};
+use crate::ecs::component::internal::GlobalTransform;
+use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
 use crate::ecs::scene::{Entity, Scene};
-use crate::ecs::scene_storage::{ComponentStorageImpl, Event};
+use crate::ecs::scene_storage::{ComponentStorageImpl, ComponentStorageMut, Event};
+use crate::renderer::vertex_mesh::{RawVertexMesh, VertexMeshCreate};
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
 use crate::HashSet;
 use bit_set::BitSet;
-use nalgebra_glm::{U8Vec4, Vec2, Vec4};
+use nalgebra_glm::{Mat4, U8Vec4, Vec2};
 use rayon::prelude::*;
 use rusttype::Font;
-use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
+use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
-    AccessFlags, BindingRes, BufferBarrier, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
-    DeviceBuffer, Format, HostBuffer, Image, ImageLayout, ImageUsageFlags, Pipeline, PipelineDepthStencil,
-    PipelineRasterization, PipelineStageFlags, PrimitiveTopology, RenderPass,
+    AccessFlags, AttachmentColorBlend, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet,
+    Device, DeviceBuffer, Format, HostBuffer, Image, ImageLayout, ImageUsageFlags, Pipeline,
+    PipelineDepthStencil, PipelineRasterization, PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler,
+    SamplerFilter, SamplerMipmap,
 };
 
 const GLYPH_SIZE: u32 = 64;
@@ -87,12 +90,17 @@ struct StyledGlyphSequence {
 }
 
 pub struct TextRendererModule {
+    device: Arc<Device>,
     pipeline: Arc<Pipeline>,
     _pool: DescriptorPool,
     descriptor: DescriptorSet,
 
+    glyph_sampler: Arc<Sampler>,
     glyph_array: Arc<Image>,
+    glyph_array_initialized: bool,
+    uniform_buffer: DeviceBuffer,
     staging_buffer: HostBuffer<u8>,
+    staging_uniform_buffer: HostBuffer<UniformData>,
 
     fonts: Vec<FontSet>,
     char_locations: HashMap<GlyphUID, GlyphLocation>,
@@ -103,16 +111,27 @@ pub struct TextRendererModule {
     allocated_glyphs: HashMap<Entity, StyledGlyphSequence>,
 }
 
+#[derive(Default, Copy, Clone)]
 #[repr(C)]
 struct GlyphInstance {
     glyph_index: u32,
     color: U8Vec4,
     offset: Vec2,
 }
+attributes_impl!(GlyphInstance, glyph_index, color, offset);
+
+#[repr(C)]
+struct UniformData {
+    px_range: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    proj_view: Mat4,
+}
 
 #[repr(C)]
 struct PushConstants {
-    px_range: f32,
+    transform: Mat4,
 }
 
 impl TextRendererModule {
@@ -138,9 +157,10 @@ impl TextRendererModule {
             .create_graphics_pipeline(
                 render_pass,
                 subpass_index,
-                PrimitiveTopology::TRIANGLE_LIST,
+                PrimitiveTopology::TRIANGLE_STRIP,
                 PipelineDepthStencil::default(),
                 PipelineRasterization::new().cull_back_faces(true),
+                &[(0, AttachmentColorBlend::default().enabled(true))],
                 &signature,
             )
             .unwrap();
@@ -149,13 +169,12 @@ impl TextRendererModule {
             .create_image_2d_array_named(
                 Format::RGBA8_UNORM,
                 1,
-                1.0,
                 ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
                 (GLYPH_SIZE, GLYPH_SIZE, PREFERRED_MAX_GLYPHS),
                 "glyph_array",
             )
             .unwrap();
-
+        // let sampler = device.create_s
         let size3d = glyph_array.size();
         let staging_buffer = device
             .create_host_buffer_named(
@@ -165,16 +184,48 @@ impl TextRendererModule {
             )
             .unwrap();
 
+        let uniform_buffer = device
+            .create_device_buffer_named(
+                BufferUsageFlags::UNIFORM | BufferUsageFlags::TRANSFER_DST,
+                mem::size_of::<UniformData>() as u64,
+                1,
+                "text_renderer_uniform",
+            )
+            .unwrap();
+        let staging_uniform_buffer = device
+            .create_host_buffer_named::<UniformData>(
+                BufferUsageFlags::TRANSFER_SRC,
+                1,
+                "text_renderer_uniform-staging",
+            )
+            .unwrap();
+
+        let glyph_sampler = device
+            .create_sampler(
+                SamplerFilter::LINEAR,
+                SamplerFilter::LINEAR,
+                SamplerMipmap::NEAREST,
+                1.0,
+            )
+            .unwrap();
+
         let mut pool = signature.create_pool(0, 1).unwrap();
         let descriptor = pool.alloc().unwrap();
         unsafe {
             device.update_descriptor_set(
                 descriptor,
-                &[pool.create_binding(
-                    0,
-                    0,
-                    BindingRes::Image(Arc::clone(&glyph_array), ImageLayout::SHADER_READ),
-                )],
+                &[
+                    pool.create_binding(0, 0, BindingRes::Buffer(uniform_buffer.handle())),
+                    pool.create_binding(
+                        1,
+                        0,
+                        BindingRes::Image(
+                            Arc::clone(&glyph_array),
+                            Some(Arc::clone(&glyph_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
+                    ),
+                ],
             );
         }
 
@@ -220,17 +271,22 @@ impl TextRendererModule {
         };
 
         Self {
+            device: Arc::clone(device),
             pipeline,
             _pool: pool,
             descriptor,
             fonts,
             glyph_array,
+            glyph_array_initialized: false,
+            uniform_buffer,
             staging_buffer,
             char_locations,
             free_locations,
             chars_to_load,
             atlas_overflow_glyph,
             allocated_glyphs: Default::default(),
+            staging_uniform_buffer,
+            glyph_sampler,
         }
     }
 
@@ -282,6 +338,7 @@ impl TextRendererModule {
                     },
                 );
                 self.chars_to_load.insert(g_uid);
+                glyphs.push(g_uid);
             } else {
                 glyphs.push(self.atlas_overflow_glyph);
             }
@@ -328,7 +385,11 @@ impl TextRendererModule {
             &[self
                 .glyph_array
                 .barrier()
-                .old_layout(ImageLayout::SHADER_READ)
+                .old_layout(if self.glyph_array_initialized {
+                    ImageLayout::SHADER_READ
+                } else {
+                    ImageLayout::UNDEFINED
+                })
                 .new_layout(ImageLayout::TRANSFER_DST)
                 .dst_access_mask(AccessFlags::TRANSFER_WRITE)],
         );
@@ -350,74 +411,137 @@ impl TextRendererModule {
 
         cl.barrier_image(
             PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::BOTTOM_OF_PIPE,
+            PipelineStageFlags::PIXEL_SHADER,
             &[self
                 .glyph_array
                 .barrier()
                 .old_layout(ImageLayout::TRANSFER_DST)
                 .new_layout(ImageLayout::SHADER_READ)
-                .src_access_mask(AccessFlags::TRANSFER_WRITE)],
+                .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(AccessFlags::SHADER_READ)],
         );
+
+        self.glyph_array_initialized = true;
     }
 
     fn lay_out_glyphs(
         &self,
         seq: &StyledGlyphSequence,
+        h_align: TextHAlign,
         max_width: f32,
         max_height: f32,
     ) -> Vec<GlyphInstance> {
-        let glyph_instances = Vec::with_capacity(seq.glyphs.len());
+        let mut glyph_instances = Vec::with_capacity(seq.glyphs.len());
+        let mut line_widths = Vec::with_capacity(32);
 
         let scale = rusttype::Scale::uniform(1.0);
         let style = &seq.style;
-
         let font = self.fonts[style.font_id() as usize].best_for_style(style.font_style());
         let space_id = font.glyph(' ').id();
         let v_metrics = font.v_metrics(scale);
+        let line_height = v_metrics.ascent - v_metrics.descent;
 
         let mut prev_glyph = None::<GlyphUID>;
-        let height = v_metrics.ascent - v_metrics.descent;
-        let mut curr_offset = Vec2::new(0.0, height);
+        // The origin (0,0) is at top-left corner
+        let mut curr_offset = Vec2::new(0.0, line_height);
 
-        let mut curr_word = Vec::<GlyphInstance>::with_capacity(30);
+        let mut curr_word = Vec::<GlyphInstance>::with_capacity(32);
+        let mut curr_word_glyph_widths = Vec::<f32>::with_capacity(32);
         let mut curr_word_width = 0.0;
+        let mut curr_word_appended = false;
 
         for g in &seq.glyphs {
             let g_id = g.glyph_id();
             let glyph = font.glyph(g_id).scaled(scale);
             let h_metrics = glyph.h_metrics();
-
             let kerning = prev_glyph
                 .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
                 .unwrap_or(0.0);
+
             curr_offset.x += kerning;
 
             if g_id != space_id {
+                let glyph_width = if curr_word.len() >= 1 { kerning } else { 0.0 } + h_metrics.advance_width;
                 curr_word.push(GlyphInstance {
                     glyph_index: self.char_locations[g].index,
                     color: style.color(),
                     offset: curr_offset,
                 });
-                curr_word_width += kerning + h_metrics.advance_width;
+                curr_word_glyph_widths.push(glyph_width);
+                curr_word_width += glyph_width;
+                curr_word_appended = false;
             } else if !curr_word.is_empty() {
                 let start_x = curr_word[0].offset.x;
 
-                if curr_word_width >= max_width {
-                    // Width of the word exceeds maximum line width => break it into two parts.
-                    // TODO
-                } else if start_x + curr_word_width >= max_width {
-                    // Place the word on a new line
-                    // TODO
-                }
+                if start_x + curr_word_width >= max_width {
+                    // Width of the word exceeds the maximum line width => break it into two parts.
 
-                curr_word.clear();
+                    if curr_word_width >= max_width {
+                        if curr_offset.x > 0.0 {
+                            line_widths.push(curr_offset.x - curr_word_width - kerning); // FIXME: -kerning ?
+                            curr_offset.x = 0.0;
+                            curr_offset.y += v_metrics.line_gap + line_height;
+                        }
+                    } else {
+                        curr_offset.x = start_x;
+                    }
+
+                    for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
+                        .drain(..)
+                        .zip(curr_word.drain(..))
+                        .enumerate()
+                    {
+                        if i > 0 && (curr_offset.x + glyph_width) > max_width {
+                            line_widths.push(curr_offset.x); // FIXME: -kerning ?
+                            curr_offset.x = 0.0;
+                            curr_offset.y += v_metrics.line_gap + line_height;
+                        }
+
+                        instance.offset = curr_offset;
+                        glyph_instances.push(instance);
+
+                        curr_offset.x += glyph_width;
+                    }
+                } else {
+                    glyph_instances.extend(curr_word.drain(..));
+                }
+                curr_word_appended = true;
             }
 
             curr_offset.x += h_metrics.advance_width;
             prev_glyph = Some(*g);
         }
 
-        todo!();
+        if !curr_word_appended {
+            glyph_instances.extend(curr_word.drain(..));
+        }
+
+        line_widths.push(curr_offset.x);
+
+        if !glyph_instances.is_empty() {
+            let mut curr_y = f32::NAN;
+            let mut curr_line = 0;
+            let mut curr_diff = 0.0;
+
+            for inst in &mut glyph_instances {
+                if curr_y != inst.offset.y {
+                    match h_align {
+                        TextHAlign::LEFT => { /* The text is already in this state */ }
+                        TextHAlign::CENTER => {
+                            curr_diff = (max_width - line_widths[curr_line]) / 2.0;
+                        }
+                        TextHAlign::RIGHT => {
+                            curr_diff = max_width - line_widths[curr_line];
+                        }
+                    }
+
+                    curr_line += 1;
+                    curr_y = inst.offset.y;
+                }
+
+                inst.offset.x += curr_diff;
+            }
+        }
 
         glyph_instances
     }
@@ -426,37 +550,56 @@ impl TextRendererModule {
     //
     // }
 
+    fn alloc_text_glyphs_on_entity(
+        &mut self,
+        entity: Entity,
+        texts: &mut ComponentStorageMut<component::SimpleText>,
+        meshes: &mut ComponentStorageMut<component::VertexMesh>,
+    ) {
+        let simple_text = texts.get(entity).unwrap();
+
+        let style = *simple_text.string().style();
+        let glyphs = self.allocate_glyphs(
+            style.font_id(),
+            style.font_style(),
+            simple_text.string().data().chars(),
+        );
+
+        let seq = StyledGlyphSequence { glyphs, style };
+
+        let instances = self.lay_out_glyphs(
+            &seq,
+            simple_text.h_align(),
+            simple_text.max_width(),
+            simple_text.max_height(),
+        );
+        self.allocated_glyphs.insert(entity, seq);
+
+        let mesh = self
+            .device
+            .create_instanced_vertex_mesh::<(), GlyphInstance>(&[], &instances, None)
+            .unwrap();
+        meshes.set(entity, component::VertexMesh::new(&mesh.raw()));
+    }
+
     fn free_text_glyphs_from_entity(&mut self, entity: Entity) {
         let seq = self.allocated_glyphs.remove(&entity).unwrap();
         self.free_glyphs(&seq.glyphs);
     }
 
     pub fn update(&mut self, scene: &mut Scene) {
-        let vertex_meshes = scene.storage_read::<component::VertexMesh>();
         let mut simple_texts = scene.storage_write::<component::SimpleText>();
-
+        let mut vertex_meshes = scene.storage_write::<component::VertexMesh>();
         let events = simple_texts.events();
 
         for e in events {
             match e {
                 Event::Created(e) => {
-                    let simple_text = simple_texts.get(e).unwrap();
-
-                    let style = *simple_text.string().style();
-                    let glyphs = self.allocate_glyphs(
-                        style.font_id(),
-                        style.font_style(),
-                        simple_text.string().data().chars(),
-                    );
-
-                    self.allocated_glyphs
-                        .insert(e, StyledGlyphSequence { glyphs, style });
-
-                    // TODO: make layout
+                    self.alloc_text_glyphs_on_entity(e, &mut simple_texts, &mut vertex_meshes);
                 }
                 Event::Modified(e) => {
                     self.free_text_glyphs_from_entity(e);
-                    todo!()
+                    self.alloc_text_glyphs_on_entity(e, &mut simple_texts, &mut vertex_meshes);
                 }
                 Event::Removed(e) => {
                     self.free_text_glyphs_from_entity(e);
@@ -465,8 +608,69 @@ impl TextRendererModule {
         }
     }
 
-    pub fn render(&self, cl: &mut CmdList) {
-        // cl.bind_pipeline(&self.pipeline);
+    pub fn pre_render(&mut self, cl: &mut CmdList, proj_view: Mat4) {
+        let uniform_data = UniformData {
+            px_range: MSDF_PX_RANGE,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+            proj_view,
+        };
+        self.staging_uniform_buffer.write(0, &[uniform_data]);
+
+        cl.copy_raw_host_buffer_to_device(&self.staging_uniform_buffer.raw(), 0, &self.uniform_buffer, 0, 1);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::VERTEX_SHADER,
+            &[self
+                .uniform_buffer
+                .barrier()
+                .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(AccessFlags::UNIFORM_READ)],
+        );
+
+        self.load_glyphs(cl);
+    }
+
+    pub fn render(
+        &mut self,
+        scene: &mut Scene,
+        vertex_meshes: &HashMap<Entity, Arc<RawVertexMesh>>,
+        cl: &mut CmdList,
+    ) {
+        cl.bind_pipeline(&self.pipeline);
+        cl.bind_graphics_input(self.pipeline.signature(), 0, self.descriptor, &[]);
+
+        let texts = scene.storage_read::<component::SimpleText>();
+        let transforms = scene.storage_read::<GlobalTransform>();
+
+        for e in texts.entries().intersection(&transforms).iter() {
+            let mesh = vertex_meshes.get(&e);
+            if mesh.is_none() {
+                continue;
+            }
+            let mesh = mesh.unwrap();
+
+            if mesh.instance_count == 0 {
+                continue;
+            }
+
+            let transform = transforms.get(e).unwrap();
+            let text = &self.allocated_glyphs[&e];
+            let n_glyphs = text.glyphs.len();
+
+            let consts = PushConstants {
+                transform: transform.matrix_f32(),
+            };
+            cl.push_constants(self.pipeline.signature(), &consts);
+
+            cl.bind_vertex_buffers(0, &mesh.bindings());
+            cl.draw_instanced(4, 0, 0, n_glyphs as u32);
+        }
+
+        // self.allocated_glyphs
+
         // cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
         //
         // let aligned_n_elements = payload.n_codes.next_power_of_two();

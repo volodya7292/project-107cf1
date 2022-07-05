@@ -1,5 +1,5 @@
 use nalgebra as na;
-use nalgebra_glm::Vec3;
+use nalgebra_glm::{U8Vec4, UVec3, UVec4, Vec2, Vec3};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{mem, ptr, slice};
@@ -13,17 +13,22 @@ pub enum Error {
     IncorrectVertexMemberFormat(String),
 }
 
+pub struct VertexAttribute {
+    pub format: Format,
+    pub member_offset: u32,
+}
+
 pub trait VertexMember {
     fn vk_format() -> Format;
 }
 
 pub trait AttributesImpl {
-    fn attributes() -> Vec<(u32, Format)>;
-    fn member_info(name: &str) -> Option<(u32, Format)>;
+    fn attributes() -> Vec<VertexAttribute>;
+    fn member_info(name: &str) -> Option<VertexAttribute>;
 }
 
 pub trait VertexPositionImpl {
-    fn position(&self) -> na::Vector3<f32>;
+    fn position(&self) -> Vec3;
 
     fn set_position(&self, _pos: na::Vector3<f32>) {
         unimplemented!()
@@ -31,7 +36,7 @@ pub trait VertexPositionImpl {
 }
 
 pub trait VertexNormalImpl {
-    fn normal(&self) -> na::Vector3<f32>;
+    fn normal(&self) -> &na::Vector3<f32>;
 
     fn set_normal(&self, _normal: na::Vector3<f32>) {
         unimplemented!()
@@ -40,10 +45,10 @@ pub trait VertexNormalImpl {
 
 #[macro_export]
 macro_rules! vertex_impl_position {
-    ($vertex: ty, position) => {
+    ($vertex: ty) => {
         impl $crate::renderer::vertex_mesh::VertexPositionImpl for $vertex {
-            fn position(&self) -> &nalgebra::Vector3<f32> {
-                &self.position
+            fn position(&self) -> nalgebra_glm::Vec3 {
+                self.position
             }
 
             fn set_position(&mut self, pos: nalgebra::Vector3<f32>) {
@@ -51,12 +56,11 @@ macro_rules! vertex_impl_position {
             }
         }
     };
-    ($vertex: ty, $i:ident) => {};
 }
 
 #[macro_export]
 macro_rules! vertex_impl_normal {
-    ($vertex: ty, normal) => {
+    ($vertex: ty) => {
         impl $crate::renderer::vertex_mesh::VertexNormalImpl for $vertex {
             fn normal(&self) -> &nalgebra::Vector3<f32> {
                 &self.normal
@@ -67,15 +71,14 @@ macro_rules! vertex_impl_normal {
             }
         }
     };
-    ($vertex: ty, $i:ident) => {};
 }
 
 #[macro_export]
 macro_rules! attributes_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
         impl $crate::renderer::vertex_mesh::AttributesImpl for $vertex {
-            fn attributes() -> Vec<(u32, vk_wrapper::Format)> {
-                use $crate::renderer::vertex_mesh::VertexMember;
+            fn attributes() -> Vec<$crate::renderer::vertex_mesh::VertexAttribute> {
+                use $crate::renderer::vertex_mesh::{VertexMember, VertexAttribute};
 
                 fn get_format<T: VertexMember>(_: &T) -> vk_wrapper::Format { T::vk_format() }
 
@@ -86,17 +89,17 @@ macro_rules! attributes_impl {
                     let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
                     let format = get_format(&dummy.$member_name);
 
-                    attribs.push((
-                        offset as u32,
+                    attribs.push(VertexAttribute {
+                        member_offset: offset as u32,
                         format,
-                    ));
+                    });
                 )*
 
                 attribs
             }
 
-            fn member_info(name: &str) -> Option<(u32, vk_wrapper::Format)> {
-                use $crate::renderer::vertex_mesh::VertexMember;
+            fn member_info(name: &str) -> Option<$crate::renderer::vertex_mesh::VertexAttribute> {
+                use $crate::renderer::vertex_mesh::{VertexMember, VertexAttribute};
 
                 $(
                     if name == stringify!($member_name) {
@@ -106,10 +109,10 @@ macro_rules! attributes_impl {
                         let offset = ((&dummy.$member_name) as *const _ as usize) - ((&dummy) as *const _ as usize);
                         let format = get_format(&dummy.$member_name);
 
-                        return Some((
-                            offset as u32,
+                        return Some(VertexAttribute {
+                            member_offset: offset as u32,
                             format,
-                        ));
+                        });
                     }
                 )*
 
@@ -131,19 +134,31 @@ impl VertexMember for f32 {
     }
 }
 
-impl VertexMember for na::Vector2<f32> {
+impl VertexMember for Vec2 {
     fn vk_format() -> Format {
         Format::RG32_FLOAT
     }
 }
 
-impl VertexMember for na::Vector3<f32> {
+impl VertexMember for Vec3 {
     fn vk_format() -> Format {
         Format::RGB32_FLOAT
     }
 }
 
-impl VertexMember for na::Vector4<u32> {
+impl VertexMember for UVec3 {
+    fn vk_format() -> Format {
+        Format::RGBA32_UINT
+    }
+}
+
+impl VertexMember for U8Vec4 {
+    fn vk_format() -> Format {
+        Format::RGBA8_UNORM
+    }
+}
+
+impl VertexMember for UVec4 {
     fn vk_format() -> Format {
         Format::RGBA32_UINT
     }
@@ -162,16 +177,22 @@ pub trait InstanceImpl: AttributesImpl {
 impl<T: AttributesImpl> InstanceImpl for T {}
 
 impl AttributesImpl for () {
-    fn attributes() -> Vec<(u32, Format)> {
+    fn attributes() -> Vec<VertexAttribute> {
         vec![]
     }
 
-    fn member_info(_: &str) -> Option<(u32, Format)> {
+    fn member_info(_: &str) -> Option<VertexAttribute> {
         None
     }
 }
 
-#[derive(Default)]
+impl VertexPositionImpl for () {
+    fn position(&self) -> Vec3 {
+        panic!("() is not vertex struct");
+    }
+}
+
+#[derive(Default, Copy, Clone)]
 pub struct Sphere {
     center: na::Vector3<f32>,
     radius: f32,
@@ -194,6 +215,7 @@ pub struct RawVertexMesh {
     pub(crate) buffer: Option<vkw::DeviceBuffer>,
     _vertex_size: u32,
     pub(crate) vertex_count: u32,
+    pub(crate) instance_count: u32,
     index_count: u32,
     aabb: (na::Vector3<f32>, na::Vector3<f32>),
     sphere: Sphere,
@@ -208,6 +230,10 @@ impl RawVertexMesh {
 
     pub fn sphere(&self) -> &Sphere {
         &self.sphere
+    }
+
+    pub fn bindings(&self) -> &[(BufferHandle, u64)] {
+        &self.bindings
     }
 }
 
@@ -235,9 +261,9 @@ where
         let mut vertices = vec![Default::default(); count.min(raw.vertex_count - first_vertex) as usize];
 
         if let Some(ref staging_buffer) = raw.staging_buffer {
-            for (vertex_offset, format) in attribs {
-                let buffer_offset = vertex_offset as isize * raw.vertex_count as isize;
-                let format_size = vkw::FORMAT_SIZES[&format] as isize;
+            for attrib in attribs {
+                let buffer_offset = attrib.member_offset as isize * raw.vertex_count as isize;
+                let format_size = vkw::FORMAT_SIZES[&attrib.format] as isize;
 
                 for (i, vertex) in vertices.iter_mut().enumerate() {
                     unsafe {
@@ -245,7 +271,7 @@ where
                             staging_buffer
                                 .as_ptr()
                                 .offset(buffer_offset + format_size * (first_vertex + i as u32) as isize),
-                            (vertex as *mut VertexT as *mut u8).offset(vertex_offset as isize),
+                            (vertex as *mut VertexT as *mut u8).offset(attrib.member_offset as isize),
                             format_size as usize,
                         );
                     }
@@ -324,7 +350,7 @@ pub trait VertexMeshCreate {
 }
 
 impl VertexMeshCreate for vkw::Device {
-    fn create_instanced_vertex_mesh<VertexT, InstanceT: AttributesImpl>(
+    fn create_instanced_vertex_mesh<VertexT, InstanceT>(
         self: &Arc<Self>,
         vertices: &[VertexT],
         instances: &[InstanceT],
@@ -332,6 +358,7 @@ impl VertexMeshCreate for vkw::Device {
     ) -> Result<VertexMesh<VertexT, InstanceT>, Error>
     where
         VertexT: AttributesImpl + VertexPositionImpl,
+        InstanceT: AttributesImpl,
     {
         let indexed = indices.is_some();
         let indices = indices.unwrap_or(&[]);
@@ -367,14 +394,14 @@ impl VertexMeshCreate for vkw::Device {
             let attribs = VertexT::attributes();
             let mut bindings = vec![];
 
-            for (vertex_offset, format) in attribs {
-                let buffer_offset = vertex_offset as isize * vertices.len() as isize;
-                let format_size = vkw::FORMAT_SIZES[&format] as isize;
+            for attrib in attribs {
+                let buffer_offset = attrib.member_offset as isize * vertices.len() as isize;
+                let format_size = vkw::FORMAT_SIZES[&attrib.format] as isize;
 
                 for (i, vertex) in vertices.iter().enumerate() {
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            (vertex as *const VertexT as *const u8).offset(vertex_offset as isize),
+                            (vertex as *const VertexT as *const u8).offset(attrib.member_offset as isize),
                             staging_buffer
                                 .as_mut_ptr()
                                 .offset(buffer_offset + format_size * i as isize),
@@ -390,15 +417,15 @@ impl VertexMeshCreate for vkw::Device {
             // Copy instances
             let attribs = InstanceT::attributes();
 
-            for (offset, format) in attribs {
-                let offset = offset as usize;
-                let buffer_offset = instances_offset + offset * instances.len();
-                let format_size = vkw::FORMAT_SIZES[&format] as usize;
+            for attrib in attribs {
+                let member_offset = attrib.member_offset as usize;
+                let buffer_offset = instances_offset + member_offset * instances.len();
+                let format_size = vkw::FORMAT_SIZES[&attrib.format] as usize;
 
                 for (i, instance) in instances.iter().enumerate() {
                     unsafe {
                         ptr::copy_nonoverlapping(
-                            (instance as *const InstanceT as *const u8).add(offset),
+                            (instance as *const InstanceT as *const u8).add(member_offset),
                             staging_buffer.as_mut_ptr().add(buffer_offset + format_size * i),
                             format_size as usize,
                         );
@@ -459,6 +486,7 @@ impl VertexMeshCreate for vkw::Device {
                 buffer: Some(buffer),
                 _vertex_size: mem::size_of::<VertexT>() as u32,
                 vertex_count: vertices.len() as u32,
+                instance_count: instances.len() as u32,
                 index_count: indices.len() as u32,
                 aabb,
                 sphere: Sphere { center, radius },
@@ -476,18 +504,18 @@ impl VertexMeshCreate for vkw::Device {
 }
 
 pub trait VertexMeshCmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>);
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>, n_instances: u32);
 }
 
 impl VertexMeshCmdList for vkw::CmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>, n_instances: u32) {
         if vertex_mesh.indexed && vertex_mesh.index_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);
             self.bind_index_buffer(vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
-            self.draw_indexed(vertex_mesh.index_count, 0, 0);
+            self.draw_indexed_instanced(vertex_mesh.index_count, 0, 0, 0, n_instances);
         } else if vertex_mesh.vertex_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-            self.draw(vertex_mesh.vertex_count, 0);
+            self.draw_instanced(vertex_mesh.vertex_count, 0, 0, n_instances);
         }
     }
 }

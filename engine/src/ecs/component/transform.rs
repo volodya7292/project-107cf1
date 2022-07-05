@@ -29,11 +29,11 @@ impl Transform {
     }
 
     pub fn matrix_f32(&self) -> Mat4 {
-        let mut mat = Mat4::identity();
-        mat.prepend_translation_mut(&glm::convert(self.position));
-        mat *=
-            Rotation3::from_euler_angles(self.rotation.x, self.rotation.y, self.rotation.z).to_homogeneous();
-        mat.prepend_nonuniform_scaling_mut(&self.scale);
+        let mut mat = Mat4::new_nonuniform_scaling(&self.scale);
+        mat *= Rotation3::from_axis_angle(&Vec3::x_axis(), self.rotation.x).to_homogeneous();
+        mat *= Rotation3::from_axis_angle(&Vec3::y_axis(), self.rotation.y).to_homogeneous();
+        mat *= Rotation3::from_axis_angle(&Vec3::z_axis(), self.rotation.z).to_homogeneous();
+        mat *= Mat4::new_translation(&glm::convert(self.position));
         mat
     }
 

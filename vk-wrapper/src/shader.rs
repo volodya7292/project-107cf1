@@ -53,7 +53,7 @@ pub struct Shader {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
-    pub(crate) vertex_location_inputs: HashMap<u32, (Format, Option<VInputRate>)>,
+    pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
     // [location, format]
     pub(crate) bindings: HashMap<String, ShaderBinding>,
     pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,

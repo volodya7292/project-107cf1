@@ -63,6 +63,7 @@ impl Queue {
             native,
             one_time_exec: false,
             last_pipeline: ptr::null(),
+            curr_framebuffer_size: (0, 0),
         })))
     }
 

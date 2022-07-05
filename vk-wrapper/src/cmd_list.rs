@@ -19,6 +19,7 @@ pub struct CmdList {
     pub(crate) native: vk::CommandBuffer,
     pub(crate) one_time_exec: bool,
     pub(crate) last_pipeline: *const Pipeline,
+    pub(crate) curr_framebuffer_size: (u32, u32),
 }
 
 #[derive(Debug)]
@@ -155,6 +156,7 @@ impl CmdList {
             self.set_viewport(framebuffer.size);
             self.set_scissor(framebuffer.size);
         }
+        self.curr_framebuffer_size = framebuffer.size;
     }
 
     pub fn next_subpass(&mut self, secondary_cmd_lists: bool) {
@@ -168,6 +170,11 @@ impl CmdList {
                 },
             )
         };
+
+        if !secondary_cmd_lists {
+            self.set_viewport(self.curr_framebuffer_size);
+            self.set_scissor(self.curr_framebuffer_size);
+        }
     }
 
     pub fn end_render_pass(&mut self) {
@@ -334,22 +341,47 @@ impl CmdList {
     }
 
     pub fn draw(&mut self, vertex_count: u32, first_vertex: u32) {
+        self.draw_instanced(vertex_count, first_vertex, 0, 1);
+    }
+
+    pub fn draw_instanced(
+        &mut self,
+        vertex_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+        instance_count: u32,
+    ) {
         unsafe {
-            self.device_wrapper
-                .native
-                .cmd_draw(self.native, vertex_count, 1, first_vertex, 0)
+            self.device_wrapper.native.cmd_draw(
+                self.native,
+                vertex_count,
+                instance_count,
+                first_vertex,
+                first_instance,
+            )
         };
     }
 
     pub fn draw_indexed(&mut self, index_count: u32, first_index: u32, vertex_offset: i32) {
+        self.draw_indexed_instanced(index_count, first_index, vertex_offset, 0, 1);
+    }
+
+    pub fn draw_indexed_instanced(
+        &mut self,
+        index_count: u32,
+        first_index: u32,
+        vertex_offset: i32,
+        first_instance: u32,
+        instance_count: u32,
+    ) {
         unsafe {
             self.device_wrapper.native.cmd_draw_indexed(
                 self.native,
                 index_count,
-                1,
+                instance_count,
                 first_index,
                 vertex_offset,
-                0,
+                first_instance,
             )
         };
     }

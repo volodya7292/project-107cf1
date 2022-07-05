@@ -3,7 +3,7 @@ use crate::instance::VK_API_VERSION;
 use crate::{
     device::{self, Device},
     surface::Surface,
-    Instance, Queue,
+    Instance, Queue, SamplerFilter, SamplerMipmap,
 };
 use ash::vk;
 use parking_lot::{Mutex, RwLock};
@@ -159,6 +159,13 @@ impl Adapter {
                 .create_pipeline_cache(&pipeline_cache_info, None)?
         };
 
+        let default_sampler = device_wrapper.create_sampler(
+            SamplerFilter::NEAREST,
+            SamplerFilter::NEAREST,
+            SamplerMipmap::NEAREST,
+            1.0,
+        )?;
+
         Ok(Arc::new(Device {
             wrapper: device_wrapper,
             allocator: Mutex::new(allocator),
@@ -166,6 +173,7 @@ impl Adapter {
             total_used_dev_memory: Arc::new(Default::default()),
             swapchain_khr,
             queues,
+            default_sampler,
             pipeline_cache: Mutex::new(pipeline_cache),
         }))
     }

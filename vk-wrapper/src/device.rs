@@ -1,6 +1,6 @@
 use crate::format::BUFFER_FORMATS;
+use crate::sampler::{SamplerFilter, SamplerMipmap};
 use crate::shader::VInputRate;
-use crate::ImageWrapper;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{
@@ -9,6 +9,7 @@ use crate::{
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
+use crate::{AttachmentColorBlend, ImageWrapper};
 use crate::{LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
 use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
@@ -95,6 +96,36 @@ impl DeviceWrapper {
             Ok(())
         }
     }
+
+    pub fn create_sampler(
+        self: &Arc<Self>,
+        mag_filter: SamplerFilter,
+        min_filter: SamplerFilter,
+        mipmap: SamplerMipmap,
+        max_anisotropy: f32,
+    ) -> Result<Arc<Sampler>, vk::Result> {
+        let sampler_info = vk::SamplerCreateInfo::builder()
+            .mag_filter(mag_filter.0)
+            .min_filter(min_filter.0)
+            .mipmap_mode(mipmap.0)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .anisotropy_enable(true)
+            .max_anisotropy(max_anisotropy)
+            .compare_enable(false)
+            .min_lod(0.0)
+            .max_lod(vk::LOD_CLAMP_NONE)
+            .unnormalized_coordinates(false);
+
+        Ok(Arc::new(Sampler {
+            device_wrapper: Arc::clone(self),
+            native: unsafe { self.native.create_sampler(&sampler_info, None)? },
+            min_filter,
+            mag_filter,
+            mipmap,
+        }))
+    }
 }
 
 impl Drop for DeviceWrapper {
@@ -113,6 +144,7 @@ pub struct Device {
     pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Arc<Queue>>,
+    pub(crate) default_sampler: Arc<Sampler>,
     pub(crate) pipeline_cache: Mutex<vk::PipelineCache>,
 }
 
@@ -312,7 +344,6 @@ impl Device {
         is_array: bool,
         format: Format,
         max_mip_levels: u32,
-        max_anisotropy: f32,
         usage: ImageUsageFlags,
         mut size: (u32, u32, u32),
         name: &str,
@@ -358,6 +389,7 @@ impl Device {
             max_mip_levels.min(format_props.max_mip_levels)
         };
 
+        let tiling = vk::ImageTiling::OPTIMAL;
         let image_info = vk::ImageCreateInfo::builder()
             .image_type(image_type.0)
             .format(format.0)
@@ -365,7 +397,7 @@ impl Device {
             .mip_levels(mip_levels)
             .array_layers(array_layers)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(vk::ImageTiling::OPTIMAL)
+            .tiling(tiling)
             .usage(usage.0)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
@@ -403,53 +435,6 @@ impl Device {
             vk::ImageAspectFlags::COLOR
         };
 
-        let sampler = if usage.intersects(
-            ImageUsageFlags::COLOR_ATTACHMENT
-                | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                | ImageUsageFlags::INPUT_ATTACHMENT
-                | ImageUsageFlags::SAMPLED
-                | ImageUsageFlags::STORAGE,
-        ) {
-            let linear_filter_supported = self
-                .wrapper
-                .adapter
-                .is_linear_filter_supported(format.0, vk::ImageTiling::OPTIMAL);
-
-            let sampler_info = vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(if linear_filter_supported {
-                    vk::Filter::LINEAR
-                } else {
-                    vk::Filter::NEAREST
-                })
-                .mipmap_mode(if linear_filter_supported {
-                    vk::SamplerMipmapMode::LINEAR
-                } else {
-                    vk::SamplerMipmapMode::NEAREST
-                })
-                .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                .anisotropy_enable(max_anisotropy != 1.0)
-                .max_anisotropy(max_anisotropy)
-                .compare_enable(false)
-                .min_lod(0.0)
-                .max_lod(mip_levels as f32 - 1.0)
-                .unnormalized_coordinates(false);
-
-            unsafe {
-                let native_sampler = self.wrapper.native.create_sampler(&sampler_info, None)?;
-                self.wrapper.debug_set_object_name(
-                    vk::ObjectType::SAMPLER,
-                    native_sampler.as_raw(),
-                    &format!("{}-sampler", name),
-                )?;
-                native_sampler
-            }
-        } else {
-            vk::Sampler::default()
-        };
-
         self.total_used_dev_memory
             .fetch_add(memory_block.size() as usize, atomic::Ordering::Relaxed);
 
@@ -464,6 +449,7 @@ impl Device {
             ty: image_type,
             format,
             aspect,
+            tiling,
             name: name.to_owned(),
         });
         let view = image_wrapper.create_view("view").build()?;
@@ -471,13 +457,21 @@ impl Device {
         Ok(Arc::new(Image {
             wrapper: image_wrapper,
             view,
-            sampler: Arc::new(Sampler {
-                device: Arc::clone(self),
-                native: sampler,
-            }),
             size,
             mip_levels,
         }))
+    }
+
+    pub fn create_sampler(
+        self: &Arc<Self>,
+        mag_filter: SamplerFilter,
+        min_filter: SamplerFilter,
+        mipmap: SamplerMipmap,
+        max_anisotropy: f32,
+    ) -> Result<Arc<Sampler>, DeviceError> {
+        Ok(self
+            .wrapper
+            .create_sampler(mag_filter, min_filter, mipmap, max_anisotropy)?)
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
@@ -485,11 +479,10 @@ impl Device {
         self: &Arc<Self>,
         format: Format,
         max_mip_levels: u32,
-        max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_named(format, max_mip_levels, max_anisotropy, usage, preferred_size, "")
+        self.create_image_2d_named(format, max_mip_levels, usage, preferred_size, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
@@ -497,7 +490,6 @@ impl Device {
         self: &Arc<Self>,
         format: Format,
         max_mip_levels: u32,
-        max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
         name: &str,
@@ -507,7 +499,6 @@ impl Device {
             false,
             format,
             max_mip_levels,
-            max_anisotropy,
             usage,
             (preferred_size.0, preferred_size.1, 1),
             name,
@@ -519,11 +510,10 @@ impl Device {
         self: &Arc<Self>,
         format: Format,
         max_mip_levels: u32,
-        max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_array_named(format, max_mip_levels, max_anisotropy, usage, preferred_size, "")
+        self.create_image_2d_array_named(format, max_mip_levels, usage, preferred_size, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
@@ -531,7 +521,6 @@ impl Device {
         self: &Arc<Self>,
         format: Format,
         max_mip_levels: u32,
-        max_anisotropy: f32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
         name: &str,
@@ -541,7 +530,6 @@ impl Device {
             true,
             format,
             max_mip_levels,
-            max_anisotropy,
             usage,
             preferred_size,
             name,
@@ -554,7 +542,7 @@ impl Device {
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(Image::TYPE_3D, false, format, 1, 1.0, usage, preferred_size, "")
+        self.create_image(Image::TYPE_3D, false, format, 1, usage, preferred_size, "")
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {
@@ -683,19 +671,6 @@ impl Device {
         .iter()
         .enumerate()
         .map(|(i, &native_image)| {
-            let sampler_info = vk::SamplerCreateInfo::builder()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(vk::Filter::NEAREST)
-                .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
-                .address_mode_u(vk::SamplerAddressMode::REPEAT)
-                .address_mode_v(vk::SamplerAddressMode::REPEAT)
-                .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                .anisotropy_enable(true)
-                .max_anisotropy(1f32)
-                .compare_enable(false)
-                .max_lod(0f32)
-                .unnormalized_coordinates(false);
-
             let name = format!("swapchain-img{}", i);
             unsafe {
                 self.wrapper
@@ -713,6 +688,7 @@ impl Device {
                 ty: Image::TYPE_2D,
                 format: Format(s_format.format),
                 aspect: vk::ImageAspectFlags::COLOR,
+                tiling: vk::ImageTiling::OPTIMAL,
                 name,
             });
             let view = image_wrapper.create_view("view").build()?;
@@ -720,10 +696,6 @@ impl Device {
             Ok(Arc::new(Image {
                 wrapper: image_wrapper,
                 view,
-                sampler: Arc::new(Sampler {
-                    device: Arc::clone(self),
-                    native: unsafe { self.wrapper.native.create_sampler(&sampler_info, None)? },
-                }),
                 size: (size.0, size.1, 1),
                 mip_levels: 1,
             }))
@@ -740,7 +712,7 @@ impl Device {
     fn create_shader(
         self: &Arc<Self>,
         code: &[u8],
-        vertex_inputs: &HashMap<&str, (Format, Option<VInputRate>)>,
+        vertex_inputs: &HashMap<&str, (Format, VInputRate)>,
         binding_types: &[(&str, ShaderBindingMod)],
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
@@ -841,7 +813,7 @@ impl Device {
         }
 
         let mut vertex_loc_inputs =
-            HashMap::<u32, (Format, Option<VInputRate>)>::with_capacity(resources.stage_inputs.len());
+            HashMap::<u32, (Format, VInputRate)>::with_capacity(resources.stage_inputs.len());
 
         if stage == ShaderStage::VERTEX {
             for res in resources.stage_inputs {
@@ -914,7 +886,7 @@ impl Device {
             &input_formats
                 .iter()
                 .cloned()
-                .map(|(name, format, rate)| (name, (format, Some(rate))))
+                .map(|(name, format, rate)| (name, (format, rate)))
                 .collect(),
             binding_types,
         )
@@ -1288,6 +1260,7 @@ impl Device {
         primitive_topology: PrimitiveTopology,
         depth_stencil: PipelineDepthStencil,
         rasterization: PipelineRasterization,
+        attachment_blends: &[(u32, AttachmentColorBlend)],
         signature: &Arc<PipelineSignature>,
     ) -> Result<Arc<Pipeline>, DeviceError> {
         // Input assembly
@@ -1308,7 +1281,7 @@ impl Device {
         let mut vertex_attrib_descs =
             vec![vk::VertexInputAttributeDescription::default(); vertex_binding_count];
 
-        for (location, (format, _)) in &vertex_shader.vertex_location_inputs {
+        for (location, (format, rate)) in &vertex_shader.vertex_location_inputs {
             let buffer_index = *location;
 
             if !BUFFER_FORMATS[&format].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
@@ -1318,7 +1291,7 @@ impl Device {
             vertex_binding_descs[buffer_index as usize] = vk::VertexInputBindingDescription {
                 binding: buffer_index,
                 stride: FORMAT_SIZES[&format] as u32,
-                input_rate: vk::VertexInputRate::VERTEX,
+                input_rate: rate.0,
             };
             vertex_attrib_descs[buffer_index as usize] = vk::VertexInputAttributeDescription {
                 location: *location,
@@ -1383,20 +1356,21 @@ impl Device {
             .scissors(slice::from_ref(&scissor));
 
         // Color blend
-        let def_attachment = vk::PipelineColorBlendAttachmentState::builder()
-            .blend_enable(false)
-            .color_write_mask(
-                vk::ColorComponentFlags::R
-                    | vk::ColorComponentFlags::G
-                    | vk::ColorComponentFlags::B
-                    | vk::ColorComponentFlags::A,
-            )
-            .build();
-        let blend_attachments =
-            vec![def_attachment; render_pass.subpasses[subpass_index as usize].color.len()];
+        let overridden_blends: HashMap<u32, AttachmentColorBlend> =
+            attachment_blends.iter().cloned().collect();
+        let n_color_attachments = render_pass.subpasses[subpass_index as usize].color.len();
+        let blend_attachment_states: Vec<_> = (0..n_color_attachments)
+            .map(|i| {
+                if let Some(overridden) = overridden_blends.get(&(i as u32)) {
+                    overridden.0
+                } else {
+                    AttachmentColorBlend::default().0
+                }
+            })
+            .collect();
         let color_blend_info = vk::PipelineColorBlendStateCreateInfo::builder()
             .logic_op_enable(false)
-            .attachments(&blend_attachments);
+            .attachments(&blend_attachment_states);
 
         // Dynamic
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];

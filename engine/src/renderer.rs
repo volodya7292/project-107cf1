@@ -36,13 +36,13 @@ use texture_atlas::TextureAtlas;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
-use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
     HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, ShaderBinding, ShaderStage,
-    SignalSemaphore, SubmitInfo, SubmitPacket, Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Sampler, SamplerFilter,
+    SamplerMipmap, ShaderBinding, ShaderStage, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass,
+    SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 // Notes
@@ -120,6 +120,7 @@ pub struct Renderer {
     device: Arc<Device>,
 
     texture_atlases: [TextureAtlas; 4],
+    tex_atlas_sampler: Arc<Sampler>,
 
     staging_buffer: HostBuffer<u8>,
     transfer_cl: [Arc<Mutex<CmdList>>; 2],
@@ -640,31 +641,64 @@ impl Renderer {
                         load_store: LoadStore::InitClearFinalSave,
                     },
                 ],
-                &[Subpass {
-                    color: vec![
-                        AttachmentRef {
-                            index: 0,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 1,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 2,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 3,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                    ],
-                    depth: Some(AttachmentRef {
-                        index: 4,
-                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                    }),
+                &[
+                    Subpass {
+                        color: vec![
+                            AttachmentRef {
+                                index: 0,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 1,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 2,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 3,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                        ],
+                        depth: Some(AttachmentRef {
+                            index: 4,
+                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                        }),
+                    },
+                    Subpass {
+                        color: vec![
+                            AttachmentRef {
+                                index: 0,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 1,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 2,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 3,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                        ],
+                        depth: Some(AttachmentRef {
+                            index: 4,
+                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                        }),
+                    },
+                ],
+                &[SubpassDependency {
+                    src_subpass: 0,
+                    dst_subpass: 1,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: Default::default(),
+                    dst_access_mask: Default::default(),
                 }],
-                &[],
             )
             .unwrap();
         let g_signature = device
@@ -686,7 +720,6 @@ impl Renderer {
                 device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
-                settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
             )
@@ -696,7 +729,6 @@ impl Renderer {
                 device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
-                settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
             )
@@ -706,7 +738,6 @@ impl Renderer {
                 device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
-                settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
             )
@@ -716,12 +747,19 @@ impl Renderer {
                 device,
                 Format::BC5_RG_UNORM,
                 settings.textures_mipmaps,
-                settings.textures_max_anisotropy,
                 tile_count,
                 settings.texture_quality as u32,
             )
             .unwrap(),
         ];
+        let tex_atlas_sampler = device
+            .create_sampler(
+                SamplerFilter::NEAREST,
+                SamplerFilter::LINEAR,
+                SamplerMipmap::LINEAR,
+                settings.textures_max_anisotropy,
+            )
+            .unwrap();
 
         // Update pipeline inputs
         unsafe {
@@ -737,17 +775,29 @@ impl Renderer {
                     g_per_frame_pool.create_binding(
                         2,
                         0,
-                        BindingRes::Image(Arc::clone(&texture_atlases[0].image()), ImageLayout::SHADER_READ),
+                        BindingRes::Image(
+                            Arc::clone(&texture_atlases[0].image()),
+                            Some(Arc::clone(&tex_atlas_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
                     ),
                     g_per_frame_pool.create_binding(
                         3,
                         0,
-                        BindingRes::Image(Arc::clone(&texture_atlases[1].image()), ImageLayout::SHADER_READ),
+                        BindingRes::Image(
+                            Arc::clone(&texture_atlases[1].image()),
+                            Some(Arc::clone(&tex_atlas_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
                     ),
                     g_per_frame_pool.create_binding(
                         4,
                         0,
-                        BindingRes::Image(Arc::clone(&texture_atlases[3].image()), ImageLayout::SHADER_READ),
+                        BindingRes::Image(
+                            Arc::clone(&texture_atlases[3].image()),
+                            Some(Arc::clone(&tex_atlas_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
                     ),
                 ],
             );
@@ -788,7 +838,7 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
-        let text_renderer = TextRendererModule::new(device, &g_render_pass, 0);
+        let text_renderer = TextRendererModule::new(device, &g_render_pass, 1);
 
         // TODO: allocate buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
@@ -803,6 +853,7 @@ impl Renderer {
             settings,
             device: Arc::clone(device),
             texture_atlases,
+            tex_atlas_sampler,
             staging_buffer,
             transfer_cl,
             transfer_submit,
@@ -1212,7 +1263,7 @@ impl Renderer {
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh, 1);
                 }
 
                 cl.end().unwrap();
@@ -1279,7 +1330,7 @@ impl Renderer {
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh, 1);
                 }
 
                 cl.end().unwrap();
@@ -1452,7 +1503,7 @@ impl Renderer {
                 &[self.compose_pool.create_binding(
                     0,
                     0,
-                    BindingRes::Image(Arc::clone(albedo), ImageLayout::SHADER_READ),
+                    BindingRes::Image(Arc::clone(albedo), None, ImageLayout::SHADER_READ),
                 )],
             )
         };
@@ -1486,6 +1537,14 @@ impl Renderer {
                 ImageLayout::GENERAL,
                 ClearValue::ColorU32([0xffffffff; 4]),
             );*/
+            let proj_view = {
+                let camera = &self.active_camera;
+                let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
+                let proj = camera.projection();
+                let view = camera::create_view_matrix(glm::convert(cam_pos), camera.rotation());
+                proj * view
+            };
+            self.text_renderer.pre_render(&mut cl, proj_view);
 
             cl.begin_render_pass(
                 &self.g_render_pass,
@@ -1501,6 +1560,12 @@ impl Renderer {
                 true,
             );
             cl.execute_secondary(&self.g_secondary_cls);
+
+            cl.next_subpass(false);
+
+            self.text_renderer
+                .render(&mut self.scene, &self.vertex_meshes, &mut cl);
+
             cl.end_render_pass();
 
             cl.barrier_image(
@@ -1702,7 +1767,6 @@ impl Renderer {
             .create_image_2d(
                 Format::D32_FLOAT,
                 1,
-                1.0,
                 ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
                 new_size,
             )
@@ -1712,7 +1776,6 @@ impl Renderer {
                 .create_image_2d_named(
                     Format::R32_FLOAT,
                     0,
-                    1.0,
                     ImageUsageFlags::SAMPLED | ImageUsageFlags::STORAGE,
                     // Note: prev_power_of_two makes sure all reductions are at most by 2x2
                     // which makes sure they are conservative
@@ -1755,15 +1818,15 @@ impl Renderer {
                                     0,
                                     0,
                                     if i == 0 {
-                                        BindingRes::ImageViewSampler(
+                                        BindingRes::ImageView(
                                             Arc::clone(depth_image.view()),
-                                            Arc::clone(depth_image.sampler()),
+                                            None,
                                             ImageLayout::SHADER_READ,
                                         )
                                     } else {
-                                        BindingRes::ImageViewSampler(
+                                        BindingRes::ImageView(
                                             Arc::clone(&self.depth_pyramid_views[i - 1]),
-                                            Arc::clone(depth_pyramid_image.sampler()),
+                                            None,
                                             ImageLayout::GENERAL,
                                         )
                                     },
@@ -1773,6 +1836,7 @@ impl Renderer {
                                     0,
                                     BindingRes::ImageView(
                                         Arc::clone(&self.depth_pyramid_views[i]),
+                                        None,
                                         ImageLayout::GENERAL,
                                     ),
                                 ),
@@ -1792,7 +1856,7 @@ impl Renderer {
                     self.cull_pool.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(depth_pyramid_image), ImageLayout::GENERAL),
+                        BindingRes::Image(Arc::clone(depth_pyramid_image), None, ImageLayout::GENERAL),
                     ),
                     self.cull_pool
                         .create_binding(1, 0, BindingRes::Buffer(self.per_frame_ub.handle())),
@@ -1832,13 +1896,7 @@ impl Renderer {
                             5,
                             ImageMod::OverrideImage(
                                 self.device
-                                    .create_image_2d(
-                                        Format::R32_UINT,
-                                        1,
-                                        1.0,
-                                        ImageUsageFlags::STORAGE,
-                                        new_size,
-                                    )
+                                    .create_image_2d(Format::R32_UINT, 1, ImageUsageFlags::STORAGE, new_size)
                                     .unwrap(),
                             ),
                         ),
@@ -1914,6 +1972,7 @@ impl Renderer {
                     PrimitiveTopology::TRIANGLE_LIST,
                     Default::default(),
                     Default::default(),
+                    &[],
                     &self.compose_signature,
                 )
                 .unwrap(),

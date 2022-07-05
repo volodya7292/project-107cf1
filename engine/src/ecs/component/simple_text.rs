@@ -28,6 +28,15 @@ pub struct TextStyle {
 }
 
 impl TextStyle {
+    pub fn new() -> Self {
+        Self {
+            font_id: 0,
+            font_size: 1.0,
+            font_style: FontStyle::Normal,
+            color: U8Vec4::from_element(255),
+        }
+    }
+
     pub fn with_font(mut self, font_id: u16) -> Self {
         self.font_id = font_id;
         self
@@ -65,17 +74,6 @@ impl TextStyle {
     }
 }
 
-impl Default for TextStyle {
-    fn default() -> Self {
-        Self {
-            font_id: 0,
-            font_size: 1.0,
-            font_style: FontStyle::Normal,
-            color: U8Vec4::from_element(255),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct StyledString {
     data: String,
@@ -83,11 +81,8 @@ pub struct StyledString {
 }
 
 impl StyledString {
-    pub fn new(data: String) -> Self {
-        Self {
-            data,
-            text_style: Default::default(),
-        }
+    pub fn new(data: String, text_style: TextStyle) -> Self {
+        Self { data, text_style }
     }
 
     pub fn data(&self) -> &str {
@@ -115,7 +110,7 @@ pub enum TextHAlign {
 #[derive(Clone)]
 pub struct SimpleText {
     text: StyledString,
-    alignment: TextHAlign,
+    h_align: TextHAlign,
     max_width: f32,
     max_height: f32,
 }
@@ -124,10 +119,15 @@ impl SimpleText {
     pub fn new(text: StyledString) -> Self {
         Self {
             text,
-            alignment: TextHAlign::LEFT,
+            h_align: TextHAlign::LEFT,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
         }
+    }
+
+    pub fn with_h_align(mut self, align: TextHAlign) -> Self {
+        self.h_align = align;
+        self
     }
 
     pub fn with_max_width(mut self, max_width: f32) -> Self {
@@ -142,6 +142,10 @@ impl SimpleText {
 
     pub fn string(&self) -> &StyledString {
         &self.text
+    }
+
+    pub fn h_align(&self) -> TextHAlign {
+        self.h_align
     }
 
     pub fn max_width(&self) -> f32 {

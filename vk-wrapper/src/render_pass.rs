@@ -132,9 +132,7 @@ impl RenderPass {
             let (image, image_view) = if let Some(override_image_view) = override_image_view {
                 (override_image, override_image_view)
             } else {
-                let image = self
-                    .device
-                    .create_image_2d(attachment.format, 1, 1f32, usage, size)?;
+                let image = self.device.create_image_2d(attachment.format, 1, usage, size)?;
                 let view = Arc::clone(&image.view);
                 (Some(image), view)
             };

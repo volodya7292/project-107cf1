@@ -13,6 +13,8 @@ use crate::physics::aabb::{AABBRayIntersection, AABB};
 use crate::physics::MOTION_EPSILON;
 use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
+use engine::ecs::component;
+use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
 use engine::renderer::Renderer;
@@ -21,7 +23,7 @@ use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
 use engine::{renderer, Application, Input};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, Vec2};
+use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
 use overworld::Overworld;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -156,6 +158,22 @@ impl Application for Game {
         overworld_streamer.set_y_render_distance(256);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
+
+        // -------------------------------------------------------
+        let scene = renderer.scene_mut();
+        let text = scene.create_entity();
+        scene.storage_write::<component::SimpleText>().set(
+            text,
+            component::SimpleText::new(StyledString::new("GOVNO".to_owned(), TextStyle::new())),
+        );
+        scene.storage_write::<component::Transform>().set(
+            text,
+            component::Transform::new(
+                DVec3::new(0.0, 67.0, 0.0),
+                Vec3::default(),
+                Vec3::from_element(1.0),
+            ),
+        );
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {

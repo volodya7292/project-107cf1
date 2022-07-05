@@ -10,21 +10,29 @@ layout(location = 0) out Output {
     vec2 texCoord;
     uint glyphIndex;
     vec4 color;
+    float pxRange;
 } vs_out;
 
-layout(push_constant) uniform PushConstants {
+layout(std140, set = 0, binding = 0) uniform UniformData {
     float pxRange;
-    mat3 transform;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
     mat4 projView;
+};
+
+layout(push_constant) uniform PushConstants {
+    mat4 transform;
 } params;
 
 void main() {
-    vs_out.texCoord = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+    vs_out.texCoord = vec2(gl_VertexIndex & 1, gl_VertexIndex >> 1);
     vs_out.glyphIndex = inGlyphIndex;
     vs_out.color = inColor;
+    vs_out.pxRange = pxRange;
 
-    vec3 worldPos = params.transform * vec3(vs_out.texCoord*2-1 + inOffset, 0.0f);
+    vec4 worldPos = params.transform * vec4(vs_out.texCoord*2-1 + inOffset, 0.0, 1.0);
 
-    gl_Position = params.projView * vec4(worldPos, 1.0);
+    gl_Position = projView * worldPos;
 //    gl_Position.y = -gl_Position.y;
 }

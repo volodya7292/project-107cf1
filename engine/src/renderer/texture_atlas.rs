@@ -139,7 +139,6 @@ pub fn new(
     device: &Arc<vkw::Device>,
     format: vkw::Format,
     mipmaps: bool,
-    max_anisotropy: f32,
     tile_count: u32,
     tile_width: u32,
 ) -> Result<TextureAtlas, vkw::DeviceError> {
@@ -155,7 +154,6 @@ pub fn new(
     let image = device.create_image_2d(
         format,
         max_mip_levels,
-        max_anisotropy,
         vkw::ImageUsageFlags::TRANSFER_DST | vkw::ImageUsageFlags::SAMPLED,
         (width, width),
     )?;

@@ -1,6 +1,6 @@
 use crate::adapter::MemoryBlock;
 use crate::swapchain::SwapchainWrapper;
-use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue, Sampler};
+use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue};
 use ash::vk;
 use ash::vk::Handle;
 use gpu_alloc_ash::AshMemoryDevice;
@@ -104,6 +104,7 @@ pub(crate) struct ImageWrapper {
     pub(crate) ty: ImageType,
     pub(crate) format: Format,
     pub(crate) aspect: vk::ImageAspectFlags,
+    pub(crate) tiling: vk::ImageTiling,
     pub(crate) name: String,
 }
 
@@ -152,7 +153,6 @@ impl ImageWrapper {
 pub struct Image {
     pub(crate) wrapper: Arc<ImageWrapper>,
     pub(crate) view: Arc<ImageView>,
-    pub(crate) sampler: Arc<Sampler>,
     pub(crate) size: (u32, u32, u32),
     pub(crate) mip_levels: u32,
 }
@@ -226,10 +226,6 @@ impl Image {
 
     pub fn view(&self) -> &Arc<ImageView> {
         &self.view
-    }
-
-    pub fn sampler(&self) -> &Arc<Sampler> {
-        &self.sampler
     }
 
     pub fn create_view(&self) -> ImageViewBuilder {

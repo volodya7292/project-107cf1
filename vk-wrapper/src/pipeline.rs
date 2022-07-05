@@ -11,6 +11,7 @@ impl PipelineStageFlags {
     pub const TOP_OF_PIPE: Self = Self(vk::PipelineStageFlags::TOP_OF_PIPE);
     pub const TRANSFER: Self = Self(vk::PipelineStageFlags::TRANSFER);
     pub const COLOR_ATTACHMENT_OUTPUT: Self = Self(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+    pub const VERTEX_SHADER: Self = Self(vk::PipelineStageFlags::VERTEX_SHADER);
     pub const PIXEL_SHADER: Self = Self(vk::PipelineStageFlags::FRAGMENT_SHADER);
     pub const LATE_FRAGMENT_TESTS: Self = Self(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS);
     pub const COMPUTE: Self = Self(vk::PipelineStageFlags::COMPUTE_SHADER);
@@ -107,11 +108,35 @@ impl Default for PipelineRasterization {
     }
 }
 
-pub struct PipelineColorBlend {}
+#[derive(Copy, Clone)]
+pub struct AttachmentColorBlend(pub(crate) vk::PipelineColorBlendAttachmentState);
 
-impl PipelineColorBlend {
-    pub fn new() -> PipelineColorBlend {
-        PipelineColorBlend {}
+impl AttachmentColorBlend {
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.0.blend_enable = enabled as u32;
+        self
+    }
+}
+
+impl Default for AttachmentColorBlend {
+    fn default() -> Self {
+        Self(
+            vk::PipelineColorBlendAttachmentState::builder()
+                .blend_enable(false)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .alpha_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_write_mask(
+                    vk::ColorComponentFlags::R
+                        | vk::ColorComponentFlags::G
+                        | vk::ColorComponentFlags::B
+                        | vk::ColorComponentFlags::A,
+                )
+                .build(),
+        )
     }
 }
 
