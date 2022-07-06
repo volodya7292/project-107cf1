@@ -10,12 +10,13 @@ use crate::HashSet;
 use bit_set::BitSet;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
 use rayon::prelude::*;
-use rusttype::Font;
+use rusttype::{Font, GlyphId};
 use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     AccessFlags, AttachmentColorBlend, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet,
@@ -33,13 +34,13 @@ const MSDF_PX_RANGE: u32 = 4;
 pub struct GlyphUID(u64);
 
 impl GlyphUID {
-    fn new(glyph_id: rusttype::GlyphId, font_id: u16, style: FontStyle) -> Self {
+    fn new(glyph_id: GlyphId, font_id: u16, style: FontStyle) -> Self {
         assert!(mem::size_of_val(&glyph_id.0) <= mem::size_of::<u32>());
         Self(((glyph_id.0 as u64) << 24) | ((font_id as u64) << 8) | (style as u64))
     }
 
-    fn glyph_id(&self) -> rusttype::GlyphId {
-        rusttype::GlyphId((self.0 >> 24) as u16)
+    fn glyph_id(&self) -> GlyphId {
+        GlyphId((self.0 >> 24) as u16)
     }
 
     fn font_id(&self) -> u16 {
@@ -89,6 +90,48 @@ struct StyledGlyphSequence {
     style: TextStyle,
 }
 
+pub struct WordSplitter<'a> {
+    glyphs: &'a [GlyphUID],
+    space_id: GlyphId,
+}
+
+impl<'a> Iterator for WordSplitter<'a> {
+    type Item = &'a [GlyphUID];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.glyphs.is_empty() {
+            return None;
+        }
+
+        // let mut len = 0;
+        // let is_word = self.glyphs[0].glyph_id() != self.space_id;
+        //
+        // for g in self.glyphs {
+        //     let g_id = g.glyph_id();
+        //     if (is_word && g_id == self.space_id) || (!is_word && g_id != self.space_id) {
+        //         break;
+        //     }
+        //     len += 1;
+        // }
+
+        let mut len = 0;
+        let mut word_found = false;
+
+        for g in self.glyphs {
+            if g.glyph_id() != self.space_id {
+                word_found = true;
+            } else if word_found {
+                break;
+            }
+            len += 1;
+        }
+
+        let slice = &self.glyphs[..len];
+        self.glyphs = &self.glyphs[len..];
+        Some(slice)
+    }
+}
+
 pub struct TextRendererModule {
     device: Arc<Device>,
     pipeline: Arc<Pipeline>,
@@ -116,11 +159,12 @@ pub struct TextRendererModule {
 #[repr(C)]
 struct GlyphInstance {
     glyph_index: u32,
+    glyph_size: Vec2,
     color: U8Vec4,
     offset: Vec2,
     scale: f32,
 }
-attributes_impl!(GlyphInstance, glyph_index, color, offset, scale);
+attributes_impl!(GlyphInstance, glyph_index, glyph_size, color, offset, scale);
 
 #[repr(C)]
 struct UniformData {
@@ -143,6 +187,7 @@ impl TextRendererModule {
                 include_bytes!("../../../shaders/build/text_char.vert.spv"),
                 &[
                     ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
+                    ("inGlyphSize", Format::RG32_FLOAT, VInputRate::INSTANCE),
                     ("inColor", Format::RGBA8_UNORM, VInputRate::INSTANCE),
                     ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
                     ("inScale", Format::R32_FLOAT, VInputRate::INSTANCE),
@@ -161,9 +206,7 @@ impl TextRendererModule {
                 render_pass,
                 subpass_index,
                 PrimitiveTopology::TRIANGLE_STRIP,
-                PipelineDepthStencil::default()
-                    .depth_test(true)
-                    .depth_write(false),
+                PipelineDepthStencil::default().depth_test(true).depth_write(true),
                 PipelineRasterization::new().cull_back_faces(true),
                 &[(0, AttachmentColorBlend::default().enabled(true))],
                 &signature,
@@ -179,7 +222,6 @@ impl TextRendererModule {
                 "glyph_array",
             )
             .unwrap();
-        // let sampler = device.create_s
         let size3d = glyph_array.size();
         let staging_buffer = device
             .create_host_buffer_named(
@@ -210,6 +252,7 @@ impl TextRendererModule {
                 SamplerFilter::LINEAR,
                 SamplerFilter::LINEAR,
                 SamplerMipmap::NEAREST,
+                SamplerClamp::CLAMP_TO_EDGE,
                 1.0,
             )
             .unwrap();
@@ -331,29 +374,40 @@ impl TextRendererModule {
                 }
             }
 
+            // Check if glyph is already allocated
             if self.char_locations.contains_key(&g_uid) {
-                // The glyph is already allocated
                 glyphs.push(g_uid);
                 continue;
             }
 
-            if let Some(index) = self.free_locations.iter().next() {
-                // Allocate a new glyph
-                self.free_locations.remove(index);
-                self.char_locations.insert(
-                    g_uid,
-                    GlyphLocation {
-                        index: index as u32,
-                        ref_count: 1,
-                    },
-                );
-                self.char_locations_rev.insert(index as u32, g_uid);
-                self.chars_to_load.insert(g_uid);
-                glyphs.push(g_uid);
-            } else {
-                // Glyph cannot be allocated due to insufficient space in glyph array
+            // Check if glyph cannot be allocated due to insufficient space in glyph array
+            if self.free_locations.is_empty() {
                 glyphs.push(self.atlas_overflow_glyph);
+                continue;
             }
+
+            // Check if glyph outline is not empty
+            let glyph = font.glyph(g_uid.glyph_id());
+            let index = if glyph
+                .scaled(rusttype::Scale::uniform(1.0))
+                .exact_bounding_box()
+                .is_none()
+            {
+                u32::MAX
+            } else {
+                let index = self.free_locations.iter().next().unwrap();
+                self.free_locations.remove(index);
+                index as u32
+            };
+
+            // Allocate a new glyph
+            if index != u32::MAX {
+                self.char_locations_rev.insert(index, g_uid);
+                self.chars_to_load.insert(g_uid);
+            }
+            self.char_locations
+                .insert(g_uid, GlyphLocation { index, ref_count: 1 });
+            glyphs.push(g_uid);
         }
 
         glyphs
@@ -437,7 +491,7 @@ impl TextRendererModule {
         self.glyph_array_initialized = true;
     }
 
-    fn lay_out_glyphs(
+    fn layout_glyphs(
         &self,
         seq: &StyledGlyphSequence,
         h_align: TextHAlign,
@@ -452,84 +506,99 @@ impl TextRendererModule {
         let font = self.fonts[style.font_id() as usize].best_for_style(style.font_style());
         let space_id = font.glyph(' ').id();
         let v_metrics = font.v_metrics(scale);
-        let line_height = v_metrics.ascent - v_metrics.descent;
 
-        let mut prev_glyph = None::<GlyphUID>;
         // The origin (0,0) is at top-left corner
-        let mut curr_offset = Vec2::new(0.0, line_height);
+        let mut curr_offset = Vec2::new(0.0, v_metrics.ascent);
+        let mut prev_glyph = None::<GlyphUID>;
 
         let mut curr_word = Vec::<GlyphInstance>::with_capacity(32);
         let mut curr_word_glyph_widths = Vec::<f32>::with_capacity(32);
-        let mut curr_word_width = 0.0;
-        let mut curr_word_appended = false;
 
-        for g in &seq.glyphs {
-            let g_id = g.glyph_id();
-            let glyph = font.glyph(g_id).scaled(scale);
-            let h_metrics = glyph.h_metrics();
-            let kerning = prev_glyph
-                .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
-                .unwrap_or(0.0);
+        // A segment is a word or blank space(s)
+        let segments = WordSplitter {
+            glyphs: &seq.glyphs,
+            space_id,
+        };
 
-            curr_offset.x += kerning;
+        for segment in segments {
+            let mut curr_word_width = 0.0;
+            curr_word.clear();
+            curr_word_glyph_widths.clear();
 
-            // FIXME: multiline layout is not working properly
+            // Layout single word
+            for g in segment {
+                let g_id = g.glyph_id();
+                let glyph_index = self.char_locations[g].index;
+                let glyph = font.glyph(g_id).scaled(scale);
+                let h_metrics = glyph.h_metrics();
+                let kerning = prev_glyph
+                    .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
+                    .unwrap_or(0.0);
 
-            if g_id != space_id {
-                let glyph_width = if curr_word.len() >= 1 { kerning } else { 0.0 } + h_metrics.advance_width;
+                let glyph_width = kerning + h_metrics.advance_width;
+                let glyph_size = if let Some(size) = msdfgen::glyph_size(&glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
+                    Vec2::new(size.0, size.1)
+                } else {
+                    Vec2::default()
+                };
+
+                curr_offset.x += kerning;
+
                 curr_word.push(GlyphInstance {
-                    glyph_index: self.char_locations[g].index,
+                    glyph_index,
+                    glyph_size,
                     color: style.color(),
                     offset: curr_offset,
                     scale: 1.0,
                 });
                 curr_word_glyph_widths.push(glyph_width);
                 curr_word_width += glyph_width;
-                curr_word_appended = false;
-            } else if !curr_word.is_empty() {
-                let start_x = curr_word[0].offset.x;
 
-                if start_x + curr_word_width >= max_width {
-                    // Width of the word exceeds the maximum line width => break it into two parts.
-
-                    if curr_word_width >= max_width {
-                        if curr_offset.x > 0.0 {
-                            line_widths.push(curr_offset.x - curr_word_width - kerning); // FIXME: -kerning ?
-                            curr_offset.x = 0.0;
-                            curr_offset.y += v_metrics.line_gap + line_height;
-                        }
-                    } else {
-                        curr_offset.x = start_x;
-                    }
-
-                    for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
-                        .drain(..)
-                        .zip(curr_word.drain(..))
-                        .enumerate()
-                    {
-                        if i > 0 && (curr_offset.x + glyph_width) > max_width {
-                            line_widths.push(curr_offset.x); // FIXME: -kerning ?
-                            curr_offset.x = 0.0;
-                            curr_offset.y += v_metrics.line_gap + line_height;
-                        }
-
-                        instance.offset = curr_offset;
-                        glyph_instances.push(instance);
-
-                        curr_offset.x += glyph_width;
-                    }
-                } else {
-                    glyph_instances.extend(curr_word.drain(..));
-                }
-                curr_word_appended = true;
+                curr_offset.x += h_metrics.advance_width;
+                prev_glyph = Some(*g);
             }
 
-            curr_offset.x += h_metrics.advance_width;
-            prev_glyph = Some(*g);
-        }
+            if curr_word.is_empty() {
+                continue;
+            }
+            let start_x = curr_word[0].offset.x;
 
-        if !curr_word_appended {
-            glyph_instances.extend(curr_word.drain(..));
+            // Put the word inside the global layout
+            if start_x + curr_word_width >= max_width {
+                // Width of the word exceeds the maximum line width => break it into two parts.
+
+                if curr_offset.x > 0.0 {
+                    line_widths.push(curr_offset.x - curr_word_width); // FIXME: -kerning ?
+                    curr_offset.x = 0.0;
+                    curr_offset.y += (v_metrics.ascent - v_metrics.descent);
+                }
+
+                for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
+                    .drain(..)
+                    .zip(curr_word.drain(..))
+                    .enumerate()
+                {
+                    if self
+                        .char_locations_rev
+                        .get(&instance.glyph_index)
+                        .map_or(true, |v| v.glyph_id() == space_id)
+                    {
+                        continue;
+                    }
+                    if i > 0 && (curr_offset.x + glyph_width) > max_width {
+                        line_widths.push(curr_offset.x); // FIXME: -kerning ?
+                        curr_offset.x = 0.0;
+                        curr_offset.y += (v_metrics.ascent - v_metrics.descent);
+                    }
+
+                    instance.offset = curr_offset;
+                    glyph_instances.push(instance);
+
+                    curr_offset.x += glyph_width;
+                }
+            } else {
+                glyph_instances.extend(curr_word.drain(..));
+            }
         }
 
         line_widths.push(curr_offset.x);
@@ -558,23 +627,25 @@ impl TextRendererModule {
                 inst.offset.x += curr_diff;
             }
 
+            glyph_instances = glyph_instances
+                .into_iter()
+                .filter(|v| v.glyph_index != u32::MAX)
+                .collect();
+
             for inst in &mut glyph_instances {
                 let g_uid = self.char_locations_rev[&inst.glyph_index];
                 let glyph = font.glyph(g_uid.glyph_id());
-                let rev_trans = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE).unwrap();
 
-                inst.scale *= rev_trans.scale;
-                inst.offset.x += rev_trans.offset_x;
-                inst.offset.y -= rev_trans.offset_y;
+                if let Some(trans) = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
+                    inst.scale *= trans.scale;
+                    inst.offset.x += trans.offset_x;
+                    inst.offset.y -= trans.offset_y;
+                }
             }
         }
 
         glyph_instances
     }
-
-    // fn allocate_text_glyphs_for_entity(&mut self, entity: Entity, ) {
-    //
-    // }
 
     fn alloc_text_glyphs_on_entity(
         &mut self,
@@ -593,7 +664,7 @@ impl TextRendererModule {
 
         let seq = StyledGlyphSequence { glyphs, style };
 
-        let instances = self.lay_out_glyphs(
+        let instances = self.layout_glyphs(
             &seq,
             simple_text.h_align(),
             simple_text.max_width(),
@@ -665,6 +736,9 @@ impl TextRendererModule {
         vertex_meshes: &HashMap<Entity, Arc<RawVertexMesh>>,
         cl: &mut CmdList,
     ) {
+        // TODO: due to no differences between text and simple vertex mesh rendering,
+        // TODO: transition text objects into regular objects with just custom shader
+
         cl.bind_pipeline(&self.pipeline);
         cl.bind_graphics_input(self.pipeline.signature(), 0, self.descriptor, &[]);
 
@@ -694,59 +768,5 @@ impl TextRendererModule {
             cl.bind_vertex_buffers(0, &mesh.bindings());
             cl.draw_instanced(4, 0, 0, n_glyphs as u32);
         }
-
-        // self.allocated_glyphs
-
-        // cl.bind_compute_input(self.pipeline.signature(), 0, self.descriptor, &[]);
-        //
-        // let aligned_n_elements = payload.n_codes.next_power_of_two();
-        // let work_group_count = UInt::div_ceil(aligned_n_elements / 2, WORK_GROUP_SIZE);
-        //
-        // let buf_offset = payload.morton_codes_offset as u64;
-        // let buf_size = (payload.n_codes * 8) as u64; // sizeof(uvec2) = 8
-        // let buf_barrier = self
-        //     .gb_barrier
-        //     .clone()
-        //     .offset(buf_offset)
-        //     .size(buf_size)
-        //     .src_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE)
-        //     .dst_access_mask(AccessFlags::SHADER_READ | AccessFlags::SHADER_WRITE);
-        //
-        // let mut execute = |h: u32, alg: MBSAlgorithm| {
-        //     let consts = PushConstants {
-        //         h,
-        //         algorithm: alg,
-        //         n_values: payload.n_codes,
-        //         data_offset: payload.morton_codes_offset,
-        //     };
-        //     cl.push_constants(self.pipeline.signature(), &consts);
-        //     cl.dispatch(work_group_count, 1, 1);
-        //     cl.barrier_buffer(
-        //         PipelineStageFlags::COMPUTE,
-        //         PipelineStageFlags::COMPUTE,
-        //         &[buf_barrier],
-        //     );
-        // };
-        //
-        // let mut h = WORK_GROUP_SIZE * 2;
-        // execute(h, MBSAlgorithm::LocalBitonicMergeSort);
-        // h *= 2;
-        //
-        // while h <= aligned_n_elements {
-        //     execute(h, MBSAlgorithm::BigFlip);
-        //
-        //     let mut hh = h / 2;
-        //     while hh > 1 {
-        //         if hh <= WORK_GROUP_SIZE * 2 {
-        //             execute(hh, MBSAlgorithm::LocalDisperse);
-        //             break;
-        //         } else {
-        //             execute(hh, MBSAlgorithm::BigDisperse);
-        //         }
-        //         hh /= 2;
-        //     }
-        //
-        //     h *= 2;
-        // }
     }
 }

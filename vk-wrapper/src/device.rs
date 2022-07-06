@@ -1,5 +1,5 @@
 use crate::format::BUFFER_FORMATS;
-use crate::sampler::{SamplerFilter, SamplerMipmap};
+use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::VInputRate;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
@@ -102,15 +102,16 @@ impl DeviceWrapper {
         mag_filter: SamplerFilter,
         min_filter: SamplerFilter,
         mipmap: SamplerMipmap,
+        clamp: SamplerClamp,
         max_anisotropy: f32,
     ) -> Result<Arc<Sampler>, vk::Result> {
         let sampler_info = vk::SamplerCreateInfo::builder()
             .mag_filter(mag_filter.0)
             .min_filter(min_filter.0)
             .mipmap_mode(mipmap.0)
-            .address_mode_u(vk::SamplerAddressMode::REPEAT)
-            .address_mode_v(vk::SamplerAddressMode::REPEAT)
-            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .address_mode_u(clamp.0)
+            .address_mode_v(clamp.0)
+            .address_mode_w(clamp.0)
             .anisotropy_enable(true)
             .max_anisotropy(max_anisotropy)
             .compare_enable(false)
@@ -467,11 +468,12 @@ impl Device {
         mag_filter: SamplerFilter,
         min_filter: SamplerFilter,
         mipmap: SamplerMipmap,
+        clamp: SamplerClamp,
         max_anisotropy: f32,
     ) -> Result<Arc<Sampler>, DeviceError> {
         Ok(self
             .wrapper
-            .create_sampler(mag_filter, min_filter, mipmap, max_anisotropy)?)
+            .create_sampler(mag_filter, min_filter, mipmap, clamp, max_anisotropy)?)
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.

@@ -1,5 +1,6 @@
 use crate::device::DeviceWrapper;
 use crate::instance::VK_API_VERSION;
+use crate::sampler::SamplerClamp;
 use crate::{
     device::{self, Device},
     surface::Surface,
@@ -163,6 +164,7 @@ impl Adapter {
             SamplerFilter::NEAREST,
             SamplerFilter::NEAREST,
             SamplerMipmap::NEAREST,
+            SamplerClamp::REPEAT,
             1.0,
         )?;
 

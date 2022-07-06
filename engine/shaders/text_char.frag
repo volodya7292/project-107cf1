@@ -1,6 +1,6 @@
 #version 450
 
-layout(early_fragment_tests) in;
+#define ALPHA_BIAS 4.0 / 255.0
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outSpecular;
@@ -33,4 +33,8 @@ void main() {
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
 
     outColor = vec4(vs_in.color.rgb, vs_in.color.a * opacity);
+
+    if (outColor.a < ALPHA_BIAS) {
+        discard;
+    }
 }

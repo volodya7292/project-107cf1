@@ -36,6 +36,7 @@ use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
+use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
     CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
@@ -757,6 +758,7 @@ impl Renderer {
                 SamplerFilter::NEAREST,
                 SamplerFilter::LINEAR,
                 SamplerMipmap::LINEAR,
+                SamplerClamp::REPEAT,
                 settings.textures_max_anisotropy,
             )
             .unwrap();

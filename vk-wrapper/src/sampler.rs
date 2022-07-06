@@ -18,6 +18,14 @@ impl SamplerMipmap {
     pub const LINEAR: Self = Self(vk::SamplerMipmapMode::LINEAR);
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct SamplerClamp(pub(crate) vk::SamplerAddressMode);
+
+impl SamplerClamp {
+    pub const REPEAT: Self = Self(vk::SamplerAddressMode::REPEAT);
+    pub const CLAMP_TO_EDGE: Self = Self(vk::SamplerAddressMode::CLAMP_TO_EDGE);
+}
+
 pub struct Sampler {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) native: vk::Sampler,

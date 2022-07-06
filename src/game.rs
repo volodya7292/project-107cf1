@@ -14,7 +14,7 @@ use crate::physics::MOTION_EPSILON;
 use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
 use engine::ecs::component;
-use engine::ecs::component::simple_text::{StyledString, TextStyle};
+use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
 use engine::renderer::{FontSet, Renderer};
@@ -172,15 +172,16 @@ impl Application for Game {
         scene.storage_write::<component::SimpleText>().set(
             text,
             component::SimpleText::new(StyledString::new(
-                "GOVNO".to_owned(),
+                "Govno, my is Gmine".to_owned(),
                 TextStyle::new().with_font(font_id),
             ))
-            .with_max_width(4.0),
+            .with_max_width(3.0)
+            .with_h_align(TextHAlign::LEFT),
         );
         scene.storage_write::<component::Transform>().set(
             text,
             component::Transform::new(
-                DVec3::new(0.0, 67.0, 0.0),
+                DVec3::new(0.0, 60.0, 0.0),
                 Vec3::default(),
                 Vec3::from_element(1.0),
             ),

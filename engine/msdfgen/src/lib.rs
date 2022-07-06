@@ -21,6 +21,7 @@ mod sys {
 
         pub fn addContour(self: Pin<&mut Shape>) -> Pin<&mut Contour>;
         pub fn normalize(self: Pin<&mut Shape>);
+        pub fn edgeCount(self: &Shape) -> i32;
 
         pub fn edgeColoringSimple(shape: Pin<&mut Shape>, angle_threshold: f64, seed: u64);
     }
@@ -102,26 +103,33 @@ impl rusttype::OutlineBuilder for SysOutlineBuilder<'_> {
     fn close(&mut self) {}
 }
 
+pub enum MSDFError {
+    EmptyOutline,
+    FailedToBuildOutline,
+}
+
 /// Generates an image of R8G8B8A8 layout with width and height of `size`.
 pub fn generate_msdf(
     glyph: rusttype::Glyph,
     size: u32,
     px_range: u32,
     output: &mut [u8],
-) -> Result<(), &'static str> {
+) -> Result<(), MSDFError> {
     let scaled = glyph.scaled(rusttype::Scale::uniform(1.0));
-    let bounds = scaled
-        .exact_bounding_box()
-        .ok_or("Could not extract glyph bounding box")?;
-
-    // FIXME: adjust based on offset to account for px_range
-    // FIXME: invert y_offset
+    let bounds = scaled.exact_bounding_box().ok_or(MSDFError::EmptyOutline)?;
 
     let px_range = px_range as f32;
-    let render_scale = (size as f32 - px_range * 2.0) / bounds.width().max(bounds.height());
+    let width = bounds.width();
+    let height = bounds.height();
+    let padded_size = size as f32 - px_range * 2.0;
+    let render_scale = padded_size / width.max(height);
+
+    // Calculate free vertical space to move glyph coordinates origin from top-left to bottom-left
+    let free_height = (1.0 - height / width).max(0.0) * padded_size;
+
     let offset = sys::Vector2 {
         x: px_range as f64,
-        y: px_range as f64,
+        y: (px_range + free_height) as f64,
     };
 
     let scaled = scaled
@@ -137,7 +145,10 @@ pub fn generate_msdf(
     };
 
     if !positioned.build_outline(&mut builder) {
-        return Err("Failed to build glyph outline");
+        return Err(MSDFError::FailedToBuildOutline);
+    }
+    if shape.edgeCount() == 0 {
+        return Err(MSDFError::EmptyOutline);
     }
 
     sys::shape_check_last_contour(shape.pin_mut());
@@ -161,6 +172,25 @@ pub fn generate_msdf(
     Ok(())
 }
 
+/// Returns glyph size with necessary padding inside a unit square.
+pub fn glyph_size(glyph: &rusttype::ScaledGlyph, size: u32, px_range: u32) -> Option<(f32, f32)> {
+    let bounds = glyph.exact_bounding_box()?;
+    let scale = glyph.scale();
+
+    let width = bounds.width() / scale.x;
+    let height = bounds.height() / scale.y;
+    let max = width.max(height);
+
+    let unit_width = width / max;
+    let unit_height = height / max;
+    let unit_px_range = px_range as f32 / size as f32;
+
+    Some((
+        (unit_width + unit_px_range * 2.0).min(1.0),
+        (unit_height + unit_px_range * 2.0).min(1.0),
+    ))
+}
+
 pub struct ReverseTransform {
     pub offset_x: f32,
     pub offset_y: f32,
@@ -169,16 +199,10 @@ pub struct ReverseTransform {
 
 /// In a MSDF image the glyph is fit to cover maximum width/height of the image.
 /// Use this transform to reverse the glyph to its original size and position.
-pub fn glyph_reverse_transform(
-    glyph: rusttype::Glyph,
-    size: u32,
-    px_range: u32,
-) -> Result<ReverseTransform, &'static str> {
+pub fn glyph_reverse_transform(glyph: rusttype::Glyph, size: u32, px_range: u32) -> Option<ReverseTransform> {
     let scale = rusttype::Scale::uniform(1.0);
     let scaled = glyph.scaled(scale);
-    let bounds = scaled
-        .exact_bounding_box()
-        .ok_or("Could not extract glyph bounding box")?;
+    let bounds = scaled.exact_bounding_box()?;
 
     let size = size as f32;
     let px_range = px_range as f32;
@@ -188,14 +212,11 @@ pub fn glyph_reverse_transform(
     let px_downscale = 1.0 - px_range * 2.0 / size;
     let reverse_scale = width.max(height) / px_downscale;
 
-    // Calculate free vertical space to move glyph coordinates origin from top-left to bottom-left
-    let free_height = (1.0 - height / width).max(0.0) * reverse_scale;
-
     let px_range_offset = px_range / size * reverse_scale;
 
-    Ok(ReverseTransform {
+    Some(ReverseTransform {
         offset_x: bounds.min.x - px_range_offset,
-        offset_y: -bounds.max.y - px_range_offset - free_height,
+        offset_y: -bounds.max.y - px_range_offset,
         scale: reverse_scale,
     })
 }
