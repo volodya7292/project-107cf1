@@ -27,7 +27,7 @@ use vk_wrapper::{
 const GLYPH_SIZE: u32 = 64;
 const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
 const PREFERRED_MAX_GLYPHS: u32 = 1024;
-const MSDF_PX_RANGE: f32 = 4.0;
+const MSDF_PX_RANGE: u32 = 4;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphUID(u64);
@@ -104,6 +104,7 @@ pub struct TextRendererModule {
 
     fonts: Vec<FontSet>,
     char_locations: HashMap<GlyphUID, GlyphLocation>,
+    char_locations_rev: HashMap<u32, GlyphUID>,
     free_locations: BitSet,
     chars_to_load: HashSet<GlyphUID>,
     atlas_overflow_glyph: GlyphUID,
@@ -117,8 +118,9 @@ struct GlyphInstance {
     glyph_index: u32,
     color: U8Vec4,
     offset: Vec2,
+    scale: f32,
 }
-attributes_impl!(GlyphInstance, glyph_index, color, offset);
+attributes_impl!(GlyphInstance, glyph_index, color, offset, scale);
 
 #[repr(C)]
 struct UniformData {
@@ -143,6 +145,7 @@ impl TextRendererModule {
                     ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
                     ("inColor", Format::RGBA8_UNORM, VInputRate::INSTANCE),
                     ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
+                    ("inScale", Format::R32_FLOAT, VInputRate::INSTANCE),
                 ],
                 &[],
             )
@@ -158,7 +161,9 @@ impl TextRendererModule {
                 render_pass,
                 subpass_index,
                 PrimitiveTopology::TRIANGLE_STRIP,
-                PipelineDepthStencil::default(),
+                PipelineDepthStencil::default()
+                    .depth_test(true)
+                    .depth_write(false),
                 PipelineRasterization::new().cull_back_faces(true),
                 &[(0, AttachmentColorBlend::default().enabled(true))],
                 &signature,
@@ -252,22 +257,24 @@ impl TextRendererModule {
         .unwrap();
 
         let mut char_locations = HashMap::with_capacity(size3d.2 as usize);
+        let mut char_locations_rev = HashMap::with_capacity(size3d.2 as usize);
         let mut free_locations: BitSet = (0..char_locations.capacity()).collect();
         let mut chars_to_load = HashSet::with_capacity(size3d.2 as usize);
         let fonts = vec![fallback_font];
 
         let atlas_overflow_glyph = {
-            let glyph = GlyphUID::new(rusttype::GlyphId(0), 0, FontStyle::Normal);
+            let g_uid = GlyphUID::new(rusttype::GlyphId(0), 0, FontStyle::Normal);
             char_locations.insert(
-                glyph,
+                g_uid,
                 GlyphLocation {
                     index: 0,
                     ref_count: 1,
                 },
             );
+            char_locations_rev.insert(0, g_uid);
             free_locations.remove(0);
-            chars_to_load.insert(glyph);
-            glyph
+            chars_to_load.insert(g_uid);
+            g_uid
         };
 
         Self {
@@ -281,6 +288,7 @@ impl TextRendererModule {
             uniform_buffer,
             staging_buffer,
             char_locations,
+            char_locations_rev,
             free_locations,
             chars_to_load,
             atlas_overflow_glyph,
@@ -324,11 +332,13 @@ impl TextRendererModule {
             }
 
             if self.char_locations.contains_key(&g_uid) {
+                // The glyph is already allocated
                 glyphs.push(g_uid);
                 continue;
             }
 
             if let Some(index) = self.free_locations.iter().next() {
+                // Allocate a new glyph
                 self.free_locations.remove(index);
                 self.char_locations.insert(
                     g_uid,
@@ -337,9 +347,11 @@ impl TextRendererModule {
                         ref_count: 1,
                     },
                 );
+                self.char_locations_rev.insert(index as u32, g_uid);
                 self.chars_to_load.insert(g_uid);
                 glyphs.push(g_uid);
             } else {
+                // Glyph cannot be allocated due to insufficient space in glyph array
                 glyphs.push(self.atlas_overflow_glyph);
             }
         }
@@ -355,8 +367,9 @@ impl TextRendererModule {
                     e.ref_count -= 1;
                 } else {
                     self.free_locations.insert(e.index as usize);
-                    v.remove();
+                    self.char_locations_rev.remove(&e.index);
                     self.chars_to_load.remove(c);
+                    v.remove();
                 }
             } else {
                 unreachable!()
@@ -460,12 +473,15 @@ impl TextRendererModule {
 
             curr_offset.x += kerning;
 
+            // FIXME: multiline layout is not working properly
+
             if g_id != space_id {
                 let glyph_width = if curr_word.len() >= 1 { kerning } else { 0.0 } + h_metrics.advance_width;
                 curr_word.push(GlyphInstance {
                     glyph_index: self.char_locations[g].index,
                     color: style.color(),
                     offset: curr_offset,
+                    scale: 1.0,
                 });
                 curr_word_glyph_widths.push(glyph_width);
                 curr_word_width += glyph_width;
@@ -541,6 +557,16 @@ impl TextRendererModule {
 
                 inst.offset.x += curr_diff;
             }
+
+            for inst in &mut glyph_instances {
+                let g_uid = self.char_locations_rev[&inst.glyph_index];
+                let glyph = font.glyph(g_uid.glyph_id());
+                let rev_trans = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE).unwrap();
+
+                inst.scale *= rev_trans.scale;
+                inst.offset.x += rev_trans.offset_x;
+                inst.offset.y -= rev_trans.offset_y;
+            }
         }
 
         glyph_instances
@@ -610,7 +636,7 @@ impl TextRendererModule {
 
     pub fn pre_render(&mut self, cl: &mut CmdList, proj_view: Mat4) {
         let uniform_data = UniformData {
-            px_range: MSDF_PX_RANGE,
+            px_range: MSDF_PX_RANGE as f32,
             _pad0: 0,
             _pad1: 0,
             _pad2: 0,

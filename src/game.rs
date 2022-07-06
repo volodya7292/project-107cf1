@@ -17,7 +17,7 @@ use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
-use engine::renderer::Renderer;
+use engine::renderer::{FontSet, Renderer};
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
@@ -160,11 +160,22 @@ impl Application for Game {
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
 
         // -------------------------------------------------------
+        let font_id = renderer.register_font(
+            FontSet::from_bytes(
+                std::fs::read("/Users/admin/Downloads/Romanesco-Regular.ttf").unwrap(),
+                None,
+            )
+            .unwrap(),
+        );
         let scene = renderer.scene_mut();
         let text = scene.create_entity();
         scene.storage_write::<component::SimpleText>().set(
             text,
-            component::SimpleText::new(StyledString::new("GOVNO".to_owned(), TextStyle::new())),
+            component::SimpleText::new(StyledString::new(
+                "GOVNO".to_owned(),
+                TextStyle::new().with_font(font_id),
+            ))
+            .with_max_width(4.0),
         );
         scene.storage_write::<component::Transform>().set(
             text,

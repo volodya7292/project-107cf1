@@ -35,6 +35,7 @@ pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 lazy_static! {
     pub static ref BUFFER_FORMATS: AHashMap<Format, FormatFeatureFlags> = [
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
+        (Format::R32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RG32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGB32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::RGBA8_UNORM, FormatFeatureFlags::VERTEX_BUFFER),

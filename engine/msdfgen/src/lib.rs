@@ -8,8 +8,8 @@ use std::ptr;
 mod sys {
     #[derive(Default, Copy, Clone, PartialEq)]
     pub struct Vector2 {
-        x: f64,
-        y: f64,
+        pub x: f64,
+        pub y: f64,
     }
 
     #[namespace = "msdfgen"]
@@ -41,7 +41,14 @@ mod sys {
             p2: Vector2,
             p3: Vector2,
         );
-        pub unsafe fn generateMSDF(output: *mut f32, width: u32, height: u32, shape: &Shape, range: f64);
+        pub unsafe fn generateMSDF(
+            output: *mut f32,
+            width: u32,
+            height: u32,
+            offset: Vector2,
+            shape: &Shape,
+            range: f64,
+        );
     }
 }
 
@@ -99,7 +106,7 @@ impl rusttype::OutlineBuilder for SysOutlineBuilder<'_> {
 pub fn generate_msdf(
     glyph: rusttype::Glyph,
     size: u32,
-    px_range: f32,
+    px_range: u32,
     output: &mut [u8],
 ) -> Result<(), &'static str> {
     let scaled = glyph.scaled(rusttype::Scale::uniform(1.0));
@@ -107,11 +114,19 @@ pub fn generate_msdf(
         .exact_bounding_box()
         .ok_or("Could not extract glyph bounding box")?;
 
-    let render_scale = size as f32 / bounds.width().max(bounds.height());
+    // FIXME: adjust based on offset to account for px_range
+    // FIXME: invert y_offset
+
+    let px_range = px_range as f32;
+    let render_scale = (size as f32 - px_range * 2.0) / bounds.width().max(bounds.height());
+    let offset = sys::Vector2 {
+        x: px_range as f64,
+        y: px_range as f64,
+    };
+
     let scaled = scaled
         .into_unscaled()
         .scaled(rusttype::Scale::uniform(render_scale));
-
     let positioned = scaled.positioned(rusttype::Point { x: 0.0, y: 0.0 });
 
     let mut shape = sys::create_shape();
@@ -132,7 +147,7 @@ pub fn generate_msdf(
     let data_f_len = (size * size * 3) as usize;
     let mut data_f = Vec::<f32>::with_capacity(data_f_len);
     unsafe {
-        sys::generateMSDF(data_f.as_mut_ptr(), size, size, &shape, px_range as f64);
+        sys::generateMSDF(data_f.as_mut_ptr(), size, size, offset, &shape, px_range as f64);
         data_f.set_len(data_f_len);
     };
 
@@ -146,28 +161,59 @@ pub fn generate_msdf(
     Ok(())
 }
 
+pub struct ReverseTransform {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub scale: f32,
+}
+
+/// In a MSDF image the glyph is fit to cover maximum width/height of the image.
+/// Use this transform to reverse the glyph to its original size and position.
+pub fn glyph_reverse_transform(
+    glyph: rusttype::Glyph,
+    size: u32,
+    px_range: u32,
+) -> Result<ReverseTransform, &'static str> {
+    let scale = rusttype::Scale::uniform(1.0);
+    let scaled = glyph.scaled(scale);
+    let bounds = scaled
+        .exact_bounding_box()
+        .ok_or("Could not extract glyph bounding box")?;
+
+    let size = size as f32;
+    let px_range = px_range as f32;
+    let width = bounds.width();
+    let height = bounds.height();
+
+    let px_downscale = 1.0 - px_range * 2.0 / size;
+    let reverse_scale = width.max(height) / px_downscale;
+
+    // Calculate free vertical space to move glyph coordinates origin from top-left to bottom-left
+    let free_height = (1.0 - height / width).max(0.0) * reverse_scale;
+
+    let px_range_offset = px_range / size * reverse_scale;
+
+    Ok(ReverseTransform {
+        offset_x: bounds.min.x - px_range_offset,
+        offset_y: -bounds.max.y - px_range_offset - free_height,
+        scale: reverse_scale,
+    })
+}
+
 // #[test]
 // fn gov() {
-//     let f = std::fs::read("/Users/admin/Downloads/Romanesco-Regular.ttf").unwrap();
+//     let f = std::fs::read("/Users/admin/Downloads/TimesNewRoman.ttf").unwrap();
 //     let font = rusttype::Font::try_from_bytes(&f).unwrap();
-//     let g = font.glyph('A');
-//     let msdf = generate_msdf(g, 64, 4.0).unwrap();
-//
-//     let mut msdf_b = vec![0_u8; 64 * 64 * 3];
-//     let min = msdf.iter().min_by(|a, b| a.partial_cmp(b).unwrap());
-//     let max = msdf.iter().max_by(|a, b| a.partial_cmp(b).unwrap());
-//
-//     for (f, u) in msdf.iter().zip(&mut msdf_b) {
-//         *u = (*f * 255.0).clamp(0.0, 255.0) as u8;
-//     }
-//     println!("{:?} {:?}", min, max);
+//     let g = font.glyph('N');
+//     let mut output = vec![0_u8; 64 * 64 * 4];
+//     generate_msdf(g, 64, 4, &mut output).unwrap();
 //
 //     image::save_buffer(
-//         "/Users/admin/Downloads/govno.jpg",
-//         &msdf_b,
+//         "/Users/admin/Downloads/govno.png",
+//         &output,
 //         64,
 //         64,
-//         image::ColorType::Rgb8,
+//         image::ColorType::Rgba8,
 //     )
 //     .unwrap();
 // }

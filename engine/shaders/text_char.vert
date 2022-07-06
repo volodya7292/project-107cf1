@@ -5,6 +5,7 @@
 layout(location = 0) in uint inGlyphIndex;
 layout(location = 1) in vec4 inColor;
 layout(location = 2) in vec2 inOffset;
+layout(location = 3) in float inScale;
 
 layout(location = 0) out Output {
     vec2 texCoord;
@@ -26,13 +27,15 @@ layout(push_constant) uniform PushConstants {
 } params;
 
 void main() {
-    vs_out.texCoord = vec2(gl_VertexIndex & 1, gl_VertexIndex >> 1);
+    // TODO: apply inScale to texCoords
+    vec2 unit_pos = vec2(gl_VertexIndex >> 1, gl_VertexIndex & 1);
+
+    vs_out.texCoord = vec2(unit_pos.x, 1.0 - unit_pos.y);
     vs_out.glyphIndex = inGlyphIndex;
     vs_out.color = inColor;
     vs_out.pxRange = pxRange;
 
-    vec4 worldPos = params.transform * vec4(vs_out.texCoord*2-1 + inOffset, 0.0, 1.0);
+    vec4 worldPos = params.transform * vec4((unit_pos * inScale + vec2(inOffset.x, -inOffset.y)) * 2 - 1, 0.0, 1.0);
 
     gl_Position = projView * worldPos;
-//    gl_Position.y = -gl_Position.y;
 }
