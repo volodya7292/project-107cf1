@@ -1,7 +1,7 @@
 use crate::ecs::component::Transform;
 use crate::ecs::scene_storage::Entity;
 use crate::utils::IndexSet;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 pub struct Parent(pub Entity);
 
@@ -24,5 +24,11 @@ impl Deref for GlobalTransform {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for GlobalTransform {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

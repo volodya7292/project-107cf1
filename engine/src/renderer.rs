@@ -6,27 +6,28 @@ pub mod material_pipeline;
 pub mod vertex_mesh;
 pub mod camera;
 mod helpers;
-mod module;
+pub mod module;
 
 use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
 use crate::ecs::scene::Scene;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::ecs::{component, system};
-use crate::utils;
+use crate::renderer::module::RendererModule;
 use crate::utils::HashMap;
+use crate::{unwrap_option, utils};
 use basis_universal::TranscoderTextureFormat;
 use camera::{Camera, Frustum};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use material_pipeline::MaterialPipelineSet;
 pub use module::text_renderer::FontSet;
-use module::text_renderer::TextRendererModule;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
+use std::any::TypeId;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Instant;
@@ -38,11 +39,11 @@ use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
-    swapchain, AccessFlags, Attachment, AttachmentRef, BindingRes, BindingType, BufferUsageFlags, ClearValue,
-    CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format, Framebuffer,
-    HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
+    swapchain, AccessFlags, Attachment, AttachmentRef, BindingLoc, BindingRes, BindingType, BufferUsageFlags,
+    ClearValue, CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format,
+    Framebuffer, HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
     PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Sampler, SamplerFilter,
-    SamplerMipmap, ShaderBinding, ShaderStage, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass,
+    SamplerMipmap, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass,
     SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
@@ -128,6 +129,7 @@ pub struct Renderer {
     transfer_submit: [SubmitPacket; 2],
     staging_cl: Arc<Mutex<CmdList>>,
     staging_submit: SubmitPacket,
+    modules_updates_submit: SubmitPacket,
     final_cl: [Arc<Mutex<CmdList>>; 2],
     final_submit: [SubmitPacket; 2],
 
@@ -166,7 +168,6 @@ pub struct Renderer {
     g_dyn_pool: DescriptorPool,
     g_per_frame_in: DescriptorSet,
     g_dyn_in: DescriptorSet,
-    g_per_pipeline_pools: HashMap<Arc<PipelineSignature>, DescriptorPool>,
 
     translucency_head_image: Option<Arc<Image>>,
     translucency_texel_image: Option<Arc<Image>>,
@@ -187,7 +188,7 @@ pub struct Renderer {
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
 
-    text_renderer: TextRendererModule,
+    modules: HashMap<TypeId, Box<dyn RendererModule + Send + Sync>>,
 }
 
 #[derive(Copy, Clone)]
@@ -273,7 +274,7 @@ struct PerFrameInfo {
 
 pub(crate) struct Renderable {
     pub buffers: SmallVec<[DeviceBuffer; 4]>,
-    pub material_pipe: u32,
+    pub mat_pipeline: u32,
     pub uniform_buf_index: usize,
     pub descriptor_sets: SmallVec<[DescriptorSet; 4]>,
 }
@@ -374,6 +375,13 @@ pub const MAX_MATERIAL_COUNT: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
 pub const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
 
+/// General descriptor set for engine-related resources
+pub const DESC_SET_GENERAL_PER_FRAME: u32 = 0;
+/// Descriptor set for custom per-object data (model matrix is mandatory)
+pub const DESC_SET_CUSTOM_PER_OBJECT: u32 = 1;
+/// Specific to material pipeline descriptor set for its per-frame resources
+pub const DESC_SET_CUSTOM_PER_FRAME: u32 = 2;
+
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
 const PIPELINE_DEPTH_READ: u32 = 0;
@@ -388,65 +396,62 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(ShaderStage, &'static [ShaderBinding]); 3] = [
-    (
-        ShaderStage::VERTEX | ShaderStage::PIXEL,
-        &[
-            // Per frame info
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 6] = [
+        // Per frame info
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 0),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::PIXEL,
                 binding_type: BindingType::UNIFORM_BUFFER,
-                descriptor_set: 0,
-                id: 0,
                 count: 1,
             },
-        ],
-    ),
-    (
-        ShaderStage::VERTEX,
-        &[
-            // Per object info
+        ),
+        // Per object info
+        (
+            BindingLoc::new(DESC_SET_CUSTOM_PER_OBJECT, 0),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::VERTEX,
                 binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
-                descriptor_set: 1,
-                id: 0,
                 count: 1,
             },
-        ],
-    ),
-    (
-        ShaderStage::PIXEL,
-        &[
-            // Material buffer
+        ),
+        // Material buffer
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 1),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_BUFFER,
-                descriptor_set: 0,
-                id: 1,
                 count: 1,
             },
-            // Albedo atlas
+        ),
+        // Albedo atlas
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 2),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
-                descriptor_set: 0,
-                id: 2,
                 count: 1,
             },
-            // Specular atlas
+        ),
+        // Specular atlas
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 3),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
-                descriptor_set: 0,
-                id: 3,
                 count: 1,
             },
-            // Normal atlas
+        ),
+        // Normal atlas
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 4),
             ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
-                descriptor_set: 0,
-                id: 4,
                 count: 1,
             },
-        ],
-    ),
-];
+        ),
+    ];
 }
 
 fn calc_group_count(thread_count: u32) -> u32 {
@@ -543,7 +548,7 @@ impl Renderer {
         // Depth pyramid pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let depth_pyramid_compute = device
-            .create_compute_shader(include_bytes!("../shaders/build/depth_pyramid.comp.spv"), &[])
+            .create_compute_shader(include_bytes!("../shaders/build/depth_pyramid.comp.spv"))
             .unwrap();
         let depth_pyramid_signature = device
             .create_pipeline_signature(&[depth_pyramid_compute], &[])
@@ -553,7 +558,7 @@ impl Renderer {
         // Cull pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let cull_compute = device
-            .create_compute_shader(include_bytes!("../shaders/build/cull.comp.spv"), &[])
+            .create_compute_shader(include_bytes!("../shaders/build/cull.comp.spv"))
             .unwrap();
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
         let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
@@ -584,10 +589,10 @@ impl Renderer {
         // Compose pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let quad_vert_shader = device
-            .create_vertex_shader(include_bytes!("../shaders/build/quad.vert.spv"), &[], &[])
+            .create_vertex_shader(include_bytes!("../shaders/build/quad.vert.spv"), &[])
             .unwrap();
         let compose_pixel_shader = device
-            .create_pixel_shader(include_bytes!("../shaders/build/compose.frag.spv"), &[])
+            .create_pixel_shader(include_bytes!("../shaders/build/compose.frag.spv"))
             .unwrap();
         let compose_signature = device
             .create_pipeline_signature(&[quad_vert_shader, compose_pixel_shader], &[])
@@ -642,64 +647,31 @@ impl Renderer {
                         load_store: LoadStore::InitClearFinalSave,
                     },
                 ],
-                &[
-                    Subpass {
-                        color: vec![
-                            AttachmentRef {
-                                index: 0,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 1,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 2,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 3,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                        ],
-                        depth: Some(AttachmentRef {
-                            index: 4,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        }),
-                    },
-                    Subpass {
-                        color: vec![
-                            AttachmentRef {
-                                index: 0,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 1,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 2,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 3,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                        ],
-                        depth: Some(AttachmentRef {
-                            index: 4,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        }),
-                    },
-                ],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: Default::default(),
-                    dst_access_mask: Default::default(),
+                &[Subpass {
+                    color: vec![
+                        AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        },
+                        AttachmentRef {
+                            index: 1,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        },
+                        AttachmentRef {
+                            index: 2,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        },
+                        AttachmentRef {
+                            index: 3,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        },
+                    ],
+                    depth: Some(AttachmentRef {
+                        index: 4,
+                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                    }),
                 }],
+                &[],
             )
             .unwrap();
         let g_signature = device
@@ -831,6 +803,10 @@ impl Renderer {
             .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])
             .unwrap();
 
+        let modules_updates_submit = device
+            .create_submit_packet(&[SubmitInfo::new(&[], &[], &[])])
+            .unwrap();
+
         let final_cl = [
             graphics_queue.create_primary_cmd_list("final").unwrap(),
             present_queue.create_primary_cmd_list("final").unwrap(),
@@ -839,8 +815,6 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
             device.create_submit_packet(&[]).unwrap(),
         ];
-
-        let text_renderer = TextRendererModule::new(device, &g_render_pass, 1);
 
         // TODO: allocate buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
@@ -861,6 +835,7 @@ impl Renderer {
             transfer_submit,
             staging_cl,
             staging_submit,
+            modules_updates_submit,
             final_cl,
             final_submit,
             sw_framebuffers: vec![],
@@ -886,7 +861,6 @@ impl Renderer {
             g_dyn_pool,
             g_per_frame_in,
             g_dyn_in,
-            g_per_pipeline_pools: Default::default(),
             translucency_head_image: None,
             translucency_texel_image: None,
             per_frame_ub: per_frame_uniform_buffer,
@@ -908,7 +882,7 @@ impl Renderer {
             vertex_mesh_pending_updates: vec![],
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
-            text_renderer,
+            modules: Default::default(),
         };
         renderer.on_resize(size);
 
@@ -962,7 +936,17 @@ impl Renderer {
             self.camera_pos_pivot = camera.position();
         }
 
-        self.text_renderer.update(&mut self.scene);
+        // --------------------------------------------------------------------
+        let mut update_cls = vec![];
+        for module in self.modules.values_mut() {
+            if let Some(cl) = module.on_update(&mut self.scene) {
+                update_cls.push(cl);
+            }
+        }
+        self.modules_updates_submit.get_mut().unwrap()[0].set_cmd_lists(update_cls);
+
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+        unsafe { graphics_queue.submit(&mut self.modules_updates_submit).unwrap() };
 
         // --------------------------------------------------------------------
 
@@ -984,10 +968,9 @@ impl Renderer {
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
             renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
-            g_per_pipeline_pools: &mut self.g_per_pipeline_pools,
             renderables: &mut self.renderables,
             buffer_updates: &mut buffer_updates,
-            material_pipelines: &self.material_pipelines,
+            material_pipelines: &mut self.material_pipelines,
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
@@ -1029,6 +1012,7 @@ impl Renderer {
             uniform_buffer_updates: &mut uniform_buffer_updates,
             global_transform_comps: self.scene.storage::<GlobalTransform>(),
             renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
+            material_pipelines: &self.material_pipelines,
             renderables: &self.renderables,
         };
 
@@ -1161,6 +1145,8 @@ impl Renderer {
         let t1 = Instant::now();
         timings.uniform_buffers_update = (t1 - t11).as_secs_f64();
 
+        self.modules_updates_submit.wait().unwrap();
+
         let total_t1 = Instant::now();
         timings.total = (total_t1 - total_t0).as_secs_f64();
 
@@ -1207,26 +1193,12 @@ impl Renderer {
 
                     let renderable_id = self.ordered_entities[entity_index];
 
-                    let transform = global_transform_comps.get(renderable_id);
-                    if transform.is_none() {
-                        continue;
-                    }
+                    let global_transform =
+                        unwrap_option!(global_transform_comps.get(renderable_id), continue);
+                    let render_config = unwrap_option!(renderer_comps.get(renderable_id), continue);
+                    let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
 
-                    let renderer = renderer_comps.get(renderable_id);
-                    if renderer.is_none() {
-                        continue;
-                    }
-
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id);
-                    if vertex_mesh.is_none() {
-                        continue;
-                    }
-
-                    let global_transform = transform.unwrap();
-                    let renderer = renderer.unwrap();
-                    let vertex_mesh = vertex_mesh.unwrap();
-
-                    if vertex_mesh.vertex_count == 0 {
+                    if vertex_mesh.vertex_count == 0 && render_config.fake_vertex_count == 0 {
                         continue;
                     }
 
@@ -1234,7 +1206,9 @@ impl Renderer {
                     let center = sphere.center() + global_transform.position_f32();
                     let radius = sphere.radius() * global_transform.scale.max();
 
-                    if !renderer.visible || !frustum.is_sphere_visible(&center, radius) {
+                    if (!render_config.visible || !frustum.is_sphere_visible(&center, radius))
+                        && render_config.fake_vertex_count == 0
+                    {
                         continue;
                     }
 
@@ -1244,10 +1218,10 @@ impl Renderer {
                         _pad: [0; 3],
                     });
 
-                    let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
+                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let renderable = &self.renderables[&renderable_id];
 
-                    let pipeline = if renderer.translucent {
+                    let pipeline = if render_config.translucent {
                         mat_pipeline.get_pipeline(PIPELINE_DEPTH_READ).unwrap()
                     } else {
                         mat_pipeline.get_pipeline(PIPELINE_DEPTH_READ_WRITE).unwrap()
@@ -1255,17 +1229,35 @@ impl Renderer {
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(pipeline.signature(), 0, self.g_per_frame_in, &[]);
+                        cl.bind_graphics_input(
+                            pipeline.signature(),
+                            DESC_SET_GENERAL_PER_FRAME,
+                            self.g_per_frame_in,
+                            &[],
+                        );
+                        if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
+                            cl.bind_graphics_input(
+                                pipeline.signature(),
+                                DESC_SET_CUSTOM_PER_FRAME,
+                                *set,
+                                &[],
+                            );
+                        }
                     }
 
                     cl.bind_graphics_input(
                         pipeline.signature(),
-                        1,
+                        DESC_SET_CUSTOM_PER_OBJECT,
                         self.g_dyn_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh, 1);
+                    if vertex_mesh.vertex_count > 0 {
+                        cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    } else if vertex_mesh.instance_count > 0 {
+                        cl.bind_vertex_buffers(0, &vertex_mesh.bindings());
+                        cl.draw_instanced(render_config.fake_vertex_count, 0, 0, vertex_mesh.instance_count);
+                    }
                 }
 
                 cl.end().unwrap();
@@ -1306,33 +1298,54 @@ impl Renderer {
                         break;
                     }
 
-                    if self.visibility_host_buffer[entity_index] == 0 {
+                    let renderable_id = self.ordered_entities[entity_index];
+                    let render_config = unwrap_option!(renderer_comps.get(renderable_id), continue);
+
+                    // Occlusion culling can't handle arbitrary vertex representations,
+                    // so check for fake_vertex_count also.
+                    if self.visibility_host_buffer[entity_index] == 0 && render_config.fake_vertex_count == 0
+                    {
                         continue;
                     }
 
-                    let renderable_id = self.ordered_entities[entity_index];
-                    let renderable = &self.renderables[&renderable_id];
+                    let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
+                    let renderable = self.renderables.get(&renderable_id).unwrap();
 
-                    let renderer = renderer_comps.get(renderable_id).unwrap();
-                    let vertex_mesh = self.vertex_meshes.get(&renderable_id).unwrap();
-
-                    let mat_pipeline = &mat_pipelines[renderer.mat_pipeline as usize];
+                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
                     let signature = pipeline.signature();
 
                     let already_bound = cl.bind_pipeline(pipeline);
                     if !already_bound {
-                        cl.bind_graphics_input(signature, 0, self.g_per_frame_in, &[]);
+                        cl.bind_graphics_input(
+                            signature,
+                            DESC_SET_GENERAL_PER_FRAME,
+                            self.g_per_frame_in,
+                            &[],
+                        );
+                        if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
+                            cl.bind_graphics_input(
+                                pipeline.signature(),
+                                DESC_SET_CUSTOM_PER_FRAME,
+                                *set,
+                                &[],
+                            );
+                        }
                     }
 
                     cl.bind_graphics_input(
                         signature,
-                        1,
+                        DESC_SET_CUSTOM_PER_OBJECT,
                         self.g_dyn_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh, 1);
+                    if vertex_mesh.vertex_count > 0 {
+                        cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                    } else {
+                        cl.bind_vertex_buffers(0, &vertex_mesh.bindings());
+                        cl.draw_instanced(render_config.fake_vertex_count, 0, 0, vertex_mesh.instance_count);
+                    }
                 }
 
                 cl.end().unwrap();
@@ -1539,14 +1552,6 @@ impl Renderer {
                 ImageLayout::GENERAL,
                 ClearValue::ColorU32([0xffffffff; 4]),
             );*/
-            let proj_view = {
-                let camera = &self.active_camera;
-                let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
-                let proj = camera.projection();
-                let view = camera::create_view_matrix(glm::convert(cam_pos), camera.rotation());
-                proj * view
-            };
-            self.text_renderer.pre_render(&mut cl, proj_view);
 
             cl.begin_render_pass(
                 &self.g_render_pass,
@@ -1562,11 +1567,6 @@ impl Renderer {
                 true,
             );
             cl.execute_secondary(&self.g_secondary_cls);
-
-            cl.next_subpass(false);
-
-            self.text_renderer
-                .render(&mut self.scene, &self.vertex_meshes, &mut cl);
 
             cl.end_render_pass();
 
@@ -1979,6 +1979,22 @@ impl Renderer {
                 )
                 .unwrap(),
         );
+    }
+
+    pub fn register_module<M: RendererModule + Send + Sync + 'static>(&mut self, module: M) {
+        self.modules.insert(TypeId::of::<M>(), Box::new(module));
+    }
+
+    pub fn module<M: RendererModule + Send + Sync + 'static>(&self) -> Option<&M> {
+        self.modules
+            .get(&TypeId::of::<M>())
+            .map(|m| m.as_any().downcast_ref::<M>().unwrap())
+    }
+
+    pub fn module_mut<M: RendererModule + Send + Sync + 'static>(&mut self) -> Option<&mut M> {
+        self.modules
+            .get_mut(&TypeId::of::<M>())
+            .map(|m| m.as_any_mut().downcast_mut::<M>().unwrap())
     }
 }
 

@@ -2,6 +2,7 @@ use crate::ecs::component::internal::GlobalTransform;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
 use crate::ecs::{component, scene_storage};
 use crate::renderer;
+use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate2, Renderable};
 use crate::utils::HashMap;
 use nalgebra_glm::Mat4;
@@ -13,6 +14,7 @@ pub(crate) struct GlobalTransformEvents<'a> {
     pub uniform_buffer_updates: &'a mut BufferUpdate2,
     pub global_transform_comps: scene_storage::LockedStorage<'a, GlobalTransform>,
     pub renderer_comps: scene_storage::LockedStorage<'a, component::MeshRenderConfig>,
+    pub material_pipelines: &'a [MaterialPipelineSet],
     pub renderables: &'a HashMap<Entity, Renderable>,
 }
 
@@ -22,9 +24,12 @@ impl GlobalTransformEvents<'_> {
         global_transform: &GlobalTransform,
         render_config: Option<&component::MeshRenderConfig>,
         buffer_updates: &mut BufferUpdate2,
+        material_pipelines: &[MaterialPipelineSet],
         renderables: &HashMap<Entity, Renderable>,
     ) {
         if let Some(config) = render_config {
+            let pipe = &material_pipelines[config.mat_pipeline as usize];
+
             let matrix = global_transform.matrix_f32();
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
@@ -36,7 +41,7 @@ impl GlobalTransformEvents<'_> {
             buffer_updates.regions.push(vkw::CopyRegion::new(
                 src_offset as u64,
                 renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE
-                    + config.uniform_buffer_offset_model as u64,
+                    + pipe.uniform_buffer_offset_model() as u64,
                 (matrix_bytes.len() as u64).try_into().unwrap(),
             ));
         }
@@ -55,6 +60,7 @@ impl GlobalTransformEvents<'_> {
                         global_transform_comps.get(entity).unwrap(),
                         renderer_comps.get(entity),
                         self.uniform_buffer_updates,
+                        self.material_pipelines,
                         self.renderables,
                     );
                 }

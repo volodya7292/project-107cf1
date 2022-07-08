@@ -2,7 +2,6 @@ use crate::adapter::MemoryBlock;
 use crate::{AccessFlags, Device, Queue};
 use ash::vk;
 use gpu_alloc_ash::AshMemoryDevice;
-use std::hash::{Hash, Hasher};
 use std::mem::ManuallyDrop;
 use std::ops::{Index, IndexMut};
 use std::sync::{atomic, Arc};
@@ -30,20 +29,6 @@ pub(crate) struct Buffer {
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
     pub(crate) bytesize: u64,
-}
-
-impl PartialEq for Buffer {
-    fn eq(&self, other: &Self) -> bool {
-        self.native == other.native
-    }
-}
-
-impl Eq for Buffer {}
-
-impl Hash for Buffer {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.native.hash(state);
-    }
 }
 
 impl Drop for Buffer {

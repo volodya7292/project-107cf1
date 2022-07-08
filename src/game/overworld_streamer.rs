@@ -6,10 +6,11 @@ use crate::game::overworld::{
     cluster, generator, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED, CLUSTER_STATE_INITIAL,
     CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING, CLUSTER_STATE_OFFLOADED_INVISIBLE,
 };
-use crate::utils::unwrap_option;
+use engine::ecs::scene::Scene;
 use engine::ecs::{component, scene};
 use engine::queue::intensive_queue;
 use engine::renderer::Renderer;
+use engine::unwrap_option;
 use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
@@ -720,9 +721,7 @@ impl OverworldStreamer {
     }
 
     /// Creates/removes new render entities.
-    pub fn update_renderer(&mut self, re: &Renderer) {
-        let scene = re.scene();
-
+    pub fn update_scene(&mut self, scene: &Scene) {
         scene.remove_entities(&self.clusters_entities_to_remove);
 
         // Reserve entities from scene
@@ -740,7 +739,7 @@ impl OverworldStreamer {
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
-            let render_config = component::MeshRenderConfig::new(&re, self.cluster_mat_pipeline, false);
+            let render_config = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
 
             transform_comps.set(entity, transform_comp);
             render_config_comps.set(entity, render_config);

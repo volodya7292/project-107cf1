@@ -1,4 +1,3 @@
-use crate::renderer::Renderer;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
@@ -55,24 +54,27 @@ impl Resource {
 
 pub struct MeshRenderConfig {
     pub(crate) mat_pipeline: u32,
-    pub(crate) uniform_buffer_offset_model: u32,
     /// binding id -> Resource
     pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
     pub(crate) translucent: bool,
     pub(crate) visible: bool,
+    pub(crate) fake_vertex_count: u32,
 }
 
 impl MeshRenderConfig {
-    pub fn new(renderer: &Renderer, mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
-        let pipe = &renderer.material_pipelines[mat_pipeline as usize];
-
+    pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
         MeshRenderConfig {
             mat_pipeline,
-            uniform_buffer_offset_model: pipe.uniform_buffer_offset_model(),
             resources: Default::default(),
             translucent,
             visible: true,
+            fake_vertex_count: 0,
         }
+    }
+
+    pub fn with_fake_vertex_count(mut self, vertex_count: u32) -> Self {
+        self.fake_vertex_count = vertex_count;
+        self
     }
 
     pub fn visible(&self) -> bool {

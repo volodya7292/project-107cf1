@@ -5,7 +5,6 @@ use crate::{
 };
 use ash::vk;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]
@@ -162,20 +161,6 @@ impl RenderPass {
             _image_views: image_views,
             size,
         }))
-    }
-}
-
-impl PartialEq for RenderPass {
-    fn eq(&self, other: &Self) -> bool {
-        self.native == other.native
-    }
-}
-
-impl Eq for RenderPass {}
-
-impl Hash for RenderPass {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.native.hash(state);
     }
 }
 

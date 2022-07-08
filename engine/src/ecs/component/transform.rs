@@ -30,10 +30,10 @@ impl Transform {
 
     pub fn matrix_f32(&self) -> Mat4 {
         let mut mat = Mat4::new_nonuniform_scaling(&self.scale);
-        mat *= Rotation3::from_axis_angle(&Vec3::x_axis(), self.rotation.x).to_homogeneous();
-        mat *= Rotation3::from_axis_angle(&Vec3::y_axis(), self.rotation.y).to_homogeneous();
-        mat *= Rotation3::from_axis_angle(&Vec3::z_axis(), self.rotation.z).to_homogeneous();
-        mat *= Mat4::new_translation(&glm::convert(self.position));
+        mat = Rotation3::from_axis_angle(&Vec3::x_axis(), self.rotation.x).to_homogeneous() * mat;
+        mat = Rotation3::from_axis_angle(&Vec3::y_axis(), self.rotation.y).to_homogeneous() * mat;
+        mat = Rotation3::from_axis_angle(&Vec3::z_axis(), self.rotation.z).to_homogeneous() * mat;
+        mat = Mat4::new_translation(&glm::convert(self.position)) * mat;
         mat
     }
 

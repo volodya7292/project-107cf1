@@ -36,12 +36,6 @@ pub struct Sampler {
 
 impl Sampler {}
 
-impl PartialEq for Sampler {
-    fn eq(&self, other: &Self) -> bool {
-        self.native == other.native
-    }
-}
-
 impl Drop for Sampler {
     fn drop(&mut self) {
         unsafe { self.device_wrapper.native.destroy_sampler(self.native, None) };

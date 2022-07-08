@@ -504,18 +504,18 @@ impl VertexMeshCreate for vkw::Device {
 }
 
 pub trait VertexMeshCmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>, n_instances: u32);
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>);
 }
 
 impl VertexMeshCmdList for vkw::CmdList {
-    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>, n_instances: u32) {
+    fn bind_and_draw_vertex_mesh(&mut self, vertex_mesh: &Arc<RawVertexMesh>) {
         if vertex_mesh.indexed && vertex_mesh.index_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);
             self.bind_index_buffer(vertex_mesh.buffer.as_ref().unwrap(), vertex_mesh.indices_offset);
-            self.draw_indexed_instanced(vertex_mesh.index_count, 0, 0, 0, n_instances);
+            self.draw_indexed_instanced(vertex_mesh.index_count, 0, 0, 0, 1);
         } else if vertex_mesh.vertex_count > 0 {
             self.bind_vertex_buffers(0, &vertex_mesh.bindings);
-            self.draw_instanced(vertex_mesh.vertex_count, 0, 0, n_instances);
+            self.draw_instanced(vertex_mesh.vertex_count, 0, 0, 1);
         }
     }
 }

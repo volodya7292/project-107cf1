@@ -1,6 +1,7 @@
 use crate::format::BUFFER_FORMATS;
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
-use crate::shader::VInputRate;
+use crate::shader::{BindingLoc, ShaderStage, VInputRate};
+use crate::PipelineSignature;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{
@@ -8,10 +9,9 @@ use crate::{
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
-use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding, ShaderStage};
+use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding};
 use crate::{AttachmentColorBlend, ImageWrapper};
 use crate::{LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
-use crate::{PipelineSignature, ShaderBindingMod};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
@@ -22,7 +22,7 @@ use gpu_alloc_ash::AshMemoryDevice;
 use parking_lot::Mutex;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
-use std::collections::{hash_map, HashMap, HashSet};
+use std::collections::{hash_map, HashMap};
 use std::ffi::CString;
 use std::mem::ManuallyDrop;
 use std::sync::atomic::AtomicUsize;
@@ -715,7 +715,6 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         vertex_inputs: &HashMap<&str, (Format, VInputRate)>,
-        binding_types: &[(&str, ShaderBindingMod)],
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
@@ -732,67 +731,6 @@ impl Device {
             .ok_or_else(|| DeviceError::InvalidShader("Entry point not found!".to_string()))?;
         let resources = ast.get_shader_resources()?;
 
-        let binding_types_map: HashMap<&str, ShaderBindingMod> = binding_types.iter().cloned().collect();
-
-        macro_rules! binding_image_array_size {
-            ($res: ident, $img_type: ident, $desc_type: ident) => {{
-                let var_type = ast.get_type($res.type_id)?;
-                ShaderBinding {
-                    binding_type: BindingType(vk::DescriptorType::$desc_type),
-                    descriptor_set: ast
-                        .get_decoration($res.id, spirv::Decoration::DescriptorSet)
-                        .unwrap(),
-                    id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
-                    count: match var_type {
-                        spirv::Type::$img_type { array } => {
-                            if array.is_empty() {
-                                1
-                            } else {
-                                65536
-                            }
-                        }
-                        _ => unreachable!(),
-                    },
-                }
-            }};
-        }
-
-        macro_rules! binding_buffer_array_size {
-            ($res: ident, $desc_type0: ident, $desc_type1: ident) => {{
-                let var_type = ast.get_type($res.type_id)?;
-                let shader_binding_mod = binding_types_map
-                    .get($res.name.as_str())
-                    .or_else(|| Some(&ShaderBindingMod::DEFAULT))
-                    .unwrap();
-                ShaderBinding {
-                    binding_type: if *shader_binding_mod == ShaderBindingMod::DEFAULT
-                        || *shader_binding_mod == ShaderBindingMod::DYNAMIC_UPDATE
-                    {
-                        BindingType(vk::DescriptorType::$desc_type0)
-                    } else {
-                        BindingType(vk::DescriptorType::$desc_type1)
-                    },
-                    descriptor_set: ast
-                        .get_decoration($res.id, spirv::Decoration::DescriptorSet)
-                        .unwrap(),
-                    id: ast.get_decoration($res.id, spirv::Decoration::Binding)?,
-                    count: match var_type {
-                        spirv::Type::Struct {
-                            member_types: _,
-                            array,
-                        } => {
-                            if array.is_empty() {
-                                1
-                            } else {
-                                65536
-                            }
-                        }
-                        _ => unreachable!(),
-                    },
-                }
-            }};
-        }
-
         let stage = match entry_point.execution_model {
             spirv::ExecutionModel::Vertex => ShaderStage::VERTEX,
             spirv::ExecutionModel::Fragment => ShaderStage::PIXEL,
@@ -806,18 +744,72 @@ impl Device {
             }
         };
 
-        if stage == ShaderStage::VERTEX {
-            for (f, _) in vertex_inputs.values() {
-                if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
-                    panic!("Unsupported vertex format is used: {:?}", f);
-                }
-            }
+        macro_rules! binding_image_array_size {
+            ($res: ident, $img_type: ident, $desc_type: ident) => {{
+                let var_type = ast.get_type($res.type_id)?;
+                (
+                    BindingLoc::new(
+                        ast.get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                            .unwrap(),
+                        ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                    ),
+                    ShaderBinding {
+                        stage_flags: stage,
+                        binding_type: BindingType(vk::DescriptorType::$desc_type),
+                        count: match var_type {
+                            spirv::Type::$img_type { array } => {
+                                if array.is_empty() {
+                                    1
+                                } else {
+                                    65536
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                    },
+                )
+            }};
+        }
+
+        macro_rules! binding_buffer_array_size {
+            ($res: ident, $desc_type0: ident) => {{
+                let var_type = ast.get_type($res.type_id)?;
+                (
+                    BindingLoc::new(
+                        ast.get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                            .unwrap(),
+                        ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                    ),
+                    ShaderBinding {
+                        stage_flags: stage,
+                        binding_type: BindingType(vk::DescriptorType::$desc_type0),
+                        count: match var_type {
+                            spirv::Type::Struct {
+                                member_types: _,
+                                array,
+                            } => {
+                                if array.is_empty() {
+                                    1
+                                } else {
+                                    65536
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                    },
+                )
+            }};
         }
 
         let mut vertex_loc_inputs =
             HashMap::<u32, (Format, VInputRate)>::with_capacity(resources.stage_inputs.len());
 
         if stage == ShaderStage::VERTEX {
+            for (f, _) in vertex_inputs.values() {
+                if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+                    panic!("Unsupported vertex format is used: {:?}", f);
+                }
+            }
             for res in resources.stage_inputs {
                 let f = *vertex_inputs
                     .get(res.name.as_str())
@@ -831,23 +823,23 @@ impl Device {
             }
         }
 
-        let mut bindings = HashMap::new();
+        let mut named_bindings = HashMap::new();
 
         for res in &resources.sampled_images {
             let binding = binding_image_array_size!(res, SampledImage, COMBINED_IMAGE_SAMPLER);
-            bindings.insert(res.name.clone(), binding);
+            named_bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.storage_images {
             let binding = binding_image_array_size!(res, Image, STORAGE_IMAGE);
-            bindings.insert(res.name.clone(), binding);
+            named_bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.uniform_buffers {
-            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER, UNIFORM_BUFFER_DYNAMIC);
-            bindings.insert(res.name.clone(), binding);
+            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER);
+            named_bindings.insert(res.name.clone(), binding);
         }
         for res in &resources.storage_buffers {
-            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER, STORAGE_BUFFER_DYNAMIC);
-            bindings.insert(res.name.clone(), binding);
+            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER);
+            named_bindings.insert(res.name.clone(), binding);
         }
 
         let mut push_constants = HashMap::new();
@@ -871,7 +863,7 @@ impl Device {
             native: unsafe { self.wrapper.native.create_shader_module(&create_info, None)? },
             stage,
             vertex_location_inputs: vertex_loc_inputs,
-            bindings,
+            named_bindings,
             _push_constants: push_constants,
             push_constants_size,
         }))
@@ -881,7 +873,6 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         input_formats: &[(&str, Format, VInputRate)],
-        binding_types: &[(&str, ShaderBindingMod)],
     ) -> Result<Arc<Shader>, DeviceError> {
         self.create_shader(
             code,
@@ -890,24 +881,15 @@ impl Device {
                 .cloned()
                 .map(|(name, format, rate)| (name, (format, rate)))
                 .collect(),
-            binding_types,
         )
     }
 
-    pub fn create_pixel_shader(
-        self: &Arc<Self>,
-        code: &[u8],
-        binding_types: &[(&str, ShaderBindingMod)],
-    ) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new(), binding_types)
+    pub fn create_pixel_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new())
     }
 
-    pub fn create_compute_shader(
-        self: &Arc<Self>,
-        code: &[u8],
-        binding_types: &[(&str, ShaderBindingMod)],
-    ) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new(), binding_types)
+    pub fn create_compute_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new())
     }
 
     pub fn create_render_pass(
@@ -1048,151 +1030,117 @@ impl Device {
         }))
     }
 
+    /// Creates pipelines signature with bindings from `shaders`. Uses `additional_bindings` to override
+    /// present bindings from shaders.
     pub fn create_pipeline_signature(
         self: &Arc<Self>,
         shaders: &[Arc<Shader>],
-        additional_bindings: &[(ShaderStage, &[ShaderBinding])],
+        additional_bindings: &[(BindingLoc, ShaderBinding)],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
-        let additional_bindings: HashMap<ShaderStage, &[ShaderBinding]> =
+        let mut combined_bindings: HashMap<BindingLoc, ShaderBinding> =
             additional_bindings.iter().cloned().collect();
 
-        // MAX 4 descriptor sets
-        let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
-        let mut binding_flags: [Vec<vk::DescriptorBindingFlags>; 4] = Default::default();
-        let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
-        let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, u32>; 4] = Default::default();
-        let mut binding_types: [HashMap<u32, vk::DescriptorType>; 4] = Default::default();
         let mut push_constants_size = 0u32;
 
-        let mut read_bindings = HashSet::<(u32, u32)>::new();
-
         for shader in shaders {
-            for (_name, binding) in &shader.bindings {
-                let set = binding.descriptor_set as usize;
-                let descriptor_sizes = &mut descriptor_sizes[set];
-                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+            for (_name, (loc, binding)) in &shader.named_bindings {
+                let set = loc.descriptor_set;
 
-                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
-                {
-                    entry.insert(descriptor_sizes.len() as u32);
-                    descriptor_sizes.push(
-                        vk::DescriptorPoolSize::builder()
-                            .ty(binding.binding_type.0)
-                            .descriptor_count(0)
-                            .build(),
-                    );
-                }
-
-                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
-                    .descriptor_count += binding.count;
-                binding_types[set].insert(binding.id, binding.binding_type.0);
-                read_bindings.insert((set as u32, binding.id));
-
-                let native_binding = native_bindings[set].iter_mut().find(|b| b.binding == binding.id);
-
-                if let Some(native_binding) = native_binding {
-                    native_binding.stage_flags |= shader.stage.0;
-                } else {
-                    native_bindings[set].push(
-                        vk::DescriptorSetLayoutBinding::builder()
-                            .binding(binding.id)
-                            .descriptor_type(binding.binding_type.0)
-                            .descriptor_count(binding.count)
-                            .stage_flags(shader.stage.0)
-                            .build(),
-                    );
-
-                    let mut flags = vk::DescriptorBindingFlags::default();
-                    if binding.count > 1 {
-                        flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                if let Some(overriding) = combined_bindings.get_mut(loc) {
+                    // Apply overridden binding type
+                    if binding.binding_type != overriding.binding_type
+                        && (!matches!(
+                            binding.binding_type,
+                            BindingType::UNIFORM_BUFFER | BindingType::UNIFORM_BUFFER_DYNAMIC
+                        ) || !matches!(
+                            overriding.binding_type,
+                            BindingType::UNIFORM_BUFFER | BindingType::UNIFORM_BUFFER_DYNAMIC
+                        ))
+                    {
+                        panic!(
+                            "Conflicting binding types (set {}, binding {}) in the shader and additional_bindings",
+                            set, loc.id
+                        );
                     }
-
-                    binding_flags[set].push(flags);
+                    if binding.count != overriding.count {
+                        panic!(
+                            "Conflicting number of descriptors (set {}, binding {}) in the shader and additional_bindings",
+                            set, loc.id
+                        );
+                    }
+                    overriding.stage_flags |= binding.stage_flags;
+                } else {
+                    // Add a new binding
+                    combined_bindings.insert(*loc, *binding);
                 }
             }
 
             push_constants_size += shader.push_constants_size;
         }
 
-        for (stage, &bindings) in &additional_bindings {
-            for binding in bindings {
-                let set = binding.descriptor_set as usize;
-                let descriptor_sizes = &mut descriptor_sizes[set];
-                let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+        // MAX 4 descriptor sets
+        let mut native_bindings: [Vec<vk::DescriptorSetLayoutBinding>; 4] = Default::default();
+        let mut binding_flags: [Vec<vk::DescriptorBindingFlags>; 4] = Default::default();
+        let mut descriptor_sizes: [Vec<vk::DescriptorPoolSize>; 4] = Default::default();
+        let mut descriptor_sizes_indices: [HashMap<vk::DescriptorType, usize>; 4] = Default::default();
+        let mut binding_types: [HashMap<u32, vk::DescriptorType>; 4] = Default::default();
 
-                if read_bindings.contains(&(set as u32, binding.id)) {
-                    let existing = native_bindings[set]
-                        .iter_mut()
-                        .find(|v| v.binding == binding.id)
-                        .unwrap();
+        for (loc, binding) in &combined_bindings {
+            let set = loc.descriptor_set as usize;
+            let descriptor_sizes = &mut descriptor_sizes[set];
+            let descriptor_sizes_indices = &mut descriptor_sizes_indices[set];
+            let native_bindings = &mut native_bindings[set];
 
-                    if existing.descriptor_type != binding.binding_type.0 {
-                        panic!(
-                            "Conflicting binding types (set {}, binding {}) in the shader and additional_bindings",
-                            set, binding.id
-                        );
-                    }
-                    if existing.descriptor_count != binding.count {
-                        panic!(
-                            "Conflicting number of descriptors (set {}, binding {}) in the shader and additional_bindings",
-                            set, binding.id
-                        );
-                    }
-
-                    existing.stage_flags |= stage.0;
-                    continue;
-                }
-
-                if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0)
-                {
-                    entry.insert(descriptor_sizes.len() as u32);
-                    descriptor_sizes.push(
-                        vk::DescriptorPoolSize::builder()
-                            .ty(binding.binding_type.0)
-                            .descriptor_count(0)
-                            .build(),
-                    );
-                }
-
-                descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0] as usize]
-                    .descriptor_count += binding.count;
-                binding_types[set].insert(binding.id, binding.binding_type.0);
-
-                native_bindings[set].push(
-                    vk::DescriptorSetLayoutBinding::builder()
-                        .binding(binding.id)
-                        .descriptor_type(binding.binding_type.0)
-                        .descriptor_count(binding.count)
-                        .stage_flags(stage.0)
+            if let hash_map::Entry::Vacant(entry) = descriptor_sizes_indices.entry(binding.binding_type.0) {
+                entry.insert(descriptor_sizes.len());
+                descriptor_sizes.push(
+                    vk::DescriptorPoolSize::builder()
+                        .ty(binding.binding_type.0)
+                        .descriptor_count(0)
                         .build(),
                 );
-
-                let mut flags = vk::DescriptorBindingFlags::default();
-                if binding.count > 1 {
-                    flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
-                }
-
-                binding_flags[set].push(flags);
             }
+
+            descriptor_sizes[descriptor_sizes_indices[&binding.binding_type.0]].descriptor_count +=
+                binding.count;
+            binding_types[set].insert(loc.id, binding.binding_type.0);
+
+            native_bindings.push(
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(loc.id)
+                    .descriptor_type(binding.binding_type.0)
+                    .descriptor_count(binding.count)
+                    .stage_flags(binding.stage_flags.0)
+                    .build(),
+            );
+
+            let mut flags = vk::DescriptorBindingFlags::default();
+            if binding.count > 1 {
+                flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+            }
+
+            binding_flags[set].push(flags);
         }
 
         let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
 
         for (i, bindings) in native_bindings.iter().enumerate() {
-            if !bindings.is_empty() {
-                let mut binding_flags_info =
-                    vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
-
-                let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
-                    .bindings(bindings)
-                    .push_next(&mut binding_flags_info);
-
-                native_descriptor_sets[i] = unsafe {
-                    self.wrapper
-                        .native
-                        .create_descriptor_set_layout(&create_info, None)?
-                };
+            if bindings.is_empty() {
+                continue;
             }
+
+            let mut binding_flags_info =
+                vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
+
+            let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                .bindings(bindings)
+                .push_next(&mut binding_flags_info);
+
+            native_descriptor_sets[i] = unsafe {
+                self.wrapper
+                    .native
+                    .create_descriptor_set_layout(&create_info, None)?
+            };
         }
 
         let shaders: HashMap<ShaderStage, Arc<Shader>> = shaders
@@ -1237,6 +1185,7 @@ impl Device {
             binding_types,
             _push_constants_size: push_constants_size,
             shaders,
+            bindings: combined_bindings,
         }))
     }
 

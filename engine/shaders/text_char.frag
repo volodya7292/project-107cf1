@@ -7,7 +7,7 @@ layout(location = 1) out vec4 outSpecular;
 layout(location = 2) out vec4 outEmission;
 layout(location = 3) out vec4 outNormal;
 
-layout(set = 0, binding = 1) uniform sampler2DArray msdfArray;
+layout(set = 2, binding = 1) uniform sampler2DArray msdfArray;
 
 layout(location = 0) in Input {
     vec2 texCoord;
@@ -33,6 +33,7 @@ void main() {
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
 
     outColor = vec4(vs_in.color.rgb, vs_in.color.a * opacity);
+//    outColor = vec4(msd, 1.0);
 
     if (outColor.a < ALPHA_BIAS) {
         discard;

@@ -167,3 +167,14 @@ pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
         thread::sleep(single_sleep_period);
     }
 }
+
+#[macro_export]
+macro_rules! unwrap_option {
+    ($to_unwrap: expr, $on_else: expr) => {
+        if let Some(v) = $to_unwrap {
+            v
+        } else {
+            $on_else
+        }
+    };
+}

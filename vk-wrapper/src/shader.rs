@@ -5,15 +5,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct ShaderStage(pub(crate) vk::ShaderStageFlags);
+pub struct ShaderStageFlags(pub(crate) vk::ShaderStageFlags);
 
-impl ShaderStage {
+impl ShaderStageFlags {
     pub const VERTEX: Self = Self(vk::ShaderStageFlags::VERTEX);
     pub const PIXEL: Self = Self(vk::ShaderStageFlags::FRAGMENT);
     pub const GEOMETRY: Self = Self(vk::ShaderStageFlags::GEOMETRY);
     pub const COMPUTE: Self = Self(vk::ShaderStageFlags::COMPUTE);
 }
-vk_bitflags_impl!(ShaderStage, vk::ShaderStageFlags);
+vk_bitflags_impl!(ShaderStageFlags, vk::ShaderStageFlags);
+
+/// Single shader stage
+pub type ShaderStage = ShaderStageFlags;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct VInputRate(pub(crate) vk::VertexInputRate);
@@ -23,15 +26,7 @@ impl VInputRate {
     pub const INSTANCE: Self = Self(vk::VertexInputRate::INSTANCE);
 }
 
-#[derive(Copy, Clone, PartialEq)]
-pub struct ShaderBindingMod(u32);
-
-impl ShaderBindingMod {
-    pub const DEFAULT: Self = Self(0);
-    pub const DYNAMIC_OFFSET: Self = Self(1);
-    pub const DYNAMIC_UPDATE: Self = Self(2);
-}
-
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct BindingType(pub(crate) vk::DescriptorType);
 
 impl BindingType {
@@ -42,10 +37,22 @@ impl BindingType {
     pub const STORAGE_IMAGE: Self = Self(vk::DescriptorType::STORAGE_IMAGE);
 }
 
-pub struct ShaderBinding {
-    pub binding_type: BindingType,
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct BindingLoc {
     pub descriptor_set: u32,
     pub id: u32,
+}
+
+impl BindingLoc {
+    pub fn new(descriptor_set: u32, id: u32) -> Self {
+        Self { descriptor_set, id }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct ShaderBinding {
+    pub stage_flags: ShaderStageFlags,
+    pub binding_type: BindingType,
     pub count: u32,
 }
 
@@ -55,7 +62,7 @@ pub struct Shader {
     pub(crate) stage: ShaderStage,
     pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
     // [location, format]
-    pub(crate) bindings: HashMap<String, ShaderBinding>,
+    pub(crate) named_bindings: HashMap<String, (BindingLoc, ShaderBinding)>,
     pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,
 }

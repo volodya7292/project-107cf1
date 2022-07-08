@@ -5,6 +5,7 @@ use nalgebra as na;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::shader::VInputRate;
+use vk_wrapper::PrimitiveTopology;
 
 pub struct MaterialPipelines {
     cluster: u32,
@@ -28,7 +29,6 @@ fn create_vertex_shader(
             .cloned()
             .map(|(name, format)| (name, format, VInputRate::VERTEX))
             .collect::<Vec<_>>(),
-        &[("per_object_data", vkw::ShaderBindingMod::DYNAMIC_OFFSET)],
     )
 }
 
@@ -46,13 +46,13 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
         )
         .unwrap();
         let pixel = device
-            .create_pixel_shader(
-                &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
-                &[],
-            )
+            .create_pixel_shader(&resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap())
             .unwrap();
 
-        renderer.register_material_pipeline::<BasicUniformInfo>(&[vertex, pixel])
+        renderer.register_material_pipeline::<BasicUniformInfo>(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_LIST,
+        )
     };
 
     MaterialPipelines { cluster }

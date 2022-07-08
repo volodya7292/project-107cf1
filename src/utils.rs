@@ -10,15 +10,3 @@ pub fn find_largest_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit
 
     largest_mode
 }
-
-macro_rules! unwrap_option {
-    ($to_unwrap: expr, $on_else: expr) => {
-        if let Some(v) = $to_unwrap {
-            v
-        } else {
-            $on_else
-        }
-    };
-}
-
-pub(crate) use unwrap_option;

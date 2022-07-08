@@ -265,6 +265,10 @@ impl SubmitInfo {
         }
     }
 
+    pub fn set_cmd_lists(&mut self, cmd_lists: Vec<Arc<Mutex<CmdList>>>) {
+        self.cmd_lists = cmd_lists.into();
+    }
+
     pub fn get_wait_semaphores(&self) -> &[WaitSemaphore] {
         &self.wait_semaphores
     }

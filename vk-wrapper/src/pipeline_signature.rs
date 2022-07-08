@@ -1,7 +1,7 @@
-use crate::{DescriptorPool, Device, Shader, ShaderStage};
+use crate::shader::{BindingLoc, ShaderStage};
+use crate::{DescriptorPool, Device, Shader, ShaderBinding};
 use ash::vk;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub struct PipelineSignature {
@@ -12,6 +12,7 @@ pub struct PipelineSignature {
     pub(crate) binding_types: [HashMap<u32, vk::DescriptorType>; 4],
     pub(crate) _push_constants_size: u32,
     pub(crate) shaders: HashMap<ShaderStage, Arc<Shader>>,
+    pub(crate) bindings: HashMap<BindingLoc, ShaderBinding>,
 }
 
 impl PipelineSignature {
@@ -31,19 +32,9 @@ impl PipelineSignature {
         pool.alloc_next_pool(base_reserve.next_power_of_two())?;
         Ok(pool)
     }
-}
 
-impl PartialEq for PipelineSignature {
-    fn eq(&self, other: &Self) -> bool {
-        self.native == other.native
-    }
-}
-
-impl Eq for PipelineSignature {}
-
-impl Hash for PipelineSignature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.native.hash(state);
+    pub fn bindings(&self) -> &HashMap<BindingLoc, ShaderBinding> {
+        &self.bindings
     }
 }
 

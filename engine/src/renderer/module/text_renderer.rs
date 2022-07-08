@@ -1,16 +1,18 @@
 use crate::ecs::component;
-use crate::ecs::component::internal::GlobalTransform;
 use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
 use crate::ecs::scene::{Entity, Scene};
 use crate::ecs::scene_storage::{ComponentStorageImpl, ComponentStorageMut, Event};
-use crate::renderer::vertex_mesh::{RawVertexMesh, VertexMeshCreate};
+use crate::renderer::module::RendererModule;
+use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
-use crate::HashSet;
+use crate::{HashSet, Renderer};
 use bit_set::BitSet;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
+use parking_lot::Mutex;
 use rayon::prelude::*;
 use rusttype::{Font, GlyphId};
+use std::any::Any;
 use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
@@ -19,10 +21,9 @@ use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
-    AccessFlags, AttachmentColorBlend, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet,
-    Device, DeviceBuffer, Format, HostBuffer, Image, ImageLayout, ImageUsageFlags, Pipeline,
-    PipelineDepthStencil, PipelineRasterization, PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler,
-    SamplerFilter, SamplerMipmap,
+    AccessFlags, BindingRes, BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image,
+    ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, Queue, Sampler, SamplerFilter,
+    SamplerMipmap,
 };
 
 const GLYPH_SIZE: u32 = 64;
@@ -132,11 +133,10 @@ impl<'a> Iterator for WordSplitter<'a> {
     }
 }
 
-pub struct TextRendererModule {
+pub struct TextRenderer {
     device: Arc<Device>,
-    pipeline: Arc<Pipeline>,
-    _pool: DescriptorPool,
-    descriptor: DescriptorSet,
+    mat_pipeline: u32,
+    staging_cl: Arc<Mutex<CmdList>>,
 
     glyph_sampler: Arc<Sampler>,
     glyph_array: Arc<Image>,
@@ -152,7 +152,7 @@ pub struct TextRendererModule {
     chars_to_load: HashSet<GlyphUID>,
     atlas_overflow_glyph: GlyphUID,
 
-    allocated_glyphs: HashMap<Entity, StyledGlyphSequence>,
+    allocated_sequences: HashMap<Entity, StyledGlyphSequence>,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -169,19 +169,18 @@ attributes_impl!(GlyphInstance, glyph_index, glyph_size, color, offset, scale);
 #[repr(C)]
 struct UniformData {
     px_range: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
-    proj_view: Mat4,
 }
 
-#[repr(C)]
-struct PushConstants {
-    transform: Mat4,
+#[derive(Default)]
+pub struct ObjectUniformInfo {
+    model: Mat4,
 }
 
-impl TextRendererModule {
-    pub fn new(device: &Arc<Device>, render_pass: &Arc<RenderPass>, subpass_index: u32) -> Self {
+uniform_struct_impl!(ObjectUniformInfo, model);
+
+impl TextRenderer {
+    pub(crate) fn new(renderer: &mut Renderer) -> Self {
+        let device = Arc::clone(renderer.device());
         let vertex_shader = device
             .create_vertex_shader(
                 include_bytes!("../../../shaders/build/text_char.vert.spv"),
@@ -192,26 +191,31 @@ impl TextRendererModule {
                     ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
                     ("inScale", Format::R32_FLOAT, VInputRate::INSTANCE),
                 ],
-                &[],
             )
             .unwrap();
         let pixel_shader = device
-            .create_pixel_shader(include_bytes!("../../../shaders/build/text_char.frag.spv"), &[])
+            .create_pixel_shader(include_bytes!("../../../shaders/build/text_char.frag.spv"))
             .unwrap();
-        let signature = device
-            .create_pipeline_signature(&[vertex_shader, pixel_shader], &[])
-            .unwrap();
-        let pipeline = device
-            .create_graphics_pipeline(
-                render_pass,
-                subpass_index,
-                PrimitiveTopology::TRIANGLE_STRIP,
-                PipelineDepthStencil::default().depth_test(true).depth_write(true),
-                PipelineRasterization::new().cull_back_faces(true),
-                &[(0, AttachmentColorBlend::default().enabled(true))],
-                &signature,
-            )
-            .unwrap();
+        // let signature = device
+        //     .create_pipeline_signature(&[vertex_shader, pixel_shader], &[])
+        //     .unwrap();
+        // let pipeline = device
+        //     .create_graphics_pipeline(
+        //         render_pass,
+        //         subpass_index,
+        //         PrimitiveTopology::TRIANGLE_STRIP,
+        //         PipelineDepthStencil::default().depth_test(true).depth_write(true),
+        //         PipelineRasterization::new().cull_back_faces(true),
+        //         &[(0, AttachmentColorBlend::default().enabled(true))],
+        //         &signature,
+        //     )
+        //     .unwrap();
+
+        let mat_pipeline = renderer.register_material_pipeline::<ObjectUniformInfo>(
+            &[vertex_shader, pixel_shader],
+            PrimitiveTopology::TRIANGLE_STRIP,
+        );
+        let pipe = renderer.get_material_pipeline_mut(mat_pipeline).unwrap();
 
         let glyph_array = device
             .create_image_2d_array_named(
@@ -257,11 +261,11 @@ impl TextRendererModule {
             )
             .unwrap();
 
-        let mut pool = signature.create_pool(0, 1).unwrap();
-        let descriptor = pool.alloc().unwrap();
+        let (pool, descriptor) = pipe.create_custom_frame_uniform_descriptor().unwrap();
+
         unsafe {
             device.update_descriptor_set(
-                descriptor,
+                *descriptor,
                 &[
                     pool.create_binding(0, 0, BindingRes::Buffer(uniform_buffer.handle())),
                     pool.create_binding(
@@ -276,6 +280,11 @@ impl TextRendererModule {
                 ],
             );
         }
+
+        let staging_cl = device
+            .get_queue(Queue::TYPE_GRAPHICS)
+            .create_primary_cmd_list("text-staging-cl")
+            .unwrap();
 
         let fallback_families = [
             font_kit::family_name::FamilyName::Serif,
@@ -321,10 +330,8 @@ impl TextRendererModule {
         };
 
         Self {
-            device: Arc::clone(device),
-            pipeline,
-            _pool: pool,
-            descriptor,
+            device,
+            mat_pipeline,
             fonts,
             glyph_array,
             glyph_array_initialized: false,
@@ -335,11 +342,13 @@ impl TextRendererModule {
             free_locations,
             chars_to_load,
             atlas_overflow_glyph,
-            allocated_glyphs: Default::default(),
+            allocated_sequences: Default::default(),
             staging_uniform_buffer,
             glyph_sampler,
+            staging_cl,
         }
     }
+    // pub fn new(device: &Arc<Device>, render_pass: &Arc<RenderPass>, subpass_index: u32) -> Self {}
 
     fn glyph_array_capacity(&mut self) -> u32 {
         self.glyph_array.size().2
@@ -568,9 +577,9 @@ impl TextRendererModule {
                 // Width of the word exceeds the maximum line width => break it into two parts.
 
                 if curr_offset.x > 0.0 {
-                    line_widths.push(curr_offset.x - curr_word_width); // FIXME: -kerning ?
+                    line_widths.push(curr_offset.x - curr_word_width);
                     curr_offset.x = 0.0;
-                    curr_offset.y += (v_metrics.ascent - v_metrics.descent);
+                    curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
                 }
 
                 for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
@@ -586,9 +595,9 @@ impl TextRendererModule {
                         continue;
                     }
                     if i > 0 && (curr_offset.x + glyph_width) > max_width {
-                        line_widths.push(curr_offset.x); // FIXME: -kerning ?
+                        line_widths.push(curr_offset.x);
                         curr_offset.x = 0.0;
-                        curr_offset.y += (v_metrics.ascent - v_metrics.descent);
+                        curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
                     }
 
                     instance.offset = curr_offset;
@@ -652,6 +661,7 @@ impl TextRendererModule {
         entity: Entity,
         texts: &mut ComponentStorageMut<component::SimpleText>,
         meshes: &mut ComponentStorageMut<component::VertexMesh>,
+        render_configs: &mut ComponentStorageMut<component::MeshRenderConfig>,
     ) {
         let simple_text = texts.get(entity).unwrap();
 
@@ -670,103 +680,83 @@ impl TextRendererModule {
             simple_text.max_width(),
             simple_text.max_height(),
         );
-        self.allocated_glyphs.insert(entity, seq);
+        self.allocated_sequences.insert(entity, seq);
 
         let mesh = self
             .device
             .create_instanced_vertex_mesh::<(), GlyphInstance>(&[], &instances, None)
             .unwrap();
+
         meshes.set(entity, component::VertexMesh::new(&mesh.raw()));
+        render_configs.set(
+            entity,
+            component::MeshRenderConfig::new(self.mat_pipeline, true).with_fake_vertex_count(4),
+        );
     }
 
     fn free_text_glyphs_from_entity(&mut self, entity: Entity) {
-        let seq = self.allocated_glyphs.remove(&entity).unwrap();
+        let seq = self.allocated_sequences.remove(&entity).unwrap();
         self.free_glyphs(&seq.glyphs);
     }
+}
 
-    pub fn update(&mut self, scene: &mut Scene) {
+impl RendererModule for TextRenderer {
+    fn on_update(&mut self, scene: &mut Scene) -> Option<Arc<Mutex<CmdList>>> {
         let mut simple_texts = scene.storage_write::<component::SimpleText>();
         let mut vertex_meshes = scene.storage_write::<component::VertexMesh>();
+        let mut render_configs = scene.storage_write::<component::MeshRenderConfig>();
         let events = simple_texts.events();
 
         for e in events {
             match e {
                 Event::Created(e) => {
-                    self.alloc_text_glyphs_on_entity(e, &mut simple_texts, &mut vertex_meshes);
+                    self.alloc_text_glyphs_on_entity(
+                        e,
+                        &mut simple_texts,
+                        &mut vertex_meshes,
+                        &mut render_configs,
+                    );
                 }
                 Event::Modified(e) => {
                     self.free_text_glyphs_from_entity(e);
-                    self.alloc_text_glyphs_on_entity(e, &mut simple_texts, &mut vertex_meshes);
+                    self.alloc_text_glyphs_on_entity(
+                        e,
+                        &mut simple_texts,
+                        &mut vertex_meshes,
+                        &mut render_configs,
+                    );
                 }
                 Event::Removed(e) => {
                     self.free_text_glyphs_from_entity(e);
                 }
             }
         }
-    }
 
-    pub fn pre_render(&mut self, cl: &mut CmdList, proj_view: Mat4) {
+        let staging_cl = Arc::clone(&self.staging_cl);
+        let mut cl = staging_cl.lock();
+        cl.begin(true).unwrap();
+
+        // Copy uniforms to the GPU
         let uniform_data = UniformData {
             px_range: MSDF_PX_RANGE as f32,
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-            proj_view,
         };
         self.staging_uniform_buffer.write(0, &[uniform_data]);
-
         cl.copy_raw_host_buffer_to_device(&self.staging_uniform_buffer.raw(), 0, &self.uniform_buffer, 0, 1);
 
-        cl.barrier_buffer(
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::VERTEX_SHADER,
-            &[self
-                .uniform_buffer
-                .barrier()
-                .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(AccessFlags::UNIFORM_READ)],
-        );
+        // Copy new glyphs to the GPU
+        self.load_glyphs(&mut cl);
 
-        self.load_glyphs(cl);
+        cl.end().unwrap();
+        drop(cl);
+
+        Some(staging_cl)
     }
 
-    pub fn render(
-        &mut self,
-        scene: &mut Scene,
-        vertex_meshes: &HashMap<Entity, Arc<RawVertexMesh>>,
-        cl: &mut CmdList,
-    ) {
-        // TODO: due to no differences between text and simple vertex mesh rendering,
-        // TODO: transition text objects into regular objects with just custom shader
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-        cl.bind_pipeline(&self.pipeline);
-        cl.bind_graphics_input(self.pipeline.signature(), 0, self.descriptor, &[]);
-
-        let texts = scene.storage_read::<component::SimpleText>();
-        let transforms = scene.storage_read::<GlobalTransform>();
-
-        for e in texts.entries().intersection(&transforms).iter() {
-            let mesh = vertex_meshes.get(&e);
-            if mesh.is_none() {
-                continue;
-            }
-            let mesh = mesh.unwrap();
-
-            if mesh.instance_count == 0 {
-                continue;
-            }
-
-            let transform = transforms.get(e).unwrap();
-            let text = &self.allocated_glyphs[&e];
-            let n_glyphs = text.glyphs.len();
-
-            let consts = PushConstants {
-                transform: transform.matrix_f32(),
-            };
-            cl.push_constants(self.pipeline.signature(), &consts);
-
-            cl.bind_vertex_buffers(0, &mesh.bindings());
-            cl.draw_instanced(4, 0, 0, n_glyphs as u32);
-        }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

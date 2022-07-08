@@ -1,19 +1,17 @@
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
-use crate::renderer::module::text_renderer::FontSet;
 use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, MAX_BASIC_UNIFORM_BLOCK_SIZE,
-    MAX_MATERIAL_COUNT, PIPELINE_COLOR_SOLID, PIPELINE_COLOR_TRANSLUCENT, PIPELINE_DEPTH_READ,
-    PIPELINE_DEPTH_READ_WRITE,
+    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
+    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR_SOLID, PIPELINE_COLOR_TRANSLUCENT,
+    PIPELINE_DEPTH_READ, PIPELINE_DEPTH_READ_WRITE,
 };
 use crate::resource_file::ResourceRef;
 use crate::utils::UInt;
 use crate::{utils, Renderer};
 use basis_universal::TranscodeParameters;
 use smallvec::SmallVec;
-use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;
-use vk_wrapper::{CopyRegion, Queue, Shader, ShaderStage};
+use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
 
 impl Renderer {
     pub fn load_texture_into_atlas(
@@ -69,27 +67,46 @@ impl Renderer {
     }
 
     /// Returns id of registered material pipeline.
-    pub fn register_material_pipeline<T: UniformStruct>(&mut self, shaders: &[Arc<Shader>]) -> u32 {
+    pub fn register_material_pipeline<T: UniformStruct>(
+        &mut self,
+        shaders: &[Arc<Shader>],
+        topology: PrimitiveTopology,
+    ) -> u32 {
         assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
 
         let main_signature = self
             .device
             .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
+        let combined_bindings: Vec<_> = main_signature.bindings().clone().into_iter().collect();
 
-        let vertex_shader = Arc::clone(shaders.iter().find(|v| v.stage() == ShaderStage::VERTEX).unwrap());
+        let vertex_shader = Arc::clone(
+            shaders
+                .iter()
+                .find(|v| v.stage() == ShaderStageFlags::VERTEX)
+                .unwrap(),
+        );
         let depth_signature = self
             .device
-            .create_pipeline_signature(&[vertex_shader], &*ADDITIONAL_PIPELINE_BINDINGS)
+            // FIXME: add all bindings from main_signature, not just from ones vertex shader
+            .create_pipeline_signature(&[vertex_shader], &combined_bindings)
+            .unwrap();
+
+        let per_object_desc_pool = main_signature
+            .create_pool(DESC_SET_CUSTOM_PER_OBJECT, 16)
             .unwrap();
 
         let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
             main_signature: Arc::clone(&main_signature),
             pipelines: Default::default(),
+            topology,
             uniform_buffer_size: mem::size_of::<T>() as u32,
             uniform_buffer_model_offset: T::model_offset(),
+            per_object_desc_pool,
+            custom_per_frame_uniform_desc: None,
         };
+        let translucent_blend_attachments = [0];
 
         pipeline_set.prepare_pipeline(
             PIPELINE_DEPTH_READ,
@@ -98,6 +115,7 @@ impl Renderer {
                 signature: &depth_signature,
                 subpass_index: 0,
                 cull_back_faces: true,
+                blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
             },
@@ -109,6 +127,7 @@ impl Renderer {
                 signature: &depth_signature,
                 subpass_index: 0,
                 cull_back_faces: true,
+                blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,
             },
@@ -120,6 +139,7 @@ impl Renderer {
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces: true,
+                blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
             },
@@ -131,23 +151,22 @@ impl Renderer {
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces: false,
+                blend_attachments: &translucent_blend_attachments,
                 depth_test: true,
                 depth_write: false,
             },
         );
 
-        if let hash_map::Entry::Vacant(e) = self.g_per_pipeline_pools.entry(main_signature) {
-            let pool = e.key().create_pool(1, 16).unwrap();
-            e.insert(pool);
-        }
-
-        let mat_pipelines = &mut self.material_pipelines;
-        mat_pipelines.push(pipeline_set);
-        (mat_pipelines.len() - 1) as u32
+        self.material_pipelines.push(pipeline_set);
+        (self.material_pipelines.len() - 1) as u32
     }
 
-    pub fn register_font(&mut self, font_set: FontSet) -> u16 {
-        self.text_renderer.register_font(font_set)
+    pub fn get_material_pipeline(&self, id: u32) -> Option<&MaterialPipelineSet> {
+        self.material_pipelines.get(id as usize)
+    }
+
+    pub fn get_material_pipeline_mut(&mut self, id: u32) -> Option<&mut MaterialPipelineSet> {
+        self.material_pipelines.get_mut(id as usize)
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {

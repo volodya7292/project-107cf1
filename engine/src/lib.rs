@@ -11,6 +11,7 @@ pub mod utils;
 use crate::input::{Keyboard, Mouse};
 use crate::platform::current_refresh_rate;
 use crate::queue::realtime_queue;
+use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 use crate::utils::thread_pool::{SafeThreadPool, TaskPriority};
 use crate::utils::{HashSet, MO_RELAXED};
@@ -116,6 +117,9 @@ impl Engine {
             &device,
             max_texture_count,
         );
+
+        let text_renderer = TextRenderer::new(&mut renderer);
+        renderer.register_module(text_renderer);
 
         app.on_engine_initialized(&mut renderer);
 

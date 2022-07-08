@@ -15,12 +15,14 @@ layout(location = 0) out Output {
     float pxRange;
 } vs_out;
 
-layout(std140, set = 0, binding = 0) uniform UniformData {
+layout(set = 0, binding = 0) uniform FrameData {
+    PerFrameInfo info;
+};
+layout(set = 1, binding = 0) uniform ObjectData {
+    mat4 model;
+};
+layout(set = 2, binding = 0) uniform TextFrameData {
     float pxRange;
-    uint _pad0;
-    uint _pad1;
-    uint _pad2;
-    mat4 projView;
 };
 
 layout(push_constant) uniform PushConstants {
@@ -38,7 +40,7 @@ void main() {
 
     // Negate inOffset.y because text starts at top-left origin, but we need bottom-left
     vec2 pos2d = unit_pos * inScale + vec2(inOffset.x, -inOffset.y);
-    vec4 worldPos = params.transform * vec4(pos2d, 0.0, 1.0);
+    vec4 worldPos = model * vec4(pos2d, 0.0, 1.0);
 
-    gl_Position = projView * worldPos;
+    gl_Position = info.camera.proj_view * worldPos;
 }

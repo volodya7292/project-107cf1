@@ -17,6 +17,7 @@ use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
+use engine::renderer::module::text_renderer::TextRenderer;
 use engine::renderer::{FontSet, Renderer};
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
@@ -160,7 +161,8 @@ impl Application for Game {
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
 
         // -------------------------------------------------------
-        let font_id = renderer.register_font(
+        let text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
+        let font_id = text_renderer.register_font(
             FontSet::from_bytes(
                 std::fs::read("/Users/admin/Downloads/Romanesco-Regular.ttf").unwrap(),
                 None,
@@ -173,7 +175,7 @@ impl Application for Game {
             text,
             component::SimpleText::new(StyledString::new(
                 "Govno, my is Gmine".to_owned(),
-                TextStyle::new().with_font(font_id),
+                TextStyle::new().with_font(font_id).with_font_size(0.5),
             ))
             .with_max_width(3.0)
             .with_h_align(TextHAlign::LEFT),
@@ -353,7 +355,7 @@ impl Application for Game {
                 let mut streamer = streamer.lock();
 
                 let t0 = Instant::now();
-                streamer.update_renderer(renderer);
+                streamer.update_scene(renderer.scene());
                 let t1 = Instant::now();
                 let el = (t1 - t0).as_secs_f64();
                 if el > 0.001 {
