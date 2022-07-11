@@ -601,8 +601,10 @@ impl Device {
         );
 
         let mut s_format = surface_formats.iter().find(|&s_format| {
-            (s_format.format == vk::Format::R8G8B8A8_UNORM || s_format.format == vk::Format::B8G8R8A8_UNORM)
-                && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            matches!(
+                s_format.format,
+                vk::Format::R8G8B8A8_SRGB | vk::Format::B8G8R8A8_SRGB
+            ) && s_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
         });
         if s_format.is_none() {
             s_format = surface_formats.first();
