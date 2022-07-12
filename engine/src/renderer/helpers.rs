@@ -1,8 +1,8 @@
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
     BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR_SOLID, PIPELINE_COLOR_TRANSLUCENT,
-    PIPELINE_DEPTH_READ, PIPELINE_DEPTH_READ_WRITE,
+    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_DEPTH_READ,
+    PIPELINE_DEPTH_READ_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::resource_file::ResourceRef;
 use crate::utils::UInt;
@@ -71,6 +71,7 @@ impl Renderer {
         &mut self,
         shaders: &[Arc<Shader>],
         topology: PrimitiveTopology,
+        cull_back_faces: bool,
     ) -> u32 {
         assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
 
@@ -88,8 +89,18 @@ impl Renderer {
         );
         let depth_signature = self
             .device
-            // FIXME: add all bindings from main_signature, not just from ones vertex shader
-            .create_pipeline_signature(&[vertex_shader], &combined_bindings)
+            .create_pipeline_signature(&[Arc::clone(&vertex_shader)], &combined_bindings)
+            .unwrap();
+
+        let translucency_depth_signature = self
+            .device
+            .create_pipeline_signature(
+                &[
+                    Arc::clone(&vertex_shader),
+                    Arc::clone(&self.translucency_depths_pixel_shader),
+                ],
+                &combined_bindings,
+            )
             .unwrap();
 
         let per_object_desc_pool = main_signature
@@ -106,7 +117,6 @@ impl Renderer {
             per_object_desc_pool,
             custom_per_frame_uniform_desc: None,
         };
-        let translucent_blend_attachments = [0];
 
         pipeline_set.prepare_pipeline(
             PIPELINE_DEPTH_READ,
@@ -114,7 +124,7 @@ impl Renderer {
                 render_pass: &self.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
-                cull_back_faces: true,
+                cull_back_faces,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
@@ -126,32 +136,32 @@ impl Renderer {
                 render_pass: &self.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
-                cull_back_faces: true,
+                cull_back_faces,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_SOLID,
+            PIPELINE_TRANSLUCENCY_DEPTHS,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
-                signature: &main_signature,
+                render_pass: &self.translucency_render_pass,
+                signature: &translucency_depth_signature,
                 subpass_index: 0,
-                cull_back_faces: true,
+                cull_back_faces,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_TRANSLUCENT,
+            PIPELINE_COLOR,
             &PipelineConfig {
                 render_pass: &self.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 0,
-                cull_back_faces: false,
-                blend_attachments: &translucent_blend_attachments,
+                cull_back_faces,
+                blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
             },

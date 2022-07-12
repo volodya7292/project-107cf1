@@ -1,3 +1,25 @@
+//! ## Overall rendering pipeline
+//! 1. Depth pass  
+//! 1.1 Render depth image of solid objects.  
+//! 1.2 Construct depth pyramid.  
+//! 1.3 Use depth pyramid to cull objects by occlusion.  
+//! 4. Render g-buffer with solid objects (with early-z testing).  
+//! 5. Translucency pass ("Atomic loop OIT" technique)  
+//! 5.1. Render translucent objects: find `TRANSLUCENCY_DEPTH_LAYERS` closest depths.
+//! 5.2. Render translucent objects: match depths with respective colors.
+//! 6. Compose solid and translucent colors.
+
+// Notes
+// --------------------------------------------
+// Encountered causes of VK_ERROR_DEVICE_LOST:
+// - Out of bounds access:
+//   - Incorrect indices of vertex mesh.
+//
+// Swapchain creation error cause may be *out of device memory*.
+//
+// HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
+//
+
 mod texture_atlas;
 
 #[macro_use]
@@ -23,7 +45,7 @@ use material_pipeline::MaterialPipelineSet;
 pub use module::text_renderer::FontSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, U32Vec4, Vec2, Vec3, Vec4};
+use nalgebra_glm::{DVec3, U32Vec4, UVec2, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
@@ -43,20 +65,9 @@ use vk_wrapper::{
     ClearValue, CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format,
     Framebuffer, HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
     PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Sampler, SamplerFilter,
-    SamplerMipmap, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket, Subpass,
-    SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
+    Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
-
-// Notes
-// --------------------------------------------
-// Encountered causes of VK_ERROR_DEVICE_LOST:
-// - Out of bounds access:
-//   - Incorrect indices of vertex mesh.
-//
-// Swapchain creation error cause may be *out of device memory*.
-//
-// HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
-//
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
@@ -77,10 +88,8 @@ pub struct UpdateTimings {
 
 #[derive(Default, Copy, Clone)]
 pub struct RenderTimings {
-    pub depth_record: f64,
-    pub depth_exec: f64,
-    pub color_record: f64,
-    pub color_exec: f64,
+    pub depth_pass: f64,
+    pub color_pass: f64,
     pub total: f64,
 }
 
@@ -93,15 +102,13 @@ pub struct RendererTimings {
 impl Display for RendererTimings {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} || depth_rec {:.5} \
-            | depth_exec {:.5} | color_rec {:.5} | color_exec {:.5} || upd_total {:.5} | render_total {:.5}",
+            "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} || \
+            depth_pass {:.5} | color_pass {:.5} || upd_total {:.5} | render_total {:.5}",
             self.update.systems_batch0,
             self.update.systems_batch1,
             self.update.uniform_buffers_update,
-            self.render.depth_record,
-            self.render.depth_exec,
-            self.render.color_record,
-            self.render.color_exec,
+            self.render.depth_pass,
+            self.render.color_pass,
             self.update.total,
             self.render.total
         ))
@@ -136,7 +143,8 @@ pub struct Renderer {
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
     depth_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
-    g_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
+    g_secondary_cls_solid: Vec<Arc<Mutex<CmdList>>>,
+    g_secondary_cls_translucent: Vec<Arc<Mutex<CmdList>>>,
 
     depth_render_pass: Arc<RenderPass>,
     depth_pyramid_image: Option<Arc<Image>>,
@@ -169,8 +177,11 @@ pub struct Renderer {
     g_per_frame_in: DescriptorSet,
     g_dyn_in: DescriptorSet,
 
-    translucency_head_image: Option<Arc<Image>>,
-    translucency_texel_image: Option<Arc<Image>>,
+    translucency_framebuffer: Option<Arc<Framebuffer>>,
+    translucency_depths_pixel_shader: Arc<Shader>,
+    translucency_depths_image: Option<DeviceBuffer>,
+    translucency_colors_image: Option<Arc<Image>>,
+    translucency_render_pass: Arc<RenderPass>,
 
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
@@ -197,13 +208,6 @@ pub enum TextureQuality {
     HIGH = 256,
 }
 
-#[derive(Copy, Clone)]
-pub enum TranslucencyMaxDepth {
-    LOW = 4,
-    MEDIUM = 8,
-    HIGH = 16,
-}
-
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum FPSLimit {
     VSync,
@@ -216,7 +220,6 @@ pub struct Settings {
     pub prefer_triple_buffering: bool,
     pub textures_mipmaps: bool,
     pub texture_quality: TextureQuality,
-    pub translucency_max_depth: TranslucencyMaxDepth,
     pub textures_max_anisotropy: f32,
 }
 
@@ -227,7 +230,6 @@ impl Default for Settings {
             prefer_triple_buffering: true,
             textures_mipmaps: true,
             texture_quality: TextureQuality::STANDARD,
-            translucency_max_depth: TranslucencyMaxDepth::LOW,
             textures_max_anisotropy: 1.0,
         }
     }
@@ -270,6 +272,11 @@ struct CameraInfo {
 struct PerFrameInfo {
     camera: CameraInfo,
     atlas_info: U32Vec4,
+}
+
+#[repr(C)]
+struct TranslucencyPushConsts {
+    frame_size: UVec2,
 }
 
 pub(crate) struct Renderable {
@@ -382,12 +389,13 @@ pub const DESC_SET_CUSTOM_PER_OBJECT: u32 = 1;
 /// Specific to material pipeline descriptor set for its per-frame resources
 pub const DESC_SET_CUSTOM_PER_FRAME: u32 = 2;
 
+const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
 const PIPELINE_DEPTH_READ: u32 = 0;
 const PIPELINE_DEPTH_READ_WRITE: u32 = 1;
-const PIPELINE_COLOR_SOLID: u32 = 2;
-const PIPELINE_COLOR_TRANSLUCENT: u32 = 3;
+const PIPELINE_COLOR: u32 = 2;
+const PIPELINE_TRANSLUCENCY_DEPTHS: u32 = 3;
 
 lazy_static! {
     static ref PIPELINE_CACHE_FILENAME: &'static str = if cfg!(debug_assertions) {
@@ -396,7 +404,7 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 6] = [
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 8] = [
         // Per frame info
         (
             BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 0),
@@ -448,6 +456,24 @@ lazy_static! {
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
+                count: 1,
+            },
+        ),
+        // Translucency depths (only used in translucency passes)
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 5),
+            ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
+                binding_type: BindingType::STORAGE_BUFFER,
+                count: 1,
+            },
+        ),
+        // Translucency colors (only used in translucency passes)
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 6),
+            ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
+                binding_type: BindingType::STORAGE_IMAGE,
                 count: 1,
             },
         ),
@@ -586,6 +612,38 @@ impl Renderer {
             .create_host_buffer(BufferUsageFlags::TRANSFER_DST, MAX_OBJECT_COUNT as u64)
             .unwrap();
 
+        // Translucency depth pipeline
+        // -----------------------------------------------------------------------------------------------------------------
+        let translucency_depths_pixel_shader = device
+            .create_pixel_shader(include_bytes!(
+                "../shaders/build/translucency_closest_depths.frag.spv"
+            ))
+            .unwrap();
+        let translucency_render_pass = device
+            .create_render_pass(
+                &[
+                    // Depth (read)
+                    Attachment {
+                        format: Format::D32_FLOAT,
+                        init_layout: ImageLayout::DEPTH_STENCIL_READ,
+                        final_layout: ImageLayout::DEPTH_STENCIL_READ,
+                        load_store: LoadStore::InitLoad,
+                    },
+                ],
+                &[
+                    // Solid colors pass
+                    Subpass {
+                        color: vec![],
+                        depth: Some(AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                        }),
+                    },
+                ],
+                &[],
+            )
+            .unwrap();
+
         // Compose pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let quad_vert_shader = device
@@ -638,42 +696,40 @@ impl Renderer {
                         format: Format::D32_FLOAT,
                         init_layout: ImageLayout::DEPTH_STENCIL_READ,
                         final_layout: ImageLayout::DEPTH_STENCIL_READ,
-                        load_store: LoadStore::InitSave,
-                    },
-                    Attachment {
-                        format: Format::R32_UINT,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::GENERAL,
-                        load_store: LoadStore::InitClearFinalSave,
+                        load_store: LoadStore::InitLoad,
                     },
                 ],
-                &[Subpass {
-                    color: vec![
-                        AttachmentRef {
-                            index: 0,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 1,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 2,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                        AttachmentRef {
-                            index: 3,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        },
-                    ],
-                    depth: Some(AttachmentRef {
-                        index: 4,
-                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                    }),
-                }],
+                &[
+                    // Solid colors pass
+                    Subpass {
+                        color: vec![
+                            AttachmentRef {
+                                index: 0,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 1,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 2,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                            AttachmentRef {
+                                index: 3,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
+                        ],
+                        depth: Some(AttachmentRef {
+                            index: 4,
+                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                        }),
+                    },
+                ],
                 &[],
             )
             .unwrap();
+
         let g_signature = device
             .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
@@ -681,10 +737,20 @@ impl Renderer {
         let mut g_dyn_pool = g_signature.create_pool(1, 1).unwrap();
         let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
         let g_dyn_in = g_dyn_pool.alloc().unwrap();
-        let g_secondary_cls =
-            iter::repeat_with(|| graphics_queue.create_secondary_cmd_list("g_secondary").unwrap())
-                .take(available_threads)
-                .collect();
+        let g_secondary_cls_solid = iter::repeat_with(|| {
+            graphics_queue
+                .create_secondary_cmd_list("g_secondary-for-solid-objs")
+                .unwrap()
+        })
+        .take(available_threads)
+        .collect();
+        let g_secondary_cls_translucent = iter::repeat_with(|| {
+            graphics_queue
+                .create_secondary_cmd_list("g_secondary-for-translucent-objs")
+                .unwrap()
+        })
+        .take(available_threads)
+        .collect();
 
         let tile_count = max_texture_count;
         let texture_atlases = [
@@ -816,7 +882,7 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
-        // TODO: allocate buffers with capacity of MAX_OBJECTS
+        // TODO: allocate necessarry buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
             scene,
             active_camera,
@@ -841,7 +907,8 @@ impl Renderer {
             sw_framebuffers: vec![],
             visibility_buffer,
             depth_secondary_cls,
-            g_secondary_cls,
+            g_secondary_cls_solid,
+            g_secondary_cls_translucent,
             depth_render_pass,
             depth_pyramid_image: None,
             depth_pyramid_views: vec![],
@@ -861,8 +928,11 @@ impl Renderer {
             g_dyn_pool,
             g_per_frame_in,
             g_dyn_in,
-            translucency_head_image: None,
-            translucency_texel_image: None,
+            translucency_framebuffer: None,
+            translucency_depths_pixel_shader,
+            translucency_depths_image: None,
+            translucency_colors_image: None,
+            translucency_render_pass,
             per_frame_ub: per_frame_uniform_buffer,
             visibility_host_buffer,
             sw_render_pass: None,
@@ -876,7 +946,6 @@ impl Renderer {
             compose_desc,
             material_pipelines: vec![],
             uniform_buffer_basic,
-            // device_buffers: SlotVec::new(),
             vertex_meshes: Default::default(),
             vertex_mesh_updates: Default::default(),
             vertex_mesh_pending_updates: vec![],
@@ -1181,7 +1250,7 @@ impl Renderer {
                     true,
                     &self.depth_render_pass,
                     0,
-                    Some(self.depth_framebuffer.as_ref().unwrap()),
+                    self.depth_framebuffer.as_ref(),
                 )
                 .unwrap();
 
@@ -1206,8 +1275,11 @@ impl Renderer {
                     let center = sphere.center() + global_transform.position_f32();
                     let radius = sphere.radius() * global_transform.scale.max();
 
-                    if (!render_config.visible || !frustum.is_sphere_visible(&center, radius))
-                        && render_config.fake_vertex_count == 0
+                    // Note: do not render depth of translucent objects
+                    if !render_config.visible
+                        || render_config.translucent
+                        || (!frustum.is_sphere_visible(&center, radius)
+                            && render_config.fake_vertex_count == 0)
                     {
                         continue;
                     }
@@ -1276,21 +1348,34 @@ impl Renderer {
 
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();
-        let draw_count_step = object_count / self.g_secondary_cls.len() + 1;
+        let draw_count_step = object_count / self.g_secondary_cls_solid.len() + 1;
 
-        self.g_secondary_cls
+        let frame_size = self.translucency_colors_image.as_ref().unwrap().size_2d();
+        let translucency_consts = TranslucencyPushConsts {
+            frame_size: UVec2::new(frame_size.0, frame_size.1),
+        };
+
+        // Render solid objects first, then translucent
+
+        self.g_secondary_cls_solid
             .par_iter()
+            .zip(&self.g_secondary_cls_translucent)
             .enumerate()
-            .for_each(|(i, cmd_list)| {
-                let mut cl = cmd_list.lock();
+            .for_each(|(i, (cmd_list_solid, cmd_list_translucent))| {
+                let mut cl_sol = cmd_list_solid.lock();
+                let mut cl_trans = cmd_list_translucent.lock();
 
-                cl.begin_secondary_graphics(
-                    true,
-                    &self.g_render_pass,
-                    0,
-                    Some(self.g_framebuffer.as_ref().unwrap()),
-                )
-                .unwrap();
+                cl_sol
+                    .begin_secondary_graphics(true, &self.g_render_pass, 0, self.g_framebuffer.as_ref())
+                    .unwrap();
+                cl_trans
+                    .begin_secondary_graphics(
+                        true,
+                        &self.translucency_render_pass,
+                        0,
+                        self.translucency_framebuffer.as_ref(),
+                    )
+                    .unwrap();
 
                 for j in 0..draw_count_step {
                     let entity_index = i * draw_count_step + j;
@@ -1311,8 +1396,14 @@ impl Renderer {
                     let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
                     let renderable = self.renderables.get(&renderable_id).unwrap();
 
+                    let (cl, pipeline_id) = if render_config.translucent {
+                        (&mut cl_trans, PIPELINE_TRANSLUCENCY_DEPTHS)
+                    } else {
+                        (&mut cl_sol, PIPELINE_COLOR)
+                    };
+
                     let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-                    let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_SOLID).unwrap();
+                    let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
 
                     let already_bound = cl.bind_pipeline(pipeline);
@@ -1331,6 +1422,9 @@ impl Renderer {
                                 &[],
                             );
                         }
+                        if pipeline_id == PIPELINE_TRANSLUCENCY_DEPTHS {
+                            cl.push_constants(signature, &translucency_consts);
+                        }
                     }
 
                     cl.bind_graphics_input(
@@ -1348,8 +1442,154 @@ impl Renderer {
                     }
                 }
 
-                cl.end().unwrap();
+                cl_sol.end().unwrap();
+                cl_trans.end().unwrap();
             });
+    }
+
+    fn depth_pass(&mut self) {
+        let frustum_visible_objects = self.record_depth_cmd_lists();
+        let object_count = self.ordered_entities.len() as u32;
+
+        let mut cl = self.staging_cl.lock();
+        cl.begin(true).unwrap();
+        cl.begin_render_pass(
+            &self.depth_render_pass,
+            self.depth_framebuffer.as_ref().unwrap(),
+            &[ClearValue::Depth(1.0)],
+            true,
+        );
+        cl.execute_secondary(&self.depth_secondary_cls);
+        cl.end_render_pass();
+
+        let depth_image = self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
+        let depth_pyramid_image = self.depth_pyramid_image.as_ref().unwrap();
+
+        // Build depth pyramid
+        // ----------------------------------------------------------------------------------------
+
+        cl.barrier_image(
+            PipelineStageFlags::ALL_GRAPHICS,
+            PipelineStageFlags::COMPUTE,
+            &[
+                depth_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .layout(ImageLayout::SHADER_READ),
+                depth_pyramid_image
+                    .barrier()
+                    .dst_access_mask(AccessFlags::SHADER_WRITE)
+                    .old_layout(ImageLayout::UNDEFINED)
+                    .new_layout(ImageLayout::GENERAL),
+            ],
+        );
+
+        cl.bind_pipeline(&self.depth_pyramid_pipeline);
+
+        let mut out_size = depth_pyramid_image.size_2d();
+
+        for i in 0..(depth_pyramid_image.mip_levels() as usize) {
+            cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
+
+            let constants = DepthPyramidConstants {
+                out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
+            };
+            cl.push_constants(&self.depth_pyramid_signature, &constants);
+
+            cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
+
+            cl.barrier_image(
+                PipelineStageFlags::COMPUTE,
+                PipelineStageFlags::COMPUTE,
+                &[depth_pyramid_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .old_layout(ImageLayout::GENERAL)
+                    .new_layout(ImageLayout::GENERAL)
+                    .mip_levels(i as u32, 1)],
+            );
+
+            out_size = ((out_size.0 >> 1).max(1), (out_size.1 >> 1).max(1));
+        }
+
+        cl.barrier_image(
+            PipelineStageFlags::COMPUTE,
+            PipelineStageFlags::BOTTOM_OF_PIPE,
+            &[depth_image
+                .barrier()
+                .src_access_mask(AccessFlags::SHADER_READ)
+                .dst_access_mask(Default::default())
+                .old_layout(ImageLayout::SHADER_READ)
+                .new_layout(ImageLayout::DEPTH_STENCIL_READ)],
+        );
+
+        // Compute visibilities
+        // ----------------------------------------------------------------------------------------
+
+        cl.copy_buffer_to_device(
+            &self.cull_host_buffer,
+            0,
+            &self.cull_buffer,
+            0,
+            frustum_visible_objects as u64,
+        );
+        cl.fill_buffer(&self.visibility_buffer, 0);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::COMPUTE,
+            &[
+                self.cull_buffer
+                    .barrier()
+                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ),
+                self.visibility_buffer
+                    .barrier()
+                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_WRITE),
+            ],
+        );
+
+        cl.bind_pipeline(&self.cull_pipeline);
+        cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc, &[]);
+
+        let pyramid_size = depth_pyramid_image.size_2d();
+        let constants = CullConstants {
+            pyramid_size: Vec2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
+            max_pyramid_levels: depth_pyramid_image.mip_levels(),
+            object_count: frustum_visible_objects,
+        };
+        cl.push_constants(&self.cull_signature, &constants);
+
+        cl.dispatch(calc_group_count(frustum_visible_objects), 1, 1);
+
+        cl.barrier_buffer(
+            PipelineStageFlags::COMPUTE,
+            PipelineStageFlags::TRANSFER,
+            &[self
+                .visibility_buffer
+                .barrier()
+                .src_access_mask(AccessFlags::SHADER_WRITE)
+                .dst_access_mask(AccessFlags::TRANSFER_READ)],
+        );
+
+        cl.copy_buffer_to_host(
+            &self.visibility_buffer,
+            0,
+            &self.visibility_host_buffer,
+            0,
+            object_count as u64,
+        );
+
+        cl.end().unwrap();
+        drop(cl);
+
+        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
+        let submit = &mut self.staging_submit;
+        unsafe { graphics_queue.submit(submit).unwrap() };
+        submit.wait().unwrap();
     }
 
     fn on_render(&mut self, sw_image: &SwapchainImage) -> RenderTimings {
@@ -1358,158 +1598,18 @@ impl Renderer {
         let device = Arc::clone(&self.device);
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
-        let object_count = self.ordered_entities.len() as u32;
-        let frustum_visible_objects = self.record_depth_cmd_lists();
+        let t1 = Instant::now();
 
-        let t1;
-        {
-            let t0 = Instant::now();
-            let mut cl = self.staging_cl.lock();
-            cl.begin(true).unwrap();
-            cl.begin_render_pass(
-                &self.depth_render_pass,
-                self.depth_framebuffer.as_ref().unwrap(),
-                &[ClearValue::Depth(1.0)],
-                true,
-            );
-            cl.execute_secondary(&self.depth_secondary_cls);
-            cl.end_render_pass();
-            t1 = Instant::now();
-            timings.depth_record = (t1 - t0).as_secs_f64();
-
-            let depth_image = self.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-            let depth_pyramid_image = self.depth_pyramid_image.as_ref().unwrap();
-
-            // Build depth pyramid
-            // ------------------------------------------------------------------
-            cl.barrier_image(
-                PipelineStageFlags::ALL_GRAPHICS,
-                PipelineStageFlags::COMPUTE,
-                &[
-                    depth_image
-                        .barrier()
-                        .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
-                        .dst_access_mask(AccessFlags::SHADER_READ)
-                        .layout(ImageLayout::SHADER_READ),
-                    depth_pyramid_image
-                        .barrier()
-                        .dst_access_mask(AccessFlags::SHADER_WRITE)
-                        .old_layout(ImageLayout::UNDEFINED)
-                        .new_layout(ImageLayout::GENERAL),
-                ],
-            );
-
-            cl.bind_pipeline(&self.depth_pyramid_pipeline);
-
-            let mut out_size = depth_pyramid_image.size_2d();
-
-            for i in 0..(depth_pyramid_image.mip_levels() as usize) {
-                cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
-
-                let constants = DepthPyramidConstants {
-                    out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
-                };
-                cl.push_constants(&self.depth_pyramid_signature, &constants);
-
-                cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
-
-                cl.barrier_image(
-                    PipelineStageFlags::COMPUTE,
-                    PipelineStageFlags::COMPUTE,
-                    &[depth_pyramid_image
-                        .barrier()
-                        .src_access_mask(AccessFlags::SHADER_WRITE)
-                        .dst_access_mask(AccessFlags::SHADER_READ)
-                        .old_layout(ImageLayout::GENERAL)
-                        .new_layout(ImageLayout::GENERAL)
-                        .mip_levels(i as u32, 1)],
-                );
-
-                out_size = ((out_size.0 >> 1).max(1), (out_size.1 >> 1).max(1));
-            }
-
-            cl.barrier_image(
-                PipelineStageFlags::COMPUTE,
-                PipelineStageFlags::BOTTOM_OF_PIPE,
-                &[depth_image
-                    .barrier()
-                    .src_access_mask(AccessFlags::SHADER_READ)
-                    .dst_access_mask(Default::default())
-                    .old_layout(ImageLayout::SHADER_READ)
-                    .new_layout(ImageLayout::DEPTH_STENCIL_READ)],
-            );
-
-            // Compute visibilities
-            // ------------------------------------------------------------------
-            cl.copy_buffer_to_device(
-                &self.cull_host_buffer,
-                0,
-                &self.cull_buffer,
-                0,
-                frustum_visible_objects as u64,
-            );
-            cl.fill_buffer(&self.visibility_buffer, 0);
-
-            cl.barrier_buffer(
-                PipelineStageFlags::TRANSFER,
-                PipelineStageFlags::COMPUTE,
-                &[
-                    self.cull_buffer
-                        .barrier()
-                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                        .dst_access_mask(AccessFlags::SHADER_READ),
-                    self.visibility_buffer
-                        .barrier()
-                        .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                        .dst_access_mask(AccessFlags::SHADER_WRITE),
-                ],
-            );
-
-            cl.bind_pipeline(&self.cull_pipeline);
-            cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc, &[]);
-
-            let pyramid_size = depth_pyramid_image.size_2d();
-            let constants = CullConstants {
-                pyramid_size: Vec2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
-                max_pyramid_levels: depth_pyramid_image.mip_levels(),
-                object_count: frustum_visible_objects,
-            };
-            cl.push_constants(&self.cull_signature, &constants);
-
-            cl.dispatch(calc_group_count(frustum_visible_objects), 1, 1);
-
-            cl.barrier_buffer(
-                PipelineStageFlags::COMPUTE,
-                PipelineStageFlags::TRANSFER,
-                &[self
-                    .visibility_buffer
-                    .barrier()
-                    .src_access_mask(AccessFlags::SHADER_WRITE)
-                    .dst_access_mask(AccessFlags::TRANSFER_READ)],
-            );
-
-            cl.copy_buffer_to_host(
-                &self.visibility_buffer,
-                0,
-                &self.visibility_host_buffer,
-                0,
-                object_count as u64,
-            );
-
-            cl.end().unwrap();
-        }
-        {
-            let submit = &mut self.staging_submit;
-            unsafe { graphics_queue.submit(submit).unwrap() };
-            submit.wait().unwrap();
-        }
+        self.depth_pass();
 
         let t2 = Instant::now();
-        timings.depth_exec = (t2 - t1).as_secs_f64();
+        timings.depth_pass = (t2 - t1).as_secs_f64();
 
         self.record_g_cmd_lists();
+
         let t3 = Instant::now();
-        timings.color_record = (t3 - t2).as_secs_f64();
+        // FIXME
+        // timings.color_ex = (t3 - t2).as_secs_f64();
 
         let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
         unsafe {
@@ -1522,36 +1622,46 @@ impl Renderer {
                 )],
             )
         };
+
         let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
         {
-            // Note: Do not render anything in final cl except copying some image into swapchain image.
-            // Uniform/vertex  may be being updated at this moment.
             let mut cl = self.final_cl[0].lock();
             cl.begin(true).unwrap();
 
-            // let _translucency_head_image = self.translucency_head_image.as_ref().unwrap();
+            let translucency_depths_image = self.translucency_depths_image.as_ref().unwrap();
+            let translucency_colors_image = self.translucency_colors_image.as_ref().unwrap();
 
-            // TODO: translucency
-            /*cl.barrier_image(
+            cl.barrier_image(
                 PipelineStageFlags::TOP_OF_PIPE,
                 PipelineStageFlags::TRANSFER,
-                &[translucency_head_image.barrier_queue(
-                    AccessFlags::default(),
-                    AccessFlags::TRANSFER_WRITE,
-                    ImageLayout::UNDEFINED,
-                    ImageLayout::GENERAL,
-                    graphics_queue,
-                    graphics_queue,
-                )],
+                &[translucency_colors_image
+                    .barrier()
+                    .dst_access_mask(AccessFlags::TRANSFER_WRITE)
+                    .old_layout(ImageLayout::UNDEFINED)
+                    .new_layout(ImageLayout::GENERAL)],
             );
+            cl.fill_buffer(translucency_depths_image, u32::MAX);
             cl.clear_image(
-                translucency_head_image,
+                translucency_colors_image,
                 ImageLayout::GENERAL,
-                ClearValue::ColorU32([0xffffffff; 4]),
-            );*/
+                ClearValue::ColorU32([0; 4]),
+            );
+            cl.barrier_buffer_image(
+                PipelineStageFlags::TRANSFER,
+                PipelineStageFlags::PIXEL_SHADER,
+                &[translucency_depths_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_WRITE | AccessFlags::SHADER_READ)],
+                &[translucency_colors_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_WRITE | AccessFlags::SHADER_READ)
+                    .layout(ImageLayout::GENERAL)],
+            );
 
             cl.begin_render_pass(
                 &self.g_render_pass,
@@ -1566,8 +1676,16 @@ impl Renderer {
                 ],
                 true,
             );
-            cl.execute_secondary(&self.g_secondary_cls);
+            cl.execute_secondary(&self.g_secondary_cls_solid);
+            cl.end_render_pass();
 
+            cl.begin_render_pass(
+                &self.translucency_render_pass,
+                self.translucency_framebuffer.as_ref().unwrap(),
+                &[],
+                true,
+            );
+            cl.execute_secondary(&self.g_secondary_cls_translucent);
             cl.end_render_pass();
 
             cl.barrier_image(
@@ -1651,7 +1769,7 @@ impl Renderer {
         }
 
         let t3 = Instant::now();
-        timings.color_exec = (t3 - t2).as_secs_f64();
+        timings.color_pass = (t3 - t2).as_secs_f64();
 
         let total_t1 = Instant::now();
         timings.total = (total_t1 - total_t0).as_secs_f64();
@@ -1907,25 +2025,47 @@ impl Renderer {
                 .unwrap(),
         );
 
-        // self.translucency_head_image = Some(
-        //     self.device
-        //         .create_image_2d(Format::R32_UINT, 1, 1.0, ImageUsageFlags::STORAGE, new_size)
-        //         .unwrap(),
-        // );
+        // Note: use buffer instead of image because Metal (on macs) does not support atomic ops on images
+        self.translucency_depths_image = Some(
+            self.device
+                .create_device_buffer_named(
+                    BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_DST,
+                    mem::size_of::<u32>() as u64,
+                    (new_size.0 * new_size.1) as u64,
+                    "translucency_depths",
+                )
+                .unwrap(),
+        );
+        self.translucency_colors_image = Some(
+            self.device
+                .create_image_2d_array_named(
+                    Format::RGBA8_UNORM,
+                    1,
+                    ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
+                    (new_size.0, new_size.1, TRANSLUCENCY_N_DEPTH_LAYERS),
+                    "translucency_colors",
+                )
+                .unwrap(),
+        );
+        self.translucency_framebuffer = Some(
+            self.translucency_render_pass
+                .create_framebuffer(
+                    new_size,
+                    &[(0, ImageMod::OverrideImage(Arc::clone(&depth_image)))],
+                )
+                .unwrap(),
+        );
 
-        // self.translucency_texel_image = Some(
-        //     self.device
-        //         .create_image_3d(
-        //             Format::RG32_UINT, // color & depth
-        //             ImageUsageFlags::STORAGE,
-        //             (
-        //                 new_size.0,
-        //                 new_size.1,
-        //                 self.settings.translucency_max_depth as u32,
-        //             ),
-        //         )
-        //         .unwrap(),
-        // );
+        unsafe {
+            self.device.update_descriptor_set(
+                self.g_per_frame_in,
+                &[self.g_per_frame_pool.create_binding(
+                    5,
+                    0,
+                    BindingRes::Buffer(self.translucency_depths_image.as_ref().unwrap().handle()),
+                )],
+            );
+        }
     }
 
     fn create_main_framebuffers(&mut self) {

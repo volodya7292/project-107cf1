@@ -802,9 +802,9 @@ impl CmdList {
         let range = vk::ImageSubresourceRange {
             aspect_mask: image.wrapper.aspect,
             base_mip_level: 0,
-            level_count: 1,
+            level_count: vk::REMAINING_MIP_LEVELS,
             base_array_layer: 0,
-            layer_count: 1,
+            layer_count: vk::REMAINING_ARRAY_LAYERS,
         };
         let clear_value = vk_clear_value(&color);
 

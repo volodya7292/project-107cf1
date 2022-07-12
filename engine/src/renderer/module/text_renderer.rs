@@ -214,6 +214,7 @@ impl TextRenderer {
         let mat_pipeline = renderer.register_material_pipeline::<ObjectUniformInfo>(
             &[vertex_shader, pixel_shader],
             PrimitiveTopology::TRIANGLE_STRIP,
+            true,
         );
         let pipe = renderer.get_material_pipeline_mut(mat_pipeline).unwrap();
 

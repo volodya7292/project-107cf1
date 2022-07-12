@@ -10,11 +10,11 @@ use std::sync::Arc;
 #[derive(Copy, Clone)]
 pub enum LoadStore {
     None,
-    InitSave,
+    InitLoad,
     InitClear,
     FinalSave,
     InitClearFinalSave,
-    InitSaveFinalSave,
+    InitLoadFinalSave,
 }
 
 #[derive(Copy, Clone)]

@@ -349,7 +349,10 @@ impl Device {
         mut size: (u32, u32, u32),
         name: &str,
     ) -> Result<Arc<Image>, DeviceError> {
-        if !IMAGE_FORMATS.contains(&format) && !BC_IMAGE_FORMATS.contains(&format) && format != DEPTH_FORMAT {
+        if !IMAGE_FORMATS.contains_key(&format)
+            && !BC_IMAGE_FORMATS.contains(&format)
+            && format != DEPTH_FORMAT
+        {
             panic!("Image format {:?} is not supported!", format);
         }
 
@@ -916,7 +919,7 @@ impl Device {
                         native_info.load_op = vk::AttachmentLoadOp::DONT_CARE;
                         native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
                     }
-                    LoadStore::InitSave => {
+                    LoadStore::InitLoad => {
                         native_info.load_op = vk::AttachmentLoadOp::LOAD;
                         native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
                     }
@@ -932,7 +935,7 @@ impl Device {
                         native_info.load_op = vk::AttachmentLoadOp::CLEAR;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }
-                    LoadStore::InitSaveFinalSave => {
+                    LoadStore::InitLoadFinalSave => {
                         native_info.load_op = vk::AttachmentLoadOp::LOAD;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }

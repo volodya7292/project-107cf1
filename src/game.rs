@@ -132,7 +132,6 @@ impl Application for Game {
             prefer_triple_buffering: false,
             textures_mipmaps: true,
             texture_quality: renderer::TextureQuality::STANDARD,
-            translucency_max_depth: renderer::TranslucencyMaxDepth::LOW,
             textures_max_anisotropy: 1.0,
         });
 

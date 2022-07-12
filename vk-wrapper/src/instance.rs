@@ -190,6 +190,7 @@ impl Instance {
                 enabled_features,
                 sampler_anisotropy,
                 independent_blend,
+                fragment_stores_and_atomics,
                 shader_uniform_buffer_array_dynamic_indexing,
                 shader_sampled_image_array_dynamic_indexing,
                 shader_storage_buffer_array_dynamic_indexing,
@@ -218,23 +219,16 @@ impl Instance {
             // ------------------------------------------------------------------------------------
 
             // Buffer formats
-            for (format, usage_bits) in format::BUFFER_FORMATS.iter() {
+            for (format, feature_bits) in format::BUFFER_FORMATS.iter() {
                 let props = unsafe {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)
                 };
-                if !props.buffer_features.intersects(*usage_bits) {
+                if !props.buffer_features.intersects(*feature_bits) {
                     continue 'g;
                 }
             }
 
-            let image_format_features = vk::FormatFeatureFlags::COLOR_ATTACHMENT
-                | vk::FormatFeatureFlags::SAMPLED_IMAGE
-                | vk::FormatFeatureFlags::STORAGE_IMAGE
-                | vk::FormatFeatureFlags::BLIT_SRC
-                | vk::FormatFeatureFlags::BLIT_DST
-                | vk::FormatFeatureFlags::TRANSFER_SRC
-                | vk::FormatFeatureFlags::TRANSFER_DST;
             let depth_format_features = vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
                 | vk::FormatFeatureFlags::SAMPLED_IMAGE
                 | vk::FormatFeatureFlags::BLIT_SRC
@@ -243,12 +237,12 @@ impl Instance {
                 | vk::FormatFeatureFlags::TRANSFER_DST;
 
             // Image formats
-            for format in format::IMAGE_FORMATS.iter() {
+            for (format, feature_bits) in format::IMAGE_FORMATS.iter() {
                 let props = unsafe {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)
                 };
-                if !props.optimal_tiling_features.contains(image_format_features) {
+                if !props.optimal_tiling_features.contains(*feature_bits) {
                     continue 'g;
                 }
             }

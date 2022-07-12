@@ -1,5 +1,4 @@
 use ahash::AHashMap;
-use ahash::AHashSet;
 use ash::vk;
 use ash::vk::FormatFeatureFlags;
 use lazy_static::lazy_static;
@@ -33,6 +32,13 @@ pub const BC_IMAGE_FORMATS: [Format; 3] = [Format::BC3_RGBA_UNORM, Format::BC5_R
 pub const DEPTH_FORMAT: Format = Format::D32_FLOAT;
 
 lazy_static! {
+    pub static ref DEFAULT_IMAGE_FEATURES: FormatFeatureFlags = FormatFeatureFlags::COLOR_ATTACHMENT
+        | FormatFeatureFlags::SAMPLED_IMAGE
+        | FormatFeatureFlags::STORAGE_IMAGE
+        | FormatFeatureFlags::BLIT_SRC
+        | FormatFeatureFlags::BLIT_DST
+        | FormatFeatureFlags::TRANSFER_SRC
+        | FormatFeatureFlags::TRANSFER_DST;
     pub static ref BUFFER_FORMATS: AHashMap<Format, FormatFeatureFlags> = [
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::R32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
@@ -43,12 +49,12 @@ lazy_static! {
     ]
     .into_iter()
     .collect();
-    pub static ref IMAGE_FORMATS: AHashSet<Format> = [
-        Format::R32_UINT,
-        Format::R32_FLOAT,
-        Format::RGBA8_UNORM,
-        Format::RG16_UNORM,
-        Format::RG32_UINT
+    pub static ref IMAGE_FORMATS: AHashMap<Format, FormatFeatureFlags> = [
+        (Format::R32_UINT, *DEFAULT_IMAGE_FEATURES),
+        (Format::R32_FLOAT, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
+        (Format::RG16_UNORM, *DEFAULT_IMAGE_FEATURES),
+        (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES)
     ]
     .into_iter()
     .collect();

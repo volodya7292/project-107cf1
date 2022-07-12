@@ -52,6 +52,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
         renderer.register_material_pipeline::<BasicUniformInfo>(
             &[vertex, pixel],
             PrimitiveTopology::TRIANGLE_LIST,
+            true,
         )
     };
 
