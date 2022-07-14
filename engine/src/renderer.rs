@@ -1666,20 +1666,18 @@ impl Renderer {
 
         cl.barrier_image(
             PipelineStageFlags::ALL_GRAPHICS,
-            PipelineStageFlags::ALL_GRAPHICS,
+            PipelineStageFlags::PIXEL_SHADER,
             &[
                 albedo
                     .barrier()
-                    .src_access_mask(AccessFlags::MEMORY_WRITE)
-                    .dst_access_mask(AccessFlags::MEMORY_READ)
-                    .old_layout(ImageLayout::SHADER_READ)
-                    .new_layout(ImageLayout::SHADER_READ),
-                // translucency_colors_image
-                //     .barrier()
-                //     .src_access_mask(AccessFlags::SHADER_WRITE)
-                //     .dst_access_mask(AccessFlags::SHADER_READ)
-                //     .old_layout(ImageLayout::GENERAL)
-                //     .new_layout(ImageLayout::GENERAL),
+                    .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .layout(ImageLayout::SHADER_READ),
+                translucency_colors_image
+                    .barrier()
+                    .src_access_mask(AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(AccessFlags::SHADER_READ)
+                    .layout(ImageLayout::GENERAL),
             ],
         );
 
