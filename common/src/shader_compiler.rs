@@ -143,6 +143,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                     .arg("--target-env=vulkan1.1")
                     .arg("--skip-validation")
                     .arg("--preserve-bindings")
+                    .arg("--scalar-block-layout")
                     .arg("-O");
 
                 let output = cmd.output().unwrap();

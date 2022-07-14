@@ -1,13 +1,11 @@
 #version 450
-
-#define ALPHA_BIAS 4.0 / 255.0
+#extension GL_GOOGLE_include_directive : require
 
 layout(early_fragment_tests) in;
 
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outSpecular;
-layout(location = 2) out vec4 outEmission;
-layout(location = 3) out vec4 outNormal;
+#define FN_TEXTURE_ATLAS
+#define ENGINE_PIXEL_SHADER
+#include "../../engine/shaders/common.glsl"
 
 layout(set = 2, binding = 1) uniform sampler2DArray msdfArray;
 
@@ -28,20 +26,12 @@ float screenPxRange() {
     return max(0.5 * dot(unitRange, screenTexSize), 1.0);
 }
 
-void writeOutputColor(vec4 albedo) {
-    if (albedo.a < ALPHA_BIAS) {
-        discard;
-    } else {
-        outColor = albedo;
-    }
-}
-
 void main() {
     vec3 msd = texture(msdfArray, vec3(vs_in.texCoord, vs_in.glyphIndex)).rgb;
     float sd = median(msd.r, msd.g, msd.b);
     float screenPxDistance = screenPxRange() * (sd - 0.5);
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
 
-    writeOutputColor(vec4(vs_in.color.rgb, vs_in.color.a * opacity));
+    writeOutputAlbedo(vec4(vs_in.color.rgb, vs_in.color.a * opacity));
 //    outColor = vec4(msd, 1.0);
 }

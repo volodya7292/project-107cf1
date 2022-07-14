@@ -1,6 +1,9 @@
 #extension GL_EXT_shader_8bit_storage : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_scalar_block_layout : require
 
+#define ALPHA_BIAS 4.0 / 255.0
+#define OIT_N_CLOSEST_LAYERS 4
 #define THREAD_GROUP_WIDTH 8
 #define THREAD_GROUP_HEIGHT 8
 #define THREAD_GROUP_1D_WIDTH (THREAD_GROUP_WIDTH * THREAD_GROUP_HEIGHT)
@@ -14,7 +17,6 @@ struct Material {
     uint diffuse_tex_id;
     uint specular_tex_id;
     uint normal_tex_id;
-    uint _pad;
     // if texture_id == -1 then the parameters below are used
     vec4 diffuse; // .a - opacity/translucency
     vec4 specular; // .a - roughness
@@ -43,15 +45,40 @@ struct Camera {
     mat4 proj_view;
     float z_near;
     float fovy;
-    vec2 _pad;
 };
 
-struct PerFrameInfo {
+struct FrameInfo {
     Camera camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
+    uvec2 frameSize;
 };
 
-#ifdef FN_TEXTURE_ATLAS
+
+#ifdef ENGINE_PIXEL_SHADER
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outSpecular;
+layout(location = 2) out vec4 outEmission;
+layout(location = 3) out vec4 outNormal;
+
+layout(set = 0, binding = 0, scalar) uniform FrameData {
+    FrameInfo info;
+};
+layout(set = 0, binding = 1, scalar) readonly buffer Materials {
+    Material materials[];
+};
+layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
+layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
+layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
+
+layout(set = 0, binding = 5, std430) coherent buffer TranslucentDepthsArray {
+    uint depthsArray[];
+};
+layout(set = 0, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
+
+layout(push_constant) uniform PushConstants {
+    uint isTranslucentPass;
+};
+
 /// tile_width: with of single tile in pixels
 /// tex_coord: regular texture coordinates
 vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile_index) {
@@ -78,7 +105,44 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
 
     return textureLod(atlas, tex_coord, lod);
 }
-#endif
+
+void writeOutputAlbedo(vec4 albedo) {
+    if (isTranslucentPass == 0 || albedo.a < ALPHA_BIAS) {
+        // Do not render translucency, this is solid colors pass
+        outAlbedo = albedo;
+        return;
+    }
+
+    uint currDepth = floatBitsToUint(gl_FragCoord.z);
+    ivec2 coord = ivec2(gl_FragCoord.xy);
+    uint coordIdx = info.frameSize.x * coord.y + coord.x;
+    uint sliceSize = info.frameSize.x * info.frameSize.y;
+
+    if (currDepth > depthsArray[coordIdx + (OIT_N_CLOSEST_LAYERS - 1) * sliceSize]) {
+        // The fragment falls behind closest depths => perform tail-blending
+        outAlbedo = albedo;
+        return;
+    }
+
+    uint start = 0;
+    uint end = OIT_N_CLOSEST_LAYERS - 1;
+
+    while (start < end) {
+        uint mid = (start + end) / 2;
+        uint depth = depthsArray[coordIdx + mid * sliceSize];
+        if (currDepth <= depth) {
+            end = mid;
+        } else {
+            start = mid + 1;
+        }
+    }
+
+    // Insert albedo at corresponding index
+    imageStore(translucencyColorsArray, ivec3(coord, start), albedo);
+    outAlbedo = vec4(0);
+}
+
+#endif // ENGINE_PIXEL_IO
 
 
 // R2 low discrepancy sequence

@@ -1,8 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "../../engine/shaders/common.glsl"
 
-#define N_LAYERS 4
-
-layout(std430, set = 0, binding = 5) coherent buffer DepthsArray {
+layout(set = 0, binding = 5, std430) coherent buffer DepthsArray {
     uint depthsArray[];
 };
 
@@ -19,13 +19,13 @@ void main() {
     uint sliceSize = frameSize.x * frameSize.y;
 
     // Early depth test
-    uint lastDepth = depthsArray[coordIdx + (N_LAYERS - 1) * sliceSize];
+    uint lastDepth = depthsArray[coordIdx + (OIT_N_CLOSEST_LAYERS - 1) * sliceSize];
     if (currDepth > lastDepth) {
         return;
     }
 
-    // Find N_LAYERS minimum depths
-    for (uint i = 0; i < N_LAYERS; i++) {
+    // Find OIT_N_CLOSEST_LAYERS minimum depths
+    for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
         uint prev = atomicMin(depthsArray[coordIdx + i * sliceSize], currDepth);
         if (prev == 0xFFFFFFFFu || prev == currDepth) {
             break;

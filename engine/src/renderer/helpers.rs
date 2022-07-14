@@ -1,8 +1,8 @@
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
     BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_DEPTH_READ,
-    PIPELINE_DEPTH_READ_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
+    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
+    PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::resource_file::ResourceRef;
 use crate::utils::UInt;
@@ -87,6 +87,7 @@ impl Renderer {
                 .find(|v| v.stage() == ShaderStageFlags::VERTEX)
                 .unwrap(),
         );
+
         let depth_signature = self
             .device
             .create_pipeline_signature(&[Arc::clone(&vertex_shader)], &combined_bindings)
@@ -118,20 +119,10 @@ impl Renderer {
             custom_per_frame_uniform_desc: None,
         };
 
+        let albedo_attachment_id = 0;
+
         pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ,
-            &PipelineConfig {
-                render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull_back_faces,
-                blend_attachments: &[],
-                depth_test: true,
-                depth_write: false,
-            },
-        );
-        pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_READ_WRITE,
+            PIPELINE_DEPTH_WRITE,
             &PipelineConfig {
                 render_pass: &self.depth_render_pass,
                 signature: &depth_signature,
@@ -145,7 +136,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_TRANSLUCENCY_DEPTHS,
             &PipelineConfig {
-                render_pass: &self.translucency_render_pass,
+                render_pass: &self.depth_render_pass,
                 signature: &translucency_depth_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -162,6 +153,18 @@ impl Renderer {
                 subpass_index: 0,
                 cull_back_faces,
                 blend_attachments: &[],
+                depth_test: true,
+                depth_write: false,
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_COLOR_WITH_BLENDING,
+            &PipelineConfig {
+                render_pass: &self.g_render_pass,
+                signature: &main_signature,
+                subpass_index: 0,
+                cull_back_faces,
+                blend_attachments: &[albedo_attachment_id],
                 depth_test: true,
                 depth_write: false,
             },

@@ -21,6 +21,7 @@ pub struct Adapter {
     pub(crate) _props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
     pub(crate) features: vk::PhysicalDeviceFeatures,
+    pub(crate) scalar_features: vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT,
     pub(crate) desc_features: vk::PhysicalDeviceDescriptorIndexingFeaturesEXT,
     pub(crate) ts_features: vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR,
     pub(crate) storage8bit_features: vk::PhysicalDevice8BitStorageFeaturesKHR,
@@ -57,6 +58,7 @@ impl Adapter {
             queue_infos.push(queue_info.build());
         }
 
+        let mut scalar_features = self.scalar_features;
         let mut desc_features = self.desc_features;
         let mut ts_features = self.ts_features;
         let mut storage8bit_features = self.storage8bit_features;
@@ -72,7 +74,8 @@ impl Adapter {
             .push_next(&mut desc_features)
             .push_next(&mut ts_features)
             .push_next(&mut storage8bit_features)
-            .push_next(&mut shader_float16_int8_features);
+            .push_next(&mut shader_float16_int8_features)
+            .push_next(&mut scalar_features);
 
         let native_device = unsafe {
             self.instance

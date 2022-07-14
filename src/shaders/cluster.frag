@@ -1,25 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-#define FN_TEXTURE_ATLAS
-#include "../../engine/shaders/common.glsl"
-
 layout(early_fragment_tests) in;
 
-layout(location = 0) out vec4 outDiffuse;
-layout(location = 1) out vec4 outSpecular;
-layout(location = 2) out vec4 outEmission;
-layout(location = 3) out vec4 outNormal;
-
-layout(set = 0, binding = 0) uniform per_frame_data {
-    PerFrameInfo info;
-};
-layout(set = 0, binding = 1, std430) readonly buffer Materials {
-    Material materials[];
-};
-layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
-layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
-layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
+#define FN_TEXTURE_ATLAS
+#define ENGINE_PIXEL_SHADER
+#include "../../engine/shaders/common.glsl"
 
 const vec3 ambient_light = vec3(0.7);
 
@@ -143,7 +129,7 @@ void main() {
     // diffuse = vs_in.surface_normal;
 
     // outDiffuse = vec4(color, 1);
-    outDiffuse = vec4(diffuse.rgb, 1);
+    writeOutputAlbedo(vec4(diffuse.rgb, 1));
     outSpecular = vec4(0.0);
     outEmission = vec4(0.0);
     outNormal = vec4(0.0);

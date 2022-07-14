@@ -15,8 +15,8 @@ layout(location = 0) out Output {
     float pxRange;
 } vs_out;
 
-layout(set = 0, binding = 0) uniform FrameData {
-    PerFrameInfo info;
+layout(set = 0, binding = 0, scalar) uniform FrameData {
+    FrameInfo info;
 };
 layout(set = 1, binding = 0) uniform ObjectData {
     mat4 model;
@@ -24,10 +24,6 @@ layout(set = 1, binding = 0) uniform ObjectData {
 layout(set = 2, binding = 0) uniform TextFrameData {
     float pxRange;
 };
-
-layout(push_constant) uniform PushConstants {
-    mat4 transform;
-} params;
 
 void main() {
     // Use inGlyphSize to clip unnecessary quad space thus improving performance

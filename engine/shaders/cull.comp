@@ -5,18 +5,17 @@
 struct CullObject {
     vec4 sphere;
     uint id;
-    uint _pad[3];
 };
 
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 layout(binding = 0) uniform sampler2D depthPyramid;
 
-layout(binding = 1) uniform per_frame_data {
-    PerFrameInfo info;
+layout(binding = 1, scalar) uniform per_frame_data {
+    FrameInfo info;
 };
 
-layout(std430, binding = 2) readonly buffer ObjectBuffer {
+layout(binding = 2, scalar) readonly buffer ObjectBuffer {
     CullObject objects[];
 };
 
