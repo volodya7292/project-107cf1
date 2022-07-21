@@ -108,6 +108,7 @@ impl MainRegistry {
         // Structures
         // ----------------------------------------------------------------------------------------------------
         let structure_world = reg.register_structure(Structure::new(
+            0,
             U64Vec3::from_element(overworld::MAX_WORLD_RADIUS as u64 * 2),
             12,
             625,

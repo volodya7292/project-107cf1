@@ -2,7 +2,7 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use std::marker::PhantomData;
 
-pub struct ValueNoise<T> {
+pub struct WhiteNoise<T> {
     main_state: u64,
     _ty: PhantomData<T>,
 }
@@ -19,14 +19,14 @@ impl State {
         self
     }
 
-    pub fn rng(&self) -> impl rand::Rng {
+    pub fn rng(&self) -> impl Rng {
         Xoshiro256PlusPlus::seed_from_u64(self.0)
     }
 }
 
-impl<T> ValueNoise<T> {
-    pub fn new(seed: u64) -> ValueNoise<T> {
-        ValueNoise {
+impl<T> WhiteNoise<T> {
+    pub fn new(seed: u64) -> WhiteNoise<T> {
+        WhiteNoise {
             main_state: Xoshiro256PlusPlus::seed_from_u64(seed).gen::<u64>(),
             _ty: Default::default(),
         }

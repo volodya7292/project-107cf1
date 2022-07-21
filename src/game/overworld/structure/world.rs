@@ -2,7 +2,7 @@ use crate::game::overworld;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::Overworld;
 use engine::utils::noise::ParamNoise;
-use engine::utils::value_noise::ValueNoise;
+use engine::utils::white_noise::WhiteNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
 use noise;
@@ -19,7 +19,7 @@ impl World {
         World {
             seed,
             grad_noise: noise::SuperSimplex::new().set_seed((seed % (u32::MAX as u64)) as u32),
-            size: overworld::sample_world_size(&mut ValueNoise::<u64>::new(seed).state().rng()),
+            size: overworld::sample_world_size(&mut WhiteNoise::<u64>::new(seed).state().rng()),
         }
     }
 

@@ -28,10 +28,6 @@ lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new(&Default::default());
 }
 
-pub fn size(level: u32) -> u64 {
-    SIZE as u64 * 2_u64.pow(level)
-}
-
 fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     let p = pos.map(|v| (v > 0) as usize + (v == SIZE - 1) as usize);
     p.x * 9 + p.y * 3 + p.z
@@ -517,7 +513,7 @@ impl Cluster {
             let curr_color = curr_level.components();
 
             for i in 0..6 {
-                let dir = Facing::from_u8(i).direction();
+                let dir = Facing::DIRECTIONS[i];
                 let rel_pos = glm::convert::<TVec3<usize>, I32Vec3>(curr_pos) + dir;
 
                 if rel_pos.x < 1

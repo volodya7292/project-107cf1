@@ -4,14 +4,15 @@ pub mod slice_split;
 pub mod slot_vec;
 pub mod thread_pool;
 pub mod unsafe_slice;
-pub mod value_noise;
+pub mod white_noise;
 
 use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra_glm::Vec3;
 pub use slice_split::SliceSplitImpl;
+use std::slice;
 use std::sync::atomic;
-use std::thread;
 use std::time::{Duration, Instant};
+use std::{mem, thread};
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
@@ -35,14 +36,17 @@ pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
-pub const fn make_mul_of(n: u32, m: u32) -> u32 {
-    ((n + m - 1) / m) * m
-}
-
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {
+    // TODO: remove when std log2 is stable
     fn log2(self) -> Self;
+    // TODO: remove when std log is stable
+    fn log(self, base: Self) -> Self;
+    // TODO: remove when std div_ceil is stable
+    fn div_ceil(self, other: Self) -> Self;
+    // TODO: remove when std next_multiple_of is stable
+    fn next_multiple_of(self, m: Self) -> Self;
 }
 
 pub trait Int {}
@@ -50,9 +54,34 @@ pub trait Int {}
 macro_rules! uint_impl {
     ($($t: ty)*) => ($(
         impl UInt for $t {
-            // TODO: remove when std log2 is stable
             fn log2(self) -> Self {
                 <$t>::BITS as $t - self.leading_zeros() as $t - 1
+            }
+
+            fn log(self, base: Self) -> Self {
+                let mut n = 0;
+                let mut r = self;
+
+                // Optimization for 128 bit wide integers.
+                if Self::BITS == 128 {
+                    let b = Self::log2(self) / (Self::log2(base) + 1);
+                    n += b;
+                    r /= base.pow(b as u32);
+                }
+
+                while r >= base {
+                    r /= base;
+                    n += 1;
+                }
+                n
+            }
+
+            fn div_ceil(self, other: Self) -> Self {
+                (self + other - 1) / other
+            }
+
+            fn next_multiple_of(self, m: Self) -> Self {
+                ((self + m - 1) / m) * m
             }
         }
     )*)
@@ -166,6 +195,10 @@ pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
     while Instant::now() < end_t {
         thread::sleep(single_sleep_period);
     }
+}
+
+pub unsafe fn slice_as_bytes<T>(slice: &[T]) -> &[u8] {
+    slice::from_raw_parts(slice.as_ptr() as *const u8, mem::size_of::<T>() * slice.len())
 }
 
 #[macro_export]
