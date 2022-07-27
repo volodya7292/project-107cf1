@@ -97,13 +97,15 @@ impl Game {
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool) {
         self.cursor_grab = enabled;
-        window
-            .set_cursor_grab(if self.cursor_grab {
-                CursorGrabMode::Locked
-            } else {
-                CursorGrabMode::None
-            })
-            .unwrap();
+
+        if self.cursor_grab {
+            window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .unwrap();
+        } else {
+            window.set_cursor_grab(CursorGrabMode::None).unwrap();
+        }
     }
 }
 
