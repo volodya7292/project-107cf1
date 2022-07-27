@@ -1,7 +1,7 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::Cluster;
-use engine::utils::noise::ParamNoise;
+use engine::utils::noise::HybridNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use noise::Seedable;
@@ -9,7 +9,7 @@ use noise::Seedable;
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 
 pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos: I64Vec3) {
-    let noise = noise::SuperSimplex::new().set_seed(0);
+    let noise = HybridNoise::<3, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
 
     // NoiseBuilder::cellular2_2d_offset().generate().
     // let noise = NoiseBuilder::gradient_3d_offset(
@@ -27,7 +27,7 @@ pub fn generate_cluster(cluster: &mut Cluster, main_registry: &MainRegistry, pos
     let block_empty = main_registry.block_empty();
     let block_default = main_registry.block_default();
 
-    let sample = |point: DVec3, freq: f64| -> f64 { noise.sample(point, freq, 1.0, 0.5) };
+    let sample = |point: DVec3, freq: f64| -> f64 { noise.sample(point, freq, 0.5) };
 
     for x in 0..cluster::SIZE {
         for y in 0..cluster::SIZE {

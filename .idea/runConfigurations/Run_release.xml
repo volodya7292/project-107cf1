@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run project-107cf1" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package project-107cf1 --bin project-107cf1" />
+  <configuration default="false" name="Run release" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package project-107cf1 --bin project-107cf1 --release" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$/work_dir" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="false" />

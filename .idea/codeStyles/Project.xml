@@ -1,9 +1,6 @@
 <component name="ProjectCodeStyleConfiguration">
   <code_scheme name="Project" version="173">
     <option name="LINE_SEPARATOR" value="&#10;" />
-    <RsCodeStyleSettings>
-      <option name="SPACE_AROUND_ASSOC_TYPE_BINDING" value="true" />
-    </RsCodeStyleSettings>
     <codeStyleSettings language="Rust">
       <option name="RIGHT_MARGIN" value="120" />
     </codeStyleSettings>

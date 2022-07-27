@@ -1,5 +1,6 @@
 #include "msdfgen.h"
 #include <cstdint>
+#include <memory>
 
 struct Vector2 {
     double x;

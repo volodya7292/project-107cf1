@@ -3,6 +3,8 @@ use std::path::Path;
 fn main() {
     println!("cargo:rustc-link-lib=msdfgen");
 
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();
+
     let files: Vec<_> = Path::new("cxx/core")
         .read_dir()
         .unwrap()
@@ -10,10 +12,12 @@ fn main() {
         .filter(|v| v.extension().unwrap() == "cpp")
         .collect();
 
-    cxx_build::bridge("src/lib.rs")
-        .files(files)
-        .include("cxx")
-        .flag("-w")
-        .flag("-std=c++17")
-        .compile("msdfgen");
+    let mut build = cxx_build::bridge("src/lib.rs");
+    build.files(files).include("cxx").flag("-w").warnings(false);
+
+    if target_env != "msvc" {
+        build.flag("-std=c++17");
+    }
+
+    build.compile("msdfgen");
 }

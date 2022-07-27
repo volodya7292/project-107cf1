@@ -21,7 +21,7 @@ use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::structure::world::World;
-use crate::game::overworld::structure::Structure;
+use crate::game::overworld::structure::{Structure, StructuresIter};
 use bit_vec::BitVec;
 use clusters_access_cache::ClustersAccessCache;
 use engine::utils::white_noise::WhiteNoise;
@@ -36,11 +36,8 @@ use std::sync::Arc;
 
 // TODO Main world - 'The Origin'
 
-const MIN_WORLD_RADIUS: u64 = 2_048;
-pub const MAX_WORLD_RADIUS: u64 = 32_000_000;
 // const MIN_DIST_BETWEEN_WORLDS: u64 = 400_000_000;
 // const MAX_DIST_BETWEEN_WORLDS: u64 = 40_000_000_000;
-pub const LOD_LEVELS: usize = 24;
 
 pub const CLUSTER_STATE_INITIAL: u8 = 0;
 pub const CLUSTER_STATE_LOADING: u8 = 1;
@@ -49,14 +46,6 @@ pub const CLUSTER_STATE_LOADED: u8 = 2;
 pub const CLUSTER_STATE_DISCARDED: u8 = 3;
 /// The cluster is invisible relative to the camera and is offloaded to reduce memory usage
 pub const CLUSTER_STATE_OFFLOADED_INVISIBLE: u8 = 4;
-
-fn sample_world_size(rng: &mut impl Rng) -> u64 {
-    const AVG_R: u64 = (MIN_WORLD_RADIUS + MAX_WORLD_RADIUS) / 2;
-    const R_HALF_DIST: f64 = ((MAX_WORLD_RADIUS - MIN_WORLD_RADIUS) / 2) as f64;
-
-    let s: f64 = rng.sample(rand_distr::StandardNormal);
-    AVG_R + (s / 3.0 * R_HALF_DIST).clamp(-R_HALF_DIST, R_HALF_DIST) as u64
-}
 
 /// Returns cluster-local block position from global position
 #[inline]
@@ -164,17 +153,19 @@ impl Overworld {
         (center_pos, present)
     }
 
-    /// Find the nearest structure position to the `start_cluster_pos` position.
+    /// Find the nearest structure positions to the `start_cluster_pos` position.  
+    /// Returned positions are in blocks.
     ///
+    /// `structure` is the structure to search for.
     /// `start_cluster_pos` is the starting cluster position.  
     /// `max_search_radius` is the radius in gen-octants of search domain.
     /// Gen-octant is of size `structure.avg_spacing` clusters.
-    pub fn find_structure_pos(
-        &self,
-        structure: &Structure,
+    pub fn find_structure_pos<'a>(
+        &'a self,
+        structure: &'a Structure,
         start_cluster_pos: I64Vec3,
         max_search_radius: u32,
-    ) -> Option<I64Vec3> {
+    ) -> StructuresIter<'a> {
         let diam = (max_search_radius * 2) as i64;
         let volume = diam.pow(3) as usize;
         let clusters_per_octant = structure.avg_spacing() as i64;
@@ -186,39 +177,14 @@ impl Overworld {
 
         queue.push_back(start_pos);
 
-        while let Some(curr_pos) = queue.pop_front() {
-            for i in 0..6 {
-                let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
-                let next_pos = curr_pos + dir;
-
-                let rel_pos = (curr_pos - start_cluster_pos).add_scalar(max_search_radius as i64);
-                if rel_pos.x < 0
-                    || rel_pos.y < 0
-                    || rel_pos.z < 0
-                    || rel_pos.x >= diam
-                    || rel_pos.y >= diam
-                    || rel_pos.z >= diam
-                {
-                    continue;
-                }
-
-                let idx_1d = (rel_pos.x * diam * diam + rel_pos.y * diam + rel_pos.x) as usize;
-                if traversed_nodes.get(idx_1d).unwrap() {
-                    continue;
-                }
-
-                let pos_in_clusters = next_pos * clusters_per_octant;
-                let (result, success) = self.gen_structure_pos(structure, pos_in_clusters);
-                if success {
-                    return Some(result);
-                }
-
-                queue.push_back(next_pos);
-                traversed_nodes.set(idx_1d, true);
-            }
+        StructuresIter {
+            overworld: self,
+            structure,
+            start_cluster_pos,
+            max_search_radius,
+            queue,
+            traversed_nodes,
         }
-
-        None
     }
 
     pub fn load_cluster(&self) {

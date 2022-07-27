@@ -7,29 +7,38 @@ mod tests;
 mod utils;
 
 use crate::game::Game;
-use engine::utils::noise::ParamNoise;
+use engine::utils::noise::HybridNoise;
 use engine::Engine;
 use nalgebra_glm as glm;
 use nalgebra_glm::DVec2;
-use noise::Seedable;
+use noise::{MultiFractal, NoiseFn, Seedable};
 use simple_logger::SimpleLogger;
 
 pub const PROGRAM_NAME: &str = "project-107cf1";
 
-fn noise_test() {
+fn make_world_prototype_image() {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];
 
-    let n = noise::SuperSimplex::new().set_seed(0);
+    let land_ocean = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
+    let temperature = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(50));
+    let moisture = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(100));
 
-    let process = |p: DVec2| -> f64 {
-        let v = n.sample(p, 5.0, 1.0, 0.5);
+    let n = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
 
-        let d = (glm::distance(&DVec2::new(0.5, 0.5), &p) * 2.0).min(1.0);
-        let s = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
+    let mut process = |p: DVec2| -> f64 {
+        let land = land_ocean.sample(p, 10.0, 0.5) * 0.5 + 0.5;
+        // let f = temperature.sample(p, 5.0, 0.5) * 0.5 + 0.5;
+        // let noise = n.sample(p, 5.0, 0.5) * 0.5 + 0.5;
+        // let noise = n.sample(p, (f * 5.0).clamp(0.001, 5.0), 0.5) * 0.5 + 0.5;
+
+        let noise = land;
+
+        let d = 1.0_f64.min(glm::distance(&DVec2::new(0.5, 0.5), &p) * 2.0);
+        let grad = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
 
         // y = 0.4 - (0.1 - (x - 0.4)) / 0.1
 
-        v * s
+        noise * grad
     };
 
     for x in 0..1024 {
@@ -46,7 +55,7 @@ fn noise_test() {
         }
     }
 
-    image::save_buffer("D:/noise_test.png", &buf, 1024, 1024, image::ColorType::Rgb8).unwrap();
+    image::save_buffer("noise_test.png", &buf, 1024, 1024, image::ColorType::Rgb8).unwrap();
     std::process::exit(0);
 }
 
@@ -75,6 +84,8 @@ fn parking_lot_deadlock_detection() {
 }
 
 fn main() {
+    // make_world_prototype_image();
+    // std::process::exit(0);
     // parking_lot_deadlock_detection();
 
     SimpleLogger::new()

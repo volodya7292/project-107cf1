@@ -10,7 +10,7 @@ use std::convert::TryInto;
 
 pub struct Registry {
     structures: Vec<Structure>,
-    structured_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
+    // structures_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
     textures: Vec<(TextureAtlasType, ResourceRef)>,
     materials: Vec<MaterialInfo>,
@@ -23,7 +23,7 @@ impl Registry {
     pub fn new() -> Self {
         Registry {
             structures: vec![],
-            structured_by_level: Default::default(),
+            // structures_by_level: Default::default(),
             models: vec![],
             textures: vec![],
             materials: vec![],
@@ -91,9 +91,9 @@ impl Registry {
         self.structures.get(id as usize)
     }
 
-    pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {
-        &self.structured_by_level[cluster_level as usize]
-    }
+    // pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {
+    //     &self.structures_by_level[cluster_level as usize]
+    // }
 
     pub fn is_block_opaque(&self, block: &Block) -> bool {
         if !block.has_textured_model() {

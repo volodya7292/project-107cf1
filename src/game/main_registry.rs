@@ -2,7 +2,7 @@ use crate::game::overworld;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::BlockModel;
-use crate::game::overworld::structure::Structure;
+use crate::game::overworld::structure::{world, Structure};
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
 use crate::physics::aabb::AABB;
@@ -109,9 +109,9 @@ impl MainRegistry {
         // ----------------------------------------------------------------------------------------------------
         let structure_world = reg.register_structure(Structure::new(
             0,
-            U64Vec3::from_element(overworld::MAX_WORLD_RADIUS as u64 * 2),
-            12,
-            625,
+            U64Vec3::from_element(world::MAX_RADIUS as u64 * 2),
+            9000,
+            16000,
             |_, _, _| true,
         ));
 
