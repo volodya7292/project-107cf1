@@ -10,7 +10,7 @@ nalgebra-glm = "0.17"
 basis-universal = "0.2"
 rayon = "1.5"
 crossbeam-channel = "0.5"
-noise = { version = "0.7.0", default-features = false }
+noise = { version = "0.7", default-features = false }
 bit-set = "0.5"
 index-pool = "1.0"
 smallvec = "1.6"
@@ -21,19 +21,13 @@ rand_distr = "0.4"
 rand_xoshiro = "0.6"
 parking_lot = "0.12"
 indexmap = "1.8"
-winit = "0.26"
-font-kit = "0.11"
+winit = "0.27"
 rusttype = "0.9"
 unicode-normalization = "0.1"
-raw-window-handle = "0.4"
 vk-wrapper = { path = "../vk-wrapper" }
 msdfgen = { path = "msdfgen" }
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-sdl2 = {version = "0.35", features = ["static-link", "bundled"] }
-
 [target.'cfg(target_os = "macos")'.dependencies]
-sdl2 = { version = "0.35", features = ["use-pkgconfig"]  }
 macos = { path = "macos" }
 
 [build-dependencies]

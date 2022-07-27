@@ -2,6 +2,7 @@ use crate::adapter::Adapter;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::vk;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
 
@@ -16,15 +17,86 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn create_surface(
-        self: &Arc<Self>,
-        window_handle: &impl raw_window_handle::HasRawWindowHandle,
-    ) -> Result<Arc<Surface>, vk::Result> {
+    pub fn create_surface<H>(self: &Arc<Self>, window_handle: &H) -> Result<Arc<Surface>, vk::Result>
+    where
+        H: HasRawWindowHandle + HasRawDisplayHandle,
+    {
+        let surface = match window_handle.raw_window_handle() {
+            RawWindowHandle::Win32(handle) => {
+                let surface_desc = vk::Win32SurfaceCreateInfoKHR::builder()
+                    .hinstance(handle.hinstance)
+                    .hwnd(handle.hwnd);
+                let surface_fn = ash::extensions::khr::Win32Surface::new(&self.entry.ash_entry, &self.native);
+                unsafe { surface_fn.create_win32_surface(&surface_desc, None) }
+            }
+            RawWindowHandle::Wayland(handle) => {
+                let display =
+                    if let RawDisplayHandle::Wayland(display_handle) = window_handle.raw_display_handle() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
+                let surface_desc = vk::WaylandSurfaceCreateInfoKHR::builder()
+                    .display(display.display)
+                    .surface(handle.surface);
+                let surface_fn =
+                    ash::extensions::khr::WaylandSurface::new(&self.entry.ash_entry, &self.native);
+                unsafe { surface_fn.create_wayland_surface(&surface_desc, None) }
+            }
+            RawWindowHandle::Xlib(handle) => {
+                let display =
+                    if let RawDisplayHandle::Xlib(display_handle) = window_handle.raw_display_handle() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
+                let surface_desc = vk::XlibSurfaceCreateInfoKHR::builder()
+                    .dpy(display.display as *mut _)
+                    .window(handle.window);
+                let surface_fn = ash::extensions::khr::XlibSurface::new(&self.entry.ash_entry, &self.native);
+                unsafe { surface_fn.create_xlib_surface(&surface_desc, None) }
+            }
+            RawWindowHandle::Xcb(handle) => {
+                let display =
+                    if let RawDisplayHandle::Xcb(display_handle) = window_handle.raw_display_handle() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
+                let surface_desc = vk::XcbSurfaceCreateInfoKHR::builder()
+                    .connection(display.connection)
+                    .window(handle.window);
+                let surface_fn = ash::extensions::khr::XcbSurface::new(&self.entry.ash_entry, &self.native);
+                unsafe { surface_fn.create_xcb_surface(&surface_desc, None) }
+            }
+            #[cfg(any(target_os = "macos"))]
+            RawWindowHandle::AppKit(handle) => {
+                use raw_window_metal::{appkit, Layer};
+
+                let layer = unsafe {
+                    if !handle.ns_view.is_null() {
+                        appkit::metal_layer_from_ns_view(handle.ns_view)
+                    } else if !handle.ns_window.is_null() {
+                        appkit::metal_layer_from_ns_window(handle.ns_window)
+                    } else {
+                        Layer::None
+                    }
+                };
+                let layer = match layer {
+                    Layer::Existing(layer) | Layer::Allocated(layer) => layer as *mut _,
+                    Layer::None => return Err(vk::Result::ERROR_INITIALIZATION_FAILED),
+                };
+
+                let surface_desc = vk::MetalSurfaceCreateInfoEXT::builder().layer(layer);
+                let surface_fn = ash::extensions::ext::MetalSurface::new(&self.entry.ash_entry, &self.native);
+                unsafe { surface_fn.create_metal_surface(&surface_desc, None) }
+            }
+            _ => Err(vk::Result::ERROR_EXTENSION_NOT_PRESENT), // not supported
+        };
+
         Ok(Arc::new(Surface {
             instance: Arc::clone(self),
-            native: unsafe {
-                ash_window::create_surface(&self.entry.ash_entry, &self.native, window_handle, None)?
-            },
+            native: surface?,
         }))
     }
 

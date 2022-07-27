@@ -37,7 +37,7 @@ use std::time::Instant;
 use vk_wrapper::Adapter;
 use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{Fullscreen, Window, WindowBuilder};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
@@ -94,6 +94,17 @@ impl Game {
         };
         program
     }
+
+    pub fn grab_cursor(&mut self, window: &Window, enabled: bool) {
+        self.cursor_grab = enabled;
+        window
+            .set_cursor_grab(if self.cursor_grab {
+                CursorGrabMode::Locked
+            } else {
+                CursorGrabMode::None
+            })
+            .unwrap();
+    }
 }
 
 impl Application for Game {
@@ -116,7 +127,7 @@ impl Application for Game {
             y: (mon_size.height as i32 - win_size.height as i32) / 2,
         });
 
-        window.set_cursor_grab(self.cursor_grab).unwrap();
+        self.grab_cursor(&window, true);
         window.set_cursor_visible(!self.cursor_grab);
 
         window
@@ -420,8 +431,7 @@ impl Application for Game {
                                 println!("{}", self.player_pos);
                             }
                             VirtualKeyCode::T => {
-                                self.cursor_grab = !self.cursor_grab;
-                                main_window.set_cursor_grab(self.cursor_grab).unwrap();
+                                self.grab_cursor(main_window, !self.cursor_grab);
                                 main_window.set_cursor_visible(!self.cursor_grab);
                             }
                             VirtualKeyCode::Key1 => {

@@ -9,7 +9,6 @@ mod tests;
 pub mod utils;
 
 use crate::input::{Keyboard, Mouse};
-use crate::platform::current_refresh_rate;
 use crate::queue::realtime_queue;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
@@ -123,7 +122,8 @@ impl Engine {
 
         app.on_engine_initialized(&mut renderer);
 
-        let curr_mode_refresh_rate = current_refresh_rate(&main_window);
+        let curr_monitor = main_window.current_monitor().unwrap();
+        let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
         Engine {
             renderer,

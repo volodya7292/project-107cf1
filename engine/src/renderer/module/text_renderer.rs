@@ -287,27 +287,8 @@ impl TextRenderer {
             .create_primary_cmd_list("text-staging-cl")
             .unwrap();
 
-        let fallback_families = [
-            font_kit::family_name::FamilyName::Serif,
-            font_kit::family_name::FamilyName::SansSerif,
-        ];
-        let fallback_normal = font_kit::source::SystemSource::new()
-            .select_best_match(
-                &fallback_families,
-                font_kit::properties::Properties::new().style(font_kit::properties::Style::Normal),
-            )
-            .unwrap();
-        let fallback_italic = font_kit::source::SystemSource::new()
-            .select_best_match(
-                &fallback_families,
-                font_kit::properties::Properties::new().style(font_kit::properties::Style::Italic),
-            )
-            .unwrap();
-        let fallback_font = FontSet::from_bytes(
-            fallback_normal.load().unwrap().copy_font_data().unwrap().to_vec(),
-            Some(fallback_italic.load().unwrap().copy_font_data().unwrap().to_vec()),
-        )
-        .unwrap();
+        let fallback_font =
+            FontSet::from_bytes(include_bytes!("../../../fallback-font.ttf").to_vec(), None).unwrap();
 
         let mut char_locations = HashMap::with_capacity(size3d.2 as usize);
         let mut char_locations_rev = HashMap::with_capacity(size3d.2 as usize);
@@ -316,7 +297,7 @@ impl TextRenderer {
         let fonts = vec![fallback_font];
 
         let atlas_overflow_glyph = {
-            let g_uid = GlyphUID::new(rusttype::GlyphId(0), 0, FontStyle::Normal);
+            let g_uid = GlyphUID::new(GlyphId(0), 0, FontStyle::Normal);
             char_locations.insert(
                 g_uid,
                 GlyphLocation {
@@ -653,6 +634,8 @@ impl TextRenderer {
                 }
             }
         }
+
+        // TODO: use max_height too if necessary
 
         glyph_instances
     }

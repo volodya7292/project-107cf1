@@ -5,7 +5,7 @@ use std::os::raw::{c_char, c_void};
 
 use crate::utils;
 use crate::Instance;
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -59,10 +59,48 @@ unsafe extern "system" fn vk_debug_callback(
 pub fn enumerate_required_window_extensions(
     window_handle: &dyn HasRawWindowHandle,
 ) -> Result<Vec<String>, vk::Result> {
-    let names = ash_window::enumerate_required_extensions(window_handle)?;
-    Ok(names
+    let extensions = match window_handle.raw_window_handle() {
+        RawWindowHandle::Win32(_) => {
+            const WINDOWS_EXTS: [&CStr; 2] = [
+                ash::extensions::khr::Surface::name(),
+                ash::extensions::khr::Win32Surface::name(),
+            ];
+            &WINDOWS_EXTS
+        }
+        RawWindowHandle::Wayland(_) => {
+            const WAYLAND_EXTS: [&CStr; 2] = [
+                ash::extensions::khr::Surface::name(),
+                ash::extensions::khr::WaylandSurface::name(),
+            ];
+            &WAYLAND_EXTS
+        }
+        RawWindowHandle::Xlib(_) => {
+            const XLIB_EXTS: [&CStr; 2] = [
+                ash::extensions::khr::Surface::name(),
+                ash::extensions::khr::XlibSurface::name(),
+            ];
+            &XLIB_EXTS
+        }
+        RawWindowHandle::Xcb(_) => {
+            const XCB_EXTS: [&CStr; 2] = [
+                ash::extensions::khr::Surface::name(),
+                ash::extensions::khr::XcbSurface::name(),
+            ];
+            &XCB_EXTS
+        }
+        RawWindowHandle::AppKit(_) => {
+            const MACOS_EXTS: [&CStr; 2] = [
+                ash::extensions::khr::Surface::name(),
+                ash::extensions::ext::MetalSurface::name(),
+            ];
+            &MACOS_EXTS
+        }
+        _ => return Err(vk::Result::ERROR_EXTENSION_NOT_PRESENT),
+    };
+
+    Ok(extensions
         .iter()
-        .map(|&name| unsafe { utils::c_ptr_to_string(name) })
+        .map(|&name| String::from(name.to_str().unwrap()))
         .collect())
 }
 
@@ -109,12 +147,11 @@ impl Entry {
 
         let mut required_layers: Vec<&str> = vec![];
         let mut required_extensions: Vec<&str> = required_extensions.iter().map(|a| a.as_ref()).collect();
-        let mut preferred_extensions: Vec<&str> = vec!["VK_KHR_portability_enumeration"];
+        let preferred_extensions: Vec<&str> = vec!["VK_KHR_portability_enumeration"];
 
         if cfg!(debug_assertions) {
             required_layers.push("VK_LAYER_KHRONOS_validation");
             required_extensions.push("VK_EXT_debug_utils");
-            preferred_extensions.push("VK_EXT_validation_features");
         }
         required_extensions.push("VK_KHR_surface");
 
@@ -130,12 +167,6 @@ impl Entry {
             .extend(utils::filter_names(&available_extensions, &preferred_extensions, false).unwrap());
         let enabled_extensions_raw: Vec<*const c_char> =
             enabled_extensions.iter().map(|name| name.as_ptr()).collect();
-
-        let ext_supported =
-            |name: &str| -> bool { enabled_extensions.contains(&CString::new(name).unwrap()) };
-
-        // Validation features
-        let enabled_val_features = [vk::ValidationFeatureEnableEXT::BEST_PRACTICES];
 
         // Infos
         let mut info = vk::InstanceCreateInfo::builder()
@@ -156,15 +187,10 @@ impl Entry {
                     | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
             )
             .pfn_user_callback(Some(vk_debug_callback));
-        let mut val_features_info =
-            vk::ValidationFeaturesEXT::builder().enabled_validation_features(&enabled_val_features);
 
         // Push extension structures
         if cfg!(debug_assertions) {
             info = info.push_next(&mut debug_msg_info);
-        }
-        if ext_supported("VK_EXT_validation_features") {
-            info = info.push_next(&mut val_features_info);
         }
 
         let native_instance = unsafe { self.ash_entry.create_instance(&info, None)? };
