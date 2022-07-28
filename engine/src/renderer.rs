@@ -1079,11 +1079,14 @@ impl Renderer {
             self.vertex_mesh_updates
                 .keys()
                 .map(|v| {
-                    let transform = transforms.get(*v).unwrap();
-                    (
-                        *v,
-                        (transform.position - self.relative_camera_pos).magnitude_squared(),
-                    )
+                    if let Some(transform) = transforms.get(*v) {
+                        (
+                            *v,
+                            (transform.position - self.relative_camera_pos).magnitude_squared(),
+                        )
+                    } else {
+                        (*v, f64::MAX)
+                    }
                 })
                 .collect()
         };

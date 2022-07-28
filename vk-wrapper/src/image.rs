@@ -1,9 +1,7 @@
-use crate::adapter::MemoryBlock;
 use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue};
 use ash::vk;
 use ash::vk::Handle;
-use gpu_alloc_ash::AshMemoryDevice;
 use std::sync::{atomic, Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -97,7 +95,7 @@ pub(crate) struct ImageWrapper {
     pub(crate) device: Arc<Device>,
     pub(crate) _swapchain_wrapper: Option<Arc<SwapchainWrapper>>,
     pub(crate) native: vk::Image,
-    pub(crate) allocation: Option<MemoryBlock>,
+    pub(crate) allocation: Option<vma::VmaAllocation>,
     pub(crate) bytesize: u64,
     pub(crate) is_array: bool,
     pub(crate) owned_handle: bool,
@@ -149,6 +147,28 @@ impl ImageWrapper {
         }
     }
 }
+
+impl Drop for ImageWrapper {
+    fn drop(&mut self) {
+        if !self.owned_handle {
+            return;
+        }
+        unsafe {
+            self.device.wrapper.native.destroy_image(self.native, None);
+
+            if let Some(allocation) = self.allocation.take() {
+                vma::vmaFreeMemory(self.device.allocator, allocation);
+            }
+
+            self.device
+                .total_used_dev_memory
+                .fetch_sub(self.bytesize as usize, atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+unsafe impl Send for ImageWrapper {}
+unsafe impl Sync for ImageWrapper {}
 
 pub struct Image {
     pub(crate) wrapper: Arc<ImageWrapper>,
@@ -252,28 +272,6 @@ impl Image {
                         .build(),
                 )
                 .build(),
-        }
-    }
-}
-
-impl Drop for ImageWrapper {
-    fn drop(&mut self) {
-        if !self.owned_handle {
-            return;
-        }
-        unsafe {
-            self.device.wrapper.native.destroy_image(self.native, None);
-
-            if let Some(memory_block) = self.allocation.take() {
-                self.device
-                    .allocator
-                    .lock()
-                    .dealloc(AshMemoryDevice::wrap(&self.device.wrapper.native), memory_block);
-            }
-
-            self.device
-                .total_used_dev_memory
-                .fetch_sub(self.bytesize as usize, atomic::Ordering::Relaxed);
         }
     }
 }

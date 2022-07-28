@@ -1,17 +1,16 @@
 use crate::device::DeviceWrapper;
-use crate::instance::VK_API_VERSION;
+use crate::entry::VK_API_VERSION;
 use crate::sampler::SamplerClamp;
 use crate::{
     device::{self, Device},
     surface::Surface,
     Instance, Queue, SamplerFilter, SamplerMipmap,
 };
-use ash::vk;
+use ash::vk::{self, Handle};
 use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
-
-pub(crate) type MemoryBlock = gpu_alloc::MemoryBlock<vk::DeviceMemory>;
+use std::{mem, ptr};
 
 pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
 
@@ -121,40 +120,109 @@ impl Adapter {
             ));
         }
 
-        let memory_props =
-            unsafe { gpu_alloc_ash::device_properties(&self.instance.native, VK_API_VERSION, self.native)? };
+        let memory_props = unsafe {
+            self.instance
+                .native
+                .get_physical_device_memory_properties(self.native)
+        };
 
-        let allowed_memory_types = memory_props
-            .memory_types
-            .iter()
-            .enumerate()
-            .filter_map(|(i, v)| {
-                // HOST_VISIBLE memory types must also be HOST_COHERENT
-                // to avoid explicit flushing/invalidating after mapping and alignment issues
-                if !v.props.contains(gpu_alloc::MemoryPropertyFlags::HOST_VISIBLE)
-                    || v.props.contains(gpu_alloc::MemoryPropertyFlags::HOST_COHERENT)
-                {
-                    Some(i as u32)
-                } else {
-                    None
-                }
-            })
-            .fold(0_u32, |acc, v| acc | (1 << v));
+        // Create memory allocator
 
-        let allocator = gpu_alloc::GpuAllocator::<vk::DeviceMemory>::new(
-            gpu_alloc::Config {
-                dedicated_threshold: 32 * 1024 * 1024,
-                preferred_dedicated_threshold: 32 * 1024 * 1024,
-                transient_dedicated_threshold: 128 * 1024 * 1024,
-                starting_free_list_chunk: 16 * 1024 * 1024,
-                final_free_list_chunk: 128 * 1024 * 1024,
-                minimal_buddy_size: 1 * 256,
-                initial_buddy_dedicated_size: 32 * 1024 * 1024,
-            },
-            memory_props,
-        );
+        let mut vma_vulkan_funcs: vma::VmaVulkanFunctions = unsafe { mem::zeroed() };
+        vma_vulkan_funcs.vkGetInstanceProcAddr = Some(unsafe {
+            mem::transmute::<
+                _,
+                unsafe extern "C" fn(vma::VkInstance, *const i8) -> Option<unsafe extern "C" fn()>,
+            >(self.instance.entry.ash_entry.static_fn().get_instance_proc_addr)
+        });
+        vma_vulkan_funcs.vkGetDeviceProcAddr = Some(unsafe {
+            mem::transmute::<
+                _,
+                unsafe extern "C" fn(vma::VkDevice, *const i8) -> Option<unsafe extern "C" fn()>,
+            >(self.instance.native.fp_v1_0().get_device_proc_addr)
+        });
 
-        // TODO: use reserved memory to reduce stutters due to lots of vkAllocateMemory
+        let mut allocator_info: vma::VmaAllocatorCreateInfo = unsafe { mem::zeroed() };
+        allocator_info.instance = self.instance.native.handle().as_raw() as vma::VkInstance;
+        allocator_info.physicalDevice = self.native.as_raw() as vma::VkPhysicalDevice;
+        allocator_info.device = device_wrapper.native.handle().as_raw() as vma::VkDevice;
+        allocator_info.vulkanApiVersion = VK_API_VERSION;
+        allocator_info.pVulkanFunctions = &vma_vulkan_funcs;
+
+        let mut allocator: vma::VmaAllocator = ptr::null_mut();
+        let result = unsafe { vma::vmaCreateAllocator(&allocator_info, &mut allocator) };
+
+        if result != vma::VK_SUCCESS {
+            return Err(vk::Result::from_raw(result));
+        }
+
+        // Create host pool
+
+        let mut host_alloc_info: vma::VmaAllocationCreateInfo = unsafe { mem::zeroed() };
+        host_alloc_info.usage = vma::VMA_MEMORY_USAGE_UNKNOWN;
+        host_alloc_info.preferredFlags = vk::MemoryPropertyFlags::HOST_CACHED.as_raw();
+        host_alloc_info.requiredFlags =
+            (vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT).as_raw();
+
+        let mut host_memory_type_index = 0;
+        unsafe {
+            vma::vmaFindMemoryTypeIndex(allocator, u32::MAX, &host_alloc_info, &mut host_memory_type_index)
+        };
+
+        if result != vma::VK_SUCCESS {
+            return Err(vk::Result::from_raw(result));
+        }
+
+        let mut host_pool_info: vma::VmaPoolCreateInfo = unsafe { mem::zeroed() };
+        host_pool_info.memoryTypeIndex = host_memory_type_index;
+        host_pool_info.blockSize = 1 << 28; // 256 MB
+        host_pool_info.minBlockCount = 2;
+
+        let mut host_mem_pool: vma::VmaPool = ptr::null_mut();
+        let result = unsafe { vma::vmaCreatePool(allocator, &host_pool_info, &mut host_mem_pool) };
+
+        if result != vma::VK_SUCCESS {
+            return Err(vk::Result::from_raw(result));
+        }
+
+        // Create device pool
+
+        let mut device_alloc_info: vma::VmaAllocationCreateInfo = unsafe { mem::zeroed() };
+        device_alloc_info.usage = vma::VMA_MEMORY_USAGE_UNKNOWN;
+        device_alloc_info.requiredFlags = vk::MemoryPropertyFlags::DEVICE_LOCAL.as_raw();
+
+        let mut device_memory_type_index = 0;
+        let result = unsafe {
+            vma::vmaFindMemoryTypeIndex(
+                allocator,
+                u32::MAX,
+                &device_alloc_info,
+                &mut device_memory_type_index,
+            )
+        };
+
+        if result != vma::VK_SUCCESS {
+            return Err(vk::Result::from_raw(result));
+        }
+
+        let device_memory_heap =
+            memory_props.memory_types[host_pool_info.memoryTypeIndex as usize].heap_index;
+        let device_memory_size = memory_props.memory_heaps[device_memory_heap as usize].size;
+
+        let mut device_pool_info: vma::VmaPoolCreateInfo = unsafe { mem::zeroed() };
+        device_pool_info.memoryTypeIndex = device_memory_type_index;
+        device_pool_info.blockSize = 1 << 28; // 256 MB
+
+        // Reserve memory to reduce stutters due to lots of vkAllocateMemory
+        device_pool_info.minBlockCount =
+            16.min((device_memory_size as f64 / device_pool_info.blockSize as f64).ceil() as usize / 2);
+
+        let mut device_mem_pool: vma::VmaPool = ptr::null_mut();
+        let result = unsafe { vma::vmaCreatePool(allocator, &device_pool_info, &mut device_mem_pool) };
+
+        if result != vma::VK_SUCCESS {
+            return Err(vk::Result::from_raw(result));
+        }
 
         let pipeline_cache_info = vk::PipelineCacheCreateInfo::builder();
         let pipeline_cache = unsafe {
@@ -173,8 +241,9 @@ impl Adapter {
 
         Ok(Arc::new(Device {
             wrapper: device_wrapper,
-            allocator: Mutex::new(allocator),
-            allowed_memory_types,
+            allocator,
+            host_mem_pool,
+            device_mem_pool,
             total_used_dev_memory: Arc::new(Default::default()),
             swapchain_khr,
             queues,

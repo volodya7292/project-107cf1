@@ -15,9 +15,8 @@ smallvec = "1.8"
 parking_lot = "0.12"
 ash = "0.37"
 raw-window-handle = "0.5"
-gpu-alloc = "0.5"
-gpu-alloc-ash = "0.5"
 spirv_cross = { version = "0.23", features = ["glsl"] }
+vma = { path = "vma" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-metal = "0.2"
