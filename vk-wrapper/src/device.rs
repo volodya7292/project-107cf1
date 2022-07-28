@@ -17,22 +17,18 @@ use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
 use ash::vk;
 use ash::vk::Handle;
-use gpu_alloc::GpuAllocator;
-use gpu_alloc_ash::AshMemoryDevice;
 use parking_lot::Mutex;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::{hash_map, HashMap};
 use std::ffi::CString;
-use std::mem::ManuallyDrop;
+use std::ptr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
 use std::{ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
 pub enum DeviceError {
-    MemoryAllocationError(gpu_alloc::AllocationError),
-    MemoryMapError(gpu_alloc::MapError),
     VkError(vk::Result),
     ZeroBufferElementSize,
     ZeroBufferSize,
@@ -40,18 +36,6 @@ pub enum DeviceError {
     SpirvError(spirv_cross::ErrorCode),
     InvalidShader(String),
     InvalidSignature(&'static str),
-}
-
-impl From<gpu_alloc::AllocationError> for DeviceError {
-    fn from(err: gpu_alloc::AllocationError) -> Self {
-        DeviceError::MemoryAllocationError(err)
-    }
-}
-
-impl From<gpu_alloc::MapError> for DeviceError {
-    fn from(err: gpu_alloc::MapError) -> Self {
-        DeviceError::MemoryMapError(err)
-    }
 }
 
 impl From<vk::Result> for DeviceError {
@@ -140,8 +124,9 @@ impl Drop for DeviceWrapper {
 
 pub struct Device {
     pub(crate) wrapper: Arc<DeviceWrapper>,
-    pub(crate) allocator: Mutex<GpuAllocator<vk::DeviceMemory>>,
-    pub(crate) allowed_memory_types: u32,
+    pub(crate) allocator: vma::VmaAllocator,
+    pub(crate) host_mem_pool: vma::VmaPool,
+    pub(crate) device_mem_pool: vma::VmaPool,
     pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) queues: Vec<Arc<Queue>>,
@@ -184,6 +169,12 @@ pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence,
     })
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum MemoryUsage {
+    Host,
+    Device,
+}
+
 impl Device {
     pub fn adapter(&self) -> &Arc<Adapter> {
         &self.wrapper.adapter
@@ -206,9 +197,9 @@ impl Device {
         usage: BufferUsageFlags,
         elem_size: u64,
         size: u64,
-        mem_usage: gpu_alloc::UsageFlags,
+        mem_usage: MemoryUsage,
         name: &str,
-    ) -> Result<Buffer, DeviceError> {
+    ) -> Result<(Buffer, vma::VmaAllocationInfo), DeviceError> {
         if elem_size == 0 {
             return Err(DeviceError::ZeroBufferElementSize);
         }
@@ -225,48 +216,65 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .size(bytesize as vk::DeviceSize);
 
-        let used_dev_memory =
-            bytesize * (mem_usage.contains(gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS) as u64);
+        let used_dev_memory = bytesize * (mem_usage == MemoryUsage::Device) as u64;
 
-        let (buffer, memory_block) = unsafe {
+        let (buffer, allocation, alloc_info) = unsafe {
             let native_buffer = self.wrapper.native.create_buffer(&buffer_info, None)?;
-            let req = self.wrapper.native.get_buffer_memory_requirements(native_buffer);
 
-            let memory_block = self.allocator.lock().alloc(
-                AshMemoryDevice::wrap(&self.wrapper.native),
-                gpu_alloc::Request {
-                    size: req.size,
-                    align_mask: req.alignment,
-                    usage: mem_usage,
-                    memory_types: self.allowed_memory_types & req.memory_type_bits,
-                },
-            )?;
+            let mut alloc_create_info: vma::VmaAllocationCreateInfo = mem::zeroed();
+            if mem_usage == MemoryUsage::Host {
+                alloc_create_info.flags = vma::VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                alloc_create_info.pool = self.host_mem_pool;
+            } else {
+                alloc_create_info.pool = self.device_mem_pool;
+            };
 
-            self.wrapper.native.bind_buffer_memory(
-                native_buffer,
-                *memory_block.memory(),
-                memory_block.offset(),
-            )?;
+            let mut allocation: vma::VmaAllocation = mem::zeroed();
+            let mut alloc_info: vma::VmaAllocationInfo = mem::zeroed();
+            let result = vma::vmaAllocateMemoryForBuffer(
+                self.allocator,
+                native_buffer.as_raw() as vma::VkBuffer,
+                &alloc_create_info,
+                &mut allocation,
+                &mut alloc_info,
+            );
+
+            if result != vma::VK_SUCCESS {
+                return Err(vk::Result::from_raw(result).into());
+            }
+
+            let result = vma::vmaBindBufferMemory(
+                self.allocator,
+                allocation,
+                native_buffer.as_raw() as vma::VkBuffer,
+            );
+
+            if result != vma::VK_SUCCESS {
+                return Err(vk::Result::from_raw(result).into());
+            }
 
             self.wrapper
                 .debug_set_object_name(vk::ObjectType::BUFFER, native_buffer.as_raw(), name)?;
 
-            (native_buffer, memory_block)
+            (native_buffer, allocation, alloc_info)
         };
 
         self.total_used_dev_memory
             .fetch_add(used_dev_memory as usize, atomic::Ordering::Relaxed);
 
-        Ok(Buffer {
-            device: Arc::clone(self),
-            native: buffer,
-            allocation: ManuallyDrop::new(memory_block),
-            used_dev_memory,
-            elem_size,
-            aligned_elem_size: aligned_elem_size as u64,
-            size,
-            bytesize: bytesize as u64,
-        })
+        Ok((
+            Buffer {
+                device: Arc::clone(self),
+                native: buffer,
+                allocation,
+                used_dev_memory,
+                elem_size,
+                aligned_elem_size: aligned_elem_size as u64,
+                size,
+                _bytesize: bytesize as u64,
+            },
+            alloc_info,
+        ))
     }
 
     pub fn create_host_buffer_named<T>(
@@ -275,30 +283,15 @@ impl Device {
         size: u64,
         name: &str,
     ) -> Result<HostBuffer<T>, DeviceError> {
-        let mut buffer = self.create_buffer(
-            usage,
-            mem::size_of::<T>() as u64,
-            size,
-            gpu_alloc::UsageFlags::HOST_ACCESS
-                | gpu_alloc::UsageFlags::DOWNLOAD
-                | gpu_alloc::UsageFlags::UPLOAD,
-            name,
-        )?;
-        let p_data = unsafe {
-            buffer
-                .allocation
-                .map(
-                    AshMemoryDevice::wrap(&self.wrapper.native),
-                    0,
-                    buffer.bytesize as usize,
-                )?
-                .as_ptr()
-        };
+        let (buffer, alloc_info) =
+            self.create_buffer(usage, mem::size_of::<T>() as u64, size, MemoryUsage::Host, name)?;
+
+        assert_ne!(alloc_info.pMappedData, ptr::null_mut());
 
         Ok(HostBuffer {
             _type_marker: PhantomData,
             buffer: Arc::new(buffer),
-            p_data,
+            p_data: alloc_info.pMappedData as *mut u8,
         })
     }
 
@@ -317,13 +310,7 @@ impl Device {
         size: u64,
         name: &str,
     ) -> Result<DeviceBuffer, DeviceError> {
-        let buffer = self.create_buffer(
-            usage,
-            element_size,
-            size,
-            gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
-            name,
-        )?;
+        let (buffer, _) = self.create_buffer(usage, element_size, size, MemoryUsage::Device, name)?;
         Ok(DeviceBuffer {
             buffer: Arc::new(buffer),
         })
@@ -406,32 +393,65 @@ impl Device {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let (image, memory_block) = unsafe {
+        let (image, allocation, alloc_info) = unsafe {
             let native_image = self.wrapper.native.create_image(&image_info, None)?;
-            let req = self.wrapper.native.get_image_memory_requirements(native_image);
 
-            let memory_block = self.allocator.lock().alloc(
-                AshMemoryDevice::wrap(&self.wrapper.native),
-                gpu_alloc::Request {
-                    size: req.size,
-                    align_mask: req.alignment,
-                    usage: gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
-                    memory_types: self.allowed_memory_types & req.memory_type_bits,
-                },
-            )?;
+            let mut alloc_create_info: vma::VmaAllocationCreateInfo = mem::zeroed();
+            alloc_create_info.pool = self.device_mem_pool;
 
-            self.wrapper.native.bind_image_memory(
-                native_image,
-                *memory_block.memory(),
-                memory_block.offset(),
-            )?;
+            let mut allocation: vma::VmaAllocation = mem::zeroed();
+            let mut alloc_info: vma::VmaAllocationInfo = mem::zeroed();
+            let result = vma::vmaAllocateMemoryForImage(
+                self.allocator,
+                native_image.as_raw() as vma::VkImage,
+                &alloc_create_info,
+                &mut allocation,
+                &mut alloc_info,
+            );
+
+            if result != vma::VK_SUCCESS {
+                return Err(vk::Result::from_raw(result).into());
+            }
+
+            // let memory_block = self.allocator.lock().alloc(
+            //     AshMemoryDevice::wrap(&self.wrapper.native),
+            //     gpu_alloc::Request {
+            //         size: req.size,
+            //         align_mask: req.alignment,
+            //         usage: mem_usage,
+            //         memory_types: self.allowed_memory_types & req.memory_type_bits,
+            //     },
+            // )?;
+
+            let result =
+                vma::vmaBindImageMemory(self.allocator, allocation, native_image.as_raw() as vma::VkImage);
+
+            if result != vma::VK_SUCCESS {
+                return Err(vk::Result::from_raw(result).into());
+            }
+
+            // let memory_block = self.allocator.lock().alloc(
+            //     AshMemoryDevice::wrap(&self.wrapper.native),
+            //     gpu_alloc::Request {
+            //         size: req.size,
+            //         align_mask: req.alignment,
+            //         usage: gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
+            //         memory_types: self.allowed_memory_types & req.memory_type_bits,
+            //     },
+            // )?;
+
+            // self.wrapper.native.bind_image_memory(
+            //     native_image,
+            //     *memory_block.memory(),
+            //     memory_block.offset(),
+            // )?;
 
             self.wrapper
                 .debug_set_object_name(vk::ObjectType::IMAGE, native_image.as_raw(), name)?;
 
-            (native_image, memory_block)
+            (native_image, allocation, alloc_info)
         };
-        let bytesize = memory_block.size();
+        let bytesize = alloc_info.size;
 
         let aspect = if format == DEPTH_FORMAT {
             vk::ImageAspectFlags::DEPTH
@@ -440,13 +460,13 @@ impl Device {
         };
 
         self.total_used_dev_memory
-            .fetch_add(memory_block.size() as usize, atomic::Ordering::Relaxed);
+            .fetch_add(bytesize as usize, atomic::Ordering::Relaxed);
 
         let image_wrapper = Arc::new(ImageWrapper {
             device: Arc::clone(self),
             _swapchain_wrapper: None,
             native: image,
-            allocation: Some(memory_block),
+            allocation: Some(allocation),
             bytesize,
             is_array,
             owned_handle: true,
@@ -1440,9 +1460,16 @@ impl Drop for Device {
 
         unsafe {
             self.wrapper.native.destroy_pipeline_cache(*pipeline_cache, None);
-            self.allocator
-                .lock()
-                .cleanup(AshMemoryDevice::wrap(&self.wrapper.native));
+            // self.allocator
+            //     .lock()
+            //     .cleanup(AshMemoryDevice::wrap(&self.wrapper.native));
+
+            vma::vmaDestroyPool(self.allocator, self.host_mem_pool);
+            vma::vmaDestroyPool(self.allocator, self.device_mem_pool);
+            vma::vmaDestroyAllocator(self.allocator);
         }
     }
 }
+
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}

@@ -1,8 +1,5 @@
-use crate::adapter::MemoryBlock;
 use crate::{AccessFlags, Device, Queue};
 use ash::vk;
-use gpu_alloc_ash::AshMemoryDevice;
-use std::mem::ManuallyDrop;
 use std::ops::{Index, IndexMut};
 use std::sync::{atomic, Arc};
 use std::{marker::PhantomData, mem, ptr, slice};
@@ -23,23 +20,19 @@ impl BufferHandleImpl for BufferHandle {
 pub(crate) struct Buffer {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::Buffer,
-    pub(crate) allocation: ManuallyDrop<MemoryBlock>,
+    pub(crate) allocation: vma::VmaAllocation,
     pub(crate) used_dev_memory: u64,
     pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
     pub(crate) size: u64,
-    pub(crate) bytesize: u64,
+    pub(crate) _bytesize: u64,
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
             self.device.wrapper.native.destroy_buffer(self.native, None);
-
-            self.device.allocator.lock().dealloc(
-                AshMemoryDevice::wrap(&self.device.wrapper.native),
-                ManuallyDrop::take(&mut self.allocation),
-            )
+            vma::vmaFreeMemory(self.device.allocator, self.allocation);
         }
 
         self.device
@@ -47,6 +40,9 @@ impl Drop for Buffer {
             .fetch_sub(self.used_dev_memory as usize, atomic::Ordering::Relaxed);
     }
 }
+
+unsafe impl Send for Buffer {}
+unsafe impl Sync for Buffer {}
 
 #[derive(Clone)]
 pub struct RawHostBuffer(pub(crate) Arc<Buffer>);
@@ -66,7 +62,6 @@ impl RawHostBuffer {
 }
 
 unsafe impl Send for RawHostBuffer {}
-
 unsafe impl Sync for RawHostBuffer {}
 
 #[derive(Clone)]
@@ -284,7 +279,6 @@ impl<T> BufferHandleImpl for HostBuffer<T> {
 }
 
 unsafe impl<T> Send for HostBuffer<T> {}
-
 unsafe impl<T> Sync for HostBuffer<T> {}
 
 pub struct DeviceBuffer {
@@ -312,6 +306,9 @@ impl DeviceBuffer {
         )
     }
 }
+
+unsafe impl Send for DeviceBuffer {}
+unsafe impl Sync for DeviceBuffer {}
 
 impl BufferHandleImpl for DeviceBuffer {
     fn handle(&self) -> BufferHandle {

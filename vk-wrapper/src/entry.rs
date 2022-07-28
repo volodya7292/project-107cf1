@@ -8,6 +8,8 @@ use crate::Instance;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::sync::Arc;
 
+pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_0;
+
 #[derive(Debug)]
 pub enum InstanceError {
     AshError(ash::LoadingError),
@@ -170,12 +172,14 @@ impl Entry {
 
         // Infos
         let mut info = vk::InstanceCreateInfo::builder()
-            // TODO: use enum variant instead of number
-            // 1 = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR
-            .flags(vk::InstanceCreateFlags::from_raw(1))
             .application_info(&app_info)
             .enabled_layer_names(&enabled_layers_raw)
             .enabled_extension_names(&enabled_extensions_raw);
+
+        if enabled_extensions.contains(&CString::new("VK_KHR_portability_enumeration").unwrap()) {
+            info = info.flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR);
+        }
+
         let mut debug_msg_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE

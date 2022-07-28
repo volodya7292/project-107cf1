@@ -1,12 +1,11 @@
 use crate::adapter::Adapter;
+use crate::entry::VK_API_VERSION;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::vk;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
-
-pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_0;
 
 pub struct Instance {
     pub(crate) entry: Arc<Entry>,
