@@ -1,8 +1,8 @@
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::{cluster, Overworld};
-use crate::glm;
 use bit_vec::BitVec;
 use engine::utils::UInt;
+use nalgebra_glm as glm;
 use nalgebra_glm::{I64Vec3, U64Vec3};
 use std::collections::VecDeque;
 

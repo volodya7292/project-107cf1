@@ -1,17 +1,37 @@
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
-use std::marker::PhantomData;
 
-pub struct WhiteNoise<T> {
+pub trait AsSeed {
+    fn as_u64_seed(&self) -> u64;
+}
+
+impl AsSeed for u64 {
+    fn as_u64_seed(&self) -> u64 {
+        *self
+    }
+}
+
+impl AsSeed for i64 {
+    fn as_u64_seed(&self) -> u64 {
+        u64::from_ne_bytes(self.to_ne_bytes())
+    }
+}
+
+impl AsSeed for f64 {
+    fn as_u64_seed(&self) -> u64 {
+        u64::from_ne_bytes(self.to_ne_bytes())
+    }
+}
+
+pub struct WhiteNoise {
     main_state: u64,
-    _ty: PhantomData<T>,
 }
 
 pub struct State(pub u64);
 
 impl State {
-    pub fn next(mut self, perm: u64) -> State {
-        self.0 ^= Xoshiro256PlusPlus::seed_from_u64(perm)
+    pub fn next<S: AsSeed>(mut self, perm: S) -> State {
+        self.0 ^= Xoshiro256PlusPlus::seed_from_u64(perm.as_u64_seed())
             .gen::<u64>()
             .wrapping_add(0x9e3779b9)
             .wrapping_add(self.0 << 6)
@@ -24,11 +44,10 @@ impl State {
     }
 }
 
-impl<T> WhiteNoise<T> {
-    pub fn new(seed: u64) -> WhiteNoise<T> {
+impl WhiteNoise {
+    pub fn new(seed: u64) -> WhiteNoise {
         WhiteNoise {
             main_state: Xoshiro256PlusPlus::seed_from_u64(seed).gen::<u64>(),
-            _ty: Default::default(),
         }
     }
 

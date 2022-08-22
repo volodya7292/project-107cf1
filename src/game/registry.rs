@@ -1,15 +1,18 @@
 use crate::game::overworld;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::structure::world::{biome, Biome, BiomeSize};
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::TexturedBlockModel;
 use engine::renderer::{MaterialInfo, TextureAtlasType};
 use engine::resource_file::ResourceRef;
+use engine::utils::HashMap;
 use entity_data::EntityStorageLayout;
 use std::convert::TryInto;
 
 pub struct Registry {
     structures: Vec<Structure>,
+    biomes_by_size: HashMap<BiomeSize, Vec<Biome>>,
     // structures_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
     textures: Vec<(TextureAtlasType, ResourceRef)>,
@@ -24,6 +27,9 @@ impl Registry {
         Registry {
             structures: vec![],
             // structures_by_level: Default::default(),
+            biomes_by_size: ((BiomeSize::MIN as u8)..=(BiomeSize::MAX as u8))
+                .map(|i| (BiomeSize::from_level(i), vec![]))
+                .collect(),
             models: vec![],
             textures: vec![],
             materials: vec![],
@@ -66,6 +72,15 @@ impl Registry {
         (self.blocks.len() - 1) as u32
     }
 
+    pub fn register_biome(&mut self, biome: Biome) {
+        let size_range = biome.size_range();
+
+        for level in size_range.start().level()..=size_range.end().level() {
+            let size = BiomeSize::from_level(level);
+            self.biomes_by_size.get_mut(&size).unwrap().push(biome.clone());
+        }
+    }
+
     pub fn register_structure(&mut self, structure: Structure) -> u32 {
         self.structures.push(structure);
         (self.structures.len() - 1) as u32
@@ -77,6 +92,10 @@ impl Registry {
 
     pub fn materials(&self) -> &[MaterialInfo] {
         &self.materials
+    }
+
+    pub fn biomes(&self) -> &HashMap<BiomeSize, Vec<Biome>> {
+        &self.biomes_by_size
     }
 
     pub fn get_block_model(&self, id: u16) -> Option<&BlockModel> {

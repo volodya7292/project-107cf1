@@ -7,8 +7,8 @@ use crate::game::overworld::{
     cluster, OverworldCluster, CLUSTER_STATE_LOADED, CLUSTER_STATE_OFFLOADED_INVISIBLE,
 };
 use crate::game::registry::Registry;
-use crate::glm;
 use engine::utils::{HashMap, MO_RELAXED};
+use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
 use parking_lot::{RawRwLock, RwLock};

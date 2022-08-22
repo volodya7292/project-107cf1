@@ -74,6 +74,8 @@ impl Game {
         let game_tick_finished = Arc::new(AtomicBool::new(true));
         let overworld = Overworld::new(&main_registry, 0);
 
+        crate::proto::make_world_prototype_image(main_registry.registry());
+
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),

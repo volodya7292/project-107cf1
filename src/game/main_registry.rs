@@ -2,6 +2,7 @@ use crate::game::overworld;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::structure::world::{Biome, BiomeSize};
 use crate::game::overworld::structure::{world, Structure};
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::game::registry::Registry;
@@ -104,6 +105,51 @@ impl MainRegistry {
             ));
             Block::new(arch as u16, tex_model)
         };
+
+        // Biomes
+        // ----------------------------------------------------------------------------------------------------
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            0..100,
+            BiomeSize::S64..=BiomeSize::S64,
+            1.0,
+        ));
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            10..200,
+            BiomeSize::M128..=BiomeSize::S64,
+            1.0,
+        ));
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            10..200,
+            BiomeSize::M128..=BiomeSize::S64,
+            1.0,
+        ));
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            10..200,
+            BiomeSize::L256..=BiomeSize::S64,
+            1.0,
+        ));
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            10..200,
+            BiomeSize::L256..=BiomeSize::S64,
+            1.0,
+        ));
+        reg.register_biome(Biome::new(
+            0.0..1.0,
+            0.0..1.0,
+            10..200,
+            BiomeSize::XL512..=BiomeSize::S64,
+            1.0,
+        ));
 
         // Structures
         // ----------------------------------------------------------------------------------------------------

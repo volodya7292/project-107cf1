@@ -73,7 +73,7 @@ impl OverworldCluster {
 pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
-    white_noise: WhiteNoise<u64>,
+    white_noise: WhiteNoise,
     loaded_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
 }
 
@@ -105,6 +105,7 @@ impl Overworld {
                 .next(center_pos.y)
                 .next(center_pos.z)
                 .0,
+            Arc::clone(self.main_registry.registry()),
         )
     }
 
