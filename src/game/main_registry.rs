@@ -119,35 +119,35 @@ impl MainRegistry {
             0.0..1.0,
             0.0..1.0,
             10..200,
-            BiomeSize::M128..=BiomeSize::S64,
+            BiomeSize::M128..=BiomeSize::M128,
             1.0,
         ));
         reg.register_biome(Biome::new(
             0.0..1.0,
             0.0..1.0,
             10..200,
-            BiomeSize::M128..=BiomeSize::S64,
+            BiomeSize::M128..=BiomeSize::M128,
             1.0,
         ));
         reg.register_biome(Biome::new(
             0.0..1.0,
             0.0..1.0,
             10..200,
-            BiomeSize::L256..=BiomeSize::S64,
+            BiomeSize::L256..=BiomeSize::L256,
             1.0,
         ));
         reg.register_biome(Biome::new(
             0.0..1.0,
             0.0..1.0,
             10..200,
-            BiomeSize::L256..=BiomeSize::S64,
+            BiomeSize::L256..=BiomeSize::L256,
             1.0,
         ));
         reg.register_biome(Biome::new(
             0.0..1.0,
             0.0..1.0,
             10..200,
-            BiomeSize::XL512..=BiomeSize::S64,
+            BiomeSize::XL512..=BiomeSize::XL512,
             1.0,
         ));
 

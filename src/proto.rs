@@ -1,13 +1,14 @@
 use crate::game::overworld::structure::world::World;
 use crate::game::registry::Registry;
 use engine::utils::noise::HybridNoise;
-use engine::utils::voronoi_noise::VoronoiNoise3D;
+use engine::utils::voronoi_noise::VoronoiNoise2D;
 use engine::utils::white_noise::WhiteNoise;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, I64Vec3};
 use noise::Seedable;
 use rand::Rng;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub fn make_world_prototype_image(registry: &Arc<Registry>) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];
@@ -21,7 +22,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
     let p_noise = noise::SuperSimplex::new();
     // let w = noise::Worley::new().set_frequency(10.0).set_displacement(1.0);
     let white_noise = WhiteNoise::new(0);
-    let mut v = VoronoiNoise3D::new();
+    let mut v = VoronoiNoise2D::new();
 
     // TODO: implement SIMD noise
 
@@ -30,7 +31,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
     let world = World::new(0, Arc::clone(registry));
 
     let mut process = |p: DVec2| -> f64 {
-        let land = land_ocean.sample(p, 10.0, 0.5) * 0.5 + 0.5;
+        // let land = land_ocean.sample(p, 10.0, 0.5) * 0.5 + 0.5;
         // let f = temperature.sample(p, 5.0, 0.5) * 0.5 + 0.5;
         // let noise = n.sample(p, 5.0, 0.5) * 0.5 + 0.5;
         // let noise = n.sample(p, (f * 5.0).clamp(0.001, 5.0), 0.5) * 0.5 + 0.5;
@@ -56,13 +57,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
         //     .rng()
         //     .sample::<usize, _>(distr);
 
-        let col = white_noise
-            .state()
-            .next(pivot.x)
-            .next(pivot.y)
-            .next(pivot.z)
-            .rng()
-            .gen::<f64>();
+        let col = white_noise.state().next(pivot.x).next(pivot.y).rng().gen::<f64>();
 
         // let a = ;
 
@@ -75,7 +70,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
 
         // let b = p_noise.get([p.x * 50.0, p.y * 50.0]);
 
-        let noise = land;
+        // let noise = land;
 
         let d = 1.0_f64.min(glm::distance(&DVec2::new(0.5, 0.5), &p) * 2.0);
         let grad = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
@@ -88,6 +83,8 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
         col * grad
         // noise * grad
     };
+
+    let t0 = Instant::now();
 
     for x in 0..1024 {
         for y in 0..1024 {
@@ -102,6 +99,13 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
             buf[i + 2] = buf[i];
         }
     }
+
+    let t1 = Instant::now();
+
+    println!(
+        "T: {}",
+        (t1 - t0).as_secs_f64() / 1024.0 / 1024.0 * 24.0_f64.powi(3)
+    );
 
     image::save_buffer("noise_test.png", &buf, 1024, 1024, image::ColorType::Rgb8).unwrap();
     std::process::exit(0);

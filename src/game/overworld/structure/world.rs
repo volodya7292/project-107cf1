@@ -3,10 +3,10 @@ pub mod biome;
 use crate::game::overworld;
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::Overworld;
-use engine::utils::voronoi_noise::VoronoiNoise3D;
+use engine::utils::voronoi_noise::VoronoiNoise2D;
 use engine::utils::white_noise::WhiteNoise;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
+use nalgebra_glm::{DVec2, DVec3, I64Vec3};
 use noise;
 use noise::{NoiseFn, Seedable};
 use rand::Rng;
@@ -20,8 +20,8 @@ pub const MIN_RADIUS: u64 = 2_048;
 pub const MAX_RADIUS: u64 = 100_000;
 
 pub struct BiomePartitionNoise {
-    voronoi: VoronoiNoise3D,
-    warp: [noise::SuperSimplex; 3],
+    voronoi: VoronoiNoise2D,
+    warp: [noise::SuperSimplex; 2],
 }
 
 pub struct World {
@@ -48,15 +48,13 @@ impl World {
 
         let biome_partition_noises: Vec<_> = (0..(BiomeSize::MAX as u8 - BiomeSize::MIN as u8 + 1))
             .map(|i| BiomePartitionNoise {
-                voronoi: VoronoiNoise3D::new()
+                voronoi: VoronoiNoise2D::new()
                     .set_seed((seed + Wrapping(0x472935762) + Wrapping(i as u64)).0),
                 warp: [
                     noise::SuperSimplex::new()
                         .set_seed((seed32 + Wrapping(i as u32) + Wrapping(0x93151_u32)).0),
                     noise::SuperSimplex::new()
                         .set_seed((seed32 + Wrapping(i as u32) + Wrapping(0x93152_u32)).0),
-                    noise::SuperSimplex::new()
-                        .set_seed((seed32 + Wrapping(i as u32) + Wrapping(0x93153_u32)).0),
                 ],
             })
             .collect();
@@ -72,8 +70,8 @@ impl World {
     }
 
     /// May panic when there are no biomes of certain biome size.
-    pub fn biome_at(&self, pos: I64Vec3) -> (&Biome, DVec3) {
-        let pos_d: DVec3 = glm::convert(pos);
+    pub fn biome_at(&self, pos: I64Vec3) -> (&Biome, DVec2) {
+        let pos_d_2d: DVec2 = glm::convert(pos.xz());
         let biomes = self.registry.biomes();
 
         // Note: using .rev() to iterate sizes from biggest to lowest
@@ -81,24 +79,15 @@ impl World {
             let noise = &self.biome_partition_noises[(i - BiomeSize::MIN as u8) as usize];
 
             let freq = 2.0_f64.powi(i as i32);
-            let pos_df = pos_d / freq;
+            let pos_df = pos_d_2d / freq;
 
-            let warp_x = noise.warp[0].get([pos_df.x, pos_df.y, pos_df.z]);
-            let warp_y = noise.warp[1].get([pos_df.x, pos_df.y, pos_df.z]);
-            let warp_z = noise.warp[2].get([pos_df.x, pos_df.y, pos_df.z]);
-            let warp = (glm::vec3(warp_x, warp_y, warp_z) * 2.0).add_scalar(-1.0) * 0.1;
-
-            // TODO: Optimize this by caching
+            let warp_x = noise.warp[0].get([pos_df.x, pos_df.y]);
+            let warp_y = noise.warp[1].get([pos_df.x, pos_df.y]);
+            let warp = (glm::vec2(warp_x, warp_y) * 2.0).add_scalar(-1.0) * 0.1;
 
             let (pivot, _) = noise.voronoi.sample(pos_df + warp);
 
-            let mut rng = self
-                .white_noise
-                .state()
-                .next(pivot.x)
-                .next(pivot.y)
-                .next(pivot.z)
-                .rng();
+            let mut rng = self.white_noise.state().next(pivot.x).next(pivot.y).rng();
             let biome_is_present = rng.gen::<bool>();
 
             // Also check for minimum-sized biome so there is always a biome present at any point
