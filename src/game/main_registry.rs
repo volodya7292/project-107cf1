@@ -1,10 +1,11 @@
 use crate::game::overworld;
 use crate::game::overworld::block::Block;
-use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::BlockModel;
-use crate::game::overworld::structure::world::{Biome, BiomeSize};
+use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
+use crate::game::overworld::structure::world::Biome;
 use crate::game::overworld::structure::{world, Structure};
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::game::overworld::{block_model, structure};
 use crate::game::registry::Registry;
 use crate::physics::aabb::AABB;
 use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
@@ -108,47 +109,65 @@ impl MainRegistry {
 
         // Biomes
         // ----------------------------------------------------------------------------------------------------
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            0..100,
-            BiomeSize::S64..=BiomeSize::S64,
-            1.0,
+        let biome_tundra = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg30..=MeanTemperature::TPos7,
+            MeanHumidity::H0..=MeanHumidity::H25,
+            0.0..=1.0,
         ));
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            10..200,
-            BiomeSize::M128..=BiomeSize::M128,
-            1.0,
+        let biome_taiga = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg15..=MeanTemperature::TPos15,
+            MeanHumidity::H0..=MeanHumidity::H37,
+            0.0..=1.0,
         ));
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            10..200,
-            BiomeSize::M128..=BiomeSize::M128,
-            1.0,
+        let biome_temperate_deciduous_forest = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg7..=MeanTemperature::TPos22,
+            MeanHumidity::H12..=MeanHumidity::H50,
+            0.0..=1.0,
         ));
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            10..200,
-            BiomeSize::L256..=BiomeSize::L256,
-            1.0,
+        let biome_temperate_rain_forest = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg7..=MeanTemperature::TPos22,
+            MeanHumidity::H50..=MeanHumidity::H75,
+            0.0..=1.0,
         ));
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            10..200,
-            BiomeSize::L256..=BiomeSize::L256,
-            1.0,
+        let biome_tropical_rain_forest = reg.register_biome(Biome::new(
+            MeanTemperature::TPos15..=MeanTemperature::TPos30,
+            MeanHumidity::H62..=MeanHumidity::H100,
+            0.0..=1.0,
         ));
-        reg.register_biome(Biome::new(
-            0.0..1.0,
-            0.0..1.0,
-            10..200,
-            BiomeSize::XL512..=BiomeSize::XL512,
-            1.0,
+        let biome_savanna = reg.register_biome(Biome::new(
+            MeanTemperature::TPos15..=MeanTemperature::TPos30,
+            MeanHumidity::H12..=MeanHumidity::H62,
+            0.0..=1.0,
+        ));
+        let biome_chaparral = reg.register_biome(Biome::new(
+            MeanTemperature::TPos7..=MeanTemperature::TPos22,
+            MeanHumidity::H12..=MeanHumidity::H37,
+            0.0..=1.0,
+        ));
+        let biome_grassland = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg7..=MeanTemperature::TPos22,
+            MeanHumidity::H0..=MeanHumidity::H37,
+            0.0..=1.0,
+        ));
+        let biome_desert = reg.register_biome(Biome::new(
+            MeanTemperature::T0..=MeanTemperature::TPos22,
+            MeanHumidity::H0..=MeanHumidity::H25,
+            0.0..=1.0,
+        ));
+        let biome_subtropical_desert = reg.register_biome(Biome::new(
+            MeanTemperature::TPos15..=MeanTemperature::TPos30,
+            MeanHumidity::H0..=MeanHumidity::H25,
+            0.0..=1.0,
+        ));
+        let biome_ocean = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg30..=MeanTemperature::TPos30,
+            MeanHumidity::H0..=MeanHumidity::H100,
+            -1.0..=0.0,
+        ));
+        let biome_coast = reg.register_biome(Biome::new(
+            MeanTemperature::TNeg30..=MeanTemperature::TPos30,
+            MeanHumidity::H0..=MeanHumidity::H100,
+            0.0..=0.02,
         ));
 
         // Structures
@@ -159,6 +178,7 @@ impl MainRegistry {
             9000,
             16000,
             |_, _, _| true,
+            world::gen_fn,
         ));
 
         Arc::new(MainRegistry {

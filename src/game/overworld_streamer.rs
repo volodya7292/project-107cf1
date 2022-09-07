@@ -1,6 +1,7 @@
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::{Cluster, IntrinsicBlockData};
+use crate::game::overworld::generator::OverworldGenerator;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::{
     cluster, generator, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED, CLUSTER_STATE_INITIAL,
@@ -26,12 +27,12 @@ pub const FORCED_LOAD_RANGE: usize = 128;
 
 pub struct OverworldStreamer {
     device: Arc<vkw::Device>,
-    main_registry: Arc<MainRegistry>,
     cluster_mat_pipeline: u32,
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
     overworld_clusters: Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>,
+    overworld_generator: Arc<OverworldGenerator>,
     rclusters: HashMap<I64Vec3, RCluster>,
     clusters_entities_to_remove: Vec<scene::Entity>,
     clusters_entities_to_add: Vec<I64Vec3>,
@@ -197,20 +198,15 @@ impl OverworldStreamer {
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
     const MAX_Y_RENDER_DISTANCE: u64 = 512;
 
-    pub fn new(
-        registry: &Arc<MainRegistry>,
-        re: &Renderer,
-        cluster_mat_pipeline: u32,
-        overworld: &Overworld,
-    ) -> Self {
+    pub fn new(re: &Renderer, cluster_mat_pipeline: u32, overworld: &Overworld) -> Self {
         Self {
             device: Arc::clone(re.device()),
-            main_registry: Arc::clone(registry),
             cluster_mat_pipeline,
             stream_pos: Default::default(),
             xz_render_distance: 128,
             y_render_distance: 128,
             overworld_clusters: Arc::clone(overworld.loaded_clusters()),
+            overworld_generator: Arc::clone(overworld.generator()),
             rclusters: Default::default(),
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
@@ -361,9 +357,8 @@ impl OverworldStreamer {
                 ocluster.state.store(CLUSTER_STATE_LOADING, MO_RELAXED);
 
                 let curr_loading_clusters_n = Arc::clone(&self.curr_loading_clusters_n);
-                let main_registry = Arc::clone(&self.main_registry);
+                let generator = Arc::clone(&self.overworld_generator);
                 let ocluster = Arc::clone(&ocluster);
-                let device = Arc::clone(&self.device);
                 let pos = p.pos;
 
                 ocluster.state.store(CLUSTER_STATE_LOADING, MO_RELAXED);
@@ -375,9 +370,9 @@ impl OverworldStreamer {
                         return;
                     }
 
-                    let mut cluster = Cluster::new(main_registry.registry(), device);
+                    let mut cluster = generator.create_cluster();
 
-                    generator::generate_cluster(&mut cluster, &main_registry, pos);
+                    generator.generate_cluster(&mut cluster, pos);
 
                     *ocluster.cluster.write() = Some(cluster);
 
@@ -683,6 +678,7 @@ impl OverworldStreamer {
                 let edge_intrinsics_determined = Arc::clone(&rcluster.edge_intrinsics_determined);
                 let curr_clusters_meshes_updating_n = Arc::clone(&self.curr_clusters_meshes_updating_n);
                 let updating_outer_intrinsics = Arc::clone(&rcluster.updating_outer_intrinsics);
+                let device = Arc::clone(&self.device);
 
                 curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
 
@@ -695,7 +691,7 @@ impl OverworldStreamer {
                         return;
                     };
 
-                    cluster.update_mesh();
+                    cluster.update_mesh(&device);
 
                     // Determine edge intrinsics
                     {

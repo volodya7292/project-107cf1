@@ -1,10 +1,7 @@
 use crate::utils::white_noise::WhiteNoise;
-use crate::utils::LruCache;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3};
-use parking_lot::RwLock;
+use nalgebra_glm::{DVec2, I64Vec2};
 use rand::Rng;
-use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
 const MIN_DIST_BETWEEN_POINTS: f64 = 0.2;

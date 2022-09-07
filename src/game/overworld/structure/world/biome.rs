@@ -1,66 +1,88 @@
-use std::ops::{Range, RangeInclusive};
+use nalgebra_glm::Vec3;
+use std::ops::RangeInclusive;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-#[repr(u8)]
-pub enum BiomeSize {
-    S64 = 6,
-    M128 = 7,
-    L256 = 8,
-    XL512 = 9,
+/// Degrees Celsius
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum MeanTemperature {
+    TNeg30 = -30,
+    TNeg22 = -22,
+    TNeg15 = -15,
+    TNeg7 = -7,
+    T0 = 0,
+    TPos7 = 7,
+    TPos15 = 12,
+    TPos22 = 22,
+    TPos30 = 30,
 }
 
-impl BiomeSize {
-    pub const MIN: Self = BiomeSize::S64; // 2^6 = 64 blocks
-    pub const MAX: Self = BiomeSize::XL512; // 2^9 = 512 blocks
+impl MeanTemperature {
+    pub const MIN: Self = Self::TNeg30;
+    pub const MAX: Self = Self::TPos30;
+    pub const SPREAD: f32 = (Self::MAX as i32 - Self::MIN as i32) as f32;
+}
 
-    pub fn from_level(level: u8) -> Self {
-        match level {
-            6 => Self::S64,
-            7 => Self::M128,
-            8 => Self::L256,
-            9 => Self::XL512,
-            _ => panic!("Invalid biome level"),
-        }
-    }
+/// Relative humidity, percentage
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum MeanHumidity {
+    H0 = 0,
+    H12 = 12,
+    H25 = 25,
+    H37 = 37,
+    H50 = 50,
+    H62 = 62,
+    H75 = 75,
+    H87 = 87,
+    H100 = 100,
+}
 
-    pub fn level(&self) -> u8 {
-        *self as u8
-    }
+impl MeanHumidity {
+    pub const MIN: Self = Self::H0;
+    pub const MAX: Self = Self::H100;
+    pub const SPREAD: f32 = (Self::MAX as i32 - Self::MIN as i32) as f32;
 }
 
 #[derive(Clone)]
 pub struct Biome {
-    /// Temperature in degrees Celsius
-    temp_range: Range<f32>,
-    /// 0.0 - dry, 1.0 - maximum moisture.
-    moisture_range: Range<f32>,
-    /// Altitude in blocks; 0 is the water level.
-    altitude_range: Range<i32>,
-    size_range: RangeInclusive<BiomeSize>,
-    /// 0.0 - no generation, 1.0 - fully utilize the dedicated space for the biome.
-    gen_probability: f32,
+    temp_range: RangeInclusive<MeanTemperature>,
+    humidity_range: RangeInclusive<MeanHumidity>,
+    /// Range: [-1, 1]; 0 is the surface level
+    altitude_range: RangeInclusive<f32>,
 }
 
 impl Biome {
     pub fn new(
-        temp_range: Range<f32>,
-        moisture_range: Range<f32>,
-        altitude_range: Range<i32>,
-        size_range: RangeInclusive<BiomeSize>,
-        gen_probability: f32,
+        temp_range: RangeInclusive<MeanTemperature>,
+        humidity_range: RangeInclusive<MeanHumidity>,
+        altitude_range: RangeInclusive<f32>,
     ) -> Self {
-        // Check absolute zero temperature boundary
-        assert!(temp_range.start >= -273.15);
+        assert!(*temp_range.start() as i32 <= *temp_range.end() as i32);
+        assert!(*humidity_range.start() as u32 <= *humidity_range.end() as u32);
+        assert!(*altitude_range.start() <= *altitude_range.end());
+        assert!(*altitude_range.start() >= -1.0 && *altitude_range.end() <= 1.0);
+
+        if (*temp_range.end() as i32 - *temp_range.start() as i32).abs() < 15 {
+            panic!("Min temperature spread is 15 degrees!");
+        }
+        if (*humidity_range.end() as u32 - *humidity_range.start() as u32) < 25 {
+            panic!("Min humidity spread is 25%!");
+        }
 
         Self {
             temp_range,
-            moisture_range,
+            humidity_range,
             altitude_range,
-            size_range,
-            gen_probability,
         }
     }
-    pub fn size_range(&self) -> RangeInclusive<BiomeSize> {
-        self.size_range.clone()
+
+    pub fn temp_range(&self) -> RangeInclusive<MeanTemperature> {
+        self.temp_range.clone()
+    }
+
+    pub fn humidity_range(&self) -> RangeInclusive<MeanHumidity> {
+        self.humidity_range.clone()
+    }
+
+    pub fn altitude_range(&self) -> RangeInclusive<f32> {
+        self.altitude_range.clone()
     }
 }

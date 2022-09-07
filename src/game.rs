@@ -75,6 +75,7 @@ impl Game {
         let overworld = Overworld::new(&main_registry, 0);
 
         crate::proto::make_world_prototype_image(main_registry.registry());
+        // crate::proto::make_climate_graph_image(main_registry.registry());
 
         let program = Game {
             resources,
@@ -166,7 +167,7 @@ impl Application for Game {
         self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_streamer =
-            OverworldStreamer::new(&self.registry, renderer, mat_pipelines.cluster(), &self.overworld);
+            OverworldStreamer::new(renderer, mat_pipelines.cluster(), &self.overworld);
 
         // overworld_streamer.set_xz_render_distance(1024);
         overworld_streamer.set_xz_render_distance(256);

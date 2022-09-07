@@ -1,15 +1,31 @@
+pub mod world;
+
 use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::game::overworld::{cluster, Overworld};
 use bit_vec::BitVec;
 use engine::utils::UInt;
 use nalgebra_glm as glm;
 use nalgebra_glm::{I64Vec3, U64Vec3};
+use once_cell::sync::OnceCell;
+use std::any::Any;
 use std::collections::VecDeque;
-
-pub mod world;
+use std::sync::Arc;
 
 /// Returns whether the structure can be generated at specified center position.
-pub type GenPosCheckFn = fn(structure: &Structure, overworld: &Overworld, center_pos: I64Vec3) -> bool;
+pub type GenPosCheckFn =
+    fn(structure: &Structure, generator: &OverworldGenerator, center_pos: I64Vec3) -> bool;
+
+/// Fills the specified cluster with structure's blocks
+pub type GenFn = fn(
+    structure: &Structure,
+    generator: &OverworldGenerator,
+    structure_seed: u64,
+    center_pos: I64Vec3,
+    cluster: &mut Cluster,
+    structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+);
 
 pub struct Structure {
     uid: u32,
@@ -20,6 +36,7 @@ pub struct Structure {
     /// Average spacing in clusters between structures of this type
     avg_spacing: u64,
     gen_pos_check_fn: GenPosCheckFn,
+    gen_fn: GenFn,
 }
 
 impl Structure {
@@ -30,6 +47,7 @@ impl Structure {
         min_spacing: u64,
         avg_spacing: u64,
         gen_pos_check_fn: GenPosCheckFn,
+        gen_fn: GenFn,
     ) -> Structure {
         assert!(avg_spacing >= min_spacing);
 
@@ -42,6 +60,7 @@ impl Structure {
             min_spacing,
             avg_spacing,
             gen_pos_check_fn,
+            gen_fn,
         }
     }
 
@@ -61,13 +80,31 @@ impl Structure {
         self.avg_spacing
     }
 
-    pub fn check_gen_pos(&self, overworld: &Overworld, center_pos: I64Vec3) -> bool {
-        (self.gen_pos_check_fn)(self, overworld, center_pos)
+    pub fn check_gen_pos(&self, generator: &OverworldGenerator, center_pos: I64Vec3) -> bool {
+        (self.gen_pos_check_fn)(self, generator, center_pos)
+    }
+
+    pub fn gen_cluster(
+        &self,
+        generator: &OverworldGenerator,
+        structure_seed: u64,
+        center_pos: I64Vec3,
+        cluster: &mut Cluster,
+        structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+    ) {
+        (self.gen_fn)(
+            self,
+            generator,
+            structure_seed,
+            center_pos,
+            cluster,
+            structure_cache,
+        );
     }
 }
 
 pub struct StructuresIter<'a> {
-    pub(super) overworld: &'a Overworld,
+    pub(super) generator: &'a OverworldGenerator,
     pub(super) structure: &'a Structure,
     pub(super) start_cluster_pos: I64Vec3,
     pub(super) max_search_radius: u32,
@@ -79,15 +116,30 @@ impl Iterator for StructuresIter<'_> {
     type Item = I64Vec3;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let diam = (self.max_search_radius * 2) as i64;
+        let diam = self.max_search_radius as i64 * 2 - 1;
         let clusters_per_octant = self.structure.avg_spacing() as i64;
 
+        let front = self.queue.front().unwrap();
+        {
+            let rel_pos = (front - self.start_cluster_pos).add_scalar(diam / 2);
+            let idx_1d = (rel_pos.x * diam * diam + rel_pos.y * diam + rel_pos.x) as usize;
+            self.traversed_nodes.set(idx_1d, true);
+
+            let pos_in_clusters = front * clusters_per_octant;
+            let (result, success) = self.generator.gen_structure_pos(self.structure, pos_in_clusters);
+
+            if success {
+                return Some(result);
+            }
+        }
+
+        // Use breadth-first search
         while let Some(curr_pos) = self.queue.pop_front() {
             for i in 0..6 {
                 let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
                 let next_pos = curr_pos + dir;
 
-                let rel_pos = (curr_pos - self.start_cluster_pos).add_scalar(self.max_search_radius as i64);
+                let rel_pos = (curr_pos - self.start_cluster_pos).add_scalar(diam / 2);
                 if rel_pos.x < 0
                     || rel_pos.y < 0
                     || rel_pos.z < 0
@@ -107,7 +159,7 @@ impl Iterator for StructuresIter<'_> {
                 self.traversed_nodes.set(idx_1d, true);
 
                 let pos_in_clusters = next_pos * clusters_per_octant;
-                let (result, success) = self.overworld.gen_structure_pos(self.structure, pos_in_clusters);
+                let (result, success) = self.generator.gen_structure_pos(self.structure, pos_in_clusters);
 
                 if success {
                     return Some(result);

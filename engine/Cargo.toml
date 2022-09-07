@@ -24,7 +24,7 @@ indexmap = "1.8"
 winit = "0.27"
 rusttype = "0.9"
 unicode-normalization = "0.1"
-lru = "0.7"
+moka = "0.9"
 vk-wrapper = { path = "../vk-wrapper" }
 msdfgen = { path = "msdfgen" }
 

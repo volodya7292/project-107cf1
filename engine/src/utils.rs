@@ -10,6 +10,7 @@ pub mod white_noise;
 use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra_glm::Vec3;
 pub use slice_split::SliceSplitImpl;
+use std::hash::Hash;
 use std::slice;
 use std::sync::atomic;
 use std::time::{Duration, Instant};
@@ -17,9 +18,9 @@ use std::{mem, thread};
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
+pub type ConcurrentCache<K, V> = moka::sync::Cache<K, V, ahash::RandomState>;
 pub type IndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 pub type IndexMap<T> = indexmap::IndexMap<T, ahash::RandomState>;
-pub type LruCache<K, V> = lru::LruCache<K, V, ahash::RandomState>;
 
 pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
@@ -201,6 +202,33 @@ pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
 
 pub unsafe fn slice_as_bytes<T>(slice: &[T]) -> &[u8] {
     slice::from_raw_parts(slice.as_ptr() as *const u8, mem::size_of::<T>() * slice.len())
+}
+
+pub trait ConcurrentCacheImpl<K, V> {
+    fn new(max_capacity: usize) -> ConcurrentCache<K, V>;
+    fn with_weigher(
+        max_capacity: usize,
+        weigher: impl Fn(&K, &V) -> u32 + Send + Sync + 'static,
+    ) -> ConcurrentCache<K, V>;
+}
+
+impl<K, V> ConcurrentCacheImpl<K, V> for ConcurrentCache<K, V>
+where
+    K: Eq + Hash + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    fn new(max_capacity: usize) -> ConcurrentCache<K, V> {
+        moka::sync::CacheBuilder::new(max_capacity as u64).build_with_hasher(ahash::RandomState::new())
+    }
+
+    fn with_weigher(
+        max_capacity: usize,
+        weigher: impl Fn(&K, &V) -> u32 + Send + Sync + 'static,
+    ) -> ConcurrentCache<K, V> {
+        moka::sync::CacheBuilder::new(max_capacity as u64)
+            .weigher(weigher)
+            .build_with_hasher(ahash::RandomState::new())
+    }
 }
 
 #[macro_export]

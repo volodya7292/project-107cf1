@@ -183,14 +183,13 @@ pub struct Cluster {
     intrinsic_data: Vec<IntrinsicBlockData>,
     side_changed: [bool; 27],
     empty: AtomicBool,
-    device: Arc<vkw::Device>,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
     light_addition_cache: VecDeque<TVec3<usize>>,
 }
 
 impl Cluster {
     /// Creating a new cluster is expensive due to its big size of memory
-    pub fn new(registry: &Arc<Registry>, device: Arc<vkw::Device>) -> Self {
+    pub fn new(registry: &Arc<Registry>) -> Self {
         let layout = registry.cluster_layout();
 
         Self {
@@ -201,7 +200,6 @@ impl Cluster {
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             side_changed: [false; 27],
             empty: AtomicBool::new(true),
-            device,
             vertex_mesh: Default::default(),
             light_addition_cache: VecDeque::with_capacity(SIZE * SIZE),
         }
@@ -753,7 +751,7 @@ impl Cluster {
         // }
     }
 
-    pub fn update_mesh(&self) {
+    pub fn update_mesh(&self, device: &Arc<vkw::Device>) {
         #[inline]
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
@@ -866,7 +864,7 @@ impl Cluster {
             indices[i + 5] = ind + 1;
         }
 
-        *self.vertex_mesh.write() = self.device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
+        *self.vertex_mesh.write() = device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
     }
 
     pub fn is_empty(&self) -> bool {
