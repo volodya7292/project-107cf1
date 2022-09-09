@@ -20,9 +20,9 @@ where
         }
     }
 
-    pub fn sample(&self, point: SVector<f64, D>, freq: f64, persistence: f64) -> f64 {
+    pub fn sample(&self, point: SVector<f64, D>, persistence: f64) -> f64 {
         let mut total = 0.0;
-        let mut freq = freq;
+        let mut freq = 1.0;
         let mut amplitude = 1.0;
         let mut max_value = 0.0;
 
