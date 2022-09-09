@@ -84,9 +84,9 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
         let biome = world.biome_2d_at(glm::convert_unchecked::<_, I64Vec2>(p * 4096.0));
         let n_biomes = registry.biomes().len() as u32;
 
-        let t1 = temp0.sample(p, 10.0, 0.5) * 0.5 + 0.5;
-        let t2 = temp1.sample(p, 10.0, 0.5) * 0.5 + 0.5;
-        let t3 = temp2.sample(p, 10.0, 0.5) * 0.5 + 0.5;
+        let t1 = temp0.sample(p * 10.0, 0.5) * 0.5 + 0.5;
+        let t2 = temp1.sample(p * 10.0, 0.5) * 0.5 + 0.5;
+        let t3 = temp2.sample(p * 10.0, 0.5) * 0.5 + 0.5;
         let t = (t1 + t2 + t3) / 3.0;
         // let t = world.sample_temperature(glm::convert_unchecked::<_, I64Vec2>(p * 2048.0))
         //     - (MeanTemperature::MIN as i32);
@@ -101,9 +101,9 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
             _ => glm::vec3(t, t, t),
         };
 
-        let m1 = moist0.sample(p, 10.0, 0.5) * 0.5 + 0.5;
-        let m2 = moist1.sample(p, 10.0, 0.5) * 0.5 + 0.5;
-        let m3 = moist2.sample(p, 10.0, 0.5) * 0.5 + 0.5;
+        let m1 = moist0.sample(p * 10.0, 0.5) * 0.5 + 0.5;
+        let m2 = moist1.sample(p * 10.0, 0.5) * 0.5 + 0.5;
+        let m3 = moist2.sample(p * 10.0, 0.5) * 0.5 + 0.5;
         let m = (m1 + m2 + m3) / 3.0;
 
         // let m = world.sample_humidity(glm::convert_unchecked::<_, I64Vec2>(p * 2048.0));
@@ -143,7 +143,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
         // land_col
         // m_col
         // noise * grad
-        DVec3::from_element(biome as f64 / (n_biomes as f64))
+        DVec3::from_element(biome as f64 / (n_biomes as f64 - 1.0))
     };
 
     let t0 = Instant::now();
