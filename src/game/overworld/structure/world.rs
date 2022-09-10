@@ -330,10 +330,6 @@ impl WorldState {
         let mut raw_humidity = self.sample_raw_humidity(pos);
         let raw_altitude = height / MAX_ALTITUDE;
 
-        if !(-1.0..=1.0).contains(&raw_altitude) {
-            panic!("GOV {}", raw_altitude);
-        }
-
         if raw_humidity > raw_temp {
             // When the temperature is low the humidity must also be low,
             // hence mirror climate parameters about triangle diagonal
