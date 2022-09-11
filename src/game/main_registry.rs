@@ -86,7 +86,7 @@ impl MainRegistry {
             let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(material_default, false, Default::default()); 6],
+                &[QuadMaterial::new(material_default); 6],
             ));
             Block::new(arch as u16, tex_model)
         };
@@ -94,7 +94,7 @@ impl MainRegistry {
             let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(material_glow, false, Default::default()); 6],
+                &[QuadMaterial::new(material_glow); 6],
             ));
             Block::new(arch as u16, tex_model)
         };
@@ -102,7 +102,7 @@ impl MainRegistry {
             let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(material_water, true, Default::default()); 6],
+                &[QuadMaterial::new(material_water).with_transparency(true); 6],
             ));
             Block::new(arch as u16, tex_model)
         };
@@ -179,6 +179,7 @@ impl MainRegistry {
             16000,
             |_, _, _| true,
             world::gen_fn,
+            Some(world::spawn_point_fn),
         ));
 
         Arc::new(MainRegistry {

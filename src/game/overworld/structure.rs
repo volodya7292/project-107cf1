@@ -24,8 +24,16 @@ pub type GenFn = fn(
     structure_seed: u64,
     center_pos: I64Vec3,
     cluster: &mut Cluster,
-    structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+    structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
 );
+
+/// Returns potential spawn point.
+pub type GenSpawnPointFn = fn(
+    structure: &Structure,
+    generator: &OverworldGenerator,
+    structure_seed: u64,
+    structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
+) -> I64Vec3;
 
 pub struct Structure {
     uid: u32,
@@ -37,6 +45,7 @@ pub struct Structure {
     avg_spacing: u64,
     gen_pos_check_fn: GenPosCheckFn,
     gen_fn: GenFn,
+    gen_spawn_point_fn: Option<GenSpawnPointFn>,
 }
 
 impl Structure {
@@ -48,6 +57,7 @@ impl Structure {
         avg_spacing: u64,
         gen_pos_check_fn: GenPosCheckFn,
         gen_fn: GenFn,
+        gen_spawn_point_fn: Option<GenSpawnPointFn>,
     ) -> Structure {
         assert!(avg_spacing >= min_spacing);
 
@@ -61,6 +71,7 @@ impl Structure {
             avg_spacing,
             gen_pos_check_fn,
             gen_fn,
+            gen_spawn_point_fn,
         }
     }
 
@@ -101,12 +112,22 @@ impl Structure {
             structure_cache,
         );
     }
+
+    pub fn gen_spawn_point(
+        &self,
+        generator: &OverworldGenerator,
+        structure_seed: u64,
+        structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+    ) -> Option<I64Vec3> {
+        self.gen_spawn_point_fn
+            .map(|f| f(self, generator, structure_seed, structure_cache))
+    }
 }
 
 pub struct StructuresIter<'a> {
     pub(super) generator: &'a OverworldGenerator,
     pub(super) structure: &'a Structure,
-    pub(super) start_cluster_pos: I64Vec3,
+    pub(super) start_octant: I64Vec3,
     pub(super) max_search_radius: u32,
     pub(super) queue: VecDeque<I64Vec3>,
     pub(super) traversed_nodes: BitVec,
@@ -118,28 +139,32 @@ impl Iterator for StructuresIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let diam = self.max_search_radius as i64 * 2 - 1;
         let clusters_per_octant = self.structure.avg_spacing() as i64;
+        let blocks_per_octant = clusters_per_octant * cluster::SIZE as i64;
 
-        let front = self.queue.front().unwrap();
+        let front_octant = self.queue.front().unwrap();
         {
-            let rel_pos = (front - self.start_cluster_pos).add_scalar(diam / 2);
+            let rel_pos = (front_octant - self.start_octant).add_scalar(diam / 2);
             let idx_1d = (rel_pos.x * diam * diam + rel_pos.y * diam + rel_pos.x) as usize;
-            self.traversed_nodes.set(idx_1d, true);
 
-            let pos_in_clusters = front * clusters_per_octant;
-            let (result, success) = self.generator.gen_structure_pos(self.structure, pos_in_clusters);
+            if !self.traversed_nodes.get(idx_1d).unwrap() {
+                self.traversed_nodes.set(idx_1d, true);
 
-            if success {
-                return Some(result);
+                let cluster_pos = front_octant * blocks_per_octant;
+                let st_pos = self.generator.gen_structure_pos(self.structure, cluster_pos);
+
+                if st_pos.present {
+                    return Some(st_pos.center_pos);
+                }
             }
         }
 
         // Use breadth-first search
-        while let Some(curr_pos) = self.queue.pop_front() {
-            for i in 0..6 {
-                let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
-                let next_pos = curr_pos + dir;
+        while let Some(curr_octant) = self.queue.pop_front() {
+            for dir in &Facing::DIRECTIONS {
+                let dir: I64Vec3 = glm::convert(*dir);
+                let next_pos = curr_octant + dir;
 
-                let rel_pos = (curr_pos - self.start_cluster_pos).add_scalar(diam / 2);
+                let rel_pos = (next_pos - self.start_octant).add_scalar(diam / 2);
                 if rel_pos.x < 0
                     || rel_pos.y < 0
                     || rel_pos.z < 0
@@ -150,7 +175,7 @@ impl Iterator for StructuresIter<'_> {
                     continue;
                 }
 
-                let idx_1d = (rel_pos.x * diam * diam + rel_pos.y * diam + rel_pos.x) as usize;
+                let idx_1d = (rel_pos.z * diam * diam + rel_pos.y * diam + rel_pos.x) as usize;
                 if self.traversed_nodes.get(idx_1d).unwrap() {
                     continue;
                 }
@@ -158,11 +183,11 @@ impl Iterator for StructuresIter<'_> {
                 self.queue.push_back(next_pos);
                 self.traversed_nodes.set(idx_1d, true);
 
-                let pos_in_clusters = next_pos * clusters_per_octant;
-                let (result, success) = self.generator.gen_structure_pos(self.structure, pos_in_clusters);
+                let cluster_pos = next_pos * blocks_per_octant;
+                let st_pos = self.generator.gen_structure_pos(self.structure, cluster_pos);
 
-                if success {
-                    return Some(result);
+                if st_pos.present {
+                    return Some(st_pos.center_pos);
                 }
             }
         }

@@ -74,7 +74,10 @@ impl Game {
         let game_tick_finished = Arc::new(AtomicBool::new(true));
         let overworld = Overworld::new(&main_registry, 0);
 
-        crate::proto::make_world_prototype_image(main_registry.registry());
+        // let spawn_point = overworld.generator().gen_spawn_point();
+        // dbg!(spawn_point);
+
+        // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
 
         let program = Game {
@@ -165,6 +168,8 @@ impl Application for Game {
         }
 
         self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+
+        // self.overworld.ww
 
         let mut overworld_streamer =
             OverworldStreamer::new(renderer, mat_pipelines.cluster(), &self.overworld);

@@ -100,6 +100,7 @@ impl NeighbourVertexIntrinsics {
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct IntrinsicBlockData {
+    pub tex_model_id: u16,
     pub occluder: Occluder,
     pub light_level: LightLevel,
 }
@@ -302,6 +303,7 @@ impl Cluster {
 
         let index = aligned_block_index(&pos.add_scalar(1));
         self.intrinsic_data[index].occluder = occluder;
+        self.intrinsic_data[index].tex_model_id = block.textured_model();
 
         BlockDataBuilder {
             entity_builder,
@@ -804,16 +806,40 @@ impl Cluster {
                         }
                     }
 
+                    let index = aligned_block_index(&glm::convert_unchecked(pos.add_scalar(1)));
+                    let intrinsic_data = &intrinsics[index];
+
                     for i in 0..6 {
                         let facing = Facing::from_u8(i as u8);
                         let rel = (pos + facing.direction()).add_scalar(1);
                         let rel_index = aligned_block_index(&glm::convert_unchecked(rel));
 
-                        let intrinsic = intrinsics[rel_index];
-                        let occludes = intrinsic.occluder.occludes_side(facing.mirror());
+                        let rel_intrinsic_data = intrinsics[rel_index];
+                        let rel_occludes = rel_intrinsic_data.occluder.occludes_side(facing.mirror());
 
-                        if occludes {
+                        // Do not emit face if this side is fully occluded
+                        if rel_occludes {
                             continue;
+                        }
+
+                        // Do not emit face if side faces are of the same shape
+                        if model.merge_enabled()
+                            && (intrinsic_data.tex_model_id == rel_intrinsic_data.tex_model_id
+                                && model.side_shapes_equality()[facing.axis_idx()])
+                        {
+                            continue;
+                        }
+                        if let Some(rel_model) = self
+                            .registry
+                            .get_textured_block_model(rel_intrinsic_data.tex_model_id)
+                        {
+                            if model.merge_enabled()
+                                && model
+                                    .first_side_quad_vsorted(facing)
+                                    .cmp_ordered(rel_model.first_side_quad_vsorted(facing.mirror()))
+                            {
+                                continue;
+                            }
                         }
 
                         for quad in model.get_quads_by_facing(facing).chunks_exact(4) {

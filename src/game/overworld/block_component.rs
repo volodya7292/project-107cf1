@@ -21,6 +21,12 @@ impl Facing {
         I32Vec3::new(0, 0, -1),
         I32Vec3::new(0, 0, 1),
     ];
+    pub const XZ_DIRECTIONS: [I32Vec3; 4] = [
+        I32Vec3::new(-1, 0, 0),
+        I32Vec3::new(1, 0, 0),
+        I32Vec3::new(0, 0, -1),
+        I32Vec3::new(0, 0, 1),
+    ];
     const MIRRORED: [Facing; 6] = [
         Facing::PositiveX,
         Facing::NegativeX,
@@ -29,6 +35,14 @@ impl Facing {
         Facing::PositiveZ,
         Facing::NegativeZ,
     ];
+
+    pub const fn axis_idx(&self) -> usize {
+        *self as usize / 2
+    }
+
+    pub const fn is_positive(&self) -> bool {
+        *self as u8 % 2 == 1
+    }
 
     pub const fn direction(&self) -> I32Vec3 {
         Self::DIRECTIONS[*self as usize]
