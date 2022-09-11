@@ -1,3 +1,4 @@
+use crate::game::overworld::generator::OverworldGenerator;
 use crate::game::overworld::structure::world::biome::MeanTemperature;
 use crate::game::overworld::structure::world::WorldState;
 use crate::game::registry::Registry;
@@ -11,7 +12,7 @@ use rand::Rng;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub fn make_world_prototype_image(registry: &Arc<Registry>) {
+pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];
 
     let land_density = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
@@ -34,7 +35,14 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
 
     let b_freq = 30.0;
 
-    let world = WorldState::new(0, registry);
+    let main_registry = generator.main_registry();
+    let registry = main_registry.registry();
+    let world_pos = generator.gen_world_pos(I64Vec3::zeros());
+    let world_seed = generator.get_world_seed(world_pos.center_pos);
+
+    let world = WorldState::new(world_seed, registry);
+
+    // let world = WorldState::new(0, registry);
 
     let mut n_min = f64::MAX;
     let mut n_max = f64::MIN;
@@ -81,7 +89,7 @@ pub fn make_world_prototype_image(registry: &Arc<Registry>) {
         // let noise = land;
 
         // let b = world.select_biome_idx(glm::convert_unchecked(p * 1000.0), 10);
-        let biome = world.biome_2d_at(glm::convert_unchecked::<_, I64Vec2>(p * 4096.0));
+        let biome = world.biome_2d_at(glm::convert_unchecked::<_, I64Vec2>(p * 4096.0).add_scalar(-2048));
         let n_biomes = registry.biomes().len() as u32;
 
         let t1 = temp0.sample(p * 10.0, 0.5) * 0.5 + 0.5;

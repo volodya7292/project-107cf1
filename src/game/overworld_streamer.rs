@@ -557,9 +557,8 @@ impl OverworldStreamer {
 
                 // Remove unnecessary filling of neighbour cluster
                 // (neighbour cluster is filled mutually with current cluster)
-                for (neighbour_pos, ocluster, _) in &fill_neighbours {
+                for (neighbour_pos, _, _) in &fill_neighbours {
                     let rcluster = rclusters.get_mut(neighbour_pos).unwrap();
-                    let offset = (pos - neighbour_pos);
                     let mask = 1 << neighbour_dir_index(&neighbour_pos, &pos);
 
                     rcluster.needs_intrinsics_fill_at &= !mask;
@@ -635,6 +634,7 @@ impl OverworldStreamer {
                                 cluster.clear_outer_intrinsics(
                                     glm::convert(offset),
                                     IntrinsicBlockData {
+                                        tex_model_id: u16::MAX,
                                         occluder: Occluder::full(),
                                         light_level: Default::default(),
                                     },

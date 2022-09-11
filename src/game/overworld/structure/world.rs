@@ -1,32 +1,36 @@
 pub mod biome;
 
 use crate::game::overworld;
+use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
 use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::Overworld;
 use crate::game::registry::Registry;
+use bit_vec::BitVec;
+use engine::utils::noise::{HybridNoise, ParamNoise};
 use engine::utils::voronoi_noise::VoronoiNoise2D;
 use engine::utils::white_noise::WhiteNoise;
+use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3};
+use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
 use noise;
 use noise::{NoiseFn, Seedable};
 use once_cell::sync::OnceCell;
 use overworld::cluster;
 use rand::Rng;
+use rand_distr::num_traits::Zero;
 use rstar::{Envelope, Point, RTree};
 use smallvec::SmallVec;
 use std::any::Any;
+use std::collections::VecDeque;
 use std::mem;
 use std::num::Wrapping;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
-use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 pub use biome::Biome;
-use engine::utils::noise::{HybridNoise, ParamNoise};
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
 
 pub const MIN_RADIUS: u64 = 2_048;
 pub const MAX_RADIUS: u64 = 100_000;
@@ -377,14 +381,15 @@ impl WorldState {
         }
     }
 
+    fn cluster_xz_cache_at(&self, cluster_pos: I64Vec2) -> ClusterXZCache {
+        self.cluster_xz_caches
+            .get_with(cluster_pos, || self.build_cluster_xz_cache(cluster_pos))
+    }
+
     pub fn biome_2d_at(&self, pos: I64Vec2) -> u32 {
         let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * cluster::SIZE as i64);
         let rel_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64));
-
-        let cache = self
-            .cluster_xz_caches
-            .get_with(cluster_pos, || self.build_cluster_xz_cache(cluster_pos));
-
+        let cache = self.cluster_xz_cache_at(cluster_pos);
         cache.biomes[rel_pos.x as usize][rel_pos.y as usize]
     }
 
@@ -392,8 +397,57 @@ impl WorldState {
         todo!()
     }
 
-    pub fn find_land(&self) -> I64Vec3 {
-        todo!()
+    pub fn find_land(&self, closest_to: I64Vec2) -> I64Vec3 {
+        const SEARCH_DIAM: i64 = 32;
+        const CLUSTER_CENTER: i64 = cluster::SIZE as i64 / 2;
+
+        let closest_to_aligned = closest_to.map(|v| v.div_euclid(cluster::SIZE as i64));
+        let mut queue = VecDeque::with_capacity((SEARCH_DIAM * SEARCH_DIAM) as usize);
+        let mut traversed_nodes = BitVec::from_elem(queue.capacity(), false);
+
+        {
+            traversed_nodes.set(0, true);
+
+            let block_pos = (closest_to_aligned * cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
+            let height = self.calc_height_at(block_pos);
+
+            if height >= 1.0 {
+                return I64Vec3::new(block_pos.x, height as i64 + 1, block_pos.y);
+            }
+        }
+
+        queue.push_back(closest_to_aligned);
+
+        // Breadth-first search
+        while let Some(curr_pos) = queue.pop_front() {
+            for dir in &Facing::XZ_DIRECTIONS {
+                let dir: I64Vec2 = glm::convert(dir.xz());
+                let next_pos = curr_pos + dir;
+
+                let rel_pos = (next_pos - closest_to_aligned).add_scalar(SEARCH_DIAM / 2);
+                if rel_pos.x < 0 || rel_pos.y < 0 || rel_pos.x >= SEARCH_DIAM || rel_pos.y >= SEARCH_DIAM {
+                    continue;
+                }
+
+                let idx_1d = (rel_pos.y * SEARCH_DIAM + rel_pos.x) as usize;
+                if traversed_nodes.get(idx_1d).unwrap() {
+                    continue;
+                }
+
+                queue.push_back(next_pos);
+                traversed_nodes.set(idx_1d, true);
+
+                let block_pos = (next_pos * cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
+                let height = self.calc_height_at(block_pos);
+
+                if height >= 1.0 {
+                    return I64Vec3::new(block_pos.x, height as i64 + 1, block_pos.y);
+                }
+            }
+        }
+
+        let height = self.calc_height_at(closest_to);
+        I64Vec3::new(closest_to.x, height as i64 + 1, closest_to.y)
     }
 }
 
@@ -402,26 +456,67 @@ impl StructureCache for WorldState {
         let cache_size = cluster::SIZE * cluster::SIZE * mem::size_of::<u32>();
         (self.cluster_xz_caches.weighted_size() * cache_size as u64 / 1024) as u32
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 pub fn gen_fn(
-    structure: &Structure,
+    _structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
     cluster_pos: I64Vec3,
     cluster: &mut Cluster,
-    structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+    state: Arc<OnceCell<Box<dyn StructureCache>>>,
 ) {
-    let cache = structure_cache.get_or_init(|| {
-        Box::new(WorldState::new(
-            structure_seed,
-            generator.main_registry().registry(),
-        ))
-    });
+    let state = state
+        .get_or_init(|| {
+            Box::new(WorldState::new(
+                structure_seed,
+                generator.main_registry().registry(),
+            ))
+        })
+        .as_any()
+        .downcast_ref::<WorldState>()
+        .unwrap();
+
+    let registry = generator.main_registry();
+    let xz_cache = state.cluster_xz_cache_at(cluster_pos.xz());
 
     for x in 0..cluster::SIZE {
         for y in 0..cluster::SIZE {
-            for z in 0..cluster::SIZE {}
+            for z in 0..cluster::SIZE {
+                let global_y = cluster_pos.y + y as i64;
+                let height = xz_cache.heights[x][z];
+                let pos = U32Vec3::new(x as u32, y as u32, z as u32);
+
+                if global_y <= height as i64 {
+                    cluster.set(&pos, registry.block_default());
+                } else {
+                    cluster.set(&pos, registry.block_empty());
+                }
+            }
         }
     }
+}
+
+pub fn spawn_point_fn(
+    _structure: &Structure,
+    generator: &OverworldGenerator,
+    structure_seed: u64,
+    state: Arc<OnceCell<Box<dyn StructureCache>>>,
+) -> I64Vec3 {
+    let state = state
+        .get_or_init(|| {
+            Box::new(WorldState::new(
+                structure_seed,
+                generator.main_registry().registry(),
+            ))
+        })
+        .as_any()
+        .downcast_ref::<WorldState>()
+        .unwrap();
+
+    state.find_land(I64Vec2::zero())
 }

@@ -61,7 +61,7 @@ impl Vertex {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct Quad {
     vertices: [Vec3; 4],
 }
@@ -76,6 +76,10 @@ impl Quad {
         &self.vertices
     }
 
+    pub fn vertices_mut(&mut self) -> &mut [Vec3; 4] {
+        &mut self.vertices
+    }
+
     /// May return 0 if vertices are ordered incorrectly
     pub fn area(&self) -> f32 {
         let d0 = self.vertices[0] - self.vertices[1];
@@ -83,6 +87,21 @@ impl Quad {
         let d2 = self.vertices[3] - self.vertices[1];
 
         (d0.cross(&d1) + d1.cross(&d2)).magnitude() / 2.0
+    }
+
+    /// Returns true if quads have the same shape. This is faster than `cmp_shape`, but quads vertices must be ordered.
+    pub fn cmp_ordered(&self, other: &Self) -> bool {
+        self.vertices
+            .iter()
+            .zip(&other.vertices)
+            .all(|(v0, v1)| v0.abs_diff_eq(v1, 1e-9))
+    }
+
+    /// Returns true if quads have the same shape
+    pub fn cmp_shape(&self, other: &Self) -> bool {
+        self.vertices
+            .iter()
+            .all(|v0| other.vertices.iter().any(|v1| v1 == v0))
     }
 }
 

@@ -74,7 +74,10 @@ impl Game {
         let game_tick_finished = Arc::new(AtomicBool::new(true));
         let overworld = Overworld::new(&main_registry, 0);
 
-        crate::proto::make_world_prototype_image(main_registry.registry());
+        let spawn_point = overworld.generator().gen_spawn_point();
+        dbg!(spawn_point);
+
+        // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
 
         let program = Game {
@@ -84,7 +87,7 @@ impl Game {
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
             overworld_streamer: None,
-            player_pos: Default::default(),
+            player_pos: glm::convert(spawn_point),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
             curr_jump_force: 0.0,
@@ -92,7 +95,7 @@ impl Game {
             block_set_cooldown: 0.0,
             curr_block: main_registry.block_default(),
             change_stream_pos: true,
-            player_collision_enabled: true,
+            player_collision_enabled: false,
             cursor_grab: true,
         };
         program
@@ -164,7 +167,9 @@ impl Application for Game {
             }
         }
 
-        self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+
+        // self.overworld.ww
 
         let mut overworld_streamer =
             OverworldStreamer::new(renderer, mat_pipelines.cluster(), &self.overworld);
@@ -172,6 +177,7 @@ impl Application for Game {
         // overworld_streamer.set_xz_render_distance(1024);
         overworld_streamer.set_xz_render_distance(256);
         overworld_streamer.set_y_render_distance(256);
+        overworld_streamer.set_stream_pos(self.player_pos);
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
 
