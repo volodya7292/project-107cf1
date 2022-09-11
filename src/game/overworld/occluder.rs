@@ -23,6 +23,10 @@ impl Occluder {
         )
     }
 
+    pub const fn empty() -> Occluder {
+        Self::new(false, false, false, false, false, false)
+    }
+
     pub const fn full() -> Occluder {
         Self::new(true, true, true, true, true, true)
     }

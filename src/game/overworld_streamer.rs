@@ -250,7 +250,7 @@ impl OverworldStreamer {
                     .magnitude(),
             })
             .collect();
-        sorted_layout.sort_unstable_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+        sorted_layout.sort_unstable_by(|a, b| a.distance.total_cmp(&b.distance));
 
         let num_threads = intensive_queue().current_num_threads() as u32;
 
@@ -291,10 +291,13 @@ impl OverworldStreamer {
                             self.clusters_entities_to_remove.push(rcl.entity);
                             rcl.entity = scene::Entity::NULL;
                         }
-                        *ocluster.cluster.write() = None;
+
+                        // Note: it is safe to transition to this state because cluster is guaranteed to be loaded
+                        // doe to its visibility because RCluster in its initial state is not 'empty'.
                         ocluster
                             .state
                             .store(CLUSTER_STATE_OFFLOADED_INVISIBLE, MO_RELAXED);
+                        *ocluster.cluster.write() = None;
                     }
                 } else {
                     ocluster.state.store(CLUSTER_STATE_DISCARDED, MO_RELAXED);
@@ -395,7 +398,7 @@ impl OverworldStreamer {
 
         // Generate meshes
         {
-            // Mark changes
+            // Mark intrinsics changes
             for (pos, ocluster) in oclusters.iter() {
                 if preloaded_clusters_states[pos] != CLUSTER_STATE_LOADED
                     || !ocluster.changed.load(MO_RELAXED)
@@ -439,7 +442,7 @@ impl OverworldStreamer {
                 }
             }
 
-            // Collect necessary clusters to update their outer intrinsics
+            // Determine occlusion of each cluster & whether respective meshes can be updated
             for pos in oclusters.keys() {
                 let rcluster = &rclusters[pos];
 
@@ -458,7 +461,7 @@ impl OverworldStreamer {
                 }
             }
 
-            // Schedule task of updating clusters outer intrinsics
+            // Sort clusters by distance to streaming position
             let mut keys: Vec<_> = oclusters
                 .keys()
                 .map(|v| {
@@ -468,8 +471,9 @@ impl OverworldStreamer {
                     )
                 })
                 .collect();
-            keys.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            keys.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
 
+            // Schedule tasks of updating outer intrinsics of respective clusters
             for (pos, _) in &keys {
                 if self.curr_clusters_intrinsics_updating_n.load(MO_RELAXED)
                     >= max_updating_clusters_in_progress
@@ -501,10 +505,12 @@ impl OverworldStreamer {
                     if needs_intrinsics_fill_at & mask == 0 {
                         continue;
                     }
-                    if !rclusters.contains_key(&p) {
+                    if let Some(rcluster) = rclusters.get(&p) {
+                        rcluster
+                    } else {
                         needs_intrinsics_fill_at &= !mask;
                         continue;
-                    }
+                    };
 
                     let state = *preloaded_clusters_states
                         .get(&p)
@@ -515,10 +521,23 @@ impl OverworldStreamer {
                         break;
                     }
 
+                    let fill_occluder = if state == CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                        // If the neighbour cluster is fully occluded or empty,
+                        // clear intrinsics of `cluster` with respective occluders.
+                        Some(if rcluster.occluded.load(MO_RELAXED) {
+                            Occluder::full()
+                        } else {
+                            Occluder::empty()
+                        })
+                    } else {
+                        None
+                    };
+
                     fill_neighbours.push((
                         p,
                         Arc::clone(&oclusters[&p]),
                         Arc::clone(&rclusters[&p].mesh_can_be_updated),
+                        fill_occluder,
                     ));
                 }
 
@@ -557,7 +576,7 @@ impl OverworldStreamer {
 
                 // Remove unnecessary filling of neighbour cluster
                 // (neighbour cluster is filled mutually with current cluster)
-                for (neighbour_pos, _, _) in &fill_neighbours {
+                for (neighbour_pos, _, _, _) in &fill_neighbours {
                     let rcluster = rclusters.get_mut(neighbour_pos).unwrap();
                     let mask = 1 << neighbour_dir_index(&neighbour_pos, &pos);
 
@@ -571,7 +590,9 @@ impl OverworldStreamer {
                         let offset = neighbour_pos - pos;
                         cluster.clear_outer_intrinsics(glm::convert(offset), Default::default());
                     }
-                    for (neighbour_pos, neighbour, neighbour_mesh_can_be_updated) in fill_neighbours {
+                    for (neighbour_pos, neighbour, neighbour_mesh_can_be_updated, offloaded_fill_occluder) in
+                        fill_neighbours
+                    {
                         // Use loop in case of failure to acquire a lock of one of the clusters
                         loop {
                             let neighbour_cluster = neighbour.cluster.try_upgradable_read();
@@ -631,11 +652,12 @@ impl OverworldStreamer {
                                 }
                             } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
                                 let offset = neighbour_pos - pos;
+
                                 cluster.clear_outer_intrinsics(
                                     glm::convert(offset),
                                     IntrinsicBlockData {
                                         tex_model_id: u16::MAX,
-                                        occluder: Occluder::full(),
+                                        occluder: offloaded_fill_occluder.unwrap(),
                                         light_level: Default::default(),
                                     },
                                 );

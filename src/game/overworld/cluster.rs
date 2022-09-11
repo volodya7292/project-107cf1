@@ -98,11 +98,21 @@ impl NeighbourVertexIntrinsics {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct IntrinsicBlockData {
     pub tex_model_id: u16,
     pub occluder: Occluder,
     pub light_level: LightLevel,
+}
+
+impl Default for IntrinsicBlockData {
+    fn default() -> Self {
+        Self {
+            tex_model_id: u16::MAX,
+            occluder: Default::default(),
+            light_level: Default::default(),
+        }
+    }
 }
 
 pub struct BlockData<'a> {

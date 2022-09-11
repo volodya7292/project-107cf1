@@ -6,6 +6,7 @@ pub mod registry;
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld_streamer::OverworldStreamer;
@@ -65,7 +66,7 @@ pub struct Game {
 }
 
 impl Game {
-    const MOVEMENT_SPEED: f64 = 8.0;
+    const MOVEMENT_SPEED: f64 = 16.0;
     const MOUSE_SENSITIVITY: f64 = 0.2;
 
     pub fn init() -> Game {
@@ -438,6 +439,10 @@ impl Application for Game {
                             }
                             VirtualKeyCode::P => {
                                 println!("{}", self.player_pos);
+                                println!(
+                                    "{:?}",
+                                    self.player_pos.map(|v| v.rem_euclid(cluster::SIZE as f64))
+                                );
                             }
                             VirtualKeyCode::T => {
                                 self.grab_cursor(main_window, !self.cursor_grab);
