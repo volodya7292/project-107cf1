@@ -75,7 +75,7 @@ impl Game {
         let overworld = Overworld::new(&main_registry, 0);
 
         let spawn_point = overworld.generator().gen_spawn_point();
-        dbg!(spawn_point);
+        // dbg!(spawn_point);
 
         // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
@@ -168,8 +168,6 @@ impl Application for Game {
         }
 
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
-
-        // self.overworld.ww
 
         let mut overworld_streamer =
             OverworldStreamer::new(renderer, mat_pipelines.cluster(), &self.overworld);
