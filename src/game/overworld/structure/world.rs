@@ -133,9 +133,9 @@ const MOUNTAINS_RIDGES_FREQ: f64 = 1.0 / 700.0;
 const OCEANS_FREQ: f64 = 1.0 / 1400.0;
 const OCEANS_LOC_FREQ: f64 = 1.0 / 700.0;
 
-const FLATNESS_MAX_HEIGHT: f32 = 10.0;
+const FLATNESS_MAX_HEIGHT: f32 = 8.0;
 const HILLS_MAX_HEIGHT: f32 = 60.0;
-const MOUNTAINS_MAX_HEIGHT: f32 = 500.0;
+const MOUNTAINS_MAX_HEIGHT: f32 = 400.0;
 const MAX_ALTITUDE: f32 = FLATNESS_MAX_HEIGHT + HILLS_MAX_HEIGHT + MOUNTAINS_MAX_HEIGHT;
 
 pub struct WorldState {
@@ -146,7 +146,7 @@ pub struct WorldState {
     biomes_by_climate: RTree<ClimateRange>,
     cluster_xz_caches: ConcurrentCache<I64Vec2, ClusterXZCache>,
 
-    flat_noise: HybridNoise<2, 1, noise::SuperSimplex>,
+    flat_noise: ParamNoise<2, noise::SuperSimplex>,
     hills_noise: HybridNoise<2, 4, noise::SuperSimplex>,
     hills_mask_noise: HybridNoise<2, 1, noise::SuperSimplex>,
     mountains_noise: HybridNoise<2, 1, noise::SuperSimplex>,
@@ -212,7 +212,10 @@ impl WorldState {
             biome_partition_noise,
             biomes_by_climate,
             cluster_xz_caches: ConcurrentCache::new(MAX_CLUSTER_BIOME_MAPS),
-            flat_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
+            flat_noise: ParamNoise::new(
+                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
+                &[(1.0, 1.0), (2.0, 0.4), (4.0, 0.2)],
+            ),
             hills_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
             hills_mask_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
             mountains_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
@@ -253,7 +256,7 @@ impl WorldState {
     fn calc_height_at(&self, pos: I64Vec2) -> f32 {
         let pos_d: DVec2 = glm::convert(pos);
 
-        let mut flat_height = self.flat_noise.sample(pos_d * FLATNESS_FREQ, 0.5) as f32;
+        let mut flat_height = self.flat_noise.sample(pos_d * FLATNESS_FREQ) as f32;
         flat_height = (flat_height * 0.5 + 0.5) * FLATNESS_MAX_HEIGHT;
 
         let mut hills_height = self.hills_noise.sample(pos_d * HILLS_FREQ, 0.5) as f32;
