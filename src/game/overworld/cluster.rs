@@ -1,6 +1,6 @@
 use crate::game::overworld::block::Block;
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::registry::Registry;

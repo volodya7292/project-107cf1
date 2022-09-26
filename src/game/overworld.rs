@@ -7,10 +7,10 @@
 /// 3. Structures
 /// 4. Features
 pub mod block;
-pub mod block_component;
 pub mod block_model;
 pub mod cluster;
 pub mod clusters_access_cache;
+pub mod facing;
 pub mod generator;
 pub mod light_level;
 pub mod occluder;
@@ -18,8 +18,8 @@ pub mod structure;
 pub mod textured_block_model;
 
 use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::OverworldGenerator;
 use crate::game::overworld::structure::{Structure, StructuresIter};
 use bit_vec::BitVec;

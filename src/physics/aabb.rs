@@ -1,4 +1,4 @@
-use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::facing::Facing;
 use crate::physics::MOTION_EPSILON;
 use nalgebra_glm::{DVec3, I32Vec3};
 

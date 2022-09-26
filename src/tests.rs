@@ -26,7 +26,7 @@ fn test_with_device() {
 
 #[test]
 fn cluster_facing() {
-    use crate::game::overworld::block_component::Facing;
+    use crate::game::overworld::facing::Facing;
 
     assert!(Facing::from_direction(&I32Vec3::new(-1, 0, 1)).is_none());
     assert!(Facing::from_direction(&I32Vec3::new(1, 0, 1)).is_none());

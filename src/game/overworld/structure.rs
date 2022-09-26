@@ -1,7 +1,7 @@
 pub mod world;
 
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::Cluster;
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::game::overworld::{cluster, Overworld};
 use bit_vec::BitVec;

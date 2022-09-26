@@ -1,6 +1,6 @@
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::block_model;
 use crate::game::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::occluder::Occluder;
 use crate::physics::aabb::AABB;
 use bit_vec::BitVec;

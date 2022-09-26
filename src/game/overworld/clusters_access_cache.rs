@@ -1,7 +1,7 @@
 use crate::game::overworld;
 use crate::game::overworld::block::Block;
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, BlockDataImpl, Cluster};
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::{
     cluster, OverworldCluster, CLUSTER_STATE_LOADED, CLUSTER_STATE_OFFLOADED_INVISIBLE,

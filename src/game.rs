@@ -5,9 +5,9 @@ pub mod registry;
 
 use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::block::Block;
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::BlockDataImpl;
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld_streamer::OverworldStreamer;
 use crate::physics::aabb::{AABBRayIntersection, AABB};

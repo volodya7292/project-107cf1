@@ -1,6 +1,6 @@
 use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::block_component::Facing;
 use crate::game::overworld::cluster::{Cluster, IntrinsicBlockData};
+use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::OverworldGenerator;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::{

@@ -1,4 +1,4 @@
-use crate::game::overworld::block_component::Facing;
+use crate::game::overworld::facing::Facing;
 use std::ops::{BitAnd, BitAndAssign};
 
 #[derive(Copy, Clone, Default, Debug)]
