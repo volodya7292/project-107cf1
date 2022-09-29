@@ -1,12 +1,13 @@
 /// World generation:
 /// 1. Terrain
-///   Temperature & moisture maps (perlin noise) - implicit biomes
+///   Temperature & humidity maps (perlin noise) - implicit biomes
 ///   Height map (perlin noise) - terrain shape (heights)
 ///   Ridge noise - rivers (various widths)
 /// 2. Ores
 /// 3. Structures
 /// 4. Features
 pub mod block;
+pub mod block_component;
 pub mod block_model;
 pub mod cluster;
 pub mod clusters_access_cache;

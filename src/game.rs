@@ -3,8 +3,8 @@ pub mod overworld;
 pub mod overworld_streamer;
 pub mod registry;
 
-use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::block::Block;
+use crate::game::main_registry::{MainRegistry, StatelessBlock};
+use crate::game::overworld::block::{AnyBlockState, Block, BlockState};
 use crate::game::overworld::cluster;
 use crate::game::overworld::cluster::BlockDataImpl;
 use crate::game::overworld::facing::Facing;
@@ -24,6 +24,7 @@ use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::HashSet;
 use engine::{renderer, Application, Input};
+use entity_data::AnyState;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
 use overworld::Overworld;
@@ -58,7 +59,7 @@ pub struct Game {
     curr_jump_force: f64,
     look_at_block: Option<(I64Vec3, Facing)>,
     block_set_cooldown: f64,
-    curr_block: Block,
+    curr_block: AnyBlockState,
 
     change_stream_pos: bool,
     player_collision_enabled: bool,
@@ -94,7 +95,7 @@ impl Game {
             curr_jump_force: 0.0,
             look_at_block: None,
             block_set_cooldown: 0.0,
-            curr_block: main_registry.block_default(),
+            curr_block: main_registry.block_default.into_any(),
             change_stream_pos: true,
             player_collision_enabled: false,
             cursor_grab: true,
@@ -317,9 +318,12 @@ impl Application for Game {
                         let dir: I64Vec3 = glm::convert(facing.direction());
                         let set_pos = pos + dir;
 
-                        access.set_block(&set_pos, self.curr_block);
+                        access.set_block(
+                            &set_pos,
+                            self.curr_block.clone().into_definite::<StatelessBlock>().unwrap(),
+                        );
 
-                        if self.curr_block == self.registry.block_glow() {
+                        if self.curr_block.block_id == self.registry.block_glow.block_id {
                             access.set_light(&set_pos, LightLevel::from_intensity(10));
                         } else {
                             // Remove light to cause occlusion of nearby lights
@@ -336,10 +340,10 @@ impl Application for Game {
                         access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
 
                     if let Some(inter) = self.look_at_block {
-                        let prev_block = access.get_block(&inter.0).unwrap().block();
-                        access.set_block(&inter.0, self.registry.block_empty());
+                        let prev_block_id = access.get_block(&inter.0).unwrap().block_id();
+                        access.set_block(&inter.0, self.registry.block_empty);
 
-                        if prev_block == self.registry.block_glow() {
+                        if prev_block_id == self.registry.block_glow.block_id {
                             access.remove_light(&inter.0);
                         } else {
                             // Set corresponding light level if there is a light nearby
@@ -449,10 +453,10 @@ impl Application for Game {
                                 main_window.set_cursor_visible(!self.cursor_grab);
                             }
                             VirtualKeyCode::Key1 => {
-                                self.curr_block = self.registry.block_default();
+                                self.curr_block = self.registry.block_default.into_any();
                             }
                             VirtualKeyCode::Key2 => {
-                                self.curr_block = self.registry.block_glow();
+                                self.curr_block = self.registry.block_glow.into_any();
                             }
                             _ => {}
                         }

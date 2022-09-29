@@ -1,6 +1,6 @@
 use crate::game::overworld;
-use crate::game::overworld::block::Block;
-use crate::game::overworld::cluster::{BlockData, BlockDataBuilder, BlockDataImpl, Cluster};
+use crate::game::overworld::block::{Block, BlockState};
+use crate::game::overworld::cluster::{BlockData, BlockDataImpl, Cluster};
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::{
@@ -8,6 +8,7 @@ use crate::game::overworld::{
 };
 use crate::game::registry::Registry;
 use engine::utils::{HashMap, MO_RELAXED};
+use entity_data::ArchetypeState;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
@@ -53,9 +54,9 @@ impl AccessGuard {
     }
 
     #[inline]
-    pub fn set(&mut self, pos: &U32Vec3, block: Block) -> BlockDataBuilder {
+    pub fn set<A: ArchetypeState>(&mut self, pos: &U32Vec3, state: BlockState<A>) {
         match &mut self.lock {
-            AccessGuardLock::Write(g) => g.as_mut().unwrap().set(pos, block),
+            AccessGuardLock::Write(g) => g.as_mut().unwrap().set(pos, state),
             _ => unreachable!(),
         }
     }
@@ -146,12 +147,15 @@ impl ClustersAccessCache {
         }
     }
 
-    /// Returns block builder or `None` if respective cluster is not loaded
-    pub fn set_block(&mut self, pos: &I64Vec3, block: Block) -> Option<BlockDataBuilder> {
-        let cluster = self.get_cluster_for_block_mut(pos)?;
-        let block_pos = overworld::cluster_block_pos_from_global(pos);
-
-        Some(cluster.set(&block_pos, block))
+    /// Returns false if respective cluster is not loaded
+    pub fn set_block<A: ArchetypeState>(&mut self, pos: &I64Vec3, state: BlockState<A>) -> bool {
+        if let Some(cluster) = self.get_cluster_for_block_mut(pos) {
+            let block_pos = overworld::cluster_block_pos_from_global(pos);
+            cluster.set(&block_pos, state);
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns block builder or `None` if respective cluster is not loaded
@@ -194,7 +198,7 @@ impl ClustersAccessCache {
             let curr_block = self.get_block(&curr_block_upos);
 
             if let Some(data) = &curr_block {
-                let block = data.block();
+                let block = registry.get_block(data.block_id()).unwrap();
 
                 if block.has_textured_model() {
                     let model = registry.get_textured_block_model(block.textured_model()).unwrap();
@@ -247,7 +251,8 @@ impl ClustersAccessCache {
                 let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
                 let rel_pos = curr_pos + dir;
 
-                let block = self.get_block(&rel_pos).unwrap().block();
+                let block_id = self.get_block(&rel_pos).unwrap().block_id();
+                let block = *self.registry.get_block(block_id).unwrap();
                 let level = self.get_light_level(&rel_pos).unwrap();
                 let color = level.components();
 

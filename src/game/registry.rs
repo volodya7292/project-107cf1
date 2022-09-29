@@ -7,7 +7,6 @@ use crate::game::overworld::textured_block_model::TexturedBlockModel;
 use engine::renderer::{MaterialInfo, TextureAtlasType};
 use engine::resource_file::ResourceRef;
 use engine::utils::HashMap;
-use entity_data::EntityStorageLayout;
 use std::convert::TryInto;
 
 pub struct Registry {
@@ -19,10 +18,14 @@ pub struct Registry {
     materials: Vec<MaterialInfo>,
     textured_models: Vec<TexturedBlockModel>,
     blocks: Vec<Block>,
-    cluster_layout: EntityStorageLayout,
 }
 
 impl Registry {
+    pub const MAX_BLOCKS: u16 = u16::MAX - 1;
+    pub const MAX_TEXTURES: u16 = 2048;
+    pub const MAX_MATERIALS: u16 = u16::MAX - 1;
+    pub const MAX_MODELS: u16 = u16::MAX - 1;
+
     pub fn new() -> Self {
         Registry {
             structures: vec![],
@@ -33,41 +36,47 @@ impl Registry {
             materials: vec![],
             textured_models: vec![],
             blocks: vec![],
-            cluster_layout: Default::default(),
         }
     }
 
-    pub fn cluster_layout(&self) -> &EntityStorageLayout {
-        &self.cluster_layout
-    }
-
-    pub fn cluster_layout_mut(&mut self) -> &mut EntityStorageLayout {
-        &mut self.cluster_layout
-    }
-
     pub fn register_block_model(&mut self, block_model: BlockModel) -> u16 {
+        if self.models.len() == Self::MAX_MODELS as usize {
+            panic!("Maximum number of materials is reached!");
+        }
         self.models.push(block_model);
         (self.models.len() - 1).try_into().unwrap()
     }
 
     pub fn register_texture(&mut self, ty: TextureAtlasType, res_ref: ResourceRef) -> u16 {
+        if self.textures.len() == Self::MAX_TEXTURES as usize {
+            panic!("Maximum number of textures is reached!");
+        }
         self.textures.push((ty, res_ref));
         (self.textures.len() - 1).try_into().unwrap()
     }
 
     pub fn register_material(&mut self, material: MaterialInfo) -> u16 {
+        if self.materials.len() == Self::MAX_MATERIALS as usize {
+            panic!("Maximum number of materials is reached!");
+        }
         self.materials.push(material);
         (self.materials.len() - 1).try_into().unwrap()
     }
 
     pub fn register_textured_block_model(&mut self, textured_block_model: TexturedBlockModel) -> u16 {
+        if self.models.len() == Self::MAX_MODELS as usize {
+            panic!("Maximum number of block models is reached!");
+        }
         self.textured_models.push(textured_block_model);
         (self.textured_models.len() - 1).try_into().unwrap()
     }
 
-    pub fn register_block(&mut self, block: Block) -> u32 {
+    pub fn register_block(&mut self, block: Block) -> u16 {
+        if self.blocks.len() == Self::MAX_BLOCKS as usize {
+            panic!("Maximum number of blocks is reached!");
+        }
         self.blocks.push(block);
-        (self.blocks.len() - 1) as u32
+        (self.blocks.len() - 1) as u16
     }
 
     pub fn register_biome(&mut self, biome: Biome) -> u32 {
@@ -94,6 +103,10 @@ impl Registry {
 
     pub fn get_biome(&self, id: u32) -> Option<&Biome> {
         self.biomes.get(id as usize)
+    }
+
+    pub fn get_block(&self, id: u16) -> Option<&Block> {
+        self.blocks.get(id as usize)
     }
 
     pub fn get_block_model(&self, id: u16) -> Option<&BlockModel> {

@@ -495,9 +495,9 @@ pub fn gen_fn(
                 let pos = U32Vec3::new(x as u32, y as u32, z as u32);
 
                 if global_y <= height as i64 {
-                    cluster.set(&pos, registry.block_default());
+                    cluster.set(&pos, registry.block_default);
                 } else {
-                    cluster.set(&pos, registry.block_empty());
+                    cluster.set(&pos, registry.block_empty);
                 }
             }
         }

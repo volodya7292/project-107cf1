@@ -1,13 +1,14 @@
-use crate::game::overworld::block::Block;
+use crate::game::overworld::block::{Block, BlockState};
 use crate::game::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::registry::Registry;
+use bit_vec::BitVec;
 use engine::renderer::vertex_mesh::VertexMeshCreate;
 use engine::renderer::VertexMesh;
 use engine::utils::MO_RELAXED;
-use entity_data::{EntityBuilder, EntityId, EntityStorage};
+use entity_data::{ArchetypeState, EntityId, EntityStorage};
 use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
@@ -25,7 +26,7 @@ const ALIGNED_SIZE: usize = SIZE + 2;
 const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
 
 lazy_static! {
-    static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new(&Default::default());
+    static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
 }
 
 fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
@@ -117,8 +118,7 @@ impl Default for IntrinsicBlockData {
 
 pub struct BlockData<'a> {
     block_storage: &'a EntityStorage,
-    block: Block,
-    id: EntityId,
+    block: InnerBlockState,
 }
 
 impl BlockData<'_> {
@@ -126,7 +126,6 @@ impl BlockData<'_> {
         Self {
             block_storage: &EMPTY_BLOCK_STORAGE,
             block: Default::default(),
-            id: Default::default(),
         }
     }
 }
@@ -135,84 +134,80 @@ pub trait BlockDataImpl {
     /// Returns specified block component `C`
     fn get<C: 'static>(&self) -> Option<&C>;
 
-    fn block(&self) -> Block;
+    fn block_id(&self) -> u16;
 }
 
 impl BlockDataImpl for BlockData<'_> {
     fn get<C: 'static>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.id)
+        self.block_storage.get::<C>(&self.block.entity_id)
     }
 
-    fn block(&self) -> Block {
-        self.block
+    fn block_id(&self) -> u16 {
+        self.block.block_id
     }
 }
 
 pub struct BlockDataMut<'a> {
     block_storage: &'a mut EntityStorage,
-    block: Block,
-    id: EntityId,
+    block: InnerBlockState,
 }
 
 impl BlockDataImpl for BlockDataMut<'_> {
     fn get<C: 'static>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.id)
+        self.block_storage.get::<C>(&self.block.entity_id)
     }
 
-    fn block(&self) -> Block {
-        self.block
+    fn block_id(&self) -> u16 {
+        self.block.block_id
     }
 }
 
 impl BlockDataMut<'_> {
     pub fn get_mut<C: 'static>(&mut self) -> Option<&mut C> {
-        self.block_storage.get_mut::<C>(&self.id)
+        self.block_storage.get_mut::<C>(&self.block.entity_id)
     }
 }
 
-pub struct BlockDataBuilder<'a> {
-    entity_builder: EntityBuilder<'a>,
-    entity_id: &'a mut EntityId,
+#[derive(Copy, Clone)]
+struct InnerBlockState {
+    block_id: u16,
+    entity_id: EntityId,
 }
 
-impl BlockDataBuilder<'_> {
-    pub fn with<C: 'static>(mut self, comp: C) -> Self {
-        self.entity_builder = self.entity_builder.with::<C>(comp);
-        self
-    }
-
-    pub fn build(self) {
-        *self.entity_id = self.entity_builder.build();
+impl Default for InnerBlockState {
+    fn default() -> Self {
+        Self {
+            block_id: u16::MAX,
+            entity_id: Default::default(),
+        }
     }
 }
 
 pub struct Cluster {
     registry: Arc<Registry>,
-    block_storage: EntityStorage,
-    block_map: Box<[[[EntityId; SIZE]; SIZE]; SIZE]>,
-    blocks: Box<[[[Block; SIZE]; SIZE]; SIZE]>,
+    block_state_storage: EntityStorage,
+    block_states: Box<[[[InnerBlockState; SIZE]; SIZE]; SIZE]>,
     intrinsic_data: Vec<IntrinsicBlockData>,
     side_changed: [bool; 27],
     empty: AtomicBool,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
     light_addition_cache: VecDeque<TVec3<usize>>,
+    active_blocks: BitVec,
 }
 
 impl Cluster {
     /// Creating a new cluster is expensive due to its big size of memory
     pub fn new(registry: &Arc<Registry>) -> Self {
-        let layout = registry.cluster_layout();
-
         Self {
             registry: Arc::clone(registry),
-            block_storage: EntityStorage::new(layout),
-            block_map: Default::default(),
-            blocks: Default::default(),
+            block_state_storage: EntityStorage::new(),
+            block_states: Default::default(),
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             side_changed: [false; 27],
             empty: AtomicBool::new(true),
             vertex_mesh: Default::default(),
             light_addition_cache: VecDeque::with_capacity(SIZE * SIZE),
+            active_blocks: BitVec::from_elem(VOLUME, false),
         }
     }
 
@@ -246,13 +241,11 @@ impl Cluster {
         }
 
         let pos: TVec3<usize> = glm::convert(*pos);
-        let block = self.blocks[pos.x][pos.y][pos.z];
-        let entity = self.block_map[pos.x][pos.y][pos.z];
+        let block = self.block_states[pos.x][pos.y][pos.z];
 
         BlockData {
-            block_storage: &self.block_storage,
+            block_storage: &self.block_state_storage,
             block,
-            id: entity,
         }
     }
 
@@ -270,18 +263,16 @@ impl Cluster {
         // TODO: set `side_changed` if necessary
 
         let pos: TVec3<usize> = glm::convert(*pos);
-        let block = self.blocks[pos.x][pos.y][pos.z];
-        let entity = self.block_map[pos.x][pos.y][pos.z];
+        let block = self.block_states[pos.x][pos.y][pos.z];
 
         BlockDataMut {
-            block_storage: &mut self.block_storage,
+            block_storage: &mut self.block_state_storage,
             block,
-            id: entity,
         }
     }
 
-    /// Sets specified block at `pos`
-    pub fn set(&mut self, pos: &U32Vec3, block: Block) -> BlockDataBuilder {
+    /// Sets the specified block at `pos`
+    pub fn set<A: ArchetypeState>(&mut self, pos: &U32Vec3, block_state: BlockState<A>) {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
@@ -292,11 +283,13 @@ impl Cluster {
         }
         let pos: TVec3<usize> = glm::convert(*pos);
 
-        let entity_id = &mut self.block_map[pos.x][pos.y][pos.z];
-        if *entity_id != EntityId::NULL {
-            self.block_storage.remove(entity_id);
+        let curr_entity_id = &mut self.block_states[pos.x][pos.y][pos.z].entity_id;
+        if *curr_entity_id != EntityId::NULL {
+            self.block_state_storage.remove(curr_entity_id);
         }
-        let entity_builder = self.block_storage.add_entity(block.archetype() as u32);
+
+        let block = self.registry.get_block(block_state.block_id).unwrap();
+        let entity_id = self.block_state_storage.add_entity(block_state.components);
 
         let occluder = if block.has_textured_model() {
             let model = self
@@ -308,17 +301,16 @@ impl Cluster {
             Occluder::default()
         };
 
+        self.block_states[pos.x][pos.y][pos.z] = InnerBlockState {
+            block_id: block_state.block_id,
+            entity_id,
+        };
+
         self.side_changed[neighbour_index_from_pos(&pos)] = true;
-        self.blocks[pos.x][pos.y][pos.z] = block;
 
         let index = aligned_block_index(&pos.add_scalar(1));
         self.intrinsic_data[index].occluder = occluder;
         self.intrinsic_data[index].tex_model_id = block.textured_model();
-
-        BlockDataBuilder {
-            entity_builder,
-            entity_id,
-        }
     }
 
     pub fn get_light_level(&mut self, pos: &U32Vec3) -> LightLevel {
@@ -537,12 +529,14 @@ impl Cluster {
                 }
                 let rel_pos: TVec3<usize> = glm::convert_unchecked(rel_pos);
 
-                let block = self.blocks[rel_pos.x - 1][rel_pos.y - 1][rel_pos.z - 1];
+                let block = self.block_states[rel_pos.x - 1][rel_pos.y - 1][rel_pos.z - 1];
                 let index = aligned_block_index(&rel_pos);
                 let level = &mut self.intrinsic_data[index].light_level;
                 let color = level.components();
 
-                if !self.registry.is_block_opaque(&block)
+                let block = self.registry.get_block(block.block_id).unwrap();
+
+                if !self.registry.is_block_opaque(block)
                     && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b))
                 {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
@@ -781,7 +775,8 @@ impl Cluster {
                 for z in 0..SIZE {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
                     let posf: Vec3 = glm::convert(pos);
-                    let block = &self.blocks[x][y][z];
+                    let state = &self.block_states[x][y][z];
+                    let block = self.registry.get_block(state.block_id).unwrap();
 
                     if !block.has_textured_model() {
                         continue;

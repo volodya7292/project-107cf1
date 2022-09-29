@@ -48,7 +48,8 @@ impl Overworld {
                     let pos = start + I64Vec3::new(x, y, z);
 
                     if let Some(entry) = access.get_block(&pos) {
-                        let block = entry.block();
+                        let block_id = entry.block_id();
+                        let block = reg.get_block(block_id).unwrap();
                         if !block.has_textured_model() {
                             continue;
                         }

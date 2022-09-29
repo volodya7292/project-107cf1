@@ -1,5 +1,5 @@
 use crate::game::overworld;
-use crate::game::overworld::block::Block;
+use crate::game::overworld::block::{Block, BlockState};
 use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::game::overworld::structure::world::Biome;
@@ -10,17 +10,22 @@ use crate::game::registry::Registry;
 use crate::physics::aabb::AABB;
 use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
 use engine::resource_file::ResourceFile;
+use entity_data::Archetype;
+use entity_data::ArchetypeState;
 use nalgebra_glm::{DVec3, U64Vec3, Vec3};
 use std::default::Default;
 use std::sync::Arc;
 
+#[derive(Copy, Clone, Archetype)]
+pub struct StatelessBlock;
+
 pub struct MainRegistry {
     registry: Arc<Registry>,
     structure_world: u32,
-    block_empty: Block,
-    block_default: Block,
-    block_glow: Block,
-    block_water: Block,
+    pub block_empty: BlockState<StatelessBlock>,
+    pub block_default: BlockState<StatelessBlock>,
+    pub block_glow: BlockState<StatelessBlock>,
+    pub block_water: BlockState<StatelessBlock>,
 }
 
 macro_rules! add_getters {
@@ -79,32 +84,32 @@ impl MainRegistry {
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let arch = reg.cluster_layout_mut().add_archetype().build();
-            Block::new(arch as u16, u16::MAX)
+            let id = reg.register_block(Block::new(u16::MAX));
+            BlockState::new(id, StatelessBlock)
         };
         let block_default = {
-            let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_default); 6],
             ));
-            Block::new(arch as u16, tex_model)
+            let id = reg.register_block(Block::new(tex_model));
+            BlockState::new(id, StatelessBlock)
         };
         let block_glow = {
-            let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_glow); 6],
             ));
-            Block::new(arch as u16, tex_model)
+            let id = reg.register_block(Block::new(tex_model));
+            BlockState::new(id, StatelessBlock)
         };
         let block_water = {
-            let arch = reg.cluster_layout_mut().add_archetype().build();
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_water).with_transparency(true); 6],
             ));
-            Block::new(arch as u16, tex_model)
+            let id = reg.register_block(Block::new(tex_model));
+            BlockState::new(id, StatelessBlock)
         };
 
         // Biomes
@@ -197,5 +202,4 @@ impl MainRegistry {
     }
 
     add_getters! { u32, structure_world }
-    add_getters! { Block, block_empty block_default block_glow }
 }
