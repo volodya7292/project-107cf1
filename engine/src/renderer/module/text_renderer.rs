@@ -7,7 +7,7 @@ use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
 use crate::{HashSet, Renderer};
-use bit_set::BitSet;
+use fixedbitset::FixedBitSet;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -148,7 +148,7 @@ pub struct TextRenderer {
     fonts: Vec<FontSet>,
     char_locations: HashMap<GlyphUID, GlyphLocation>,
     char_locations_rev: HashMap<u32, GlyphUID>,
-    free_locations: BitSet,
+    free_locations: FixedBitSet,
     chars_to_load: HashSet<GlyphUID>,
     atlas_overflow_glyph: GlyphUID,
 
@@ -292,7 +292,7 @@ impl TextRenderer {
 
         let mut char_locations = HashMap::with_capacity(size3d.2 as usize);
         let mut char_locations_rev = HashMap::with_capacity(size3d.2 as usize);
-        let mut free_locations: BitSet = (0..char_locations.capacity()).collect();
+        let mut free_locations: FixedBitSet = (0..char_locations.capacity()).collect();
         let mut chars_to_load = HashSet::with_capacity(size3d.2 as usize);
         let fonts = vec![fallback_font];
 
@@ -306,7 +306,7 @@ impl TextRenderer {
                 },
             );
             char_locations_rev.insert(0, g_uid);
-            free_locations.remove(0);
+            free_locations.set(0, false);
             chars_to_load.insert(g_uid);
             g_uid
         };
@@ -386,8 +386,8 @@ impl TextRenderer {
             {
                 u32::MAX
             } else {
-                let index = self.free_locations.iter().next().unwrap();
-                self.free_locations.remove(index);
+                let index = self.free_locations.ones().next().unwrap();
+                self.free_locations.toggle(index);
                 index as u32
             };
 

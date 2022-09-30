@@ -9,9 +9,9 @@ edition = "2021"
 [dependencies]
 lazy_static = "1.4"
 log = "0.4"
-ahash = "0.7"
-bit-set = "0.5"
-smallvec = "1.8"
+ahash = "0.8"
+fixedbitset = "0.4"
+smallvec = { version = "1.9", features = ["const_generics"] }
 parking_lot = "0.12"
 ash = "0.37"
 raw-window-handle = "0.5"
@@ -19,4 +19,4 @@ spirv_cross = { version = "0.23", features = ["glsl"] }
 vma = { path = "vma" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-raw-window-metal = "0.2"
+raw-window-metal = "0.3"

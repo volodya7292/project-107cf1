@@ -1,7 +1,7 @@
 use crate::sampler::SamplerFilter;
 use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler, SamplerMipmap};
 use ash::vk;
-use bit_set::BitSet;
+use fixedbitset::FixedBitSet;
 use smallvec::SmallVec;
 use std::ops::Range;
 use std::slice;
@@ -52,7 +52,7 @@ pub struct DescriptorPool {
     pub(crate) set_layout_id: u32,
     pub(crate) native: SmallVec<[NativeDescriptorPool; 16]>,
     pub(crate) allocated: Vec<DescriptorSet>,
-    pub(crate) free_sets: BitSet,
+    pub(crate) free_sets: FixedBitSet,
 }
 
 impl DescriptorPool {
@@ -98,13 +98,17 @@ impl DescriptorPool {
         let sets = unsafe { self.device.wrapper.native.allocate_descriptor_sets(&alloc_info)? };
 
         let start_i = self.allocated.len() as u32;
+
         self.allocated
             .extend(sets.into_iter().enumerate().map(|(i, v)| DescriptorSet {
                 native: v,
                 id: start_i + i as u32,
             }));
+
+        self.free_sets.grow((start_i + size) as usize);
         self.free_sets
-            .extend((start_i as usize..(start_i + size) as usize).into_iter());
+            .insert_range((start_i as usize..(start_i + size) as usize).into_iter());
+
         self.native.push(next_pool);
         Ok(())
     }
@@ -116,8 +120,8 @@ impl DescriptorPool {
             return Ok(DescriptorSet::NULL);
         }
 
-        if let Some(id) = self.free_sets.iter().next() {
-            self.free_sets.remove(id);
+        if let Some(id) = self.free_sets.ones().next() {
+            self.free_sets.toggle(id);
             Ok(self.allocated[id])
         } else {
             self.alloc_next_pool((self.native.last().unwrap().size + 1).next_power_of_two())?;

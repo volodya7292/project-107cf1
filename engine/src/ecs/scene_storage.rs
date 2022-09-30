@@ -1,5 +1,5 @@
 use crate::utils::HashMap;
-use bit_set::BitSet;
+use fixedbitset::FixedBitSet;
 use index_pool::IndexPool;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::{Any, TypeId};
@@ -29,7 +29,7 @@ pub struct RawComponentStorage {
     needs_drop: bool,
     entity_allocated_count: Arc<AtomicU32>,
     emit_events: bool,
-    available: BitSet,
+    available: FixedBitSet,
     aval_count: u32,
     created: HashMap<u32, u64>,
     modified: HashMap<u32, u64>,
@@ -93,12 +93,13 @@ impl RawComponentStorage {
         }
         let ptr = (self.data.as_mut_ptr() as *mut T).add(index);
 
-        let already_present = !self.available.insert(index);
+        let already_present = self.available.contains(index);
         if already_present {
             if self.needs_drop {
                 (self.drop_func)(ptr as *mut u8);
             }
         } else {
+            self.available.extend([index].into_iter());
             self.aval_count += 1;
         }
 
@@ -131,7 +132,7 @@ impl RawComponentStorage {
             assert_failed(index, len / self.elem_size);
         }
 
-        let was_present = self.available.remove(index);
+        let was_present = self.available.contains(index);
 
         if self.emit_events {
             let just_created = self.created.remove(&entity.id).is_some();
@@ -143,6 +144,7 @@ impl RawComponentStorage {
         }
 
         if was_present {
+            self.available.set(index, false);
             self.aval_count -= 1;
             if self.needs_drop {
                 (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
@@ -214,7 +216,7 @@ impl RawComponentStorage {
 impl Drop for RawComponentStorage {
     fn drop(&mut self) {
         if self.needs_drop {
-            for index in &self.available {
+            for index in self.available.ones() {
                 let index_b = index * self.elem_size;
                 (self.drop_func)(unsafe { self.data.as_mut_ptr().add(index_b) });
             }
@@ -223,7 +225,7 @@ impl Drop for RawComponentStorage {
 }
 
 pub struct Entries<'a> {
-    set: BitSet,
+    set: FixedBitSet,
     entities: &'a Entities,
     estimate_len: u32,
 }
@@ -242,7 +244,7 @@ impl Entries<'_> {
 
     pub fn iter(&self) -> EntriesIter {
         EntriesIter {
-            set_iter: self.set.iter(),
+            set_iter: self.set.ones(),
             entities: self.entities,
             estimate_len: self.estimate_len,
         }
@@ -250,7 +252,7 @@ impl Entries<'_> {
 }
 
 pub struct EntriesIter<'a> {
-    set_iter: bit_set::Iter<'a, u32>,
+    set_iter: fixedbitset::Ones<'a>,
     entities: &'a Entities,
     estimate_len: u32,
 }
@@ -272,12 +274,12 @@ impl Iterator for EntriesIter<'_> {
 
 mod private {
     use crate::ecs::scene_storage::{Entities, RawComponentStorage};
-    use bit_set::BitSet;
+    use fixedbitset::FixedBitSet;
 
     pub trait RawComponentStorageImpl {
         fn raw(&self) -> &RawComponentStorage;
         fn entities(&self) -> &Entities;
-        fn available(&self) -> &BitSet;
+        fn available(&self) -> &FixedBitSet;
     }
 }
 
@@ -337,7 +339,7 @@ impl<'a, T> private::RawComponentStorageImpl for ComponentStorage<'a, T> {
         &self.entities
     }
 
-    fn available(&self) -> &BitSet {
+    fn available(&self) -> &FixedBitSet {
         &self.raw.available
     }
 }
@@ -360,7 +362,7 @@ impl<'a, T> private::RawComponentStorageImpl for ComponentStorageMut<'a, T> {
         &self.entities
     }
 
-    fn available(&self) -> &BitSet {
+    fn available(&self) -> &FixedBitSet {
         &self.raw.available
     }
 }

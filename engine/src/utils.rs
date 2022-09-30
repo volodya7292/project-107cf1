@@ -1,7 +1,6 @@
 pub mod noise;
 mod qef;
 pub mod slice_split;
-pub mod slot_vec;
 pub mod thread_pool;
 pub mod unsafe_slice;
 pub mod voronoi_noise;
