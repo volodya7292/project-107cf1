@@ -1,3 +1,15 @@
+use std::hash::Hash;
+use std::slice;
+use std::sync::atomic;
+use std::time::{Duration, Instant};
+use std::{mem, thread};
+
+use nalgebra_glm::Vec3;
+
+pub use slice_split::SliceSplitImpl;
+
+use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
+
 pub mod noise;
 mod qef;
 pub mod slice_split;
@@ -5,15 +17,6 @@ pub mod thread_pool;
 pub mod unsafe_slice;
 pub mod voronoi_noise;
 pub mod white_noise;
-
-use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
-use nalgebra_glm::Vec3;
-pub use slice_split::SliceSplitImpl;
-use std::hash::Hash;
-use std::slice;
-use std::sync::atomic;
-use std::time::{Duration, Instant};
-use std::{mem, thread};
 
 pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;

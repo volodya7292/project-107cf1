@@ -1,15 +1,16 @@
-use nalgebra::SVector;
-use noise::{NoiseFn, Seedable};
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-pub struct HybridNoise<const D: usize, const OCTAVES: usize, N: NoiseFn<[f64; D]>> {
+use nalgebra::SVector;
+use noise::{NoiseFn, Seedable};
+
+pub struct HybridNoise<const D: usize, const OCTAVES: usize, N: NoiseFn<f64, D>> {
     sources: [N; OCTAVES],
 }
 
 impl<const D: usize, const OCTAVES: usize, N> HybridNoise<D, OCTAVES, N>
 where
-    N: NoiseFn<[f64; D]> + Seedable + Clone + Debug,
+    N: NoiseFn<f64, D> + Seedable + Clone + Debug,
 {
     pub fn new(noise: N) -> Self {
         let sources: Vec<_> = (0..OCTAVES)
@@ -40,13 +41,13 @@ where
     }
 }
 
-pub struct ParamNoise<const D: usize, N: NoiseFn<[f64; D]>> {
+pub struct ParamNoise<const D: usize, N: NoiseFn<f64, D>> {
     sources: Vec<(N, f64, f64)>,
 }
 
 impl<const D: usize, N> ParamNoise<D, N>
 where
-    N: NoiseFn<[f64; D]> + Seedable + Clone + Debug,
+    N: NoiseFn<f64, D> + Seedable + Clone + Debug,
 {
     /// `octaves`: array of (frequency, amplitude)
     pub fn new(noise: N, octaves: &[(f64, f64)]) -> Self {

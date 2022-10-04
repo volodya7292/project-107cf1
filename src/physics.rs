@@ -1,10 +1,12 @@
-pub mod aabb;
-
-use crate::game::overworld::cluster::BlockDataImpl;
-use crate::game::overworld::Overworld;
-use aabb::AABB;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3};
+
+use aabb::AABB;
+
+use crate::game::overworld::raw_cluster::BlockDataImpl;
+use crate::game::overworld::Overworld;
+
+pub mod aabb;
 
 pub const MOTION_EPSILON: f64 = 1e-10;
 pub const G_ACCEL: f64 = 14.0;

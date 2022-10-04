@@ -1,30 +1,39 @@
+use std::default::Default;
+use std::sync::Arc;
+
+use entity_data::Archetype;
+use entity_data::ArchetypeState;
+use nalgebra_glm::{DVec3, U64Vec3, Vec3};
+
+use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
+use engine::resource_file::ResourceFile;
+
 use crate::game::overworld;
+use crate::game::overworld::block::event_handlers::AfterTickActionsStorage;
 use crate::game::overworld::block::{Block, BlockState};
 use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::game::overworld::structure::world::Biome;
 use crate::game::overworld::structure::{world, Structure};
 use crate::game::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
-use crate::game::overworld::{block_model, structure};
+use crate::game::overworld::{block, block_component, block_model, structure};
 use crate::game::registry::Registry;
 use crate::physics::aabb::AABB;
-use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
-use engine::resource_file::ResourceFile;
-use entity_data::Archetype;
-use entity_data::ArchetypeState;
-use nalgebra_glm::{DVec3, U64Vec3, Vec3};
-use std::default::Default;
-use std::sync::Arc;
 
 #[derive(Copy, Clone, Archetype)]
 pub struct StatelessBlock;
+
+#[derive(Copy, Clone, Archetype)]
+pub struct GlowBlockState {
+    activity: block_component::Activity,
+}
 
 pub struct MainRegistry {
     registry: Arc<Registry>,
     structure_world: u32,
     pub block_empty: BlockState<StatelessBlock>,
     pub block_default: BlockState<StatelessBlock>,
-    pub block_glow: BlockState<StatelessBlock>,
+    pub block_glow: BlockState<GlowBlockState>,
     pub block_water: BlockState<StatelessBlock>,
 }
 
@@ -84,7 +93,7 @@ impl MainRegistry {
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let id = reg.register_block(Block::new(u16::MAX));
+            let id = reg.register_block(Block::new_simple(&reg, u16::MAX));
             BlockState::new(id, StatelessBlock)
         };
         let block_default = {
@@ -92,7 +101,7 @@ impl MainRegistry {
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_default); 6],
             ));
-            let id = reg.register_block(Block::new(tex_model));
+            let id = reg.register_block(Block::new_simple(&reg, tex_model));
             BlockState::new(id, StatelessBlock)
         };
         let block_glow = {
@@ -100,15 +109,27 @@ impl MainRegistry {
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_glow); 6],
             ));
-            let id = reg.register_block(Block::new(tex_model));
-            BlockState::new(id, StatelessBlock)
+            let id = reg.register_block(Block::new(
+                &reg,
+                tex_model,
+                block::EventHandlers::new().with_on_tick(|pos, _, _, mut after_actions| {
+                    after_actions.set_component(*pos, block_component::Activity { active: false });
+                    println!("ON TICK!");
+                }),
+            ));
+            BlockState::new(
+                id,
+                GlowBlockState {
+                    activity: block_component::Activity { active: true },
+                },
+            )
         };
         let block_water = {
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_water).with_transparency(true); 6],
             ));
-            let id = reg.register_block(Block::new(tex_model));
+            let id = reg.register_block(Block::new_simple(&reg, tex_model));
             BlockState::new(id, StatelessBlock)
         };
 

@@ -1,17 +1,20 @@
-use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
-use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
-    PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
-};
-use crate::resource_file::ResourceRef;
-use crate::utils::UInt;
-use crate::{utils, Renderer};
-use basis_universal::TranscodeParameters;
-use smallvec::SmallVec;
 use std::mem;
 use std::sync::Arc;
+
+use basis_universal::TranscodeParameters;
+use smallvec::SmallVec;
+
 use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
+
+use crate::{Renderer, utils};
+use crate::renderer::{
+    ADDITIONAL_PIPELINE_BINDINGS, BufferUpdate, DESC_SET_CUSTOM_PER_OBJECT, MaterialInfo, MAX_BASIC_UNIFORM_BLOCK_SIZE,
+    MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE,
+    PIPELINE_TRANSLUCENCY_DEPTHS, TextureAtlasType,
+};
+use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
+use crate::resource_file::ResourceRef;
+use crate::utils::UInt;
 
 impl Renderer {
     pub fn load_texture_into_atlas(

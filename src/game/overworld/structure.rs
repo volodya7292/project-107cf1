@@ -1,17 +1,20 @@
-pub mod world;
-
-use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::facing::Facing;
-use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
-use crate::game::overworld::{cluster, Overworld};
-use bit_vec::BitVec;
-use engine::utils::UInt;
-use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, U64Vec3};
-use once_cell::sync::OnceCell;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+use bit_vec::BitVec;
+use nalgebra_glm as glm;
+use nalgebra_glm::{I64Vec3, U64Vec3};
+use once_cell::sync::OnceCell;
+
+use engine::utils::UInt;
+
+use crate::game::overworld::facing::Facing;
+use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::game::overworld::raw_cluster::RawCluster;
+use crate::game::overworld::{raw_cluster, Overworld};
+
+pub mod world;
 
 /// Returns whether the structure can be generated at specified center position.
 pub type GenPosCheckFn =
@@ -23,7 +26,7 @@ pub type GenFn = fn(
     generator: &OverworldGenerator,
     structure_seed: u64,
     center_pos: I64Vec3,
-    cluster: &mut Cluster,
+    cluster: &mut RawCluster,
     structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
 );
 
@@ -61,7 +64,7 @@ impl Structure {
     ) -> Structure {
         assert!(avg_spacing >= min_spacing);
 
-        let size_in_clusters = UInt::div_ceil(max_size.max(), cluster::SIZE as u64);
+        let size_in_clusters = UInt::div_ceil(max_size.max(), raw_cluster::SIZE as u64);
         assert!(min_spacing >= size_in_clusters);
 
         Structure {
@@ -100,7 +103,7 @@ impl Structure {
         generator: &OverworldGenerator,
         structure_seed: u64,
         center_pos: I64Vec3,
-        cluster: &mut Cluster,
+        cluster: &mut RawCluster,
         structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
     ) {
         (self.gen_fn)(
@@ -139,7 +142,7 @@ impl Iterator for StructuresIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let diam = self.max_search_radius as i64 * 2 - 1;
         let clusters_per_octant = self.structure.avg_spacing() as i64;
-        let blocks_per_octant = clusters_per_octant * cluster::SIZE as i64;
+        let blocks_per_octant = clusters_per_octant * raw_cluster::SIZE as i64;
 
         let front_octant = self.queue.front().unwrap();
         {

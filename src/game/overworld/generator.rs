@@ -1,12 +1,8 @@
-use crate::game::main_registry::MainRegistry;
-use crate::game::overworld::cluster;
-use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::structure::world::WorldState;
-use crate::game::overworld::structure::{Structure, StructuresIter};
+use std::any::Any;
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
-use engine::utils::noise::HybridNoise;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use noise::Seedable;
@@ -14,9 +10,16 @@ use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
-use std::any::Any;
-use std::collections::VecDeque;
-use std::sync::Arc;
+
+use engine::utils::noise::HybridNoise;
+use engine::utils::white_noise::WhiteNoise;
+use engine::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
+
+use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::raw_cluster;
+use crate::game::overworld::raw_cluster::RawCluster;
+use crate::game::overworld::structure::world::WorldState;
+use crate::game::overworld::structure::{Structure, StructuresIter};
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 
@@ -72,8 +75,8 @@ impl OverworldGenerator {
     /// and a `bool` indicating whether the structure is actually present there.  
     /// Gen-octant size = `structure.avg_spacing * cluster_size` blocks.
     pub fn gen_structure_pos(&self, structure: &Structure, pos: I64Vec3) -> StructurePos {
-        let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), cluster::SIZE as u64);
-        let octant_size = structure.avg_spacing() * cluster::SIZE as u64;
+        let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), raw_cluster::SIZE as u64);
+        let octant_size = structure.avg_spacing() * raw_cluster::SIZE as u64;
         let octant = pos.map(|v| v.div_euclid(octant_size as i64));
         let octant_u64 = octant.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
 
@@ -169,11 +172,11 @@ impl OverworldGenerator {
         world_pos.center_pos + rel_spawn_point
     }
 
-    pub fn create_cluster(&self) -> Cluster {
-        Cluster::new(self.main_registry.registry())
+    pub fn create_cluster(&self) -> RawCluster {
+        RawCluster::new(self.main_registry.registry())
     }
 
-    pub fn generate_cluster(&self, cluster: &mut Cluster, pos: I64Vec3) {
+    pub fn generate_cluster(&self, cluster: &mut RawCluster, pos: I64Vec3) {
         let reg = self.main_registry.registry();
         let world_st = reg.get_structure(self.main_registry.structure_world()).unwrap();
         let world_pos = self.gen_world_pos(pos);

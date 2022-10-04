@@ -1,19 +1,19 @@
-pub mod main_registry;
-pub mod overworld;
-pub mod overworld_streamer;
-pub mod registry;
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::AtomicBool;
+use std::sync::{atomic, Arc};
+use std::time::Instant;
 
-use crate::game::main_registry::{MainRegistry, StatelessBlock};
-use crate::game::overworld::block::{AnyBlockState, Block, BlockState};
-use crate::game::overworld::cluster;
-use crate::game::overworld::cluster::BlockDataImpl;
-use crate::game::overworld::facing::Facing;
-use crate::game::overworld::light_level::LightLevel;
-use crate::game::overworld_streamer::OverworldStreamer;
-use crate::physics::aabb::{AABBRayIntersection, AABB};
-use crate::physics::MOTION_EPSILON;
-use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
 use approx::AbsDiffEq;
+use entity_data::AnyState;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
+use parking_lot::Mutex;
+use rayon::prelude::*;
+use rayon::ThreadPool;
+use winit::event::{MouseButton, VirtualKeyCode};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
+
 use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::scene::Scene;
@@ -22,24 +22,29 @@ use engine::renderer::module::text_renderer::TextRenderer;
 use engine::renderer::{FontSet, Renderer};
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
-use engine::utils::HashSet;
+use engine::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::{renderer, Application, Input};
-use entity_data::AnyState;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
 use overworld::Overworld;
-use parking_lot::Mutex;
-use rayon::prelude::*;
-use rayon::ThreadPool;
 use renderer::camera;
-use std::f32::consts::FRAC_PI_2;
-use std::sync::atomic::AtomicBool;
-use std::sync::{atomic, Arc};
-use std::time::Instant;
 use vk_wrapper::Adapter;
-use winit::event::{MouseButton, VirtualKeyCode};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
+
+use crate::game::main_registry::{MainRegistry, StatelessBlock};
+use crate::game::overworld::block::event_handlers::AfterTickActionsStorage;
+use crate::game::overworld::block::{AnyBlockState, Block, BlockState};
+use crate::game::overworld::facing::Facing;
+use crate::game::overworld::light_level::LightLevel;
+use crate::game::overworld::raw_cluster::BlockDataImpl;
+use crate::game::overworld::{block_component, raw_cluster, LoadedClusters};
+use crate::game::overworld_streamer::OverworldStreamer;
+use crate::game::registry::Registry;
+use crate::physics::aabb::{AABBRayIntersection, AABB};
+use crate::physics::MOTION_EPSILON;
+use crate::{material_pipelines, physics, utils, PROGRAM_NAME};
+
+pub mod main_registry;
+pub mod overworld;
+pub mod overworld_streamer;
+pub mod registry;
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
@@ -50,7 +55,7 @@ pub struct Game {
     cursor_rel: (f64, f64),
     game_tick_finished: Arc<AtomicBool>,
 
-    overworld: Overworld,
+    overworld: Arc<Overworld>,
     overworld_streamer: Option<Arc<Mutex<OverworldStreamer>>>,
 
     player_pos: DVec3,
@@ -185,7 +190,7 @@ impl Application for Game {
         let text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
         let font_id = text_renderer.register_font(
             FontSet::from_bytes(
-                std::fs::read("/Users/admin/Downloads/Romanesco-Regular.ttf").unwrap(),
+                include_bytes!("../res/fonts/Romanesco-Regular.ttf").to_vec(),
                 None,
             )
             .unwrap(),
@@ -318,10 +323,7 @@ impl Application for Game {
                         let dir: I64Vec3 = glm::convert(facing.direction());
                         let set_pos = pos + dir;
 
-                        access.set_block(
-                            &set_pos,
-                            self.curr_block.clone().into_definite::<StatelessBlock>().unwrap(),
-                        );
+                        access.set_block(&set_pos, self.curr_block.clone());
 
                         if self.curr_block.block_id == self.registry.block_glow.block_id {
                             access.set_light(&set_pos, LightLevel::from_intensity(10));
@@ -372,6 +374,7 @@ impl Application for Game {
         }
 
         if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
+            let overworld = Arc::clone(&self.overworld);
             let streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
             let game_tick_finished = Arc::clone(&self.game_tick_finished);
 
@@ -394,7 +397,7 @@ impl Application for Game {
                 }
             }
 
-            coroutine_queue().spawn(|| game_tick(streamer, game_tick_finished));
+            coroutine_queue().spawn(|| game_tick(overworld, streamer, game_tick_finished));
             // println!("as {}", renderer.device().calc_real_device_mem_usage());
         }
     }
@@ -445,7 +448,7 @@ impl Application for Game {
                                 println!("{}", self.player_pos);
                                 println!(
                                     "{:?}",
-                                    self.player_pos.map(|v| v.rem_euclid(cluster::SIZE as f64))
+                                    self.player_pos.map(|v| v.rem_euclid(raw_cluster::SIZE as f64))
                                 );
                             }
                             VirtualKeyCode::T => {
@@ -477,13 +480,68 @@ impl Application for Game {
     }
 }
 
-pub fn game_tick(streamer: Arc<Mutex<OverworldStreamer>>, finished: Arc<AtomicBool>) {
+pub fn game_tick(
+    overworld: Arc<Overworld>,
+    streamer: Arc<Mutex<OverworldStreamer>>,
+    finished: Arc<AtomicBool>,
+) {
     let mut streamer = streamer.lock();
 
     // let t0 = Instant::now();
-    streamer.update();
+    let dirty_clusters = streamer.update();
     // let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
+    process_active_blocks(&overworld, &dirty_clusters);
+
     finished.store(true, atomic::Ordering::Relaxed);
+}
+
+pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<I64Vec3>) {
+    let loaded_clusters = overworld.loaded_clusters().read();
+    let registry = overworld.main_registry().registry();
+
+    let total_after_actions = Mutex::new(Vec::with_capacity(loaded_clusters.len()));
+
+    loaded_clusters.par_iter().for_each(|(cl_pos, o_cluster)| {
+        if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
+            let mut has_active_blocks = false;
+            let cluster = o_cluster.cluster.read();
+
+            let mut after_actions = AfterTickActionsStorage::new();
+
+            if let Some(cluster) = &*cluster {
+                for (pos, block_data) in cluster.active_blocks() {
+                    let global_pos = cl_pos + glm::convert::<_, I64Vec3>(pos);
+                    let block = registry.get_block(block_data.block_id()).unwrap();
+
+                    if let Some(on_tick) = &block.event_handlers().on_tick {
+                        on_tick(&global_pos, block_data, overworld, after_actions.builder());
+                        has_active_blocks = true;
+                    }
+                }
+            }
+            o_cluster
+                .may_have_active_blocks
+                .store(has_active_blocks, MO_RELAXED);
+
+            total_after_actions.lock().push(after_actions);
+        }
+    });
+
+    let mut cluster_accessor = overworld.access();
+    let total_after_actions = total_after_actions.lock();
+
+    // Note: first set components, and only after that set states which may be of different archetypes.
+    for actions in &*total_after_actions {
+        for info in &actions.components_infos {
+            let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.ptr);
+        }
+    }
+
+    for actions in &*total_after_actions {
+        for info in &actions.states_infos {
+            let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.ptr);
+        }
+    }
 }

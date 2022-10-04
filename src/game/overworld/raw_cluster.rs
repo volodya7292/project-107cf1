@@ -1,27 +1,36 @@
-use crate::game::overworld::block::{Block, BlockState};
-use crate::game::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
-use crate::game::overworld::facing::Facing;
-use crate::game::overworld::light_level::LightLevel;
-use crate::game::overworld::occluder::Occluder;
-use crate::game::registry::Registry;
+use std::any::TypeId;
+use std::collections::VecDeque;
+use std::convert::TryInto;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
-use engine::renderer::vertex_mesh::VertexMeshCreate;
-use engine::renderer::VertexMesh;
-use engine::utils::MO_RELAXED;
-use entity_data::{ArchetypeState, EntityId, EntityStorage};
+use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
+use fixedbitset::FixedBitSet;
 use glm::{I32Vec3, U32Vec3, Vec3};
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{TVec3, U8Vec3, Vec2, Vec4};
 use parking_lot::{RwLock, RwLockReadGuard};
-use std::collections::VecDeque;
-use std::convert::TryInto;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+
+use engine::renderer::vertex_mesh::VertexMeshCreate;
+use engine::renderer::VertexMesh;
+use engine::utils::MO_RELAXED;
 use vk_wrapper as vkw;
+
+use crate::game::overworld::block::{Block, BlockState};
+use crate::game::overworld::block_component;
+use crate::game::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
+use crate::game::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::game::overworld::facing::Facing;
+use crate::game::overworld::light_level::LightLevel;
+use crate::game::overworld::occluder::Occluder;
+use crate::game::overworld::position::ClusterBlockPos;
+use crate::game::registry::Registry;
 
 pub const SIZE: usize = 24;
 pub const VOLUME: usize = SIZE * SIZE * SIZE;
+pub const N_PARTS: usize = 27; // 1 (center) + 6 sides + 12 edges + 8 corners
 const ALIGNED_SIZE: usize = SIZE + 2;
 const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
 
@@ -29,7 +38,7 @@ lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
 }
 
-fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
+pub fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     let p = pos.map(|v| (v > 0) as usize + (v == SIZE - 1) as usize);
     p.x * 9 + p.y * 3 + p.z
 }
@@ -48,9 +57,15 @@ pub fn neighbour_index_to_dir(index: usize) -> I32Vec3 {
     I32Vec3::new(index as i32 / 9 % 3, index as i32 / 3 % 3, index as i32 % 3).add_scalar(-1)
 }
 
-#[inline]
-fn block_index(pos: &TVec3<usize>) -> usize {
-    pos.x * SIZE * SIZE + pos.y * SIZE + pos.z
+#[test]
+fn test_block_index_to_pos() {
+    let block_pos = TVec3::<usize>::new(3, 19, 8);
+    let idx = block_index(&block_pos);
+    assert_eq!(block_index_to_pos(idx), glm::convert::<_, U32Vec3>(block_pos));
+
+    let block_pos = TVec3::<usize>::new(SIZE - 1, SIZE - 1, SIZE - 1);
+    let idx = block_index(&block_pos);
+    assert_eq!(block_index_to_pos(idx), glm::convert::<_, U32Vec3>(block_pos));
 }
 
 #[inline]
@@ -70,32 +85,6 @@ impl NeighbourVertexIntrinsics {
             && self.sides[0].occluder.is_empty()
             && self.sides[1].occluder.is_empty()) as u8
             * 255
-    }
-
-    #[inline]
-    fn calculate_lighting(&self, curr_block: IntrinsicBlockData) -> u16 {
-        let corner = if self.corner.occluder.is_full() {
-            curr_block.light_level
-        } else {
-            self.corner.light_level
-        }
-        .components();
-        let side1 = if self.sides[0].occluder.is_full() {
-            curr_block.light_level
-        } else {
-            self.sides[0].light_level
-        }
-        .components();
-        let side2 = if self.sides[1].occluder.is_full() {
-            curr_block.light_level
-        } else {
-            self.sides[1].light_level
-        }
-        .components();
-
-        let color = (corner + side1 + side2) / 3;
-
-        LightLevel::from_vec(color).bits()
     }
 }
 
@@ -118,60 +107,60 @@ impl Default for IntrinsicBlockData {
 
 pub struct BlockData<'a> {
     block_storage: &'a EntityStorage,
-    block: InnerBlockState,
+    inner_state: InnerBlockState,
 }
 
 impl BlockData<'_> {
     pub fn empty() -> Self {
         Self {
             block_storage: &EMPTY_BLOCK_STORAGE,
-            block: Default::default(),
+            inner_state: Default::default(),
         }
     }
 }
 
 pub trait BlockDataImpl {
-    /// Returns specified block component `C`
-    fn get<C: 'static>(&self) -> Option<&C>;
+    /// Returns the specified block component `C`
+    fn get<C: Component>(&self) -> Option<&C>;
 
     fn block_id(&self) -> u16;
 }
 
 impl BlockDataImpl for BlockData<'_> {
-    fn get<C: 'static>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.block.entity_id)
+    fn get<C: Component>(&self) -> Option<&C> {
+        self.block_storage.get::<C>(&self.inner_state.entity_id)
     }
 
     fn block_id(&self) -> u16 {
-        self.block.block_id
+        self.inner_state.block_id
     }
 }
 
 pub struct BlockDataMut<'a> {
     block_storage: &'a mut EntityStorage,
-    block: InnerBlockState,
+    pub inner_state: InnerBlockState,
 }
 
 impl BlockDataImpl for BlockDataMut<'_> {
-    fn get<C: 'static>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.block.entity_id)
+    fn get<C: Component>(&self) -> Option<&C> {
+        self.block_storage.get::<C>(&self.inner_state.entity_id)
     }
 
     fn block_id(&self) -> u16 {
-        self.block.block_id
+        self.inner_state.block_id
     }
 }
 
 impl BlockDataMut<'_> {
-    pub fn get_mut<C: 'static>(&mut self) -> Option<&mut C> {
-        self.block_storage.get_mut::<C>(&self.block.entity_id)
+    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
+        self.block_storage.get_mut::<C>(&self.inner_state.entity_id)
     }
 }
 
 #[derive(Copy, Clone)]
-struct InnerBlockState {
+pub struct InnerBlockState {
     block_id: u16,
-    entity_id: EntityId,
+    pub entity_id: EntityId,
 }
 
 impl Default for InnerBlockState {
@@ -183,19 +172,33 @@ impl Default for InnerBlockState {
     }
 }
 
-pub struct Cluster {
+pub struct RawCluster {
     registry: Arc<Registry>,
     block_state_storage: EntityStorage,
     block_states: Box<[[[InnerBlockState; SIZE]; SIZE]; SIZE]>,
     intrinsic_data: Vec<IntrinsicBlockData>,
-    side_changed: [bool; 27],
     empty: AtomicBool,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
     light_addition_cache: VecDeque<TVec3<usize>>,
-    active_blocks: BitVec,
 }
 
-impl Cluster {
+impl RawCluster {
+    #[inline]
+    pub fn block_index(pos: &TVec3<usize>) -> usize {
+        pos.x * SIZE * SIZE + pos.y * SIZE + pos.z
+    }
+
+    #[inline]
+    pub fn block_index_to_pos(index: usize) -> U32Vec3 {
+        const SIZE_SQR: usize = SIZE * SIZE;
+
+        let x = index / SIZE_SQR;
+        let y = index % SIZE_SQR / SIZE;
+        let z = index % SIZE;
+
+        U32Vec3::new(x as u32, y as u32, z as u32)
+    }
+
     /// Creating a new cluster is expensive due to its big size of memory
     pub fn new(registry: &Arc<Registry>) -> Self {
         Self {
@@ -203,30 +206,14 @@ impl Cluster {
             block_state_storage: EntityStorage::new(),
             block_states: Default::default(),
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
-            side_changed: [false; 27],
             empty: AtomicBool::new(true),
             vertex_mesh: Default::default(),
             light_addition_cache: VecDeque::with_capacity(SIZE * SIZE),
-            active_blocks: BitVec::from_elem(VOLUME, false),
         }
     }
 
     pub fn vertex_mesh(&self) -> RwLockReadGuard<VertexMesh<PackedVertex, ()>> {
         self.vertex_mesh.read()
-    }
-
-    /// Returns a mask of `Facing` of changed cluster sides since the previous `Cluster::update_mesh()` call,
-    /// and clears it.
-    pub fn acquire_changed_sides(&mut self) -> [bool; 27] {
-        let mut changed_sides = self.side_changed;
-        changed_sides[1 * 9 + 1 * 3 + 1] = false;
-
-        self.side_changed = [false; 27];
-        changed_sides
-    }
-
-    pub fn get_changed_sides(&self) -> [bool; 27] {
-        self.side_changed
     }
 
     /// Returns block data at `pos`
@@ -241,11 +228,11 @@ impl Cluster {
         }
 
         let pos: TVec3<usize> = glm::convert(*pos);
-        let block = self.block_states[pos.x][pos.y][pos.z];
+        let inner_state = self.block_states[pos.x][pos.y][pos.z];
 
         BlockData {
             block_storage: &self.block_state_storage,
-            block,
+            inner_state,
         }
     }
 
@@ -260,19 +247,17 @@ impl Cluster {
             assert_failed();
         }
 
-        // TODO: set `side_changed` if necessary
-
         let pos: TVec3<usize> = glm::convert(*pos);
         let block = self.block_states[pos.x][pos.y][pos.z];
 
         BlockDataMut {
             block_storage: &mut self.block_state_storage,
-            block,
+            inner_state: block,
         }
     }
 
     /// Sets the specified block at `pos`
-    pub fn set<A: ArchetypeState>(&mut self, pos: &U32Vec3, block_state: BlockState<A>) {
+    pub fn set<A: ArchetypeState>(&mut self, pos: &U32Vec3, block_state: BlockState<A>) -> BlockDataMut {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
@@ -281,39 +266,36 @@ impl Cluster {
         if pos >= &U32Vec3::from_element(SIZE as u32) {
             assert_failed();
         }
-        let pos: TVec3<usize> = glm::convert(*pos);
 
-        let curr_entity_id = &mut self.block_states[pos.x][pos.y][pos.z].entity_id;
-        if *curr_entity_id != EntityId::NULL {
-            self.block_state_storage.remove(curr_entity_id);
+        let pos: TVec3<usize> = glm::convert(*pos);
+        let curr_state = &mut self.block_states[pos.x][pos.y][pos.z];
+
+        // Remove previous block state if present
+        if curr_state.entity_id != EntityId::NULL {
+            self.block_state_storage.remove(&curr_state.entity_id);
         }
 
-        let block = self.registry.get_block(block_state.block_id).unwrap();
         let entity_id = self.block_state_storage.add_entity(block_state.components);
+        let block = self.registry.get_block(block_state.block_id).unwrap();
 
-        let occluder = if block.has_textured_model() {
-            let model = self
-                .registry
-                .get_textured_block_model(block.textured_model())
-                .unwrap();
-            model.occluder()
-        } else {
-            Occluder::default()
-        };
-
-        self.block_states[pos.x][pos.y][pos.z] = InnerBlockState {
+        // Update current state
+        *curr_state = InnerBlockState {
             block_id: block_state.block_id,
             entity_id,
         };
 
-        self.side_changed[neighbour_index_from_pos(&pos)] = true;
-
+        // Set intrinsics
         let index = aligned_block_index(&pos.add_scalar(1));
-        self.intrinsic_data[index].occluder = occluder;
+        self.intrinsic_data[index].occluder = block.occluder();
         self.intrinsic_data[index].tex_model_id = block.textured_model();
+
+        BlockDataMut {
+            block_storage: &mut self.block_state_storage,
+            inner_state: *curr_state,
+        }
     }
 
-    pub fn get_light_level(&mut self, pos: &U32Vec3) -> LightLevel {
+    pub fn get_light_level(&self, pos: &U32Vec3) -> LightLevel {
         let index = aligned_block_index(&glm::convert(pos.add_scalar(1)));
         self.intrinsic_data[index].light_level
     }
@@ -324,7 +306,7 @@ impl Cluster {
         let index = aligned_block_index(&pos.add_scalar(1));
         self.intrinsic_data[index].light_level = light_level;
 
-        self.side_changed[neighbour_index_from_pos(&pos)] = true;
+        // self.side_dirty[neighbour_index_from_pos(&pos)] = true;
     }
 
     /// Checks if self inner edge is fully occluded
@@ -406,7 +388,7 @@ impl Cluster {
         }
     }
 
-    pub fn paste_outer_intrinsics(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    pub fn paste_outer_intrinsics(&mut self, side_cluster: &RawCluster, side_offset: I32Vec3) {
         let size = SIZE as i32;
         let b = side_offset.map(|v| v == -size || v == size);
 
@@ -467,12 +449,16 @@ impl Cluster {
         }
     }
 
-    pub fn propagate_outer_lighting(&mut self, side_cluster: &Cluster, side_offset: I32Vec3) {
+    pub fn propagate_outer_lighting(
+        &mut self,
+        side_cluster: &RawCluster,
+        side_offset: I32Vec3,
+    ) -> ClusterDirtySides {
         let size = SIZE as i32;
 
         if side_offset.abs().sum() != size {
             // Not a side but corner or edge offset
-            return;
+            return ClusterDirtySides::none();
         }
 
         fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
@@ -502,12 +488,14 @@ impl Cluster {
             }
         }
 
-        self.propagate_pending_lighting();
+        self.propagate_pending_lighting()
     }
 
     /// Propagates lighting from boundaries into the cluster
-    fn propagate_pending_lighting(&mut self) {
+    fn propagate_pending_lighting(&mut self) -> ClusterDirtySides {
         const MAX_BOUNDARY: i32 = (ALIGNED_SIZE - 1) as i32;
+
+        let mut dirty_parts = ClusterDirtySides::none();
 
         while let Some(curr_pos) = self.light_addition_cache.pop_front() {
             let curr_index = aligned_block_index(&curr_pos);
@@ -542,18 +530,22 @@ impl Cluster {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
                     *level = LightLevel::from_vec(new_color);
 
-                    self.side_changed[neighbour_index_from_aligned_pos(&rel_pos)] = true;
                     self.light_addition_cache.push_back(glm::convert(rel_pos));
+
+                    let dirty_pos = rel_pos.map(|v| v as u8 - 1);
+                    dirty_parts.set_dirty(&ClusterBlockPos(dirty_pos));
                 }
             }
         }
+
+        dirty_parts
     }
 
     /// Propagates lighting where necessary in the cluster using light source at `block_pos`.
-    pub fn propagate_lighting(&mut self, block_pos: &U32Vec3) {
+    pub fn propagate_lighting(&mut self, block_pos: &U32Vec3) -> ClusterDirtySides {
         self.light_addition_cache
             .push_back(glm::convert(block_pos.add_scalar(1)));
-        self.propagate_pending_lighting();
+        self.propagate_pending_lighting()
     }
 
     /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.

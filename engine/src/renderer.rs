@@ -19,40 +19,25 @@
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
-mod texture_atlas;
+use std::any::TypeId;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use std::time::Instant;
+use std::{fs, iter, mem, slice};
 
-#[macro_use]
-pub mod material_pipeline;
-#[macro_use]
-pub mod vertex_mesh;
-pub mod camera;
-mod helpers;
-pub mod module;
-
-use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
-use crate::ecs::scene::Scene;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
-use crate::ecs::{component, system};
-use crate::renderer::module::RendererModule;
-use crate::utils::HashMap;
-use crate::{unwrap_option, utils};
 use basis_universal::TranscoderTextureFormat;
-use camera::{Camera, Frustum};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
-use material_pipeline::MaterialPipelineSet;
-pub use module::text_renderer::FontSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, U32Vec4, UVec2, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::any::TypeId;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use std::time::Instant;
-use std::{fs, iter, mem, slice};
+
+use camera::{Camera, Frustum};
+use material_pipeline::MaterialPipelineSet;
+pub use module::text_renderer::FontSet;
 use texture_atlas::TextureAtlas;
 use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
@@ -67,6 +52,24 @@ use vk_wrapper::{
     SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
     Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
+
+use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
+use crate::ecs::scene::Scene;
+use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
+use crate::ecs::{component, system};
+use crate::renderer::module::RendererModule;
+use crate::utils::HashMap;
+use crate::{unwrap_option, utils};
+
+mod texture_atlas;
+
+#[macro_use]
+pub mod material_pipeline;
+#[macro_use]
+pub mod vertex_mesh;
+pub mod camera;
+mod helpers;
+pub mod module;
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.

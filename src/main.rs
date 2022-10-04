@@ -1,3 +1,9 @@
+use simple_logger::SimpleLogger;
+
+use engine::Engine;
+
+use crate::game::Game;
+
 mod game;
 mod material_pipelines;
 mod physics;
@@ -6,10 +12,6 @@ mod scene_component;
 #[cfg(test)]
 mod tests;
 mod utils;
-
-use crate::game::Game;
-use engine::Engine;
-use simple_logger::SimpleLogger;
 
 pub const PROGRAM_NAME: &str = "project-107cf1";
 

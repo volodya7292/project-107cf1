@@ -1,28 +1,3 @@
-pub mod biome;
-
-use crate::game::overworld;
-use crate::game::overworld::cluster::Cluster;
-use crate::game::overworld::facing::Facing;
-use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
-use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
-use crate::game::overworld::structure::Structure;
-use crate::game::overworld::Overworld;
-use crate::game::registry::Registry;
-use bit_vec::BitVec;
-use engine::utils::noise::{HybridNoise, ParamNoise};
-use engine::utils::voronoi_noise::VoronoiNoise2D;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
-use noise;
-use noise::{NoiseFn, Seedable};
-use once_cell::sync::OnceCell;
-use overworld::cluster;
-use rand::Rng;
-use rand_distr::num_traits::Zero;
-use rstar::{Envelope, Point, RTree};
-use smallvec::SmallVec;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem;
@@ -30,7 +5,34 @@ use std::num::Wrapping;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
+use bit_vec::BitVec;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
+use noise;
+use noise::{NoiseFn, Seedable};
+use once_cell::sync::OnceCell;
+use rand::Rng;
+use rand_distr::num_traits::Zero;
+use rstar::{Envelope, Point, RTree};
+use smallvec::SmallVec;
+
 pub use biome::Biome;
+use engine::utils::noise::{HybridNoise, ParamNoise};
+use engine::utils::voronoi_noise::VoronoiNoise2D;
+use engine::utils::white_noise::WhiteNoise;
+use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
+use overworld::raw_cluster;
+
+use crate::game::overworld;
+use crate::game::overworld::facing::Facing;
+use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::game::overworld::raw_cluster::RawCluster;
+use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
+use crate::game::overworld::structure::Structure;
+use crate::game::overworld::Overworld;
+use crate::game::registry::Registry;
+
+pub mod biome;
 
 pub const MIN_RADIUS: u64 = 2_048;
 pub const MAX_RADIUS: u64 = 100_000;
@@ -116,8 +118,8 @@ impl rstar::PointDistance for ClimateRange {
 
 #[derive(Clone)]
 struct ClusterXZCache {
-    heights: Arc<[[f32; cluster::SIZE]; cluster::SIZE]>,
-    biomes: Arc<[[u32; cluster::SIZE]; cluster::SIZE]>,
+    heights: Arc<[[f32; raw_cluster::SIZE]; raw_cluster::SIZE]>,
+    biomes: Arc<[[u32; raw_cluster::SIZE]; raw_cluster::SIZE]>,
 }
 
 // Max 8192 2D clusters in cache
@@ -167,8 +169,8 @@ impl WorldState {
         let biome_partition_noise = BiomePartitionNoise {
             voronoi: VoronoiNoise2D::new().set_seed(seed_gen.gen::<u64>()),
             warp: [
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
             ],
             white_noise: WhiteNoise::new(seed_gen.gen::<u64>()),
         };
@@ -202,38 +204,30 @@ impl WorldState {
         Self {
             registry: Arc::clone(registry),
             temperature_noise: ParamNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
                 &[(1.0, 1.0), (1.0, 1.0), (1.0, 1.0)],
             ),
             humidity_noise: ParamNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
                 &[(1.0, 1.0), (1.0, 1.0), (1.0, 1.0)],
             ),
             biome_partition_noise,
             biomes_by_climate,
             cluster_xz_caches: ConcurrentCache::new(MAX_CLUSTER_BIOME_MAPS),
             flat_noise: ParamNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
                 &[(1.0, 1.0), (2.0, 0.4), (4.0, 0.2)],
             ),
-            hills_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
-            hills_mask_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
-            mountains_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
-            mountains_mask_noise: HybridNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
-            ),
-            mountains_midpoint_noise: HybridNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
-            ),
-            mountains_ridges_noise: HybridNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
-            ),
-            mountains_power_noise: HybridNoise::new(
-                noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>()),
-            ),
-            oceans_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
-            oceans_loc_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
-            oceans_mask_noise: HybridNoise::new(noise::SuperSimplex::new().set_seed(seed_gen.gen::<u32>())),
+            hills_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            hills_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            mountains_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            mountains_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            mountains_midpoint_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            mountains_ridges_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            mountains_power_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            oceans_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            oceans_loc_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            oceans_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
         }
     }
 
@@ -362,14 +356,14 @@ impl WorldState {
     }
 
     fn build_cluster_xz_cache(&self, cluster_pos: I64Vec2) -> ClusterXZCache {
-        let mut height_map = Arc::<[[f32; cluster::SIZE]; cluster::SIZE]>::new(Default::default());
+        let mut height_map = Arc::<[[f32; raw_cluster::SIZE]; raw_cluster::SIZE]>::new(Default::default());
         let height_map_mut = Arc::get_mut(&mut height_map).unwrap();
 
-        let mut biome_map = Arc::<[[u32; cluster::SIZE]; cluster::SIZE]>::new(Default::default());
+        let mut biome_map = Arc::<[[u32; raw_cluster::SIZE]; raw_cluster::SIZE]>::new(Default::default());
         let biome_map_mut = Arc::get_mut(&mut biome_map).unwrap();
 
-        for x in 0..cluster::SIZE {
-            for z in 0..cluster::SIZE {
+        for x in 0..raw_cluster::SIZE {
+            for z in 0..raw_cluster::SIZE {
                 let pos = cluster_pos + I64Vec2::new(x as i64, z as i64);
                 let height = self.calc_height_at(pos);
 
@@ -390,8 +384,8 @@ impl WorldState {
     }
 
     pub fn biome_2d_at(&self, pos: I64Vec2) -> u32 {
-        let cluster_pos = pos.map(|v| v.div_euclid(cluster::SIZE as i64) * cluster::SIZE as i64);
-        let rel_pos = pos.map(|v| v.rem_euclid(cluster::SIZE as i64));
+        let cluster_pos = pos.map(|v| v.div_euclid(raw_cluster::SIZE as i64) * raw_cluster::SIZE as i64);
+        let rel_pos = pos.map(|v| v.rem_euclid(raw_cluster::SIZE as i64));
         let cache = self.cluster_xz_cache_at(cluster_pos);
         cache.biomes[rel_pos.x as usize][rel_pos.y as usize]
     }
@@ -402,16 +396,16 @@ impl WorldState {
 
     pub fn find_land(&self, closest_to: I64Vec2) -> I64Vec3 {
         const SEARCH_DIAM: i64 = 32;
-        const CLUSTER_CENTER: i64 = cluster::SIZE as i64 / 2;
+        const CLUSTER_CENTER: i64 = raw_cluster::SIZE as i64 / 2;
 
-        let closest_to_aligned = closest_to.map(|v| v.div_euclid(cluster::SIZE as i64));
+        let closest_to_aligned = closest_to.map(|v| v.div_euclid(raw_cluster::SIZE as i64));
         let mut queue = VecDeque::with_capacity((SEARCH_DIAM * SEARCH_DIAM) as usize);
         let mut traversed_nodes = BitVec::from_elem(queue.capacity(), false);
 
         {
             traversed_nodes.set(0, true);
 
-            let block_pos = (closest_to_aligned * cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
+            let block_pos = (closest_to_aligned * raw_cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
             let height = self.calc_height_at(block_pos);
 
             if height >= 1.0 {
@@ -440,7 +434,7 @@ impl WorldState {
                 queue.push_back(next_pos);
                 traversed_nodes.set(idx_1d, true);
 
-                let block_pos = (next_pos * cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
+                let block_pos = (next_pos * raw_cluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
                 let height = self.calc_height_at(block_pos);
 
                 if height >= 1.0 {
@@ -456,7 +450,7 @@ impl WorldState {
 
 impl StructureCache for WorldState {
     fn size(&self) -> u32 {
-        let cache_size = cluster::SIZE * cluster::SIZE * mem::size_of::<u32>();
+        let cache_size = raw_cluster::SIZE * raw_cluster::SIZE * mem::size_of::<u32>();
         (self.cluster_xz_caches.weighted_size() * cache_size as u64 / 1024) as u32
     }
 
@@ -470,7 +464,7 @@ pub fn gen_fn(
     generator: &OverworldGenerator,
     structure_seed: u64,
     cluster_pos: I64Vec3,
-    cluster: &mut Cluster,
+    cluster: &mut RawCluster,
     state: Arc<OnceCell<Box<dyn StructureCache>>>,
 ) {
     let state = state
@@ -487,9 +481,9 @@ pub fn gen_fn(
     let registry = generator.main_registry();
     let xz_cache = state.cluster_xz_cache_at(cluster_pos.xz());
 
-    for x in 0..cluster::SIZE {
-        for y in 0..cluster::SIZE {
-            for z in 0..cluster::SIZE {
+    for x in 0..raw_cluster::SIZE {
+        for y in 0..raw_cluster::SIZE {
+            for z in 0..raw_cluster::SIZE {
                 let global_y = cluster_pos.y + y as i64;
                 let height = xz_cache.heights[x][z];
                 let pos = U32Vec3::new(x as u32, y as u32, z as u32);

@@ -1,3 +1,4 @@
+#[derive(Copy, Clone)]
 pub struct Activity {
-    active: bool,
+    pub active: bool,
 }

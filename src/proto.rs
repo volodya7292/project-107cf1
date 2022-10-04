@@ -1,33 +1,36 @@
-use crate::game::overworld::generator::OverworldGenerator;
-use crate::game::overworld::structure::world::biome::MeanTemperature;
-use crate::game::overworld::structure::world::WorldState;
-use crate::game::registry::Registry;
-use engine::utils::noise::HybridNoise;
-use engine::utils::voronoi_noise::VoronoiNoise2D;
-use engine::utils::white_noise::WhiteNoise;
+use std::sync::Arc;
+use std::time::Instant;
+
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, DVec3, DVec4, I64Vec2, I64Vec3, Vec3};
 use noise::Seedable;
 use rand::Rng;
-use std::sync::Arc;
-use std::time::Instant;
+
+use engine::utils::noise::HybridNoise;
+use engine::utils::voronoi_noise::VoronoiNoise2D;
+use engine::utils::white_noise::WhiteNoise;
+
+use crate::game::overworld::generator::OverworldGenerator;
+use crate::game::overworld::structure::world::biome::MeanTemperature;
+use crate::game::overworld::structure::world::WorldState;
+use crate::game::registry::Registry;
 
 pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];
 
-    let land_density = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
+    let land_density = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
 
-    let temp0 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(50));
-    let temp1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(51));
-    let temp2 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(52));
+    let temp0 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(50));
+    let temp1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(51));
+    let temp2 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(52));
 
-    let moist0 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(100));
-    let moist1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(101));
-    let moist2 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(102));
+    let moist0 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(100));
+    let moist1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(101));
+    let moist2 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(102));
 
-    let n = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new().set_seed(0));
+    let n = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
 
-    let p_noise = noise::SuperSimplex::new();
+    let p_noise = noise::SuperSimplex::new(0);
     let white_noise = WhiteNoise::new(0);
     let mut v = VoronoiNoise2D::new();
 

@@ -1,3 +1,24 @@
+use std::any::Any;
+use std::collections::hash_map;
+use std::mem;
+use std::sync::Arc;
+
+use fixedbitset::FixedBitSet;
+use nalgebra_glm::{Mat4, U8Vec4, Vec2};
+use parking_lot::Mutex;
+use rayon::prelude::*;
+use rusttype::{Font, GlyphId};
+use unicode_normalization::UnicodeNormalization;
+
+use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::sampler::SamplerClamp;
+use vk_wrapper::shader::VInputRate;
+use vk_wrapper::{
+    AccessFlags, BindingRes, BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image,
+    ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, Queue, Sampler, SamplerFilter,
+    SamplerMipmap,
+};
+
 use crate::ecs::component;
 use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
 use crate::ecs::scene::{Entity, Scene};
@@ -7,24 +28,6 @@ use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::utils::unsafe_slice::UnsafeSlice;
 use crate::utils::HashMap;
 use crate::{HashSet, Renderer};
-use fixedbitset::FixedBitSet;
-use nalgebra_glm::{Mat4, U8Vec4, Vec2};
-use parking_lot::Mutex;
-use rayon::prelude::*;
-use rusttype::{Font, GlyphId};
-use std::any::Any;
-use std::collections::hash_map;
-use std::mem;
-use std::sync::Arc;
-use unicode_normalization::UnicodeNormalization;
-use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::sampler::SamplerClamp;
-use vk_wrapper::shader::VInputRate;
-use vk_wrapper::{
-    AccessFlags, BindingRes, BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image,
-    ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, Queue, Sampler, SamplerFilter,
-    SamplerMipmap,
-};
 
 const GLYPH_SIZE: u32 = 64;
 const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
