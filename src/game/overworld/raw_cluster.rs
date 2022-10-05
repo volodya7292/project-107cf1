@@ -57,17 +57,6 @@ pub fn neighbour_index_to_dir(index: usize) -> I32Vec3 {
     I32Vec3::new(index as i32 / 9 % 3, index as i32 / 3 % 3, index as i32 % 3).add_scalar(-1)
 }
 
-#[test]
-fn test_block_index_to_pos() {
-    let block_pos = TVec3::<usize>::new(3, 19, 8);
-    let idx = block_index(&block_pos);
-    assert_eq!(block_index_to_pos(idx), glm::convert::<_, U32Vec3>(block_pos));
-
-    let block_pos = TVec3::<usize>::new(SIZE - 1, SIZE - 1, SIZE - 1);
-    let idx = block_index(&block_pos);
-    assert_eq!(block_index_to_pos(idx), glm::convert::<_, U32Vec3>(block_pos));
-}
-
 #[inline]
 fn aligned_block_index(pos: &U8Vec3) -> usize {
     pos.x as usize * ALIGNED_SIZE * ALIGNED_SIZE + pos.y as usize * ALIGNED_SIZE + pos.z as usize

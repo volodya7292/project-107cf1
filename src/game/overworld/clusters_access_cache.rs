@@ -32,18 +32,22 @@ pub enum AccessGuardLock {
 }
 
 impl AccessGuard {
+    /// Returns cluster for the specified global block position.
+    /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster(&self) -> &Cluster {
+    pub fn cluster(&self) -> Option<&Cluster> {
         match &self.lock {
-            AccessGuardLock::Read(g) => g.as_ref().unwrap(),
-            AccessGuardLock::Write(g) => g.as_ref().unwrap(),
+            AccessGuardLock::Read(g) => g.as_ref(),
+            AccessGuardLock::Write(g) => g.as_ref(),
         }
     }
 
+    /// Returns cluster for the specified global block position.
+    /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster_mut(&mut self) -> &mut Cluster {
+    pub fn cluster_mut(&mut self) -> Option<&mut Cluster> {
         match &mut self.lock {
-            AccessGuardLock::Write(g) => g.as_mut().unwrap(),
+            AccessGuardLock::Write(g) => g.as_mut(),
             _ => unreachable!(),
         }
     }
@@ -56,7 +60,7 @@ pub struct ClustersAccessor {
 }
 
 impl ClustersAccessor {
-    /// Returns cluster for the specified global block position
+    /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster(&mut self, cluster_pos: &ClusterPos) -> Option<&AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
             hash_map::Entry::Vacant(e) => {
@@ -76,7 +80,7 @@ impl ClustersAccessor {
         }
     }
 
-    /// Returns cluster for the specified global block position
+    /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster_mut(&mut self, cluster_pos: &ClusterPos) -> Option<&mut AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
             hash_map::Entry::Vacant(e) => {
@@ -122,17 +126,22 @@ impl ClustersAccessor {
 
     /// Returns block data or `None` if respective cluster is not loaded
     pub fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData> {
-        if let Some(access) = self.access_cluster(&pos.cluster_pos()) {
-            Some(access.cluster().raw.get(&pos.cluster_block_pos()))
-        } else {
-            None
-        }
+        self.access_cluster(&pos.cluster_pos())
+            .map(|access| {
+                access
+                    .cluster()
+                    .map(|cluster| cluster.raw.get(&pos.cluster_block_pos()))
+            })
+            .flatten()
     }
 
     /// Returns block data or `None` if respective cluster is not loaded
     pub fn update_block<F: FnOnce(&mut BlockDataMut)>(&mut self, pos: &BlockPos, update_fn: F) -> bool {
-        if let Some(access) = self.access_cluster_mut(&pos.cluster_pos()) {
-            let cluster = access.cluster_mut();
+        if let Some(cluster) = self
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|access| access.cluster_mut())
+            .flatten()
+        {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut block_data = cluster.raw.get_mut(&cluster_block_pos);
 
@@ -153,9 +162,12 @@ impl ClustersAccessor {
 
     /// Returns false if respective cluster is not loaded
     pub fn set_block<A: ArchetypeState>(&mut self, pos: &BlockPos, state: BlockState<A>) -> bool {
-        if let Some(access) = self.access_cluster_mut(&pos.cluster_pos()) {
+        if let Some(cluster) = self
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|access| access.cluster_mut())
+            .flatten()
+        {
             let cluster_block_pos = pos.cluster_block_pos();
-            let cluster = access.cluster_mut();
             let mut block_data = cluster.raw.set(&cluster_block_pos, state);
 
             // Determine activity
@@ -176,14 +188,19 @@ impl ClustersAccessor {
     /// Returns block builder or `None` if respective cluster is not loaded
     fn get_light_level(&mut self, pos: &BlockPos) -> Option<LightLevel> {
         let cluster = self.access_cluster(&pos.cluster_pos())?;
-        Some(cluster.cluster().raw.get_light_level(&pos.cluster_block_pos()))
+        cluster
+            .cluster()
+            .map(|cluster| cluster.raw.get_light_level(&pos.cluster_block_pos()))
     }
 
     /// Returns block builder or `None` if respective cluster is not loaded
     fn set_light_level(&mut self, pos: &BlockPos, light_level: LightLevel) {
-        if let Some(access) = self.access_cluster_mut(&pos.cluster_pos()) {
+        if let Some(cluster) = self
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|access| access.cluster_mut())
+            .flatten()
+        {
             let cluster_block_pos = pos.cluster_block_pos();
-            let cluster = access.cluster_mut();
             cluster.raw.set_light_level(&cluster_block_pos, light_level);
             cluster.dirty_parts.set_dirty(&cluster_block_pos);
         }
@@ -286,8 +303,11 @@ impl ClustersAccessor {
 
     /// Use breadth-first search to set lighting across all lit area
     pub fn set_light(&mut self, pos: &BlockPos, light_level: LightLevel) {
-        if let Some(cluster) = self.access_cluster_mut(&pos.cluster_pos()) {
-            let cluster = cluster.cluster_mut();
+        if let Some(cluster) = self
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|accesss| accesss.cluster_mut())
+            .flatten()
+        {
             let cluster_block_pos = pos.cluster_block_pos();
 
             cluster.raw.set_light_level(&cluster_block_pos, light_level);
@@ -330,7 +350,9 @@ impl ClustersAccessor {
         for pos in addition_queue {
             let cluster = self.access_cluster_mut(&pos.cluster_pos()).unwrap();
             let cluster_block_pos = pos.cluster_block_pos();
-            cluster.cluster_mut().raw.propagate_lighting(&cluster_block_pos);
+            if let Some(cluster) = cluster.cluster_mut() {
+                cluster.raw.propagate_lighting(&cluster_block_pos);
+            }
         }
     }
 
@@ -342,8 +364,7 @@ impl ClustersAccessor {
 
             let cluster = self.access_cluster_mut(&pos.cluster_pos());
 
-            if let Some(cluster) = cluster {
-                let cluster = cluster.cluster_mut();
+            if let Some(cluster) = cluster.map(|access| access.cluster_mut()).flatten() {
                 let cluster_block_pos = rel_pos.cluster_block_pos();
                 let level = cluster.raw.get_light_level(&cluster_block_pos);
 
