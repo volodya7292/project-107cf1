@@ -33,6 +33,7 @@ use crate::game::overworld::block::event_handlers::AfterTickActionsStorage;
 use crate::game::overworld::block::{AnyBlockState, Block, BlockState};
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
+use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::BlockDataImpl;
 use crate::game::overworld::{block_component, raw_cluster, LoadedClusters};
 use crate::game::overworld_streamer::OverworldStreamer;
@@ -62,7 +63,7 @@ pub struct Game {
     player_aabb: AABB,
     fall_time: f64,
     curr_jump_force: f64,
-    look_at_block: Option<(I64Vec3, Facing)>,
+    look_at_block: Option<(BlockPos, Facing)>,
     block_set_cooldown: f64,
     curr_block: AnyBlockState,
 
@@ -94,7 +95,7 @@ impl Game {
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
             overworld_streamer: None,
-            player_pos: glm::convert(spawn_point),
+            player_pos: glm::convert(spawn_point.0),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
             curr_jump_force: 0.0,
@@ -209,7 +210,7 @@ impl Application for Game {
         scene.storage_write::<component::Transform>().set(
             text,
             component::Transform::new(
-                DVec3::new(0.0, 60.0, 0.0),
+                DVec3::new(self.player_pos.x, self.player_pos.y + 60.0, self.player_pos.z),
                 Vec3::default(),
                 Vec3::from_element(1.0),
             ),
@@ -276,10 +277,7 @@ impl Application for Game {
                 {
                     let mut blocks = self.overworld.access();
 
-                    if blocks
-                        .get_block(&glm::convert_unchecked(glm::floor(&self.player_pos)))
-                        .is_some()
-                    {
+                    if blocks.get_block(&BlockPos::from_f64(&self.player_pos)).is_some() {
                         // Free fall
                         motion_delta.y -= (physics::G_ACCEL * self.fall_time) * delta_time;
 
@@ -321,7 +319,7 @@ impl Application for Game {
 
                     if let Some((pos, facing)) = self.look_at_block {
                         let dir: I64Vec3 = glm::convert(facing.direction());
-                        let set_pos = pos + dir;
+                        let set_pos = pos.offset(&dir);
 
                         access.set_block(&set_pos, self.curr_block.clone());
 
@@ -497,7 +495,7 @@ pub fn game_tick(
     finished.store(true, atomic::Ordering::Relaxed);
 }
 
-pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<I64Vec3>) {
+pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<ClusterPos>) {
     let loaded_clusters = overworld.loaded_clusters().read();
     let registry = overworld.main_registry().registry();
 
@@ -512,7 +510,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<I64
 
             if let Some(cluster) = &*cluster {
                 for (pos, block_data) in cluster.active_blocks() {
-                    let global_pos = cl_pos + glm::convert::<_, I64Vec3>(pos);
+                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(pos.0));
                     let block = registry.get_block(block_data.block_id()).unwrap();
 
                     if let Some(on_tick) = &block.event_handlers().on_tick {

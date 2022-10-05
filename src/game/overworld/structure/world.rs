@@ -26,6 +26,7 @@ use overworld::raw_cluster;
 use crate::game::overworld;
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::game::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::RawCluster;
 use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::game::overworld::structure::Structure;
@@ -394,7 +395,7 @@ impl WorldState {
         todo!()
     }
 
-    pub fn find_land(&self, closest_to: I64Vec2) -> I64Vec3 {
+    pub fn find_land(&self, closest_to: I64Vec2) -> BlockPos {
         const SEARCH_DIAM: i64 = 32;
         const CLUSTER_CENTER: i64 = raw_cluster::SIZE as i64 / 2;
 
@@ -409,7 +410,7 @@ impl WorldState {
             let height = self.calc_height_at(block_pos);
 
             if height >= 1.0 {
-                return I64Vec3::new(block_pos.x, height as i64 + 1, block_pos.y);
+                return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
             }
         }
 
@@ -438,13 +439,13 @@ impl WorldState {
                 let height = self.calc_height_at(block_pos);
 
                 if height >= 1.0 {
-                    return I64Vec3::new(block_pos.x, height as i64 + 1, block_pos.y);
+                    return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
                 }
             }
         }
 
         let height = self.calc_height_at(closest_to);
-        I64Vec3::new(closest_to.x, height as i64 + 1, closest_to.y)
+        BlockPos::new(closest_to.x, height as i64 + 1, closest_to.y)
     }
 }
 
@@ -463,7 +464,7 @@ pub fn gen_fn(
     _structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    cluster_pos: I64Vec3,
+    cluster_pos: ClusterPos,
     cluster: &mut RawCluster,
     state: Arc<OnceCell<Box<dyn StructureCache>>>,
 ) {
@@ -479,14 +480,14 @@ pub fn gen_fn(
         .unwrap();
 
     let registry = generator.main_registry();
-    let xz_cache = state.cluster_xz_cache_at(cluster_pos.xz());
+    let xz_cache = state.cluster_xz_cache_at(cluster_pos.get().xz());
 
     for x in 0..raw_cluster::SIZE {
         for y in 0..raw_cluster::SIZE {
             for z in 0..raw_cluster::SIZE {
-                let global_y = cluster_pos.y + y as i64;
+                let global_y = cluster_pos.get().y + y as i64;
                 let height = xz_cache.heights[x][z];
-                let pos = U32Vec3::new(x as u32, y as u32, z as u32);
+                let pos = ClusterBlockPos::new(x as u8, y as u8, z as u8);
 
                 if global_y <= height as i64 {
                     cluster.set(&pos, registry.block_default);
@@ -503,7 +504,7 @@ pub fn spawn_point_fn(
     generator: &OverworldGenerator,
     structure_seed: u64,
     state: Arc<OnceCell<Box<dyn StructureCache>>>,
-) -> I64Vec3 {
+) -> BlockPos {
     let state = state
         .get_or_init(|| {
             Box::new(WorldState::new(

@@ -16,6 +16,7 @@ use engine::utils::white_noise::WhiteNoise;
 use engine::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
 
 use crate::game::main_registry::MainRegistry;
+use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster;
 use crate::game::overworld::raw_cluster::RawCluster;
 use crate::game::overworld::structure::world::WorldState;
@@ -33,7 +34,7 @@ pub trait StructureCache: Any + Send + Sync + 'static {
 
 pub struct StructurePos {
     pub octant: I64Vec3,
-    pub center_pos: I64Vec3,
+    pub center_pos: BlockPos,
     pub present: bool,
 }
 
@@ -41,7 +42,7 @@ pub struct OverworldGenerator {
     seed: u64,
     white_noise: WhiteNoise,
     main_registry: Arc<MainRegistry>,
-    structure_states: ConcurrentCache<(u32, I64Vec3), Arc<OnceCell<Box<dyn StructureCache>>>>,
+    structure_states: ConcurrentCache<(u32, BlockPos), Arc<OnceCell<Box<dyn StructureCache>>>>,
 }
 
 impl OverworldGenerator {
@@ -61,8 +62,8 @@ impl OverworldGenerator {
         &self.main_registry
     }
 
-    pub fn get_world_seed(&self, center_pos: I64Vec3) -> u64 {
-        let center_pos = center_pos.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
+    pub fn get_world_seed(&self, center_pos: BlockPos) -> u64 {
+        let center_pos = center_pos.0.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
         self.white_noise
             .state()
             .next(center_pos.x)
@@ -74,10 +75,10 @@ impl OverworldGenerator {
     /// Returns position of the structure center (within gen-octant corresponding to the block position)
     /// and a `bool` indicating whether the structure is actually present there.  
     /// Gen-octant size = `structure.avg_spacing * cluster_size` blocks.
-    pub fn gen_structure_pos(&self, structure: &Structure, pos: I64Vec3) -> StructurePos {
+    pub fn gen_structure_pos(&self, structure: &Structure, pos: BlockPos) -> StructurePos {
         let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), raw_cluster::SIZE as u64);
         let octant_size = structure.avg_spacing() * raw_cluster::SIZE as u64;
-        let octant = pos.map(|v| v.div_euclid(octant_size as i64));
+        let octant = pos.0.map(|v| v.div_euclid(octant_size as i64));
         let octant_u64 = octant.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
 
         let mut rng = self
@@ -97,6 +98,7 @@ impl OverworldGenerator {
         let dy = rng.gen_range(range.clone()) as i64;
         let dz = rng.gen_range(range.clone()) as i64;
         let center_pos = octant * (octant_size as i64) + I64Vec3::new(dx, dy, dz);
+        let center_pos = BlockPos(center_pos);
 
         if present {
             present = structure.check_gen_pos(self, center_pos);
@@ -145,7 +147,7 @@ impl OverworldGenerator {
     }
 
     /// Returns center pos of found world
-    pub fn gen_world_pos(&self, pos: I64Vec3) -> StructurePos {
+    pub fn gen_world_pos(&self, pos: BlockPos) -> StructurePos {
         let reg = self.main_registry.registry();
         let world_st = reg.get_structure(self.main_registry.structure_world()).unwrap();
         let mut st_pos = self.gen_structure_pos(world_st, pos);
@@ -156,10 +158,10 @@ impl OverworldGenerator {
         st_pos
     }
 
-    pub fn gen_spawn_point(&self) -> I64Vec3 {
+    pub fn gen_spawn_point(&self) -> BlockPos {
         let reg = self.main_registry.registry();
         let world_st = reg.get_structure(self.main_registry.structure_world()).unwrap();
-        let world_pos = self.gen_world_pos(I64Vec3::zeros());
+        let world_pos = self.gen_world_pos(BlockPos(I64Vec3::zeros()));
         let world_seed = self.get_world_seed(world_pos.center_pos);
 
         let mut cache = self
@@ -169,17 +171,17 @@ impl OverworldGenerator {
             });
 
         let rel_spawn_point = world_st.gen_spawn_point(self, world_seed, cache).unwrap();
-        world_pos.center_pos + rel_spawn_point
+        world_pos.center_pos.offset(&rel_spawn_point.0)
     }
 
     pub fn create_cluster(&self) -> RawCluster {
         RawCluster::new(self.main_registry.registry())
     }
 
-    pub fn generate_cluster(&self, cluster: &mut RawCluster, pos: I64Vec3) {
+    pub fn generate_cluster(&self, cluster: &mut RawCluster, pos: ClusterPos) {
         let reg = self.main_registry.registry();
         let world_st = reg.get_structure(self.main_registry.structure_world()).unwrap();
-        let world_pos = self.gen_world_pos(pos);
+        let world_pos = self.gen_world_pos(pos.to_block_pos());
 
         if !world_pos.present {
             return;
@@ -192,6 +194,11 @@ impl OverworldGenerator {
                 Arc::new(OnceCell::new())
             });
 
-        world_st.gen_cluster(self, world_seed, pos - world_pos.center_pos, cluster, cache);
+        let rel_cluster_pos = pos
+            .to_block_pos()
+            .offset(&(-world_pos.center_pos.0))
+            .cluster_pos();
+
+        world_st.gen_cluster(self, world_seed, rel_cluster_pos, cluster, cache);
     }
 }

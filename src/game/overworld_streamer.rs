@@ -22,6 +22,7 @@ use crate::game::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::OverworldGenerator;
 use crate::game::overworld::occluder::Occluder;
+use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::{IntrinsicBlockData, RawCluster};
 use crate::game::overworld::{
     generator, raw_cluster, Cluster, LoadedClusters, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED,
@@ -38,9 +39,9 @@ pub struct OverworldStreamer {
     y_render_distance: u64,
     loaded_clusters: LoadedClusters,
     overworld_generator: Arc<OverworldGenerator>,
-    rclusters: HashMap<I64Vec3, RCluster>,
+    rclusters: HashMap<ClusterPos, RCluster>,
     clusters_entities_to_remove: Vec<scene::Entity>,
-    clusters_entities_to_add: Vec<I64Vec3>,
+    clusters_entities_to_add: Vec<ClusterPos>,
     curr_loading_clusters_n: Arc<AtomicU32>,
     curr_clusters_intrinsics_updating_n: Arc<AtomicU32>,
     curr_clusters_meshes_updating_n: Arc<AtomicU32>,
@@ -76,38 +77,36 @@ impl RCluster {
     }
 }
 
-struct ClusterPosD {
-    pos: I64Vec3,
+struct ClusterPosDistance {
+    pos: ClusterPos,
     distance: f64,
-}
-
-fn cluster_aligned_pos(pos: DVec3) -> I64Vec3 {
-    glm::convert_unchecked(glm::floor(&(pos / raw_cluster::SIZE as f64)))
 }
 
 fn calc_cluster_layout(
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
-) -> HashSet<I64Vec3> {
+) -> HashSet<ClusterPos> {
     let cr = (xz_render_distance / raw_cluster::SIZE as u64 / 2) as i64;
     let cl_size = raw_cluster::SIZE as i64;
-    let c_stream_pos = cluster_aligned_pos(stream_pos);
+    let c_stream_pos = BlockPos::from_f64(&stream_pos).cluster_pos();
+
     let mut layout = HashSet::with_capacity((cr * 2 + 1).pow(3) as usize);
 
     for x in -cr..(cr + 1) {
         for y in -cr..(cr + 1) {
             for z in -cr..(cr + 1) {
-                let cp = c_stream_pos + glm::vec3(x, y, z);
-                let center = (cp * cl_size).add_scalar(cl_size / 2);
-                let d = stream_pos - glm::convert::<I64Vec3, DVec3>(center);
+                let cp = c_stream_pos.offset(&glm::vec3(x, y, z));
+                let center = cp.get().add_scalar(cl_size / 2);
+
+                let d = stream_pos - glm::convert::<_, DVec3>(center);
 
                 if (d.x / xz_render_distance as f64).powi(2)
                     + (d.y / y_render_distance as f64).powi(2)
                     + (d.z / xz_render_distance as f64).powi(2)
                     <= 1.0
                 {
-                    layout.insert(cp * cl_size);
+                    layout.insert(cp);
                 }
             }
         }
@@ -116,9 +115,8 @@ fn calc_cluster_layout(
     layout
 }
 
-fn get_side_clusters(pos: &I64Vec3) -> SmallVec<[I64Vec3; 26]> {
-    let mut neighbours = SmallVec::<[I64Vec3; 26]>::new();
-    let cl_size = raw_cluster::SIZE as i64;
+fn get_side_clusters(pos: &ClusterPos) -> SmallVec<[ClusterPos; 26]> {
+    let mut neighbours = SmallVec::<[ClusterPos; 26]>::new();
 
     for x in -1..2 {
         for y in -1..2 {
@@ -126,7 +124,7 @@ fn get_side_clusters(pos: &I64Vec3) -> SmallVec<[I64Vec3; 26]> {
                 if x == 0 && y == 0 && z == 0 {
                     continue;
                 }
-                let pos2 = pos + I64Vec3::new(x, y, z) * cl_size;
+                let pos2 = pos.offset(&glm::vec3(x, y, z));
                 neighbours.push(pos2);
             }
         }
@@ -135,16 +133,13 @@ fn get_side_clusters(pos: &I64Vec3) -> SmallVec<[I64Vec3; 26]> {
     neighbours
 }
 
-fn get_side_cluster_by_facing(pos: I64Vec3, facing: Facing) -> I64Vec3 {
-    let dir = facing.direction();
-    let cl_size = raw_cluster::SIZE as i64;
-
-    pos + glm::convert::<I32Vec3, I64Vec3>(dir) * cl_size
+fn get_side_cluster_by_facing(pos: ClusterPos, facing: Facing) -> ClusterPos {
+    pos.offset(&glm::convert(facing.direction()))
 }
 
-fn neighbour_dir_index(pos: &I64Vec3, target: &I64Vec3) -> u8 {
-    let d: U8Vec3 = glm::convert_unchecked(((target - pos) / (raw_cluster::SIZE as i64)).add_scalar(1));
-    d.x * 9 + d.y * 3 + d.z
+fn neighbour_dir_index(pos: &ClusterPos, target: &ClusterPos) -> usize {
+    let diff = ((target.get() - pos.get()) / raw_cluster::SIZE as i64).add_scalar(1);
+    diff.x as usize * 9 + diff.y as usize * 3 + diff.z as usize
 }
 
 fn look_cube_directions(dir: DVec3) -> [I32Vec3; 3] {
@@ -155,20 +150,20 @@ fn look_cube_directions(dir: DVec3) -> [I32Vec3; 3] {
     ]
 }
 
-fn is_cluster_in_forced_load_range(pos: &I64Vec3, stream_pos: &DVec3) -> bool {
-    let center_pos: DVec3 = glm::convert(pos.add_scalar(raw_cluster::SIZE as i64 / 2));
-    let dir_to_cluster_unnorm = center_pos - stream_pos;
+fn is_cluster_in_forced_load_range(pos: &ClusterPos, stream_pos: &DVec3) -> bool {
+    let center_pos: DVec3 = glm::convert(pos.get().add_scalar(raw_cluster::SIZE as i64 / 2));
+    let distance = glm::distance(&center_pos, &stream_pos);
 
-    dir_to_cluster_unnorm.magnitude() <= FORCED_LOAD_RANGE as f64
+    distance <= FORCED_LOAD_RANGE as f64
 }
 
 /// Checks if cluster at `pos` is occluded at all sides by the neighbour clusters
 fn is_cluster_visibly_occluded(
-    rclusters: &HashMap<I64Vec3, RCluster>,
-    pos: I64Vec3,
+    rclusters: &HashMap<ClusterPos, RCluster>,
+    pos: ClusterPos,
     stream_pos: DVec3,
 ) -> bool {
-    let center_pos: DVec3 = glm::convert(pos.add_scalar(raw_cluster::SIZE as i64 / 2));
+    let center_pos: DVec3 = glm::convert(pos.get().add_scalar(raw_cluster::SIZE as i64 / 2));
     let dir_to_cluster_unnorm = center_pos - stream_pos;
 
     if dir_to_cluster_unnorm.magnitude() <= FORCED_LOAD_RANGE as f64 {
@@ -243,7 +238,7 @@ impl OverworldStreamer {
 
     /// Generates new clusters and their content. Updates and optimizes overworld cluster layout.
     /// Returns positions of clusters which have been changed by `Overworld` or generated.
-    pub fn update(&mut self) -> HashSet<I64Vec3> {
+    pub fn update(&mut self) -> HashSet<ClusterPos> {
         // Note: the work this method schedules on other threads is supposed to run for 20 ms in total.
         let layout = calc_cluster_layout(self.stream_pos, self.xz_render_distance, self.y_render_distance);
         let rclusters = &mut self.rclusters;
@@ -252,11 +247,12 @@ impl OverworldStreamer {
 
         let mut sorted_layout: Vec<_> = layout
             .iter()
-            .map(|p| ClusterPosD {
+            .map(|p| ClusterPosDistance {
                 pos: *p,
-                distance: (glm::convert::<I64Vec3, DVec3>(p.add_scalar(raw_cluster::SIZE as i64 / 2))
-                    - self.stream_pos)
-                    .magnitude(),
+                distance: glm::distance2(
+                    &glm::convert::<_, DVec3>(p.get().add_scalar(raw_cluster::SIZE as i64 / 2)),
+                    &self.stream_pos,
+                ),
             })
             .collect();
         sorted_layout.sort_unstable_by(|a, b| a.distance.total_cmp(&b.distance));
@@ -429,7 +425,7 @@ impl OverworldStreamer {
             for i in dirty_parts.iter_sides() {
                 let changed_dir: I64Vec3 = glm::convert(raw_cluster::neighbour_index_to_dir(i));
 
-                let p0 = pos / (raw_cluster::SIZE as i64);
+                let p0 = pos.get() / (raw_cluster::SIZE as i64);
                 let p1 = p0 + changed_dir;
 
                 let min = p0.inf(&p1);
@@ -438,7 +434,7 @@ impl OverworldStreamer {
                 for x in min.x..=max.x {
                     for y in min.y..=max.y {
                         for z in min.z..=max.z {
-                            let p = glm::vec3(x, y, z) * (raw_cluster::SIZE as i64);
+                            let p = ClusterPos::new(glm::vec3(x, y, z) * (raw_cluster::SIZE as i64));
                             if p == *pos {
                                 continue;
                             }
@@ -476,7 +472,7 @@ impl OverworldStreamer {
             .map(|v| {
                 (
                     *v,
-                    (glm::convert::<I64Vec3, DVec3>(*v) - self.stream_pos).magnitude_squared(),
+                    (glm::convert::<_, DVec3>(*v.get()) - self.stream_pos).magnitude_squared(),
                 )
             })
             .collect();
@@ -565,7 +561,7 @@ impl OverworldStreamer {
             // Subtract fill sides from clear sides because sides for clearing will be overridden by filling
             let clear_mask = needs_intrinsics_clear_at & !needs_intrinsics_fill_at;
 
-            let clear_neighbour_sides: SmallVec<[I64Vec3; 26]> = get_side_clusters(&pos)
+            let clear_neighbour_sides: SmallVec<[ClusterPos; 26]> = get_side_clusters(&pos)
                 .into_iter()
                 .filter_map(|p| {
                     let mask = 1 << neighbour_dir_index(&pos, &p);
@@ -595,7 +591,7 @@ impl OverworldStreamer {
                 for neighbour_pos in clear_neighbour_sides {
                     let mut cluster = cluster.write();
                     let cluster = unwrap_option!(cluster.as_mut(), continue);
-                    let offset = neighbour_pos - pos;
+                    let offset = neighbour_pos.get() - pos.get();
                     cluster
                         .raw
                         .clear_outer_intrinsics(glm::convert(offset), Default::default());
@@ -618,7 +614,7 @@ impl OverworldStreamer {
                         let cluster = unwrap_option!(cluster_guard.as_mut(), break);
 
                         if neighbour.state() == CLUSTER_STATE_LOADED {
-                            let offset: I32Vec3 = glm::convert(neighbour_pos - pos);
+                            let offset: I32Vec3 = glm::convert(neighbour_pos.get() - pos.get());
                             let neighbour_cluster = unwrap_option!(neighbour_cluster_guard.as_ref(), break);
 
                             // Mutually update `cluster` and `neighbour_cluster` intrinsics.
@@ -668,7 +664,7 @@ impl OverworldStreamer {
                                 neighbour.dirty.store(true, MO_RELAXED);
                             }
                         } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
-                            let offset = neighbour_pos - pos;
+                            let offset = neighbour_pos.get() - pos.get();
 
                             cluster.raw.clear_outer_intrinsics(
                                 glm::convert(offset),
@@ -770,7 +766,7 @@ impl OverworldStreamer {
         for pos in &self.clusters_entities_to_add {
             let entity = entities.pop().unwrap();
             let transform_comp = component::Transform::new(
-                glm::convert(*pos),
+                glm::convert(*pos.get()),
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );

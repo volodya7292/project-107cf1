@@ -11,6 +11,7 @@ use engine::utils::UInt;
 
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::RawCluster;
 use crate::game::overworld::{raw_cluster, Overworld};
 
@@ -18,14 +19,14 @@ pub mod world;
 
 /// Returns whether the structure can be generated at specified center position.
 pub type GenPosCheckFn =
-    fn(structure: &Structure, generator: &OverworldGenerator, center_pos: I64Vec3) -> bool;
+    fn(structure: &Structure, generator: &OverworldGenerator, center_pos: BlockPos) -> bool;
 
 /// Fills the specified cluster with structure's blocks
 pub type GenFn = fn(
     structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    center_pos: I64Vec3,
+    cluster_pos: ClusterPos,
     cluster: &mut RawCluster,
     structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
 );
@@ -36,7 +37,7 @@ pub type GenSpawnPointFn = fn(
     generator: &OverworldGenerator,
     structure_seed: u64,
     structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
-) -> I64Vec3;
+) -> BlockPos;
 
 pub struct Structure {
     uid: u32,
@@ -94,7 +95,7 @@ impl Structure {
         self.avg_spacing
     }
 
-    pub fn check_gen_pos(&self, generator: &OverworldGenerator, center_pos: I64Vec3) -> bool {
+    pub fn check_gen_pos(&self, generator: &OverworldGenerator, center_pos: BlockPos) -> bool {
         (self.gen_pos_check_fn)(self, generator, center_pos)
     }
 
@@ -102,7 +103,7 @@ impl Structure {
         &self,
         generator: &OverworldGenerator,
         structure_seed: u64,
-        center_pos: I64Vec3,
+        cluster_pos: ClusterPos,
         cluster: &mut RawCluster,
         structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
     ) {
@@ -110,7 +111,7 @@ impl Structure {
             self,
             generator,
             structure_seed,
-            center_pos,
+            cluster_pos,
             cluster,
             structure_cache,
         );
@@ -121,7 +122,7 @@ impl Structure {
         generator: &OverworldGenerator,
         structure_seed: u64,
         structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
-    ) -> Option<I64Vec3> {
+    ) -> Option<BlockPos> {
         self.gen_spawn_point_fn
             .map(|f| f(self, generator, structure_seed, structure_cache))
     }
@@ -137,7 +138,7 @@ pub struct StructuresIter<'a> {
 }
 
 impl Iterator for StructuresIter<'_> {
-    type Item = I64Vec3;
+    type Item = BlockPos;
 
     fn next(&mut self) -> Option<Self::Item> {
         let diam = self.max_search_radius as i64 * 2 - 1;
@@ -152,8 +153,10 @@ impl Iterator for StructuresIter<'_> {
             if !self.traversed_nodes.get(idx_1d).unwrap() {
                 self.traversed_nodes.set(idx_1d, true);
 
-                let cluster_pos = front_octant * blocks_per_octant;
-                let st_pos = self.generator.gen_structure_pos(self.structure, cluster_pos);
+                let cluster_pos = ClusterPos::new(front_octant * blocks_per_octant);
+                let st_pos = self
+                    .generator
+                    .gen_structure_pos(self.structure, cluster_pos.to_block_pos());
 
                 if st_pos.present {
                     return Some(st_pos.center_pos);
@@ -186,8 +189,10 @@ impl Iterator for StructuresIter<'_> {
                 self.queue.push_back(next_pos);
                 self.traversed_nodes.set(idx_1d, true);
 
-                let cluster_pos = next_pos * blocks_per_octant;
-                let st_pos = self.generator.gen_structure_pos(self.structure, cluster_pos);
+                let cluster_pos = ClusterPos::new(next_pos * blocks_per_octant);
+                let st_pos = self
+                    .generator
+                    .gen_structure_pos(self.structure, cluster_pos.to_block_pos());
 
                 if st_pos.present {
                     return Some(st_pos.center_pos);

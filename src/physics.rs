@@ -3,6 +3,7 @@ use nalgebra_glm::{DVec3, I64Vec3};
 
 use aabb::AABB;
 
+use crate::game::overworld::position::BlockPos;
 use crate::game::overworld::raw_cluster::BlockDataImpl;
 use crate::game::overworld::Overworld;
 
@@ -49,7 +50,7 @@ impl Overworld {
                 for z in 0..size.z {
                     let pos = start + I64Vec3::new(x, y, z);
 
-                    if let Some(entry) = access.get_block(&pos) {
+                    if let Some(entry) = access.get_block(&BlockPos(pos)) {
                         let block_id = entry.block_id();
                         let block = reg.get_block(block_id).unwrap();
                         if !block.has_textured_model() {

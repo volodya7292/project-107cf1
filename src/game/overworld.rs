@@ -17,7 +17,7 @@ use crate::game::main_registry::MainRegistry;
 use crate::game::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::generator::OverworldGenerator;
-use crate::game::overworld::position::ClusterBlockPos;
+use crate::game::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
 use crate::game::overworld::structure::{Structure, StructuresIter};
 
@@ -78,17 +78,17 @@ impl Cluster {
     pub fn new(raw: RawCluster) -> Cluster {
         let mut active_blocks = FixedBitSet::with_capacity(raw_cluster::VOLUME);
 
-        for x in 0..raw_cluster::SIZE {
-            for y in 0..raw_cluster::SIZE {
-                for z in 0..raw_cluster::SIZE {
-                    let pos = U32Vec3::new(x as u32, y as u32, z as u32);
+        for x in 0..raw_cluster::SIZE as u8 {
+            for y in 0..raw_cluster::SIZE as u8 {
+                for z in 0..raw_cluster::SIZE as u8 {
+                    let pos = ClusterBlockPos::new(x, y, z);
                     let active = raw
                         .get(&pos)
                         .get::<block_component::Activity>()
                         .map_or(false, |v| v.active);
 
                     if active {
-                        active_blocks.toggle(RawCluster::block_index(&glm::convert(pos)));
+                        active_blocks.toggle(pos.index());
                     }
                 }
             }
@@ -102,9 +102,9 @@ impl Cluster {
         }
     }
 
-    pub fn active_blocks(&self) -> impl Iterator<Item = (U32Vec3, BlockData)> + '_ {
+    pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {
         self.active_blocks.ones().map(|idx| {
-            let block_pos = RawCluster::block_index_to_pos(idx);
+            let block_pos = ClusterBlockPos::from_index(idx);
             (block_pos, self.raw.get(&block_pos))
         })
     }
@@ -135,7 +135,7 @@ impl OverworldCluster {
     }
 }
 
-pub type LoadedClusters = Arc<RwLock<HashMap<I64Vec3, Arc<OverworldCluster>>>>;
+pub type LoadedClusters = Arc<RwLock<HashMap<ClusterPos, Arc<OverworldCluster>>>>;
 
 pub struct Overworld {
     seed: u64,

@@ -10,16 +10,17 @@ use engine::utils::HashMap;
 
 use crate::game::overworld::block::{BlockData, BlockState};
 use crate::game::overworld::clusters_access_cache::ClustersAccessor;
+use crate::game::overworld::position::BlockPos;
 use crate::game::overworld::raw_cluster::BlockDataImpl;
 use crate::game::AnyBlockState;
 use crate::game::Overworld;
 
 /// Returns true if the specified state/component was successfully set.
-pub type ApplyFn = fn(access: &mut ClustersAccessor, pos: &I64Vec3, data: *const u8) -> bool;
+pub type ApplyFn = fn(access: &mut ClustersAccessor, pos: &BlockPos, data: *const u8) -> bool;
 
 pub struct BlockStateInfo {
     pub ptr: *const u8,
-    pub pos: I64Vec3,
+    pub pos: BlockPos,
     pub apply_fn: ApplyFn,
 }
 unsafe impl Send for BlockStateInfo {}
@@ -27,7 +28,7 @@ unsafe impl Sync for BlockStateInfo {}
 
 pub struct BlockComponentInfo {
     pub ptr: *const u8,
-    pub pos: I64Vec3,
+    pub pos: BlockPos,
     pub apply_fn: ApplyFn,
 }
 unsafe impl Send for BlockComponentInfo {}
@@ -52,7 +53,7 @@ impl AfterTickActionsStorage {
         }
     }
 
-    pub fn set_block<A: ArchetypeState>(&mut self, pos: I64Vec3, block_state: BlockState<A>) {
+    pub fn set_block<A: ArchetypeState>(&mut self, pos: BlockPos, block_state: BlockState<A>) {
         let mut_ref = self.states.alloc(block_state);
 
         self.states_infos.push(BlockStateInfo {
@@ -70,7 +71,7 @@ impl AfterTickActionsStorage {
         });
     }
 
-    pub fn set_component<C: Component>(&mut self, pos: I64Vec3, component: C) {
+    pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         let mut_ref = self.components.alloc(component);
 
         self.components_infos.push(BlockComponentInfo {
@@ -101,18 +102,18 @@ pub struct AfterTickActionsBuilder<'a> {
 }
 
 impl AfterTickActionsBuilder<'_> {
-    pub fn set_block<A: ArchetypeState>(&mut self, pos: I64Vec3, block_state: BlockState<A>) {
+    pub fn set_block<A: ArchetypeState>(&mut self, pos: BlockPos, block_state: BlockState<A>) {
         self.storage.set_block(pos, block_state);
     }
 
-    pub fn set_component<C: Component>(&mut self, pos: I64Vec3, component: C) {
+    pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         self.storage.set_component(pos, component);
     }
 }
 
 /// Returns the actions to perform after the tick.
 pub type OnTickFn =
-    fn(pos: &I64Vec3, block_data: BlockData, overworld: &Overworld, result: AfterTickActionsBuilder);
+    fn(pos: &BlockPos, block_data: BlockData, overworld: &Overworld, result: AfterTickActionsBuilder);
 
 /// Gets called when nearby block is set.
 pub type OnNearbyBlockSet = fn(

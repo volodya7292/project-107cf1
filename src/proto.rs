@@ -11,6 +11,7 @@ use engine::utils::voronoi_noise::VoronoiNoise2D;
 use engine::utils::white_noise::WhiteNoise;
 
 use crate::game::overworld::generator::OverworldGenerator;
+use crate::game::overworld::position::BlockPos;
 use crate::game::overworld::structure::world::biome::MeanTemperature;
 use crate::game::overworld::structure::world::WorldState;
 use crate::game::registry::Registry;
@@ -40,7 +41,7 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
 
     let main_registry = generator.main_registry();
     let registry = main_registry.registry();
-    let world_pos = generator.gen_world_pos(I64Vec3::zeros());
+    let world_pos = generator.gen_world_pos(BlockPos(I64Vec3::zeros()));
     let world_seed = generator.get_world_seed(world_pos.center_pos);
 
     let world = WorldState::new(world_seed, registry);

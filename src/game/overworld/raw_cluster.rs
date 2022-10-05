@@ -69,8 +69,8 @@ fn test_block_index_to_pos() {
 }
 
 #[inline]
-fn aligned_block_index(pos: &TVec3<usize>) -> usize {
-    pos.x * ALIGNED_SIZE * ALIGNED_SIZE + pos.y * ALIGNED_SIZE + pos.z
+fn aligned_block_index(pos: &U8Vec3) -> usize {
+    pos.x as usize * ALIGNED_SIZE * ALIGNED_SIZE + pos.y as usize * ALIGNED_SIZE + pos.z as usize
 }
 
 struct NeighbourVertexIntrinsics {
@@ -175,36 +175,20 @@ impl Default for InnerBlockState {
 pub struct RawCluster {
     registry: Arc<Registry>,
     block_state_storage: EntityStorage,
-    block_states: Box<[[[InnerBlockState; SIZE]; SIZE]; SIZE]>,
+    block_states: Vec<InnerBlockState>,
     intrinsic_data: Vec<IntrinsicBlockData>,
     empty: AtomicBool,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
-    light_addition_cache: VecDeque<TVec3<usize>>,
+    light_addition_cache: VecDeque<U8Vec3>,
 }
 
 impl RawCluster {
-    #[inline]
-    pub fn block_index(pos: &TVec3<usize>) -> usize {
-        pos.x * SIZE * SIZE + pos.y * SIZE + pos.z
-    }
-
-    #[inline]
-    pub fn block_index_to_pos(index: usize) -> U32Vec3 {
-        const SIZE_SQR: usize = SIZE * SIZE;
-
-        let x = index / SIZE_SQR;
-        let y = index % SIZE_SQR / SIZE;
-        let z = index % SIZE;
-
-        U32Vec3::new(x as u32, y as u32, z as u32)
-    }
-
     /// Creating a new cluster is expensive due to its big size of memory
     pub fn new(registry: &Arc<Registry>) -> Self {
         Self {
             registry: Arc::clone(registry),
             block_state_storage: EntityStorage::new(),
-            block_states: Default::default(),
+            block_states: vec![Default::default(); VOLUME],
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             empty: AtomicBool::new(true),
             vertex_mesh: Default::default(),
@@ -217,18 +201,17 @@ impl RawCluster {
     }
 
     /// Returns block data at `pos`
-    pub fn get(&self, pos: &U32Vec3) -> BlockData {
+    pub fn get(&self, pos: &ClusterBlockPos) -> BlockData {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
             panic!("Cluster::get_block failed: pos >= Cluster::SIZE");
         }
-        if pos >= &U32Vec3::from_element(SIZE as u32) {
+        if pos.0 >= U8Vec3::from_element(SIZE as u8) {
             assert_failed();
         }
 
-        let pos: TVec3<usize> = glm::convert(*pos);
-        let inner_state = self.block_states[pos.x][pos.y][pos.z];
+        let inner_state = self.block_states[pos.index()];
 
         BlockData {
             block_storage: &self.block_state_storage,
@@ -237,18 +220,17 @@ impl RawCluster {
     }
 
     /// Returns mutable block data at `pos`
-    pub fn get_mut(&mut self, pos: &U32Vec3) -> BlockDataMut {
+    pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut {
         #[cold]
         #[inline(never)]
         fn assert_failed() {
             panic!("Cluster::get_block_mut failed: pos >= Cluster::SIZE");
         }
-        if pos >= &U32Vec3::from_element(SIZE as u32) {
+        if pos.0 >= U8Vec3::from_element(SIZE as u8) {
             assert_failed();
         }
 
-        let pos: TVec3<usize> = glm::convert(*pos);
-        let block = self.block_states[pos.x][pos.y][pos.z];
+        let block = self.block_states[pos.index()];
 
         BlockDataMut {
             block_storage: &mut self.block_state_storage,
@@ -257,18 +239,21 @@ impl RawCluster {
     }
 
     /// Sets the specified block at `pos`
-    pub fn set<A: ArchetypeState>(&mut self, pos: &U32Vec3, block_state: BlockState<A>) -> BlockDataMut {
+    pub fn set<A: ArchetypeState>(
+        &mut self,
+        pos: &ClusterBlockPos,
+        block_state: BlockState<A>,
+    ) -> BlockDataMut {
         #[cold]
         #[inline(never)]
         fn assert_failed() -> ! {
             panic!("Cluster::set_block failed: pos >= Cluster::SIZE");
         }
-        if pos >= &U32Vec3::from_element(SIZE as u32) {
+        if pos.0 >= U8Vec3::from_element(SIZE as u8) {
             assert_failed();
         }
 
-        let pos: TVec3<usize> = glm::convert(*pos);
-        let curr_state = &mut self.block_states[pos.x][pos.y][pos.z];
+        let curr_state = &mut self.block_states[pos.index()];
 
         // Remove previous block state if present
         if curr_state.entity_id != EntityId::NULL {
@@ -285,7 +270,7 @@ impl RawCluster {
         };
 
         // Set intrinsics
-        let index = aligned_block_index(&pos.add_scalar(1));
+        let index = aligned_block_index(&pos.0.add_scalar(1));
         self.intrinsic_data[index].occluder = block.occluder();
         self.intrinsic_data[index].tex_model_id = block.textured_model();
 
@@ -295,18 +280,14 @@ impl RawCluster {
         }
     }
 
-    pub fn get_light_level(&self, pos: &U32Vec3) -> LightLevel {
-        let index = aligned_block_index(&glm::convert(pos.add_scalar(1)));
+    pub fn get_light_level(&self, pos: &ClusterBlockPos) -> LightLevel {
+        let index = aligned_block_index(&pos.0.add_scalar(1));
         self.intrinsic_data[index].light_level
     }
 
-    pub fn set_light_level(&mut self, pos: &U32Vec3, light_level: LightLevel) {
-        let pos: TVec3<usize> = glm::convert(*pos);
-
-        let index = aligned_block_index(&pos.add_scalar(1));
+    pub fn set_light_level(&mut self, pos: &ClusterBlockPos, light_level: LightLevel) {
+        let index = aligned_block_index(&pos.0.add_scalar(1));
         self.intrinsic_data[index].light_level = light_level;
-
-        // self.side_dirty[neighbour_index_from_pos(&pos)] = true;
     }
 
     /// Checks if self inner edge is fully occluded
@@ -327,7 +308,7 @@ impl RawCluster {
         for i in 0..SIZE {
             for j in 0..SIZE {
                 let p = map_pos(&dir, i, j, SIZE - 1).add_scalar(1);
-                let index = aligned_block_index(&p);
+                let index = aligned_block_index(&glm::convert(p));
 
                 state &= self.intrinsic_data[index].occluder.occludes_side(facing);
 
@@ -360,7 +341,7 @@ impl RawCluster {
 
             for k in 0..SIZE {
                 let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
-                let index = aligned_block_index(&dst_p);
+                let index = aligned_block_index(&glm::convert(dst_p));
                 self.intrinsic_data[index] = value;
             }
         } else {
@@ -381,7 +362,7 @@ impl RawCluster {
             for k in 0..SIZE {
                 for l in 0..SIZE {
                     let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
-                    let index = aligned_block_index(&dst_p);
+                    let index = aligned_block_index(&glm::convert(dst_p));
                     self.intrinsic_data[index] = value;
                 }
             }
@@ -415,8 +396,8 @@ impl RawCluster {
             for k in 0..SIZE {
                 let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
                 let src_p = map_pos(&n, k, SIZE - 1).add_scalar(1);
-                let dst_index = aligned_block_index(&dst_p);
-                let src_index = aligned_block_index(&src_p);
+                let dst_index = aligned_block_index(&glm::convert(dst_p));
+                let src_index = aligned_block_index(&glm::convert(src_p));
 
                 self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
             }
@@ -440,8 +421,8 @@ impl RawCluster {
                 for l in 0..SIZE {
                     let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
                     let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
-                    let dst_index = aligned_block_index(&dst_p);
-                    let src_index = aligned_block_index(&src_p);
+                    let dst_index = aligned_block_index(&glm::convert(dst_p));
+                    let src_index = aligned_block_index(&glm::convert(src_p));
 
                     self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
                 }
@@ -479,12 +460,12 @@ impl RawCluster {
             for l in 0..SIZE {
                 let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
                 let src_p = map_pos(&dir_inv, k, l, SIZE - 1).add_scalar(1);
-                let dst_index = aligned_block_index(&dst_p);
-                let src_index = aligned_block_index(&src_p);
+                let dst_index = aligned_block_index(&glm::convert(dst_p));
+                let src_index = aligned_block_index(&glm::convert(src_p));
 
                 self.intrinsic_data[dst_index].light_level =
                     side_cluster.intrinsic_data[src_index].light_level;
-                self.light_addition_cache.push_back(dst_p);
+                self.light_addition_cache.push_back(glm::convert(dst_p));
             }
         }
 
@@ -504,22 +485,23 @@ impl RawCluster {
 
             for i in 0..6 {
                 let dir = Facing::DIRECTIONS[i];
-                let rel_pos = glm::convert::<TVec3<usize>, I32Vec3>(curr_pos) + dir;
+                let rel_pos = glm::convert_unchecked::<_, U8Vec3>(glm::convert::<_, I32Vec3>(curr_pos) - dir);
 
                 if rel_pos.x < 1
                     || rel_pos.y < 1
                     || rel_pos.z < 1
-                    || rel_pos.x >= MAX_BOUNDARY
-                    || rel_pos.y >= MAX_BOUNDARY
-                    || rel_pos.z >= MAX_BOUNDARY
+                    || rel_pos.x >= MAX_BOUNDARY as u8
+                    || rel_pos.y >= MAX_BOUNDARY as u8
+                    || rel_pos.z >= MAX_BOUNDARY as u8
                 {
                     continue;
                 }
-                let rel_pos: TVec3<usize> = glm::convert_unchecked(rel_pos);
 
-                let block = self.block_states[rel_pos.x - 1][rel_pos.y - 1][rel_pos.z - 1];
-                let index = aligned_block_index(&rel_pos);
-                let level = &mut self.intrinsic_data[index].light_level;
+                let index = ClusterBlockPos(rel_pos - U8Vec3::from_element(1)).index();
+                let aligned_index = aligned_block_index(&rel_pos);
+
+                let block = self.block_states[index];
+                let level = &mut self.intrinsic_data[aligned_index].light_level;
                 let color = level.components();
 
                 let block = self.registry.get_block(block.block_id).unwrap();
@@ -542,9 +524,9 @@ impl RawCluster {
     }
 
     /// Propagates lighting where necessary in the cluster using light source at `block_pos`.
-    pub fn propagate_lighting(&mut self, block_pos: &U32Vec3) -> ClusterDirtySides {
+    pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) -> ClusterDirtySides {
         self.light_addition_cache
-            .push_back(glm::convert(block_pos.add_scalar(1)));
+            .push_back(pos.offset(&U8Vec3::from_element(1)).0);
         self.propagate_pending_lighting()
     }
 
@@ -767,7 +749,7 @@ impl RawCluster {
                 for z in 0..SIZE {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
                     let posf: Vec3 = glm::convert(pos);
-                    let state = &self.block_states[x][y][z];
+                    let state = &self.block_states[ClusterBlockPos(glm::convert_unchecked(pos)).index()];
                     let block = self.registry.get_block(state.block_id).unwrap();
 
                     if !block.has_textured_model() {
