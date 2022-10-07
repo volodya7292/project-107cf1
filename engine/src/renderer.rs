@@ -296,6 +296,7 @@ pub struct MaterialInfo {
     pub(crate) emission: Vec4,
 }
 
+#[derive(Copy, Clone)]
 pub enum MatComponent {
     Texture(u16),
     Color(Vec4),
@@ -309,8 +310,8 @@ impl MaterialInfo {
         emission: Vec4,
     ) -> MaterialInfo {
         let mut info = MaterialInfo {
-            diffuse_tex_id: 0,
-            specular_tex_id: 0,
+            diffuse_tex_id: u32::MAX,
+            specular_tex_id: u32::MAX,
             normal_tex_id: normal_tex_id as u32,
             diffuse: Default::default(),
             specular: Default::default(),

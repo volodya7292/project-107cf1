@@ -1,13 +1,15 @@
-use crate::utils::HashMap;
-use fixedbitset::FixedBitSet;
-use index_pool::IndexPool;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU32;
 use std::sync::{atomic, Arc};
 use std::{mem, ptr};
+
+use fixedbitset::FixedBitSet;
+use index_pool::IndexPool;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use crate::utils::HashMap;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Entity {
@@ -20,6 +22,12 @@ impl Entity {
         id: u32::MAX,
         gen: u64::MAX,
     };
+}
+
+impl Default for Entity {
+    fn default() -> Self {
+        Self::NULL
+    }
 }
 
 pub struct RawComponentStorage {
@@ -273,8 +281,9 @@ impl Iterator for EntriesIter<'_> {
 }
 
 mod private {
-    use crate::ecs::scene_storage::{Entities, RawComponentStorage};
     use fixedbitset::FixedBitSet;
+
+    use crate::ecs::scene_storage::{Entities, RawComponentStorage};
 
     pub trait RawComponentStorageImpl {
         fn raw(&self) -> &RawComponentStorage;
