@@ -1,13 +1,17 @@
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+
+use vk_wrapper as vkw;
+use vk_wrapper::WaitSemaphore;
+
 use crate::ecs::component;
 use crate::ecs::scene_storage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::renderer::VMBufferUpdate;
 use crate::utils::HashMap;
-use parking_lot::Mutex;
-use std::sync::Arc;
-use vk_wrapper as vkw;
-use vk_wrapper::WaitSemaphore;
+use crate::HashSet;
 
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
@@ -27,6 +31,8 @@ impl GpuBuffersUpdate<'_> {
 
         self.transfer_submit[0].wait().unwrap();
         self.transfer_submit[1].wait().unwrap();
+
+        let mut processed_meshes = HashSet::new();
 
         {
             let mut t_cl = self.transfer_cl[0].lock();
@@ -52,6 +58,11 @@ impl GpuBuffersUpdate<'_> {
 
                 let src_buffer = mesh.staging_buffer.as_ref().unwrap();
                 let dst_buffer = mesh.buffer.as_ref().unwrap();
+
+                // Multiple entities may use the same mesh, process it only once
+                if !processed_meshes.insert(src_buffer.as_ptr()) {
+                    continue;
+                }
 
                 t_cl.copy_raw_host_buffer_to_device(&src_buffer.raw(), 0, dst_buffer, 0, src_buffer.size());
 
