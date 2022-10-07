@@ -1,13 +1,16 @@
-use crate::game::overworld::block_model;
-use crate::game::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
-use crate::game::overworld::facing::Facing;
-use crate::game::overworld::occluder::Occluder;
-use crate::physics::aabb::AABB;
+use std::ops::Range;
+
 use bit_vec::BitVec;
 use nalgebra_glm as glm;
 use nalgebra_glm::{Vec2, Vec3};
 use smallvec::{smallvec, SmallVec};
-use std::ops::Range;
+
+use crate::game::overworld::block_model;
+use crate::game::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
+use crate::game::overworld::facing::Facing;
+use crate::game::overworld::occluder::Occluder;
+use crate::game::registry::Registry;
+use crate::physics::aabb::AABB;
 
 #[derive(Copy, Clone)]
 pub enum QuadRotation {
@@ -50,10 +53,15 @@ impl Default for QuadTexUV {
     }
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TexturedQuad {
+    pub vertices: [Vertex; 4],
+    pub transparent: bool,
+}
+
 #[derive(Copy, Clone)]
 pub struct QuadMaterial {
     material_id: u16,
-    transparent: bool,
     texture_uv: QuadTexUV,
 }
 
@@ -61,14 +69,8 @@ impl QuadMaterial {
     pub fn new(material_id: u16) -> Self {
         Self {
             material_id,
-            transparent: false,
             texture_uv: Default::default(),
         }
-    }
-
-    pub fn with_transparency(mut self, transparent: bool) -> Self {
-        self.transparent = transparent;
-        self
     }
 
     pub fn with_tex_uv(mut self, texture_uv: QuadTexUV) -> Self {
@@ -79,19 +81,14 @@ impl QuadMaterial {
     pub fn invisible() -> Self {
         Self {
             material_id: u16::MAX,
-            transparent: true,
             texture_uv: QuadTexUV::new(Default::default()),
         }
-    }
-
-    pub fn transparent(&self) -> bool {
-        self.transparent
     }
 }
 
 pub struct TexturedBlockModel {
     content_type: ContentType,
-    vertices: Vec<Vertex>,
+    quads: Vec<TexturedQuad>,
     side_quad_vertices: [Range<usize>; 6],
     first_side_quads_vsorted: [Quad; 6],
     inner_quad_vertices: Range<usize>,
@@ -103,16 +100,23 @@ pub struct TexturedBlockModel {
 }
 
 impl TexturedBlockModel {
-    pub fn new(model: &BlockModel, quad_materials: &[QuadMaterial]) -> TexturedBlockModel {
+    pub fn new(
+        model: &BlockModel,
+        quad_materials: &[QuadMaterial],
+        registry: &Registry,
+    ) -> TexturedBlockModel {
         let mut tex_model = TexturedBlockModel {
             content_type: model.content_type(),
-            vertices: vec![],
+            quads: vec![],
             side_quad_vertices: model.side_quads_range(),
             first_side_quads_vsorted: Default::default(),
             inner_quad_vertices: model.inner_quads_range(),
             side_shapes_equality: [false; 3],
             occluder: model.occluder(),
-            quads_transparency: quad_materials.iter().map(|m| m.transparent).collect(),
+            quads_transparency: quad_materials
+                .iter()
+                .map(|m| registry.get_material(m.material_id).unwrap().translucent())
+                .collect(),
             merge_enabled: true,
             aabbs: model.aabbs().to_vec(),
         };
@@ -150,7 +154,12 @@ impl TexturedBlockModel {
                     });
                     tex_model.first_side_quads_vsorted[f_i] = quad_sorted;
                 }
-                if block_model::quad_occludes_side(q) && quad_materials[range.start + i].transparent() {
+
+                let mat = registry
+                    .get_material(quad_materials[range.start + i].material_id)
+                    .unwrap();
+
+                if block_model::quad_occludes_side(q) && mat.translucent() {
                     tex_model.occluder.clear_side(facing);
                     break;
                 }
@@ -173,16 +182,16 @@ impl TexturedBlockModel {
             tex_model.side_shapes_equality[i] = equal;
         }
 
-        tex_model.vertices = model
+        tex_model.quads = model
             .all_quads()
             .iter()
             .zip(quad_materials)
-            .flat_map(|(quad, q_mat)| {
+            .map(|(quad, q_mat)| {
                 let material_id = q_mat.material_id as u32;
                 let vertices = quad.vertices();
                 let normal = engine::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
 
-                quad.vertices()
+                let tex_vertices: SmallVec<[_; 4]> = vertices
                     .iter()
                     .zip(&q_mat.texture_uv.0)
                     .map(move |(p, uv)| Vertex {
@@ -193,15 +202,16 @@ impl TexturedBlockModel {
                         lighting: 0,
                         material_id,
                     })
+                    .collect();
+
+                let mat = registry.get_material(q_mat.material_id).unwrap();
+
+                TexturedQuad {
+                    vertices: tex_vertices.into_inner().unwrap(),
+                    transparent: mat.translucent(),
+                }
             })
             .collect();
-
-        for s in &mut tex_model.side_quad_vertices {
-            s.start *= 4;
-            s.end *= 4;
-        }
-        tex_model.inner_quad_vertices.start *= 4;
-        tex_model.inner_quad_vertices.end *= 4;
 
         tex_model
     }
@@ -225,14 +235,14 @@ impl TexturedBlockModel {
         &self.first_side_quads_vsorted[facing as usize]
     }
 
-    pub fn get_quads_by_facing(&self, facing: Facing) -> &[Vertex] {
+    pub fn get_quads_by_facing(&self, facing: Facing) -> &[TexturedQuad] {
         let range = self.side_quad_vertices[facing as usize].clone();
-        &self.vertices[range]
+        &self.quads[range]
     }
 
-    pub fn get_inner_quads(&self) -> &[Vertex] {
+    pub fn get_inner_quads(&self) -> &[TexturedQuad] {
         let range = self.inner_quad_vertices.clone();
-        &self.vertices[range]
+        &self.quads[range]
     }
 
     pub fn occluder(&self) -> Occluder {

@@ -168,6 +168,7 @@ pub struct RawCluster {
     intrinsic_data: Vec<IntrinsicBlockData>,
     empty: AtomicBool,
     vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
+    vertex_mesh_translucent: RwLock<VertexMesh<PackedVertex, ()>>,
     light_addition_cache: VecDeque<U8Vec3>,
 }
 
@@ -181,12 +182,17 @@ impl RawCluster {
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             empty: AtomicBool::new(true),
             vertex_mesh: Default::default(),
+            vertex_mesh_translucent: Default::default(),
             light_addition_cache: VecDeque::with_capacity(SIZE * SIZE),
         }
     }
 
     pub fn vertex_mesh(&self) -> RwLockReadGuard<VertexMesh<PackedVertex, ()>> {
         self.vertex_mesh.read()
+    }
+
+    pub fn vertex_mesh_translucent(&self) -> RwLockReadGuard<VertexMesh<PackedVertex, ()>> {
+        self.vertex_mesh_translucent.read()
     }
 
     /// Returns block data at `pos`
@@ -731,6 +737,7 @@ impl RawCluster {
 
         let intrinsics = &self.intrinsic_data;
         let mut vertices = Vec::<PackedVertex>::with_capacity(VOLUME * 8);
+        let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(VOLUME * 8);
         let mut empty = true;
 
         for x in 0..SIZE {
@@ -757,20 +764,31 @@ impl RawCluster {
                         // let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
                         // let light_level = intrinsics[index].light_level;
 
-                        for mut quad in model.get_inner_quads().chunks_exact(4) {
-                            let mut quad: [Vertex; 4] = quad.try_into().unwrap();
+                        for mut quad in model.get_inner_quads() {
+                            let mut quad_vertices = quad.vertices;
                             let normal = engine::utils::calc_triangle_normal(
-                                &quad[0].position,
-                                &quad[1].position,
-                                &quad[2].position,
+                                &quad_vertices[0].position,
+                                &quad_vertices[1].position,
+                                &quad_vertices[2].position,
                             );
 
-                            self.calc_quad_lighting(&pos, &mut quad, Facing::from_normal_closest(&normal));
+                            self.calc_quad_lighting(
+                                &pos,
+                                &mut quad_vertices,
+                                Facing::from_normal_closest(&normal),
+                            );
 
-                            for mut v in quad {
+                            let vertices_vec = if quad.transparent {
+                                &mut vertices_translucent
+                            } else {
+                                &mut vertices
+                            };
+
+                            for mut v in quad_vertices {
                                 v.position += posf;
                                 v.normal = normal;
-                                vertices.push(v.pack());
+
+                                vertices_vec.push(v.pack());
                             }
                         }
                     }
@@ -811,18 +829,18 @@ impl RawCluster {
                             }
                         }
 
-                        for quad in model.get_quads_by_facing(facing).chunks_exact(4) {
-                            let mut quad: [Vertex; 4] = quad.try_into().unwrap();
+                        for quad in model.get_quads_by_facing(facing) {
+                            let mut quad_vertices = quad.vertices;
 
                             let normal = engine::utils::calc_triangle_normal(
-                                &quad[0].position,
-                                &quad[1].position,
-                                &quad[2].position,
+                                &quad_vertices[0].position,
+                                &quad_vertices[1].position,
+                                &quad_vertices[2].position,
                             );
 
-                            self.calc_quad_lighting(&pos, &mut quad, facing);
+                            self.calc_quad_lighting(&pos, &mut quad_vertices, facing);
 
-                            for v in &mut quad {
+                            for v in &mut quad_vertices {
                                 let neighbours = self.get_vertex_neighbours(&pos, &v.position, facing);
                                 v.position += posf;
                                 v.normal = normal;
@@ -830,15 +848,23 @@ impl RawCluster {
                                 // v.lighting = neighbours.calculate_lighting(intrinsic);
                             }
 
-                            if quad[1].ao != quad[2].ao || quad[1].lighting != quad[2].lighting {
-                                let vc = quad;
-                                quad[1] = vc[0];
-                                quad[3] = vc[1];
-                                quad[0] = vc[2];
-                                quad[2] = vc[3];
+                            if quad_vertices[1].ao != quad_vertices[2].ao
+                                || quad_vertices[1].lighting != quad_vertices[2].lighting
+                            {
+                                let vc = quad_vertices;
+                                quad_vertices[1] = vc[0];
+                                quad_vertices[3] = vc[1];
+                                quad_vertices[0] = vc[2];
+                                quad_vertices[2] = vc[3];
                             }
 
-                            vertices.extend(quad.map(|v| v.pack()));
+                            let vertices_vec = if quad.transparent {
+                                &mut vertices_translucent
+                            } else {
+                                &mut vertices
+                            };
+
+                            vertices_vec.extend(quad_vertices.map(|v| v.pack()));
                         }
                     }
                 }
@@ -848,18 +874,29 @@ impl RawCluster {
         self.empty.store(empty, MO_RELAXED);
 
         let mut indices = vec![0; vertices.len() / 4 * 6];
+        let mut indices_translucent = vec![0; vertices_translucent.len() / 4 * 6];
 
-        for i in (0..indices.len()).step_by(6) {
-            let ind = (i / 6 * 4) as u32;
-            indices[i] = ind;
-            indices[i + 1] = ind + 2;
-            indices[i + 2] = ind + 1;
-            indices[i + 3] = ind + 2;
-            indices[i + 4] = ind + 3;
-            indices[i + 5] = ind + 1;
+        let map_quad_ids = |quad_idx, chunk: &mut [u32]| {
+            let ind = (quad_idx * 4) as u32;
+            chunk[0] = ind;
+            chunk[1] = ind + 2;
+            chunk[2] = ind + 1;
+            chunk[3] = ind + 2;
+            chunk[4] = ind + 3;
+            chunk[5] = ind + 1;
+        };
+
+        for (i, chunk) in indices.chunks_exact_mut(6).enumerate() {
+            map_quad_ids(i, chunk);
+        }
+        for (i, chunk) in indices_translucent.chunks_exact_mut(6).enumerate() {
+            map_quad_ids(i, chunk);
         }
 
         *self.vertex_mesh.write() = device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
+        *self.vertex_mesh_translucent.write() = device
+            .create_vertex_mesh(&vertices_translucent, Some(&indices_translucent))
+            .unwrap();
     }
 
     pub fn is_empty(&self) -> bool {

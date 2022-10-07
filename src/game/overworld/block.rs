@@ -11,6 +11,7 @@ use crate::game::overworld::Overworld;
 use crate::game::registry::Registry;
 
 pub mod event_handlers;
+pub mod water;
 
 #[derive(Copy, Clone)]
 pub struct Block {

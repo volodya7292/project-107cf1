@@ -1,13 +1,16 @@
-use crate::game::overworld;
-use crate::game::overworld::block::Block;
-use crate::game::overworld::block_model::BlockModel;
-use crate::game::overworld::structure::world::{biome, Biome};
-use crate::game::overworld::structure::Structure;
-use crate::game::overworld::textured_block_model::TexturedBlockModel;
+use std::convert::TryInto;
+
 use engine::renderer::{MaterialInfo, TextureAtlasType};
 use engine::resource_file::ResourceRef;
 use engine::utils::HashMap;
-use std::convert::TryInto;
+
+use crate::game::overworld;
+use crate::game::overworld::block::Block;
+use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::material::Material;
+use crate::game::overworld::structure::world::{biome, Biome};
+use crate::game::overworld::structure::Structure;
+use crate::game::overworld::textured_block_model::TexturedBlockModel;
 
 pub struct Registry {
     structures: Vec<Structure>,
@@ -15,7 +18,7 @@ pub struct Registry {
     // structures_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
     textures: Vec<(TextureAtlasType, ResourceRef)>,
-    materials: Vec<MaterialInfo>,
+    materials: Vec<Material>,
     textured_models: Vec<TexturedBlockModel>,
     blocks: Vec<Block>,
 }
@@ -55,7 +58,7 @@ impl Registry {
         (self.textures.len() - 1).try_into().unwrap()
     }
 
-    pub fn register_material(&mut self, material: MaterialInfo) -> u16 {
+    pub fn register_material(&mut self, material: Material) -> u16 {
         if self.materials.len() == Self::MAX_MATERIALS as usize {
             panic!("Maximum number of materials is reached!");
         }
@@ -93,7 +96,7 @@ impl Registry {
         &self.textures
     }
 
-    pub fn materials(&self) -> &[MaterialInfo] {
+    pub fn materials(&self) -> &[Material] {
         &self.materials
     }
 
@@ -107,6 +110,10 @@ impl Registry {
 
     pub fn get_block(&self, id: u16) -> Option<&Block> {
         self.blocks.get(id as usize)
+    }
+
+    pub fn get_material(&self, id: u16) -> Option<&Material> {
+        self.materials.get(id as usize)
     }
 
     pub fn get_block_model(&self, id: u16) -> Option<&BlockModel> {

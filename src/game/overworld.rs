@@ -37,6 +37,7 @@ pub mod clusters_access_cache;
 pub mod facing;
 pub mod generator;
 pub mod light_level;
+pub mod material;
 pub mod occluder;
 pub mod position;
 pub mod raw_cluster;

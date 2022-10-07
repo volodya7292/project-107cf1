@@ -35,7 +35,7 @@ use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::BlockDataImpl;
-use crate::game::overworld::{block_component, raw_cluster, LoadedClusters};
+use crate::game::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use crate::game::overworld_streamer::OverworldStreamer;
 use crate::game::registry::Registry;
 use crate::physics::aabb::{AABBRayIntersection, AABB};
@@ -170,8 +170,8 @@ impl Application for Game {
                 renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
             }
 
-            for (id, info) in self.registry.registry().materials().iter().enumerate() {
-                renderer.set_material(id as u32, *info);
+            for (id, material) in self.registry.registry().materials().iter().enumerate() {
+                renderer.set_material(id as u32, material.info());
             }
         }
 
@@ -458,6 +458,10 @@ impl Application for Game {
                             }
                             VirtualKeyCode::Key2 => {
                                 self.curr_block = self.registry.block_glow.into_any();
+                            }
+                            VirtualKeyCode::Key3 => {
+                                let idx = block::water::v4d_to_idx([6, 6, 6, 6], 7);
+                                self.curr_block = self.registry.water_states[idx].into_any();
                             }
                             _ => {}
                         }

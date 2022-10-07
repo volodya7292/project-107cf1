@@ -49,9 +49,21 @@ pub struct OverworldStreamer {
 
 const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
 
+#[derive(Default)]
+struct RClusterEntities {
+    solid: scene::Entity,
+    translucent: scene::Entity,
+}
+
+impl RClusterEntities {
+    fn is_null(&self) -> bool {
+        self.solid == scene::Entity::NULL && self.translucent == scene::Entity::NULL
+    }
+}
+
 struct RCluster {
     creation_time: Instant,
-    entity: scene::Entity,
+    entities: RClusterEntities,
     /// Intrinsics mask of clusters whose intrinsics data is currently being pasted into this cluster
     updating_outer_intrinsics: Arc<AtomicU32>,
     /// Whether this cluster is invisible due to full intrinsics by the neighbour clusters
@@ -273,8 +285,9 @@ impl OverworldStreamer {
                 let timeout = (curr_t - rcl.creation_time).as_secs() >= 3;
                 let do_preserve = in_layout || !timeout;
 
-                if !do_preserve && rcl.entity != scene::Entity::NULL {
-                    self.clusters_entities_to_remove.push(rcl.entity);
+                if !do_preserve && !rcl.entities.is_null() {
+                    self.clusters_entities_to_remove
+                        .extend([rcl.entities.solid, rcl.entities.translucent]);
                     removed_rclusters.push(*p);
                 }
 
@@ -292,9 +305,10 @@ impl OverworldStreamer {
                     let visible = rcl.is_visible() || is_cluster_in_forced_load_range(p, &self.stream_pos);
 
                     if !visible {
-                        if rcl.entity != scene::Entity::NULL {
-                            self.clusters_entities_to_remove.push(rcl.entity);
-                            rcl.entity = scene::Entity::NULL;
+                        if !rcl.entities.is_null() {
+                            self.clusters_entities_to_remove
+                                .extend([rcl.entities.solid, rcl.entities.translucent]);
+                            rcl.entities = Default::default();
                         }
 
                         // Note: it is safe to transition to this state because cluster is guaranteed to be loaded
@@ -315,7 +329,7 @@ impl OverworldStreamer {
                 if let hash_map::Entry::Vacant(e) = rclusters.entry(*p) {
                     e.insert(RCluster {
                         creation_time: curr_t,
-                        entity: scene::Entity::NULL,
+                        entities: Default::default(),
                         updating_outer_intrinsics: Default::default(),
                         occluded: Default::default(),
                         empty: Default::default(),
@@ -755,8 +769,8 @@ impl OverworldStreamer {
     pub fn update_scene(&mut self, scene: &Scene) {
         scene.remove_entities(&self.clusters_entities_to_remove);
 
-        // Reserve entities from scene
-        let mut entities = scene.create_entities(self.clusters_entities_to_add.len() as u32);
+        // Reserve entities from scene (two for each cluster, solid and translucent)
+        let mut entities = scene.create_entities(self.clusters_entities_to_add.len() as u32 * 2);
 
         let mut transform_comps = scene.storage_write::<component::Transform>();
         let mut render_config_comps = scene.storage_write::<component::MeshRenderConfig>();
@@ -764,18 +778,27 @@ impl OverworldStreamer {
 
         // Add components to the new entities
         for pos in &self.clusters_entities_to_add {
-            let entity = entities.pop().unwrap();
+            let entity_solid = entities.pop().unwrap();
+            let entity_translucent = entities.pop().unwrap();
+
             let transform_comp = component::Transform::new(
                 glm::convert(*pos.get()),
                 Vec3::new(0.0, 0.0, 0.0),
                 Vec3::new(1.0, 1.0, 1.0),
             );
-            let render_config = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
+            let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
+            let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
 
-            transform_comps.set(entity, transform_comp);
-            render_config_comps.set(entity, render_config);
+            transform_comps.set(entity_solid, transform_comp);
+            render_config_comps.set(entity_solid, render_config_solid);
 
-            self.rclusters.get_mut(pos).unwrap().entity = entity;
+            transform_comps.set(entity_translucent, transform_comp);
+            render_config_comps.set(entity_translucent, render_config_translucent);
+
+            self.rclusters.get_mut(pos).unwrap().entities = RClusterEntities {
+                solid: entity_solid,
+                translucent: entity_translucent,
+            };
         }
 
         // Update meshes
@@ -788,7 +811,6 @@ impl OverworldStreamer {
 
             let cluster = ocluster.cluster.read();
             let cluster = unwrap_option!(cluster.as_ref(), continue);
-            let mesh = cluster.raw.vertex_mesh();
             let mut ready_to_set_mesh = true;
 
             for p in get_side_clusters(pos) {
@@ -803,8 +825,15 @@ impl OverworldStreamer {
                 }
             }
 
-            if ready_to_set_mesh && rcluster.entity != scene::Entity::NULL {
-                vertex_mesh_comps.set(rcluster.entity, component::VertexMesh::new(&mesh.raw()));
+            if ready_to_set_mesh && !rcluster.entities.is_null() {
+                let mesh = cluster.raw.vertex_mesh();
+                let mesh_translucent = cluster.raw.vertex_mesh_translucent();
+
+                vertex_mesh_comps.set(rcluster.entities.solid, component::VertexMesh::new(&mesh.raw()));
+                vertex_mesh_comps.set(
+                    rcluster.entities.translucent,
+                    component::VertexMesh::new(&mesh_translucent.raw()),
+                );
                 rcluster.mesh_changed.store(false, MO_RELAXED);
             }
         }

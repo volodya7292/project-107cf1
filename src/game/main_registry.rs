@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use entity_data::Archetype;
 use entity_data::ArchetypeState;
-use nalgebra_glm::{DVec3, U64Vec3, Vec3};
+use nalgebra_glm::{DVec3, U64Vec3, Vec3, Vec4};
 
 use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
 use engine::resource_file::ResourceFile;
@@ -12,6 +12,7 @@ use crate::game::overworld;
 use crate::game::overworld::block::event_handlers::AfterTickActionsStorage;
 use crate::game::overworld::block::{Block, BlockState};
 use crate::game::overworld::block_model::BlockModel;
+use crate::game::overworld::material::Material;
 use crate::game::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::game::overworld::structure::world::Biome;
 use crate::game::overworld::structure::{world, Structure};
@@ -34,7 +35,8 @@ pub struct MainRegistry {
     pub block_empty: BlockState<StatelessBlock>,
     pub block_default: BlockState<StatelessBlock>,
     pub block_glow: BlockState<GlowBlockState>,
-    pub block_water: BlockState<StatelessBlock>,
+    // pub block_water: BlockState<StatelessBlock>,
+    pub water_states: Vec<BlockState<StatelessBlock>>,
 }
 
 macro_rules! add_getters {
@@ -64,24 +66,15 @@ impl MainRegistry {
         );
 
         // Materials
-        let material_default = reg.register_material(MaterialInfo::new(
-            MatComponent::Texture(tex_default),
-            MatComponent::Color(Default::default()),
-            TEXTURE_ID_NONE,
-            Default::default(),
-        ));
-        let material_glow = reg.register_material(MaterialInfo::new(
-            MatComponent::Texture(tex_glow),
-            MatComponent::Color(Default::default()),
-            TEXTURE_ID_NONE,
-            Default::default(),
-        ));
-        let material_water = reg.register_material(MaterialInfo::new(
-            MatComponent::Texture(tex_water),
-            MatComponent::Color(Default::default()),
-            TEXTURE_ID_NONE,
-            Default::default(),
-        ));
+        let material_default = reg.register_material(Material::new(MatComponent::Texture(tex_default)));
+        let material_glow = reg.register_material(Material::new(MatComponent::Texture(tex_glow)));
+        let material_water = reg.register_material(
+            Material::new(
+                // MatComponent::Texture(tex_water),
+                MatComponent::Color(Vec4::new(0.0, 0.0, 1.0, 0.5)),
+            )
+            .with_translucent(true),
+        );
 
         // Block models
         // ----------------------------------------------------------------------------------------------------
@@ -100,6 +93,7 @@ impl MainRegistry {
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_default); 6],
+                &reg,
             ));
             let id = reg.register_block(Block::new_simple(&reg, tex_model));
             BlockState::new(id, StatelessBlock)
@@ -108,6 +102,7 @@ impl MainRegistry {
             let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
                 reg.get_block_model(cube_model).unwrap(),
                 &[QuadMaterial::new(material_glow); 6],
+                &reg,
             ));
             let id = reg.register_block(Block::new(
                 &reg,
@@ -124,13 +119,27 @@ impl MainRegistry {
                 },
             )
         };
-        let block_water = {
-            let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
-                reg.get_block_model(cube_model).unwrap(),
-                &[QuadMaterial::new(material_water).with_transparency(true); 6],
-            ));
-            let id = reg.register_block(Block::new_simple(&reg, tex_model));
-            BlockState::new(id, StatelessBlock)
+        let water_states = {
+            let models = block::water::gen_blocks(&reg, material_water, 7);
+
+            let states: Vec<_> = models
+                .into_iter()
+                .map(|model| {
+                    let tex_model = reg.register_textured_block_model(model);
+                    let id = reg.register_block(Block::new_simple(&reg, tex_model));
+
+                    BlockState::new(id, StatelessBlock)
+                })
+                .collect();
+
+            states
+
+            // let tex_model = reg.register_textured_block_model(TexturedBlockModel::new(
+            //     reg.get_block_model(cube_model).unwrap(),
+            //     &[QuadMaterial::new(material_water).with_transparency(true); 6],
+            // ));
+            // let id = reg.register_block(Block::new_simple(&reg, tex_model));
+            // BlockState::new(id, StatelessBlock)
         };
 
         // Biomes
@@ -214,7 +223,8 @@ impl MainRegistry {
             block_empty,
             block_default,
             block_glow,
-            block_water,
+            // block_water,
+            water_states,
         })
     }
 
