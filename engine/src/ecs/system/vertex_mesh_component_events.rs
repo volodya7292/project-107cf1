@@ -1,9 +1,10 @@
+use std::sync::Arc;
+
 use crate::ecs::component;
 use crate::ecs::scene_storage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::utils::HashMap;
-use std::sync::Arc;
 
 pub(crate) struct VertexMeshCompEvents<'a> {
     pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
@@ -12,15 +13,6 @@ pub(crate) struct VertexMeshCompEvents<'a> {
 }
 
 impl VertexMeshCompEvents<'_> {
-    fn vertex_mesh_comp_modified(
-        entity: Entity,
-        vertex_mesh_comp: &component::VertexMesh,
-        buffer_updates: &mut HashMap<Entity, Arc<RawVertexMesh>>,
-    ) {
-        let vertex_mesh = &vertex_mesh_comp.0;
-        buffer_updates.insert(entity, Arc::clone(vertex_mesh));
-    }
-
     pub fn run(&mut self) {
         let events = self.vertex_mesh_comps.write().events();
 
@@ -30,15 +22,13 @@ impl VertexMeshCompEvents<'_> {
         // ------------------------------------------------------------------------------------
         for event in &events {
             match event {
-                scene_storage::Event::Created(i) | scene_storage::Event::Modified(i) => {
-                    Self::vertex_mesh_comp_modified(
-                        *i,
-                        vertex_mesh_comps.get(*i).unwrap(),
-                        self.buffer_updates,
-                    );
+                Event::Created(e) | Event::Modified(e) => {
+                    let comp = vertex_mesh_comps.get(*e).unwrap();
+                    self.buffer_updates.insert(*e, Arc::clone(&comp.0));
                 }
-                Event::Removed(i) => {
-                    self.vertex_meshes.remove(i);
+                Event::Removed(e) => {
+                    self.vertex_meshes.remove(e);
+                    self.buffer_updates.remove(e);
                 }
             }
         }
