@@ -187,8 +187,8 @@ impl ClustersAccessor {
 
     /// Returns block builder or `None` if respective cluster is not loaded
     fn get_light_level(&mut self, pos: &BlockPos) -> Option<LightLevel> {
-        let cluster = self.access_cluster(&pos.cluster_pos())?;
-        cluster
+        let access = self.access_cluster(&pos.cluster_pos())?;
+        access
             .cluster()
             .map(|cluster| cluster.raw.get_light_level(&pos.cluster_block_pos()))
     }
@@ -206,7 +206,7 @@ impl ClustersAccessor {
         }
     }
 
-    /// Returns facing, intersection point, and block data of the block that intersects with specified ray.
+    /// Returns intersection facing and position of the block that specified ray intersect.
     pub fn get_block_at_ray(
         &mut self,
         ray_origin: &DVec3,

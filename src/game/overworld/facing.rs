@@ -1,5 +1,6 @@
-use nalgebra_glm::{I32Vec3, Vec3};
 use std::mem;
+
+use nalgebra_glm::{I32Vec3, Vec3};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -69,10 +70,11 @@ impl Facing {
 
     pub fn from_normal_closest(dir: &Vec3) -> Facing {
         let largest_i = dir.iamax();
-        let mut dir = I32Vec3::default();
-        dir[largest_i] = dir[largest_i].signum();
 
-        Self::from_direction(&dir).unwrap()
+        let mut rounded = I32Vec3::default();
+        rounded[largest_i] = dir[largest_i].signum() as i32;
+
+        Self::from_direction(&rounded).unwrap()
     }
 
     pub fn mirror(&self) -> Facing {

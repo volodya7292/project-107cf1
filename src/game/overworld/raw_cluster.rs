@@ -148,7 +148,7 @@ impl BlockDataMut<'_> {
 
 #[derive(Copy, Clone)]
 pub struct InnerBlockState {
-    block_id: u16,
+    pub block_id: u16,
     pub entity_id: EntityId,
 }
 
@@ -768,6 +768,7 @@ impl RawCluster {
                             self.calc_quad_lighting(&pos, &mut quad, Facing::from_normal_closest(&normal));
 
                             for mut v in quad {
+                                v.position += posf;
                                 v.normal = normal;
                                 vertices.push(v.pack());
                             }
