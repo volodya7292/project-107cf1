@@ -175,9 +175,23 @@ impl TexturedBlockModel {
             let neg_quads = model.get_quads_by_facing(f);
             let pos_quads = model.get_quads_by_facing(inv_f);
 
-            let equal = neg_quads
-                .iter()
-                .all(|q0| pos_quads.iter().any(|q1| q1.cmp_shape(q0)));
+            let mut dir_mask: Vec3 = Vec3::from_element(1.0);
+            dir_mask[f.axis_idx()] = 0.0;
+
+            let equal = neg_quads.iter().all(|q0| {
+                pos_quads.iter().any(|q1| {
+                    let mut q0 = *q0;
+                    let mut q1 = *q1;
+                    let mut v0 = q0.vertices_mut();
+                    let mut v1 = q1.vertices_mut();
+
+                    for v in v0.iter_mut().chain(v1) {
+                        *v = v.component_mul(&dir_mask);
+                    }
+
+                    q1.cmp_shape(&q0)
+                })
+            });
 
             tex_model.side_shapes_equality[i] = equal;
         }

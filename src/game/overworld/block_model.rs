@@ -14,6 +14,8 @@ use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::raw_cluster;
 use crate::physics::aabb::AABB;
 
+const EQUITY_EPSILON: f32 = 1e-6;
+
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct PackedVertex {
@@ -97,14 +99,17 @@ impl Quad {
         self.vertices
             .iter()
             .zip(&other.vertices)
-            .all(|(v0, v1)| v0.abs_diff_eq(v1, 1e-9))
+            .all(|(v0, v1)| v0.abs_diff_eq(v1, EQUITY_EPSILON))
     }
 
     /// Returns true if quads have the same shape
     pub fn cmp_shape(&self, other: &Self) -> bool {
-        self.vertices
-            .iter()
-            .all(|v0| other.vertices.iter().any(|v1| v1 == v0))
+        self.vertices.iter().all(|v0| {
+            other
+                .vertices
+                .iter()
+                .any(|v1| v1.abs_diff_eq(&v0, EQUITY_EPSILON))
+        })
     }
 }
 
@@ -158,9 +163,9 @@ pub fn determine_quad_side(quad: &Quad) -> Option<Facing> {
     });
 
     fn check(v: f32, f0: Facing, f1: Facing) -> Option<Facing> {
-        if v.abs_diff_eq(&0.0, 1e-7) {
+        if v.abs_diff_eq(&0.0, EQUITY_EPSILON) {
             Some(f0)
-        } else if v.abs_diff_eq(&1.0, 1e-7) {
+        } else if v.abs_diff_eq(&1.0, EQUITY_EPSILON) {
             Some(f1)
         } else {
             None
@@ -180,7 +185,7 @@ pub fn determine_quad_side(quad: &Quad) -> Option<Facing> {
 }
 
 pub fn quad_occludes_side(quad: &Quad) -> bool {
-    quad.area().abs_diff_eq(&1.0, 1e-7)
+    quad.area().abs_diff_eq(&1.0, EQUITY_EPSILON)
 }
 
 impl BlockModel {
