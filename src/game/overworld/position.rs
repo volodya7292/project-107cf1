@@ -1,39 +1,51 @@
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, U32Vec3, U8Vec3};
+use nalgebra_glm::{DVec3, I64Vec3, TVec3, U32Vec3};
 
 use crate::game::overworld::raw_cluster;
+use crate::game::overworld::raw_cluster::RawCluster;
 
 /// Block position relative to cluster
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
-pub struct ClusterBlockPos(pub U8Vec3);
+pub struct ClusterBlockPos(pub TVec3<usize>);
 
 impl ClusterBlockPos {
     #[inline]
-    pub fn new(x: u8, y: u8, z: u8) -> Self {
-        Self(glm::vec3(x, y, z))
+    pub const fn new(x: usize, y: usize, z: usize) -> Self {
+        if x >= RawCluster::SIZE || y >= RawCluster::SIZE || z >= RawCluster::SIZE {
+            panic!("Invalid coordinates");
+        }
+        Self(TVec3::new(x, y, z))
     }
 
     #[inline]
-    pub fn offset(&self, offset: &U8Vec3) -> Self {
+    pub const fn from_vec_unchecked(vec: TVec3<usize>) -> Self {
+        Self(vec)
+    }
+
+    #[inline]
+    pub fn get(&self) -> &TVec3<usize> {
+        &self.0
+    }
+
+    #[inline]
+    pub fn offset(&self, offset: &TVec3<usize>) -> Self {
         ClusterBlockPos(self.0 + offset)
     }
 
     #[inline]
     pub fn from_index(index: usize) -> Self {
-        const SIZE_SQR: usize = raw_cluster::SIZE * raw_cluster::SIZE;
+        const SIZE_SQR: usize = RawCluster::SIZE * RawCluster::SIZE;
 
         let x = index / SIZE_SQR;
-        let y = index % SIZE_SQR / raw_cluster::SIZE;
-        let z = index % raw_cluster::SIZE;
+        let y = index % SIZE_SQR / RawCluster::SIZE;
+        let z = index % RawCluster::SIZE;
 
-        Self::new(x as u8, y as u8, z as u8)
+        Self::new(x, y, z)
     }
 
     #[inline]
     pub fn index(&self) -> usize {
-        self.0.x as usize * raw_cluster::SIZE * raw_cluster::SIZE
-            + self.0.y as usize * raw_cluster::SIZE
-            + self.0.z as usize
+        self.0.x * RawCluster::SIZE * RawCluster::SIZE + self.0.y * RawCluster::SIZE + self.0.z
     }
 }
 
@@ -61,13 +73,13 @@ impl BlockPos {
     pub fn cluster_pos(&self) -> ClusterPos {
         ClusterPos(
             self.0
-                .map(|v| v.div_euclid(raw_cluster::SIZE as i64) * raw_cluster::SIZE as i64),
+                .map(|v| v.div_euclid(RawCluster::SIZE as i64) * RawCluster::SIZE as i64),
         )
     }
 
     #[inline]
     pub fn cluster_block_pos(&self) -> ClusterBlockPos {
-        ClusterBlockPos(self.0.map(|v| v.rem_euclid(raw_cluster::SIZE as i64) as u8))
+        ClusterBlockPos(self.0.map(|v| v.rem_euclid(RawCluster::SIZE as i64) as usize))
     }
 }
 
@@ -79,9 +91,9 @@ impl ClusterPos {
     #[inline]
     pub fn new(pos: I64Vec3) -> Self {
         debug_assert!(
-            pos.x % raw_cluster::SIZE as i64 == 0
-                && pos.y % raw_cluster::SIZE as i64 == 0
-                && pos.z % raw_cluster::SIZE as i64 == 0
+            pos.x % RawCluster::SIZE as i64 == 0
+                && pos.y % RawCluster::SIZE as i64 == 0
+                && pos.z % RawCluster::SIZE as i64 == 0
         );
         Self(pos)
     }
@@ -98,7 +110,7 @@ impl ClusterPos {
 
     #[inline]
     pub fn offset(&self, offset: &I64Vec3) -> ClusterPos {
-        ClusterPos(self.0 + offset * raw_cluster::SIZE as i64)
+        ClusterPos(self.0 + offset * RawCluster::SIZE as i64)
     }
 }
 

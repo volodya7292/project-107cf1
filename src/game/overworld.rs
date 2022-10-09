@@ -9,7 +9,7 @@ use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, U32Vec3, U64Vec3, Vec3};
 use parking_lot::RwLock;
 use rand::Rng;
 
-use clusters_access_cache::ClustersAccessor;
+use accessor::OverworldAccessor;
 use engine::utils::white_noise::WhiteNoise;
 use engine::utils::{HashMap, UInt, MO_RELAXED};
 
@@ -21,6 +21,7 @@ use crate::game::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
 use crate::game::overworld::structure::{Structure, StructuresIter};
 
+pub mod accessor;
 /// World generation:
 /// 1. Terrain
 ///   Temperature & humidity maps (perlin noise) - implicit biomes
@@ -33,7 +34,6 @@ pub mod block;
 pub mod block_component;
 pub mod block_model;
 pub mod cluster_dirty_parts;
-pub mod clusters_access_cache;
 pub mod facing;
 pub mod generator;
 pub mod light_level;
@@ -60,7 +60,7 @@ pub const CLUSTER_STATE_OFFLOADED_INVISIBLE: u8 = 4;
 /// Returns cluster-local block position from global position
 #[inline]
 pub fn cluster_block_pos_from_global(global_pos: &I64Vec3) -> U32Vec3 {
-    global_pos.map(|v| v.rem_euclid(raw_cluster::SIZE as i64) as u32)
+    global_pos.map(|v| v.rem_euclid(RawCluster::SIZE as i64) as u32)
 }
 
 // Cluster lifecycle
@@ -77,11 +77,11 @@ pub struct Cluster {
 
 impl Cluster {
     pub fn new(raw: RawCluster) -> Cluster {
-        let mut active_blocks = FixedBitSet::with_capacity(raw_cluster::VOLUME);
+        let mut active_blocks = FixedBitSet::with_capacity(RawCluster::VOLUME);
 
-        for x in 0..raw_cluster::SIZE as u8 {
-            for y in 0..raw_cluster::SIZE as u8 {
-                for z in 0..raw_cluster::SIZE as u8 {
+        for x in 0..RawCluster::SIZE {
+            for y in 0..RawCluster::SIZE {
+                for z in 0..RawCluster::SIZE {
                     let pos = ClusterBlockPos::new(x, y, z);
                     let active = raw
                         .get(&pos)
@@ -101,6 +101,11 @@ impl Cluster {
             active_blocks,
             may_have_active_blocks: true,
         }
+    }
+
+    pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
+        let dirty_parts = self.raw.propagate_lighting(pos);
+        self.dirty_parts = dirty_parts;
     }
 
     pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {
@@ -126,7 +131,7 @@ impl OverworldCluster {
             cluster: Default::default(),
             state: AtomicU8::new(CLUSTER_STATE_INITIAL),
             dirty: Default::default(),
-            active_blocks: FixedBitSet::with_capacity(raw_cluster::VOLUME),
+            active_blocks: FixedBitSet::with_capacity(RawCluster::VOLUME),
             may_have_active_blocks: Default::default(),
         }
     }
@@ -171,8 +176,8 @@ impl Overworld {
         todo!()
     }
 
-    pub fn access(&self) -> ClustersAccessor {
-        ClustersAccessor {
+    pub fn access(&self) -> OverworldAccessor {
+        OverworldAccessor {
             registry: Arc::clone(self.main_registry.registry()),
             loaded_clusters: Arc::clone(&self.loaded_clusters),
             clusters_cache: HashMap::with_capacity(32),

@@ -12,6 +12,7 @@ use engine::renderer::vertex_mesh::VertexPositionImpl;
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::raw_cluster;
+use crate::game::overworld::raw_cluster::RawCluster;
 use crate::physics::aabb::AABB;
 
 const EQUITY_EPSILON: f32 = 1e-6;
@@ -27,9 +28,9 @@ attributes_impl!(PackedVertex, pack1, pack2);
 impl VertexPositionImpl for PackedVertex {
     fn position(&self) -> Vec3 {
         Vec3::new(
-            ((self.pack1[0] >> 16) & 0xffff) as f32 / 65535.0 * (raw_cluster::SIZE as f32),
-            (self.pack1[0] & 0xffff) as f32 / 65535.0 * (raw_cluster::SIZE as f32),
-            ((self.pack1[1] >> 16) & 0xffff) as f32 / 65535.0 * (raw_cluster::SIZE as f32),
+            ((self.pack1[0] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
+            (self.pack1[0] & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
+            ((self.pack1[1] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
         )
     }
 }
@@ -46,7 +47,7 @@ pub struct Vertex {
 
 impl Vertex {
     pub fn pack(&self) -> PackedVertex {
-        let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (raw_cluster::SIZE as f32) * 65535.0);
+        let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (RawCluster::SIZE as f32) * 65535.0);
         let enc_normal: U32Vec3 =
             glm::convert_unchecked(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0));
         let enc_tex_uv: U32Vec2 = glm::convert_unchecked(self.tex_uv / 64.0 * 65535.0);

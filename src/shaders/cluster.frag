@@ -7,7 +7,7 @@ layout(early_fragment_tests) in;
 #define ENGINE_PIXEL_SHADER
 #include "../../engine/shaders/common.glsl"
 
-const vec3 ambient_light = vec3(0.7);
+const vec3 ambient_light = vec3(0.6);
 
 layout(location = 0) in Output {
     vec2 tex_uv;

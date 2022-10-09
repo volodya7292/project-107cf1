@@ -8,15 +8,15 @@ use smallvec::SmallVec;
 use engine::unwrap_option;
 use engine::utils::HashMap;
 
+use crate::game::overworld::accessor::OverworldAccessor;
 use crate::game::overworld::block::{BlockData, BlockState};
-use crate::game::overworld::clusters_access_cache::ClustersAccessor;
 use crate::game::overworld::position::BlockPos;
 use crate::game::overworld::raw_cluster::BlockDataImpl;
 use crate::game::AnyBlockState;
 use crate::game::Overworld;
 
 /// Returns true if the specified state/component was successfully set.
-pub type ApplyFn = fn(access: &mut ClustersAccessor, pos: &BlockPos, data: *const u8) -> bool;
+pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) -> bool;
 
 pub struct BlockStateInfo {
     pub ptr: *const u8,

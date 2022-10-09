@@ -53,13 +53,13 @@ impl AccessGuard {
     }
 }
 
-pub struct ClustersAccessor {
+pub struct OverworldAccessor {
     pub(super) registry: Arc<Registry>,
     pub(super) loaded_clusters: LoadedClusters,
     pub(super) clusters_cache: HashMap<ClusterPos, AccessGuard>,
 }
 
-impl ClustersAccessor {
+impl OverworldAccessor {
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster(&mut self, cluster_pos: &ClusterPos) -> Option<&AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
@@ -309,9 +309,8 @@ impl ClustersAccessor {
             .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
-
             cluster.raw.set_light_level(&cluster_block_pos, light_level);
-            cluster.raw.propagate_lighting(&cluster_block_pos);
+            cluster.propagate_lighting(&cluster_block_pos);
         }
     }
 
@@ -351,7 +350,7 @@ impl ClustersAccessor {
             let cluster = self.access_cluster_mut(&pos.cluster_pos()).unwrap();
             let cluster_block_pos = pos.cluster_block_pos();
             if let Some(cluster) = cluster.cluster_mut() {
-                cluster.raw.propagate_lighting(&cluster_block_pos);
+                cluster.propagate_lighting(&cluster_block_pos);
             }
         }
     }
@@ -369,7 +368,7 @@ impl ClustersAccessor {
                 let level = cluster.raw.get_light_level(&cluster_block_pos);
 
                 if !level.is_zero() {
-                    cluster.raw.propagate_lighting(&cluster_block_pos);
+                    cluster.propagate_lighting(&cluster_block_pos);
                 }
             }
         }

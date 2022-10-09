@@ -1,10 +1,16 @@
-use crate::game::overworld::facing::Facing;
 use std::ops::{BitAnd, BitAndAssign};
 
-#[derive(Copy, Clone, Default, Debug)]
+use crate::game::overworld::facing::Facing;
+
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
 pub struct Occluder(u8);
 
 impl Occluder {
+    /// Does not occlude any side
+    pub const EMPTY: Self = Self::all(false);
+    /// Occludes every side
+    pub const FULL: Self = Self::all(true);
+
     pub const fn new(
         x_neg: bool,
         x_pos: bool,
@@ -23,12 +29,8 @@ impl Occluder {
         )
     }
 
-    pub const fn empty() -> Occluder {
-        Self::new(false, false, false, false, false, false)
-    }
-
-    pub const fn full() -> Occluder {
-        Self::new(true, true, true, true, true, true)
+    pub const fn all(occlude: bool) -> Self {
+        Self::new(occlude, occlude, occlude, occlude, occlude, occlude)
     }
 
     pub const fn occludes_side(&self, facing: Facing) -> bool {
@@ -48,11 +50,11 @@ impl Occluder {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0 == 0
+        self == &Self::EMPTY
     }
 
     pub fn is_full(&self) -> bool {
-        self.0 == 0b111111
+        self == &Self::FULL
     }
 }
 

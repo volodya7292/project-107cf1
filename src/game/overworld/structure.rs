@@ -65,7 +65,7 @@ impl Structure {
     ) -> Structure {
         assert!(avg_spacing >= min_spacing);
 
-        let size_in_clusters = UInt::div_ceil(max_size.max(), raw_cluster::SIZE as u64);
+        let size_in_clusters = UInt::div_ceil(max_size.max(), RawCluster::SIZE as u64);
         assert!(min_spacing >= size_in_clusters);
 
         Structure {
@@ -143,7 +143,7 @@ impl Iterator for StructuresIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let diam = self.max_search_radius as i64 * 2 - 1;
         let clusters_per_octant = self.structure.avg_spacing() as i64;
-        let blocks_per_octant = clusters_per_octant * raw_cluster::SIZE as i64;
+        let blocks_per_octant = clusters_per_octant * RawCluster::SIZE as i64;
 
         let front_octant = self.queue.front().unwrap();
         {

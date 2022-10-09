@@ -76,8 +76,8 @@ impl OverworldGenerator {
     /// and a `bool` indicating whether the structure is actually present there.  
     /// Gen-octant size = `structure.avg_spacing * cluster_size` blocks.
     pub fn gen_structure_pos(&self, structure: &Structure, pos: BlockPos) -> StructurePos {
-        let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), raw_cluster::SIZE as u64);
-        let octant_size = structure.avg_spacing() * raw_cluster::SIZE as u64;
+        let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), RawCluster::SIZE as u64);
+        let octant_size = structure.avg_spacing() * RawCluster::SIZE as u64;
         let octant = pos.0.map(|v| v.div_euclid(octant_size as i64));
         let octant_u64 = octant.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
 

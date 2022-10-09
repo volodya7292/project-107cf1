@@ -34,7 +34,7 @@ use crate::game::overworld::block::{AnyBlockState, Block, BlockState};
 use crate::game::overworld::facing::Facing;
 use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::position::{BlockPos, ClusterPos};
-use crate::game::overworld::raw_cluster::BlockDataImpl;
+use crate::game::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use crate::game::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use crate::game::overworld_streamer::OverworldStreamer;
 use crate::game::registry::Registry;
@@ -446,7 +446,7 @@ impl Application for Game {
                                 println!("{}", self.player_pos);
                                 println!(
                                     "{:?}",
-                                    self.player_pos.map(|v| v.rem_euclid(raw_cluster::SIZE as f64))
+                                    self.player_pos.map(|v| v.rem_euclid(RawCluster::SIZE as f64))
                                 );
                             }
                             VirtualKeyCode::T => {
