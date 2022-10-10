@@ -294,8 +294,9 @@ impl OverworldStreamer {
                 do_preserve
             });
 
-            let mut oclusters_write = RwLockUpgradableReadGuard::upgrade(oclusters);
-            oclusters_write.retain(|p, ocluster| {
+            let mut oclusters_to_remove = Vec::with_capacity(oclusters.len());
+
+            for (p, ocluster) in &*oclusters {
                 let in_layout = rclusters.contains_key(p);
 
                 if in_layout {
@@ -319,11 +320,16 @@ impl OverworldStreamer {
                         *ocluster.cluster.write() = None;
                     }
                 } else {
+                    oclusters_to_remove.push(*p);
                     ocluster.state.store(CLUSTER_STATE_DISCARDED, MO_RELAXED);
                 }
+            }
 
-                in_layout
-            });
+            // Remove clusters separately to prevent possible deadlocks
+            let mut oclusters_write = RwLockUpgradableReadGuard::upgrade(oclusters);
+            for pos in oclusters_to_remove {
+                oclusters_write.remove(&pos);
+            }
 
             for p in &layout {
                 if let hash_map::Entry::Vacant(e) = rclusters.entry(*p) {
