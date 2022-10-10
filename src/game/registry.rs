@@ -8,6 +8,8 @@ use crate::game::overworld;
 use crate::game::overworld::block::Block;
 use crate::game::overworld::block_model::BlockModel;
 use crate::game::overworld::material::Material;
+use crate::game::overworld::occluder::Occluder;
+use crate::game::overworld::raw_cluster::{BlockData, InnerBlockState};
 use crate::game::overworld::structure::world::{biome, Biome};
 use crate::game::overworld::structure::Structure;
 use crate::game::overworld::textured_block_model::TexturedBlockModel;
@@ -21,6 +23,8 @@ pub struct Registry {
     materials: Vec<Material>,
     textured_models: Vec<TexturedBlockModel>,
     blocks: Vec<Block>,
+    block_empty: u16,
+    inner_block_state_empty: Option<InnerBlockState>,
 }
 
 impl Registry {
@@ -30,7 +34,7 @@ impl Registry {
     pub const MAX_MODELS: u16 = u16::MAX - 1;
 
     pub fn new() -> Self {
-        Registry {
+        let mut registry = Registry {
             structures: vec![],
             // structures_by_level: Default::default(),
             biomes: vec![],
@@ -39,7 +43,19 @@ impl Registry {
             materials: vec![],
             textured_models: vec![],
             blocks: vec![],
-        }
+            block_empty: u16::MAX,
+            inner_block_state_empty: None,
+        };
+
+        let block_empty = registry.register_block(Block::new_simple(&registry, u16::MAX));
+        registry.block_empty = block_empty;
+
+        registry.inner_block_state_empty = Some(InnerBlockState {
+            block_id: block_empty,
+            entity_id: Default::default(),
+        });
+
+        registry
     }
 
     pub fn register_block_model(&mut self, block_model: BlockModel) -> u16 {
@@ -131,6 +147,10 @@ impl Registry {
     // pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {
     //     &self.structures_by_level[cluster_level as usize]
     // }
+
+    pub fn inner_block_state_empty(&self) -> &InnerBlockState {
+        self.inner_block_state_empty.as_ref().unwrap()
+    }
 
     pub fn is_block_opaque(&self, block: &Block) -> bool {
         if !block.has_textured_model() {

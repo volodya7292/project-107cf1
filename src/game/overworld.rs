@@ -49,13 +49,37 @@ pub mod textured_block_model;
 // const MIN_DIST_BETWEEN_WORLDS: u64 = 400_000_000;
 // const MAX_DIST_BETWEEN_WORLDS: u64 = 40_000_000_000;
 
-pub const CLUSTER_STATE_INITIAL: u8 = 0;
-pub const CLUSTER_STATE_LOADING: u8 = 1;
-pub const CLUSTER_STATE_LOADED: u8 = 2;
-/// The cluster is not needed anymore
-pub const CLUSTER_STATE_DISCARDED: u8 = 3;
-/// The cluster is invisible relative to the camera and is offloaded to reduce memory usage
-pub const CLUSTER_STATE_OFFLOADED_INVISIBLE: u8 = 4;
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ClusterState {
+    Initial,
+    Loading,
+    /// The cluster is available in read/write mode
+    Loaded,
+    /// The cluster is not needed anymore
+    Discarded,
+    /// The cluster is invisible because it is empty and is offloaded to reduce memory usage
+    OffloadedEmpty,
+    /// The cluster is invisible relative to camera and is offloaded to reduce memory usage
+    OffloadedOccluded,
+}
+
+impl ClusterState {
+    /// Whether cluster can be accessed in read-only mode
+    pub fn is_readable(&self) -> bool {
+        matches!(*self, Self::Loaded | Self::OffloadedEmpty)
+    }
+
+    /// Whether cluster can be accessed in read-only mode
+    pub fn is_empty_or_occluded(&self) -> bool {
+        matches!(*self, Self::OffloadedEmpty | Self::OffloadedOccluded)
+    }
+
+    pub fn from_u32(v: u32) -> Self {
+        assert!(v <= Self::OffloadedOccluded as u32);
+        unsafe { std::mem::transmute(v) }
+    }
+}
 
 /// Returns cluster-local block position from global position
 #[inline]
@@ -117,27 +141,27 @@ impl Cluster {
 }
 
 pub struct OverworldCluster {
-    pub cluster: Arc<RwLock<Option<Cluster>>>,
-    pub state: AtomicU8,
-    pub dirty: AtomicBool,
+    pub(super) cluster: Arc<RwLock<Option<Cluster>>>,
+    pub(super) state: AtomicU32,
+    pub(super) dirty: AtomicBool,
 
-    pub active_blocks: FixedBitSet,
-    pub may_have_active_blocks: AtomicBool,
+    pub(super) active_blocks: FixedBitSet,
+    pub(super) may_have_active_blocks: AtomicBool,
 }
 
 impl OverworldCluster {
     pub fn new() -> Self {
         Self {
             cluster: Default::default(),
-            state: AtomicU8::new(CLUSTER_STATE_INITIAL),
+            state: AtomicU32::new(ClusterState::Initial as u32),
             dirty: Default::default(),
             active_blocks: FixedBitSet::with_capacity(RawCluster::VOLUME),
             may_have_active_blocks: Default::default(),
         }
     }
 
-    pub fn state(&self) -> u8 {
-        self.state.load(MO_RELAXED)
+    pub fn state(&self) -> ClusterState {
+        ClusterState::from_u32(self.state.load(MO_RELAXED))
     }
 }
 
@@ -177,11 +201,10 @@ impl Overworld {
     }
 
     pub fn access(&self) -> OverworldAccessor {
-        OverworldAccessor {
-            registry: Arc::clone(self.main_registry.registry()),
-            loaded_clusters: Arc::clone(&self.loaded_clusters),
-            clusters_cache: HashMap::with_capacity(32),
-        }
+        OverworldAccessor::new(
+            Arc::clone(self.main_registry.registry()),
+            Arc::clone(&self.loaded_clusters),
+        )
     }
 }
 

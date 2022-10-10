@@ -29,12 +29,9 @@ use crate::game::overworld::position::ClusterBlockPos;
 use crate::game::registry::Registry;
 
 pub const N_PARTS: usize = 27; // 1 (center) + 6 sides + 12 edges + 8 corners
+
 const ALIGNED_SIZE: usize = RawCluster::SIZE + 2;
 const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
-
-lazy_static! {
-    static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
-}
 
 pub fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     let p = pos.map(|v| (v > 0) as usize + (v == RawCluster::SIZE - 1) as usize);
@@ -94,8 +91,8 @@ impl Default for IntrinsicBlockData {
 }
 
 pub struct BlockData<'a> {
-    block_storage: &'a EntityStorage,
-    inner_state: &'a InnerBlockState,
+    pub(super) block_storage: &'a EntityStorage,
+    pub(super) inner_state: &'a InnerBlockState,
 }
 
 pub trait BlockDataImpl {

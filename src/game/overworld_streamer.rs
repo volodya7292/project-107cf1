@@ -25,8 +25,7 @@ use crate::game::overworld::occluder::Occluder;
 use crate::game::overworld::position::{BlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::{IntrinsicBlockData, RawCluster};
 use crate::game::overworld::{
-    generator, raw_cluster, Cluster, LoadedClusters, Overworld, OverworldCluster, CLUSTER_STATE_DISCARDED,
-    CLUSTER_STATE_INITIAL, CLUSTER_STATE_LOADED, CLUSTER_STATE_LOADING, CLUSTER_STATE_OFFLOADED_INVISIBLE,
+    generator, raw_cluster, Cluster, ClusterState, LoadedClusters, Overworld, OverworldCluster,
 };
 
 pub const FORCED_LOAD_RANGE: usize = 128;
@@ -303,7 +302,11 @@ impl OverworldStreamer {
                     let rcl = rclusters.get_mut(p).unwrap();
                     // Do not remove nearby empty/occluded clusters up to FORCED_LOAD_RANGE
                     // to allow fast access to blocks near the streaming position.
-                    let visible = rcl.is_visible() || is_cluster_in_forced_load_range(p, &self.stream_pos);
+                    let is_empty = rcl.empty.load(MO_RELAXED);
+                    let is_occluded = rcl.occluded.load(MO_RELAXED);
+
+                    let visible =
+                        (!is_empty && !is_occluded) || is_cluster_in_forced_load_range(p, &self.stream_pos);
 
                     if !visible {
                         if !rcl.entities.is_null() {
@@ -312,16 +315,21 @@ impl OverworldStreamer {
                             rcl.entities = Default::default();
                         }
 
-                        // Note: it is safe to transition to this state because cluster is guaranteed to be loaded
-                        // doe to its visibility because RCluster in its initial state is not 'empty'.
-                        ocluster
-                            .state
-                            .store(CLUSTER_STATE_OFFLOADED_INVISIBLE, MO_RELAXED);
+                        // Note: it is valid to transition to this state because the cluster is guaranteed to be loaded
+                        // due to its visibility because RCluster in its initial state is not 'empty'.
+
+                        let new_state = if is_empty {
+                            ClusterState::OffloadedEmpty
+                        } else {
+                            ClusterState::OffloadedOccluded
+                        };
+                        ocluster.state.store(new_state as u32, MO_RELAXED);
+
                         *ocluster.cluster.write() = None;
                     }
                 } else {
                     oclusters_to_remove.push(*p);
-                    ocluster.state.store(CLUSTER_STATE_DISCARDED, MO_RELAXED);
+                    ocluster.state.store(ClusterState::Discarded as u32, MO_RELAXED);
                 }
             }
 
@@ -375,21 +383,20 @@ impl OverworldStreamer {
                 }
 
                 let ocluster = &oclusters[&p.pos];
-                if matches!(ocluster.state(), CLUSTER_STATE_LOADED | CLUSTER_STATE_LOADING) {
+                if ocluster.state() != ClusterState::Initial {
                     continue;
                 }
-                ocluster.state.store(CLUSTER_STATE_LOADING, MO_RELAXED);
 
                 let curr_loading_clusters_n = Arc::clone(&self.curr_loading_clusters_n);
                 let generator = Arc::clone(&self.overworld_generator);
                 let ocluster = Arc::clone(&ocluster);
                 let pos = p.pos;
 
-                ocluster.state.store(CLUSTER_STATE_LOADING, MO_RELAXED);
+                ocluster.state.store(ClusterState::Loading as u32, MO_RELAXED);
                 curr_loading_clusters_n.fetch_add(1, MO_ACQUIRE);
 
                 intensive_queue().spawn(move || {
-                    if ocluster.state() == CLUSTER_STATE_DISCARDED {
+                    if ocluster.state() == ClusterState::Discarded {
                         curr_loading_clusters_n.fetch_sub(1, MO_RELAXED);
                         return;
                     }
@@ -402,8 +409,8 @@ impl OverworldStreamer {
 
                     // Note: use CAS to account for DISCARDED state
                     let _ = ocluster.state.compare_exchange(
-                        CLUSTER_STATE_LOADING,
-                        CLUSTER_STATE_LOADED,
+                        ClusterState::Loading as u32,
+                        ClusterState::Loaded as u32,
                         MO_RELEASE,
                         MO_RELAXED,
                     );
@@ -423,7 +430,7 @@ impl OverworldStreamer {
 
         // Mark intrinsics changes
         for (pos, ocluster) in oclusters.iter() {
-            if preloaded_clusters_states[pos] != CLUSTER_STATE_LOADED || !ocluster.dirty.load(MO_RELAXED) {
+            if preloaded_clusters_states[pos] != ClusterState::Loaded || !ocluster.dirty.load(MO_RELAXED) {
                 continue;
             }
             ocluster.dirty.store(false, MO_RELAXED);
@@ -515,7 +522,7 @@ impl OverworldStreamer {
 
             let ocluster = unwrap_option!(oclusters.get(pos), continue);
 
-            if ocluster.state() != CLUSTER_STATE_LOADED {
+            if ocluster.state() != ClusterState::Loaded {
                 continue;
             }
             let cluster = Arc::clone(&ocluster.cluster);
@@ -538,21 +545,17 @@ impl OverworldStreamer {
 
                 let state = *preloaded_clusters_states
                     .get(&p)
-                    .unwrap_or(&CLUSTER_STATE_INITIAL);
+                    .unwrap_or(&ClusterState::Initial);
 
-                if state != CLUSTER_STATE_LOADED && state != CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                if state != ClusterState::Loaded && !state.is_empty_or_occluded() {
                     ready_to_fill = false;
                     break;
                 }
 
-                let fill_occluder = if state == CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                let fill_occluder = if state.is_empty_or_occluded() {
                     // If the neighbour cluster is fully occluded or empty,
                     // clear intrinsics of `cluster` with respective occluders.
-                    Some(if rcluster.occluded.load(MO_RELAXED) {
-                        Occluder::FULL
-                    } else {
-                        Occluder::EMPTY
-                    })
+                    Some(Occluder::all(rcluster.occluded.load(MO_RELAXED)))
                 } else {
                     None
                 };
@@ -633,7 +636,7 @@ impl OverworldStreamer {
 
                         let cluster = unwrap_option!(cluster_guard.as_mut(), break);
 
-                        if neighbour.state() == CLUSTER_STATE_LOADED {
+                        if neighbour.state() == ClusterState::Loaded {
                             let offset: I32Vec3 = glm::convert(neighbour_pos.get() - pos.get());
                             let neighbour_cluster = unwrap_option!(neighbour_cluster_guard.as_ref(), break);
 
@@ -683,7 +686,7 @@ impl OverworldStreamer {
                             if neighbour_cluster.dirty_parts.is_any() {
                                 neighbour.dirty.store(true, MO_RELAXED);
                             }
-                        } else if neighbour.state() == CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                        } else if neighbour.state().is_empty_or_occluded() {
                             let offset = neighbour_pos.get() - pos.get();
 
                             cluster.raw.clear_outer_intrinsics(

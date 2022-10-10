@@ -2,6 +2,8 @@ use std::collections::{hash_map, VecDeque};
 use std::sync::Arc;
 
 use entity_data::ArchetypeState;
+use entity_data::EntityStorage;
+use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
 use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
@@ -16,13 +18,17 @@ use crate::game::overworld::light_level::LightLevel;
 use crate::game::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
 use crate::game::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut, RawCluster};
 use crate::game::overworld::{
-    block_component, raw_cluster, Cluster, LoadedClusters, OverworldCluster, CLUSTER_STATE_LOADED,
-    CLUSTER_STATE_OFFLOADED_INVISIBLE,
+    block_component, raw_cluster, Cluster, ClusterState, LoadedClusters, OverworldCluster,
 };
 use crate::game::registry::Registry;
 
+lazy_static! {
+    static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
+}
+
 pub struct AccessGuard {
     o_cluster: Arc<OverworldCluster>,
+    locked_state: ClusterState,
     lock: AccessGuardLock,
 }
 
@@ -53,50 +59,39 @@ impl AccessGuard {
     }
 }
 
-pub struct OverworldAccessor {
-    pub(super) registry: Arc<Registry>,
-    pub(super) loaded_clusters: LoadedClusters,
-    pub(super) clusters_cache: HashMap<ClusterPos, AccessGuard>,
+pub struct ClustersAccessorCache {
+    loaded_clusters: LoadedClusters,
+    clusters_cache: HashMap<ClusterPos, AccessGuard>,
 }
 
-impl OverworldAccessor {
+impl ClustersAccessorCache {
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster(&mut self, cluster_pos: &ClusterPos) -> Option<&AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
+            hash_map::Entry::Occupied(e) => Some(e.into_mut()),
             hash_map::Entry::Vacant(e) => {
                 let clusters = self.loaded_clusters.read();
                 let o_cluster = Arc::clone(clusters.get(cluster_pos)?);
                 let state = o_cluster.state();
 
-                if state != CLUSTER_STATE_LOADED && state != CLUSTER_STATE_OFFLOADED_INVISIBLE {
+                if !state.is_readable() {
                     return None;
                 }
 
                 let lock = AccessGuardLock::Read(o_cluster.cluster.read_arc());
 
-                Some(e.insert(AccessGuard { o_cluster, lock }))
+                Some(e.insert(AccessGuard {
+                    o_cluster,
+                    locked_state: state,
+                    lock,
+                }))
             }
-            hash_map::Entry::Occupied(e) => Some(e.into_mut()),
         }
     }
 
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster_mut(&mut self, cluster_pos: &ClusterPos) -> Option<&mut AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
-            hash_map::Entry::Vacant(e) => {
-                let clusters = self.loaded_clusters.read();
-                let o_cluster = Arc::clone(clusters.get(cluster_pos)?);
-
-                if o_cluster.state() != CLUSTER_STATE_LOADED {
-                    None
-                } else {
-                    o_cluster.dirty.store(true, MO_RELAXED);
-
-                    let lock = AccessGuardLock::Write(o_cluster.cluster.write_arc());
-
-                    Some(e.insert(AccessGuard { o_cluster, lock }))
-                }
-            }
             hash_map::Entry::Occupied(e) => {
                 let guard = e.into_mut();
 
@@ -121,16 +116,60 @@ impl OverworldAccessor {
 
                 Some(guard)
             }
+            hash_map::Entry::Vacant(e) => {
+                let clusters = self.loaded_clusters.read();
+                let o_cluster = Arc::clone(clusters.get(cluster_pos)?);
+                let state = o_cluster.state();
+
+                if state != ClusterState::Loaded {
+                    None
+                } else {
+                    o_cluster.dirty.store(true, MO_RELAXED);
+
+                    let lock = AccessGuardLock::Write(o_cluster.cluster.write_arc());
+
+                    Some(e.insert(AccessGuard {
+                        o_cluster,
+                        locked_state: state,
+                        lock,
+                    }))
+                }
+            }
         }
+    }
+}
+
+pub struct OverworldAccessor {
+    registry: Arc<Registry>,
+    cache: ClustersAccessorCache,
+}
+
+impl OverworldAccessor {
+    pub fn new(registry: Arc<Registry>, loaded_clusters: LoadedClusters) -> Self {
+        Self {
+            registry,
+            cache: ClustersAccessorCache {
+                loaded_clusters,
+                clusters_cache: Default::default(),
+            },
+        }
+    }
+
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.registry
     }
 
     /// Returns block data or `None` if respective cluster is not loaded
     pub fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData> {
-        self.access_cluster(&pos.cluster_pos())
-            .map(|access| {
-                access
-                    .cluster()
-                    .map(|cluster| cluster.raw.get(&pos.cluster_block_pos()))
+        self.cache
+            .access_cluster(&pos.cluster_pos())
+            .map(|access| match access.cluster() {
+                Some(cluster) => Some(cluster.raw.get(&pos.cluster_block_pos())),
+                None if access.locked_state == ClusterState::OffloadedEmpty => Some(BlockData {
+                    block_storage: &EMPTY_BLOCK_STORAGE,
+                    inner_state: self.registry.inner_block_state_empty(),
+                }),
+                _ => None,
             })
             .flatten()
     }
@@ -138,6 +177,7 @@ impl OverworldAccessor {
     /// Returns block data or `None` if respective cluster is not loaded
     pub fn update_block<F: FnOnce(&mut BlockDataMut)>(&mut self, pos: &BlockPos, update_fn: F) -> bool {
         if let Some(cluster) = self
+            .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
             .flatten()
@@ -163,6 +203,7 @@ impl OverworldAccessor {
     /// Returns false if respective cluster is not loaded
     pub fn set_block<A: ArchetypeState>(&mut self, pos: &BlockPos, state: BlockState<A>) -> bool {
         if let Some(cluster) = self
+            .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
             .flatten()
@@ -187,7 +228,7 @@ impl OverworldAccessor {
 
     /// Returns block builder or `None` if respective cluster is not loaded
     fn get_light_level(&mut self, pos: &BlockPos) -> Option<LightLevel> {
-        let access = self.access_cluster(&pos.cluster_pos())?;
+        let access = self.cache.access_cluster(&pos.cluster_pos())?;
         access
             .cluster()
             .map(|cluster| cluster.raw.get_light_level(&pos.cluster_block_pos()))
@@ -196,6 +237,7 @@ impl OverworldAccessor {
     /// Returns block builder or `None` if respective cluster is not loaded
     fn set_light_level(&mut self, pos: &BlockPos, light_level: LightLevel) {
         if let Some(cluster) = self
+            .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
             .flatten()
@@ -304,6 +346,7 @@ impl OverworldAccessor {
     /// Use breadth-first search to set lighting across all lit area
     pub fn set_light(&mut self, pos: &BlockPos, light_level: LightLevel) {
         if let Some(cluster) = self
+            .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|accesss| accesss.cluster_mut())
             .flatten()
@@ -316,7 +359,7 @@ impl OverworldAccessor {
 
     pub fn remove_light(&mut self, global_pos: &BlockPos) {
         let curr_level = self.get_light_level(&global_pos).unwrap();
-        self.set_light_level(global_pos, LightLevel::zero());
+        self.set_light_level(global_pos, LightLevel::ZERO);
 
         let mut removal_queue = VecDeque::with_capacity((curr_level.components().max() as usize * 2).pow(3));
         let mut addition_queue = VecDeque::with_capacity(removal_queue.capacity());
@@ -335,7 +378,7 @@ impl OverworldAccessor {
 
                 if glm::any(&color.zip_map(&curr_color, |a, b| a < b)) {
                     if !level.is_zero() {
-                        self.set_light_level(&rel_pos, LightLevel::zero());
+                        self.set_light_level(&rel_pos, LightLevel::ZERO);
                         removal_queue.push_back((rel_pos, level));
                     }
                 }
@@ -347,10 +390,10 @@ impl OverworldAccessor {
         }
 
         for pos in addition_queue {
-            let cluster = self.access_cluster_mut(&pos.cluster_pos()).unwrap();
+            let cluster = self.cache.access_cluster_mut(&pos.cluster_pos()).unwrap();
             let cluster_block_pos = pos.cluster_block_pos();
             if let Some(cluster) = cluster.cluster_mut() {
-                cluster.propagate_lighting(&cluster_block_pos);
+                cluster.raw.propagate_lighting(&cluster_block_pos);
             }
         }
     }
@@ -361,7 +404,7 @@ impl OverworldAccessor {
             let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
             let rel_pos = pos.offset(&dir);
 
-            let cluster = self.access_cluster_mut(&pos.cluster_pos());
+            let cluster = self.cache.access_cluster_mut(&pos.cluster_pos());
 
             if let Some(cluster) = cluster.map(|access| access.cluster_mut()).flatten() {
                 let cluster_block_pos = rel_pos.cluster_block_pos();

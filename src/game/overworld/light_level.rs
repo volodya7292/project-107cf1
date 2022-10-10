@@ -5,25 +5,19 @@ pub struct LightLevel(u16);
 
 impl LightLevel {
     pub const MAX_COMPONENT_VALUE: u8 = 31;
-
-    pub fn zero() -> Self {
-        Self(0)
-    }
-
-    pub fn max() -> Self {
-        Self::from_intensity(Self::MAX_COMPONENT_VALUE)
-    }
+    pub const ZERO: Self = Self(0);
+    pub const MAX: Self = Self::from_intensity(Self::MAX_COMPONENT_VALUE);
 
     pub fn is_zero(&self) -> bool {
-        self.0 == 0
+        self == &Self::ZERO
     }
 
     /// Only 5 bit is available for each component
-    pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+    pub const fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         Self(((r as u16) << 10) | ((g as u16) << 5) | (b as u16))
     }
 
-    pub fn from_intensity(intensity: u8) -> Self {
+    pub const fn from_intensity(intensity: u8) -> Self {
         Self::from_rgb(intensity, intensity, intensity)
     }
 
