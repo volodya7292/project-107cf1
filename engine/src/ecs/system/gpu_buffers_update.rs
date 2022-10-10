@@ -9,7 +9,6 @@ use crate::ecs::component;
 use crate::ecs::scene_storage;
 use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::VMBufferUpdate;
 use crate::utils::HashMap;
 use crate::HashSet;
 
@@ -19,7 +18,7 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
     pub buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub sorted_buffer_updates_entities: &'a Vec<(Entity, f64)>,
-    pub pending_buffer_updates: &'a mut Vec<VMBufferUpdate>,
+    pub pending_buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
 }
 
 impl GpuBuffersUpdate<'_> {
@@ -49,10 +48,7 @@ impl GpuBuffersUpdate<'_> {
                 let mesh = self.buffer_updates.remove(entity).unwrap();
 
                 if mesh.staging_buffer.is_none() {
-                    self.pending_buffer_updates.push(VMBufferUpdate {
-                        entity: *entity,
-                        mesh,
-                    });
+                    self.pending_buffer_updates.insert(*entity, mesh);
                     continue;
                 }
 
@@ -81,10 +77,7 @@ impl GpuBuffersUpdate<'_> {
                 );
 
                 total_copy_size += src_buffer.size();
-                self.pending_buffer_updates.push(VMBufferUpdate {
-                    entity: *entity,
-                    mesh,
-                });
+                self.pending_buffer_updates.insert(*entity, mesh);
 
                 if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
                     break;
@@ -123,7 +116,7 @@ impl GpuBuffersUpdate<'_> {
 }
 
 pub(crate) struct CommitBufferUpdates<'a> {
-    pub updates: Vec<VMBufferUpdate>,
+    pub updates: HashMap<Entity, Arc<RawVertexMesh>>,
     pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
     pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
 }
@@ -132,9 +125,9 @@ impl CommitBufferUpdates<'_> {
     pub fn run(self) {
         let vertex_mesh_comps = self.vertex_mesh_comps.read();
 
-        for update in self.updates {
-            if vertex_mesh_comps.contains(update.entity) {
-                self.vertex_meshes.insert(update.entity, update.mesh);
+        for (entity, updated_mesh) in self.updates {
+            if vertex_mesh_comps.contains(entity) {
+                self.vertex_meshes.insert(entity, updated_mesh);
             }
         }
     }

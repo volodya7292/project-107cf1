@@ -188,7 +188,7 @@ pub struct Renderer {
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
     vertex_mesh_updates: HashMap<Entity, Arc<RawVertexMesh>>,
-    vertex_mesh_pending_updates: Vec<VMBufferUpdate>,
+    vertex_mesh_pending_updates: HashMap<Entity, Arc<RawVertexMesh>>,
 
     /// Entities ordered in respect to children order inside `Children` components:
     /// global parents are not in order, but all the children are.
@@ -935,7 +935,7 @@ impl Renderer {
             uniform_buffer_basic,
             vertex_meshes: Default::default(),
             vertex_mesh_updates: Default::default(),
-            vertex_mesh_pending_updates: vec![],
+            vertex_mesh_pending_updates: Default::default(),
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
             modules: Default::default(),
@@ -1029,10 +1029,12 @@ impl Renderer {
             material_pipelines: &mut self.material_pipelines,
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
         };
+        let mut removed_vertex_mesh_entities = Vec::with_capacity(4096);
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
             vertex_meshes: &mut self.vertex_meshes,
             vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
             buffer_updates: &mut self.vertex_mesh_updates,
+            removed_entities: &mut removed_vertex_mesh_entities,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             parent_comps: self.scene.storage::<Parent>(),
@@ -1054,11 +1056,6 @@ impl Renderer {
             timings.batch0_render_events = (t1 - t0).as_secs_f64();
             timings.batch0_vertex_meshes = (t2 - t1).as_secs_f64();
             timings.batch0_hierarchy_propag = (t3 - t2).as_secs_f64();
-
-            // Wait for previous transfers before committing them
-            if !self.vertex_mesh_pending_updates.is_empty() {
-                s.spawn(|_| self.transfer_submit[1].wait().unwrap());
-            }
         });
 
         let t11 = Instant::now();
@@ -1074,8 +1071,19 @@ impl Renderer {
 
         let t00 = Instant::now();
 
+        // Wait for previous transfers before committing them
+        if !self.vertex_mesh_pending_updates.is_empty() {
+            self.transfer_submit[1].wait().unwrap();
+        }
+
+        // Remove unnecessary updates to prevent buffer lifetime conflicts
+        // that result in destroying buffers when copying them to the GPU.
+        for entity in removed_vertex_mesh_entities {
+            self.vertex_mesh_pending_updates.remove(&entity);
+        }
+
         // Before updating new buffers, collect all the completed updates to commit them
-        let completed_updates = self.vertex_mesh_pending_updates.drain(..).collect();
+        let completed_updates = self.vertex_mesh_pending_updates.drain().collect();
 
         // Sort by distance to perform updates of the nearest vertex meshes first
         let mut sorted_buffer_updates_entities: Vec<_> = {
