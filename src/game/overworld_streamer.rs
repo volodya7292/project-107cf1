@@ -84,12 +84,6 @@ struct RCluster {
     meshes: Arc<Mutex<raw_cluster::Meshes>>,
 }
 
-impl RCluster {
-    fn is_visible(&self) -> bool {
-        !self.empty.load(MO_RELAXED) && !self.occluded.load(MO_RELAXED)
-    }
-}
-
 struct ClusterPosDistance {
     pos: ClusterPos,
     distance: f64,
@@ -380,9 +374,6 @@ impl OverworldStreamer {
             for p in &sorted_layout {
                 if self.curr_loading_clusters_n.load(MO_ACQUIRE) >= max_loading_clusters_in_progress {
                     break;
-                }
-                if !rclusters[&p.pos].is_visible() {
-                    continue;
                 }
 
                 let ocluster = &oclusters[&p.pos];
@@ -816,15 +807,13 @@ impl OverworldStreamer {
         }
 
         // Update meshes
-        for (pos, ocluster) in self.loaded_clusters.read().iter() {
+        for (pos, _) in self.loaded_clusters.read().iter() {
             let rcluster = &self.rclusters[pos];
 
             if !rcluster.mesh_changed.load(MO_RELAXED) {
                 continue;
             }
 
-            let cluster = ocluster.cluster.read();
-            let cluster = unwrap_option!(cluster.as_ref(), continue);
             let mut ready_to_set_mesh = true;
 
             for p in get_side_clusters(pos) {

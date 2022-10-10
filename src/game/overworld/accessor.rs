@@ -393,7 +393,7 @@ impl OverworldAccessor {
             let cluster = self.cache.access_cluster_mut(&pos.cluster_pos()).unwrap();
             let cluster_block_pos = pos.cluster_block_pos();
             if let Some(cluster) = cluster.cluster_mut() {
-                cluster.raw.propagate_lighting(&cluster_block_pos);
+                cluster.propagate_lighting(&cluster_block_pos);
             }
         }
     }
