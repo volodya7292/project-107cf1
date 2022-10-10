@@ -147,14 +147,22 @@ impl Default for InnerBlockState {
     }
 }
 
+#[derive(Default)]
+pub struct Meshes {
+    pub solid: VertexMesh<PackedVertex, ()>,
+    pub transparent: VertexMesh<PackedVertex, ()>,
+}
+
+pub struct BuildResult {
+    pub meshes: Meshes,
+    pub empty: bool,
+}
+
 pub struct RawCluster {
     registry: Arc<Registry>,
     block_state_storage: EntityStorage,
     block_states: Vec<InnerBlockState>,
     intrinsic_data: Vec<IntrinsicBlockData>,
-    empty: AtomicBool,
-    vertex_mesh: RwLock<VertexMesh<PackedVertex, ()>>,
-    vertex_mesh_translucent: RwLock<VertexMesh<PackedVertex, ()>>,
     light_addition_cache: VecDeque<TVec3<usize>>,
 }
 
@@ -169,19 +177,8 @@ impl RawCluster {
             block_state_storage: EntityStorage::new(),
             block_states: vec![Default::default(); Self::VOLUME],
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
-            empty: AtomicBool::new(true),
-            vertex_mesh: Default::default(),
-            vertex_mesh_translucent: Default::default(),
             light_addition_cache: VecDeque::with_capacity(Self::SIZE * Self::SIZE),
         }
-    }
-
-    pub fn vertex_mesh(&self) -> RwLockReadGuard<VertexMesh<PackedVertex, ()>> {
-        self.vertex_mesh.read()
-    }
-
-    pub fn vertex_mesh_translucent(&self) -> RwLockReadGuard<VertexMesh<PackedVertex, ()>> {
-        self.vertex_mesh_translucent.read()
     }
 
     /// Returns block data at `pos`
@@ -696,7 +693,7 @@ impl RawCluster {
         // }
     }
 
-    pub fn update_mesh(&self, device: &Arc<vkw::Device>) {
+    pub fn update_mesh(&self, device: &Arc<vkw::Device>) -> BuildResult {
         #[inline]
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
@@ -841,8 +838,6 @@ impl RawCluster {
             }
         }
 
-        self.empty.store(empty, MO_RELAXED);
-
         let mut indices = vec![0; vertices.len() / 4 * 6];
         let mut indices_translucent = vec![0; vertices_translucent.len() / 4 * 6];
 
@@ -863,13 +858,13 @@ impl RawCluster {
             map_quad_ids(i, chunk);
         }
 
-        *self.vertex_mesh.write() = device.create_vertex_mesh(&vertices, Some(&indices)).unwrap();
-        *self.vertex_mesh_translucent.write() = device
-            .create_vertex_mesh(&vertices_translucent, Some(&indices_translucent))
-            .unwrap();
-    }
+        let meshes = Meshes {
+            solid: device.create_vertex_mesh(&vertices, Some(&indices)).unwrap(),
+            transparent: device
+                .create_vertex_mesh(&vertices_translucent, Some(&indices_translucent))
+                .unwrap(),
+        };
 
-    pub fn is_empty(&self) -> bool {
-        self.empty.load(MO_RELAXED)
+        BuildResult { meshes, empty }
     }
 }

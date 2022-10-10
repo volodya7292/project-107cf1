@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
-use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use smallvec::SmallVec;
 
 use engine::ecs::scene::Scene;
@@ -80,6 +80,8 @@ struct RCluster {
     mesh_can_be_updated: Arc<AtomicBool>,
     /// Mesh has been updated and it needs to be updated inside the VertexMesh scene component
     mesh_changed: Arc<AtomicBool>,
+
+    meshes: Arc<Mutex<raw_cluster::Meshes>>,
 }
 
 impl RCluster {
@@ -221,7 +223,7 @@ impl OverworldStreamer {
             rclusters: Default::default(),
             clusters_entities_to_remove: Default::default(),
             clusters_entities_to_add: Default::default(),
-            curr_loading_clusters_n: Arc::new(Default::default()),
+            curr_loading_clusters_n: Default::default(),
             curr_clusters_intrinsics_updating_n: Default::default(),
             curr_clusters_meshes_updating_n: Default::default(),
         }
@@ -353,6 +355,7 @@ impl OverworldStreamer {
                         edge_intrinsics_determined: Default::default(),
                         mesh_can_be_updated: Default::default(),
                         mesh_changed: Default::default(),
+                        meshes: Arc::new(Default::default()),
                     });
                     self.clusters_entities_to_add.push(*p);
                 }
@@ -735,6 +738,7 @@ impl OverworldStreamer {
             let edge_intrinsics_determined = Arc::clone(&rcluster.edge_intrinsics_determined);
             let curr_clusters_meshes_updating_n = Arc::clone(&self.curr_clusters_meshes_updating_n);
             let updating_outer_intrinsics = Arc::clone(&rcluster.updating_outer_intrinsics);
+            let meshes = Arc::clone(&rcluster.meshes);
             let device = Arc::clone(&self.device);
 
             curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
@@ -748,7 +752,8 @@ impl OverworldStreamer {
                     return;
                 };
 
-                cluster.raw.update_mesh(&device);
+                let result = cluster.raw.update_mesh(&device);
+                *meshes.lock() = result.meshes;
 
                 // Determine edge intrinsics
                 {
@@ -762,8 +767,8 @@ impl OverworldStreamer {
                 }
 
                 // Check if cluster is empty (cluster's empty status is updated in `update_mesh`)
-                empty.store(cluster.raw.is_empty(), MO_RELEASE);
-                // Set a flag to initiate object's component::VertexMesh change in the scene
+                empty.store(result.empty, MO_RELEASE);
+                // Set flag to initiate object's component::VertexMesh change in the scene
                 mesh_changed.store(true, MO_RELEASE);
 
                 updating_outer_intrinsics.store(0, MO_RELEASE);
@@ -835,13 +840,15 @@ impl OverworldStreamer {
             }
 
             if ready_to_set_mesh && !rcluster.entities.is_null() {
-                let mesh = cluster.raw.vertex_mesh();
-                let mesh_translucent = cluster.raw.vertex_mesh_translucent();
+                let meshes = rcluster.meshes.lock();
 
-                vertex_mesh_comps.set(rcluster.entities.solid, component::VertexMesh::new(&mesh.raw()));
+                vertex_mesh_comps.set(
+                    rcluster.entities.solid,
+                    component::VertexMesh::new(&meshes.solid.raw()),
+                );
                 vertex_mesh_comps.set(
                     rcluster.entities.translucent,
-                    component::VertexMesh::new(&mesh_translucent.raw()),
+                    component::VertexMesh::new(&meshes.transparent.raw()),
                 );
                 rcluster.mesh_changed.store(false, MO_RELAXED);
             }
