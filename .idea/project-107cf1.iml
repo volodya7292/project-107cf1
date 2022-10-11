@@ -4,16 +4,18 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/res-encoder/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/vk-wrapper/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/common/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/macos/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/msdfgen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/vk-wrapper/vma/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/engine/vk-wrapper/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/engine/vk-wrapper/vma/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/res-encoder/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
-      <excludeFolder url="file://$MODULE_DIR$/vk-wrapper/target" />
       <excludeFolder url="file://$MODULE_DIR$/engine/target" />
+      <excludeFolder url="file://$MODULE_DIR$/engine/vk-wrapper/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

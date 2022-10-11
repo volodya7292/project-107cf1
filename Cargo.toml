@@ -6,17 +6,19 @@ edition = "2021"
 
 [workspace]
 members = [
-    "vk-wrapper",
-    "vk-wrapper/vma",
-    "engine",
+    "engine/vk-wrapper",
+    "engine/vk-wrapper/vma",
     "engine/macos",
     "engine/msdfgen",
+    "engine",
     "common",
+    "core",
+    "client",
 ]
 
 [dependencies]
 engine = { path = "engine" }
-vk-wrapper = { path = "vk-wrapper" }
+vk-wrapper = { path = "engine/vk-wrapper" }
 log = "0.4"
 simple_logger = "2.1"
 nalgebra = "0.31"

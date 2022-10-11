@@ -10,11 +10,11 @@ use engine::utils::noise::HybridNoise;
 use engine::utils::voronoi_noise::VoronoiNoise2D;
 use engine::utils::white_noise::WhiteNoise;
 
-use crate::game::overworld::generator::OverworldGenerator;
-use crate::game::overworld::position::BlockPos;
-use crate::game::overworld::structure::world::biome::MeanTemperature;
-use crate::game::overworld::structure::world::WorldState;
-use crate::game::registry::Registry;
+use crate::core::overworld::generator::OverworldGenerator;
+use crate::core::overworld::position::BlockPos;
+use crate::core::overworld::structure::world::biome::MeanTemperature;
+use crate::core::overworld::structure::world::WorldState;
+use crate::core::registry::Registry;
 
 pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];

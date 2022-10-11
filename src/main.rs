@@ -2,16 +2,13 @@ use simple_logger::SimpleLogger;
 
 use engine::Engine;
 
-use crate::game::Game;
+use crate::core::Game;
 
-mod game;
-mod material_pipelines;
-mod physics;
+mod client;
+mod core;
 pub mod proto;
-mod scene_component;
 #[cfg(test)]
 mod tests;
-mod utils;
 
 pub const PROGRAM_NAME: &str = "project-107cf1";
 
@@ -41,7 +38,7 @@ fn parking_lot_deadlock_detection() {
 
 fn main() {
     // std::process::exit(0);
-    // parking_lot_deadlock_detection();
+    parking_lot_deadlock_detection();
 
     SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
