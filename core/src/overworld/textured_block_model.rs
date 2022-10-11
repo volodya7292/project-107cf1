@@ -1,15 +1,16 @@
+use std::ops::Range;
+
 use bit_vec::BitVec;
 use nalgebra_glm as glm;
 use nalgebra_glm::{Vec2, Vec3};
 use smallvec::{smallvec, SmallVec};
-use std::ops::Range;
 
-use crate::core::overworld::block_model;
-use crate::core::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::occluder::Occluder;
-use crate::core::physics::aabb::AABB;
-use crate::core::registry::Registry;
+use crate::overworld::block_model;
+use crate::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
+use crate::overworld::facing::Facing;
+use crate::overworld::occluder::Occluder;
+use crate::physics::aabb::AABB;
+use crate::registry::Registry;
 
 #[derive(Copy, Clone)]
 pub enum QuadRotation {

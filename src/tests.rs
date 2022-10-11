@@ -4,8 +4,8 @@ use nalgebra_glm::{I32Vec3, Vec3};
 
 use engine::attributes_impl;
 
-use crate::core::overworld::block_model;
-use crate::core::overworld::block_model::Quad;
+use crate::game::overworld::block_model;
+use crate::game::overworld::block_model::Quad;
 
 #[derive(Default, Copy, Clone, PartialEq)]
 struct Vertex {
@@ -28,7 +28,7 @@ fn test_with_device() {
 
 #[test]
 fn cluster_facing() {
-    use crate::core::overworld::facing::Facing;
+    use crate::game::overworld::facing::Facing;
 
     assert!(Facing::from_direction(&I32Vec3::new(-1, 0, 1)).is_none());
     assert!(Facing::from_direction(&I32Vec3::new(1, 0, 1)).is_none());

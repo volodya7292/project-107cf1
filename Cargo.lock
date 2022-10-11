@@ -443,6 +443,33 @@ dependencies = [
 [[package]]
 name = "core"
 version = "0.1.0"
+dependencies = [
+ "approx",
+ "bit-vec",
+ "bumpalo",
+ "crossbeam-channel",
+ "engine",
+ "entity_data",
+ "fixedbitset",
+ "futures",
+ "image",
+ "lazy_static",
+ "log",
+ "nalgebra",
+ "nalgebra-glm",
+ "noise",
+ "once_cell",
+ "parking_lot",
+ "rand 0.8.5",
+ "rand_distr",
+ "rayon",
+ "replace_with",
+ "rstar",
+ "simple_logger",
+ "smallvec",
+ "vk-wrapper",
+ "winit",
+]
 
 [[package]]
 name = "core-foundation"
@@ -1727,6 +1754,7 @@ dependencies = [
  "bit-vec",
  "bumpalo",
  "common",
+ "core",
  "crossbeam-channel",
  "engine",
  "entity_data",

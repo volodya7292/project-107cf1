@@ -1,5 +1,5 @@
-use engine::ecs::{component, scene};
 use engine::ecs::scene::Scene;
+use engine::ecs::{component, scene};
 use engine::queue::intensive_queue;
 use engine::renderer::Renderer;
 use engine::unwrap_option;
@@ -10,21 +10,21 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::mem;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
+use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
 
-use crate::core::main_registry::MainRegistry;
-use crate::core::overworld::{
-    Cluster, ClusterState, generator, LoadedClusters, Overworld, OverworldCluster, raw_cluster,
+use crate::main_registry::MainRegistry;
+use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::facing::Facing;
+use crate::overworld::generator::OverworldGenerator;
+use crate::overworld::occluder::Occluder;
+use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::raw_cluster::{IntrinsicBlockData, RawCluster};
+use crate::overworld::{
+    generator, raw_cluster, Cluster, ClusterState, LoadedClusters, Overworld, OverworldCluster,
 };
-use crate::core::overworld::cluster_dirty_parts::ClusterDirtySides;
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::generator::OverworldGenerator;
-use crate::core::overworld::occluder::Occluder;
-use crate::core::overworld::position::{BlockPos, ClusterPos};
-use crate::core::overworld::raw_cluster::{IntrinsicBlockData, RawCluster};
 
 pub const FORCED_LOAD_RANGE: usize = 128;
 

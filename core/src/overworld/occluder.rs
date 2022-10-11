@@ -1,6 +1,6 @@
 use std::ops::{BitAnd, BitAndAssign};
 
-use crate::core::overworld::facing::Facing;
+use crate::overworld::facing::Facing;
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
 pub struct Occluder(u8);

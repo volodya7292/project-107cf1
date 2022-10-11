@@ -14,6 +14,19 @@ use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 
+use core::main_registry::{MainRegistry, StatelessBlock};
+use core::overworld::block::event_handlers::AfterTickActionsStorage;
+use core::overworld::block::{AnyBlockState, Block, BlockState};
+use core::overworld::facing::Facing;
+use core::overworld::light_level::LightLevel;
+use core::overworld::position::{BlockPos, ClusterPos};
+use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
+use core::overworld::Overworld;
+use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
+use core::overworld_streamer::OverworldStreamer;
+use core::physics::aabb::{AABBRayIntersection, AABB};
+use core::physics::MOTION_EPSILON;
+use core::registry::Registry;
 use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::scene::Scene;
@@ -24,33 +37,11 @@ use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::{renderer, Application, Input};
-use overworld::Overworld;
-use physics::aabb::{AABBRayIntersection, AABB};
-use physics::MOTION_EPSILON;
 use renderer::camera;
 use vk_wrapper::Adapter;
 
 use crate::client::{material_pipelines, utils};
-use crate::core::main_registry::{MainRegistry, StatelessBlock};
-use crate::core::overworld::block::event_handlers::AfterTickActionsStorage;
-use crate::core::overworld::block::{AnyBlockState, Block, BlockState};
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::light_level::LightLevel;
-use crate::core::overworld::position::{BlockPos, ClusterPos};
-use crate::core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
-use crate::core::overworld::{block, block_component, raw_cluster, LoadedClusters};
-use crate::core::overworld_streamer::OverworldStreamer;
-use crate::core::registry::Registry;
 use crate::PROGRAM_NAME;
-
-pub mod main_registry;
-pub mod overworld;
-// pub mod overworld_orchestrator;
-// pub mod overworld_renderer;
-pub mod overworld_streamer;
-mod physics;
-pub mod registry;
-mod scene_component;
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
@@ -284,7 +275,7 @@ impl Application for Game {
 
                     if blocks.get_block(&BlockPos::from_f64(&self.player_pos)).is_some() {
                         // Free fall
-                        motion_delta.y -= (physics::G_ACCEL * self.fall_time) * delta_time;
+                        motion_delta.y -= (core::physics::G_ACCEL * self.fall_time) * delta_time;
 
                         // Jump force
                         motion_delta.y += self.curr_jump_force * delta_time;

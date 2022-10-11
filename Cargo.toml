@@ -42,6 +42,7 @@ parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision
 once_cell = "1.13"
 rstar = "0.9"
 bumpalo = "3.11"
+core = { path = "core" }
 
 [build-dependencies]
 common = { path = "common" }

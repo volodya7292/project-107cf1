@@ -1,19 +1,3 @@
-pub use biome::Biome;
-use bit_vec::BitVec;
-use engine::utils::noise::{HybridNoise, ParamNoise};
-use engine::utils::voronoi_noise::VoronoiNoise2D;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
-use noise;
-use noise::{NoiseFn, Seedable};
-use once_cell::sync::OnceCell;
-use overworld::raw_cluster;
-use rand::Rng;
-use rand_distr::num_traits::Zero;
-use rstar::{Envelope, Point, RTree};
-use smallvec::SmallVec;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem;
@@ -21,15 +5,33 @@ use std::num::Wrapping;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
-use crate::core::overworld;
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::generator::{OverworldGenerator, StructureCache};
-use crate::core::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
-use crate::core::overworld::raw_cluster::RawCluster;
-use crate::core::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
-use crate::core::overworld::structure::Structure;
-use crate::core::overworld::Overworld;
-use crate::core::registry::Registry;
+use bit_vec::BitVec;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
+use noise;
+use noise::{NoiseFn, Seedable};
+use once_cell::sync::OnceCell;
+use rand::Rng;
+use rand_distr::num_traits::Zero;
+use rstar::{Envelope, Point, RTree};
+use smallvec::SmallVec;
+
+pub use biome::Biome;
+use engine::utils::noise::{HybridNoise, ParamNoise};
+use engine::utils::voronoi_noise::VoronoiNoise2D;
+use engine::utils::white_noise::WhiteNoise;
+use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
+use overworld::raw_cluster;
+
+use crate::overworld;
+use crate::overworld::facing::Facing;
+use crate::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
+use crate::overworld::raw_cluster::RawCluster;
+use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
+use crate::overworld::structure::Structure;
+use crate::overworld::Overworld;
+use crate::registry::Registry;
 
 pub mod biome;
 

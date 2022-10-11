@@ -2,10 +2,10 @@ use simple_logger::SimpleLogger;
 
 use engine::Engine;
 
-use crate::core::Game;
+use crate::game::Game;
 
 mod client;
-mod core;
+mod game;
 pub mod proto;
 #[cfg(test)]
 mod tests;

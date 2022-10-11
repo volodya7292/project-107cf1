@@ -1,23 +1,25 @@
-use accessor::OverworldAccessor;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
+use std::sync::Arc;
+
 use bit_vec::BitVec;
-use engine::utils::{HashMap, MO_RELAXED, UInt};
-use engine::utils::white_noise::WhiteNoise;
 use fixedbitset::FixedBitSet;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, U32Vec3, U64Vec3, Vec3};
 use parking_lot::RwLock;
 use rand::Rng;
-use std::collections::VecDeque;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 
-use crate::core::main_registry::MainRegistry;
-use crate::core::overworld::cluster_dirty_parts::ClusterDirtySides;
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::generator::OverworldGenerator;
-use crate::core::overworld::position::{ClusterBlockPos, ClusterPos};
-use crate::core::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
-use crate::core::overworld::structure::{Structure, StructuresIter};
+use accessor::OverworldAccessor;
+use engine::utils::white_noise::WhiteNoise;
+use engine::utils::{HashMap, UInt, MO_RELAXED};
+
+use crate::main_registry::MainRegistry;
+use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::facing::Facing;
+use crate::overworld::generator::OverworldGenerator;
+use crate::overworld::position::{ClusterBlockPos, ClusterPos};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
+use crate::overworld::structure::{Structure, StructuresIter};
 
 pub mod accessor;
 /// World generation:
@@ -139,12 +141,12 @@ impl Cluster {
 }
 
 pub struct OverworldCluster {
-    pub(super) cluster: Arc<RwLock<Option<Cluster>>>,
+    pub cluster: Arc<RwLock<Option<Cluster>>>,
     pub(super) state: AtomicU32,
     pub(super) dirty: AtomicBool,
 
     pub(super) active_blocks: FixedBitSet,
-    pub(super) may_have_active_blocks: AtomicBool,
+    pub may_have_active_blocks: AtomicBool,
 }
 
 impl OverworldCluster {

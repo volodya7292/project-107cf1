@@ -1,7 +1,10 @@
+use std::any::TypeId;
+use std::collections::VecDeque;
+use std::convert::TryInto;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use bit_vec::BitVec;
-use engine::renderer::vertex_mesh::VertexMeshCreate;
-use engine::renderer::VertexMesh;
-use engine::utils::MO_RELAXED;
 use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
 use fixedbitset::FixedBitSet;
 use glm::{I32Vec3, U32Vec3, Vec3};
@@ -9,22 +12,21 @@ use lazy_static::lazy_static;
 use nalgebra_glm as glm;
 use nalgebra_glm::{TVec3, U8Vec3, Vec2, Vec4};
 use parking_lot::{RwLock, RwLockReadGuard};
-use std::any::TypeId;
-use std::collections::VecDeque;
-use std::convert::TryInto;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+
+use engine::renderer::vertex_mesh::VertexMeshCreate;
+use engine::renderer::VertexMesh;
+use engine::utils::MO_RELAXED;
 use vk_wrapper as vkw;
 
-use crate::core::overworld::block::{Block, BlockState};
-use crate::core::overworld::block_component;
-use crate::core::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
-use crate::core::overworld::cluster_dirty_parts::ClusterDirtySides;
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::light_level::LightLevel;
-use crate::core::overworld::occluder::Occluder;
-use crate::core::overworld::position::ClusterBlockPos;
-use crate::core::registry::Registry;
+use crate::overworld::block::{Block, BlockState};
+use crate::overworld::block_component;
+use crate::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
+use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::facing::Facing;
+use crate::overworld::light_level::LightLevel;
+use crate::overworld::occluder::Occluder;
+use crate::overworld::position::ClusterBlockPos;
+use crate::registry::Registry;
 
 pub const N_PARTS: usize = 27; // 1 (center) + 6 sides + 12 edges + 8 corners
 

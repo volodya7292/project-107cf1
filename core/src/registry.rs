@@ -1,17 +1,18 @@
+use std::convert::TryInto;
+
 use engine::renderer::{MaterialInfo, TextureAtlasType};
 use engine::resource_file::ResourceRef;
 use engine::utils::HashMap;
-use std::convert::TryInto;
 
-use crate::core::overworld;
-use crate::core::overworld::block::Block;
-use crate::core::overworld::block_model::BlockModel;
-use crate::core::overworld::material::Material;
-use crate::core::overworld::occluder::Occluder;
-use crate::core::overworld::raw_cluster::{BlockData, InnerBlockState};
-use crate::core::overworld::structure::Structure;
-use crate::core::overworld::structure::world::{biome, Biome};
-use crate::core::overworld::textured_block_model::TexturedBlockModel;
+use crate::overworld;
+use crate::overworld::block::Block;
+use crate::overworld::block_model::BlockModel;
+use crate::overworld::material::Material;
+use crate::overworld::occluder::Occluder;
+use crate::overworld::raw_cluster::{BlockData, InnerBlockState};
+use crate::overworld::structure::world::{biome, Biome};
+use crate::overworld::structure::Structure;
+use crate::overworld::textured_block_model::TexturedBlockModel;
 
 pub struct Registry {
     structures: Vec<Structure>,

@@ -1,13 +1,14 @@
+use std::any::Any;
+
 use entity_data::{AnyState, ArchetypeState, StaticArchetype};
 use nalgebra_glm::I64Vec3;
 use smallvec::SmallVec;
-use std::any::Any;
 
-pub use crate::core::overworld::block::event_handlers::EventHandlers;
-use crate::core::overworld::occluder::Occluder;
-use crate::core::overworld::Overworld;
-use crate::core::overworld::raw_cluster::BlockData;
-use crate::core::registry::Registry;
+pub use crate::overworld::block::event_handlers::EventHandlers;
+use crate::overworld::occluder::Occluder;
+use crate::overworld::raw_cluster::BlockData;
+use crate::overworld::Overworld;
+use crate::registry::Registry;
 
 pub mod event_handlers;
 pub mod water;

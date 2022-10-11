@@ -1,23 +1,25 @@
-use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
-use engine::resource_file::ResourceFile;
-use entity_data::Archetype;
-use entity_data::ArchetypeState;
-use nalgebra_glm::{DVec3, U64Vec3, Vec3, Vec4};
 use std::default::Default;
 use std::sync::Arc;
 
-use crate::core::overworld;
-use crate::core::overworld::block::event_handlers::AfterTickActionsStorage;
-use crate::core::overworld::block::{Block, BlockState};
-use crate::core::overworld::block_model::BlockModel;
-use crate::core::overworld::material::Material;
-use crate::core::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
-use crate::core::overworld::structure::world::Biome;
-use crate::core::overworld::structure::{world, Structure};
-use crate::core::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
-use crate::core::overworld::{block, block_component, block_model, structure};
-use crate::core::physics::aabb::AABB;
-use crate::core::registry::Registry;
+use entity_data::Archetype;
+use entity_data::ArchetypeState;
+use nalgebra_glm::{DVec3, U64Vec3, Vec3, Vec4};
+
+use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
+use engine::resource_file::ResourceFile;
+
+use crate::overworld;
+use crate::overworld::block::event_handlers::AfterTickActionsStorage;
+use crate::overworld::block::{Block, BlockState};
+use crate::overworld::block_model::BlockModel;
+use crate::overworld::material::Material;
+use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
+use crate::overworld::structure::world::Biome;
+use crate::overworld::structure::{world, Structure};
+use crate::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::overworld::{block, block_component, block_model, structure};
+use crate::physics::aabb::AABB;
+use crate::registry::Registry;
 
 #[derive(Copy, Clone, Archetype)]
 pub struct StatelessBlock;

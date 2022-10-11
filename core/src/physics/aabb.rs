@@ -1,7 +1,7 @@
 use nalgebra_glm::{DVec3, I32Vec3};
 
-use crate::core::overworld::facing::Facing;
-use crate::core::physics::MOTION_EPSILON;
+use crate::overworld::facing::Facing;
+use crate::physics::MOTION_EPSILON;
 
 #[derive(Debug, Copy, Clone)]
 pub struct AABB {

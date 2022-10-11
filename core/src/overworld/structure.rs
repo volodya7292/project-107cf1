@@ -1,17 +1,19 @@
-use bit_vec::BitVec;
-use engine::utils::UInt;
-use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, U64Vec3};
-use once_cell::sync::OnceCell;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::core::overworld::{Overworld, raw_cluster};
-use crate::core::overworld::facing::Facing;
-use crate::core::overworld::generator::{OverworldGenerator, StructureCache};
-use crate::core::overworld::position::{BlockPos, ClusterPos};
-use crate::core::overworld::raw_cluster::RawCluster;
+use bit_vec::BitVec;
+use nalgebra_glm as glm;
+use nalgebra_glm::{I64Vec3, U64Vec3};
+use once_cell::sync::OnceCell;
+
+use engine::utils::UInt;
+
+use crate::overworld::facing::Facing;
+use crate::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::raw_cluster::RawCluster;
+use crate::overworld::{raw_cluster, Overworld};
 
 pub mod world;
 

@@ -1,8 +1,8 @@
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, TVec3, U32Vec3};
 
-use crate::core::overworld::raw_cluster;
-use crate::core::overworld::raw_cluster::RawCluster;
+use crate::overworld::raw_cluster;
+use crate::overworld::raw_cluster::RawCluster;
 
 /// Block position relative to cluster
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]

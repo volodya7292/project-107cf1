@@ -1,9 +1,9 @@
 use nalgebra_glm::{DVec3, Vec3};
 
-use crate::core::overworld::block_model::{BlockModel, Quad};
-use crate::core::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
-use crate::core::physics::aabb::AABB;
-use crate::core::registry::Registry;
+use crate::overworld::block_model::{BlockModel, Quad};
+use crate::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::physics::aabb::AABB;
+use crate::registry::Registry;
 
 fn construct(heights: [f32; 4]) -> BlockModel {
     let p000 = Vec3::new(0.0, 0.0, 0.0);

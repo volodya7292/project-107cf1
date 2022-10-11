@@ -1,8 +1,9 @@
-use nalgebra_glm as glm;
 use std::ops::{BitOr, BitOrAssign};
 
-use crate::core::overworld::position::ClusterBlockPos;
-use crate::core::overworld::raw_cluster;
+use nalgebra_glm as glm;
+
+use crate::overworld::position::ClusterBlockPos;
+use crate::overworld::raw_cluster;
 
 #[derive(Copy, Clone, Default)]
 pub struct ClusterDirtySides(u32);

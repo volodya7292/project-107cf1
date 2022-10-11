@@ -1,17 +1,18 @@
-use engine::unwrap_option;
-use engine::utils::HashMap;
-use entity_data::{ArchetypeState, Component};
-use nalgebra_glm::I64Vec3;
-use smallvec::SmallVec;
 use std::any::TypeId;
 use std::mem;
 
-use crate::core::AnyBlockState;
-use crate::core::Overworld;
-use crate::core::overworld::accessor::OverworldAccessor;
-use crate::core::overworld::block::{BlockData, BlockState};
-use crate::core::overworld::position::BlockPos;
-use crate::core::overworld::raw_cluster::BlockDataImpl;
+use entity_data::{ArchetypeState, Component};
+use nalgebra_glm::I64Vec3;
+use smallvec::SmallVec;
+
+use engine::unwrap_option;
+use engine::utils::HashMap;
+
+use crate::overworld::accessor::OverworldAccessor;
+use crate::overworld::block::{BlockData, BlockState};
+use crate::overworld::position::BlockPos;
+use crate::overworld::raw_cluster::BlockDataImpl;
+use crate::overworld::Overworld;
 
 /// Returns true if the specified state/component was successfully set.
 pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) -> bool;
