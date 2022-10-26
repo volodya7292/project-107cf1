@@ -1,37 +1,32 @@
 use std::sync::Arc;
+use std::time::Instant;
+
+use entity_data::{EntityId, SystemAccess, SystemHandler};
 
 use crate::ecs::component;
-use crate::ecs::scene_storage;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::utils::HashMap;
+use crate::utils::{HashMap, HashSet};
 
 pub(crate) struct VertexMeshCompEvents<'a> {
-    pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
-    pub buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub removed_entities: &'a mut Vec<Entity>,
+    pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub dirty_components: HashSet<EntityId>,
+    pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub run_time: f64,
 }
 
-impl VertexMeshCompEvents<'_> {
-    pub fn run(&mut self) {
-        let events = self.vertex_mesh_comps.write().events();
-        let vertex_mesh_comps = self.vertex_mesh_comps.read();
+impl SystemHandler for VertexMeshCompEvents<'_> {
+    fn run(&mut self, data: SystemAccess) {
+        let t0 = Instant::now();
+        let vertex_mesh_comps = data.component_mut::<component::VertexMesh>();
 
         // Update device buffers of vertex meshes
-        // ------------------------------------------------------------------------------------
-        for event in &events {
-            match event {
-                Event::Created(entity) | Event::Modified(entity) => {
-                    let comp = vertex_mesh_comps.get(*entity).unwrap();
-                    self.buffer_updates.insert(*entity, Arc::clone(&comp.0));
-                }
-                Event::Removed(entity) => {
-                    self.vertex_meshes.remove(entity);
-                    self.buffer_updates.remove(entity);
-                    self.removed_entities.push(*entity);
-                }
+        for entity in &self.dirty_components {
+            if let Some(comp) = vertex_mesh_comps.get(entity) {
+                self.buffer_updates.insert(*entity, Arc::clone(&comp.0));
             }
         }
+
+        let t1 = Instant::now();
+        self.run_time = (t1 - t0).as_secs_f64();
     }
 }

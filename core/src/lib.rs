@@ -5,3 +5,4 @@ pub mod overworld;
 pub mod overworld_streamer;
 pub mod physics;
 pub mod registry;
+pub mod scene;

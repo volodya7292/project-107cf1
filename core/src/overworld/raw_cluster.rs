@@ -174,7 +174,7 @@ impl RawCluster {
     pub fn new(registry: &Arc<Registry>) -> Self {
         Self {
             registry: Arc::clone(registry),
-            block_state_storage: EntityStorage::new(),
+            block_state_storage: Default::default(),
             block_states: vec![Default::default(); Self::VOLUME],
             intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
             light_addition_cache: VecDeque::with_capacity(Self::SIZE * Self::SIZE),
@@ -219,7 +219,7 @@ impl RawCluster {
             self.block_state_storage.remove(&curr_state.entity_id);
         }
 
-        let entity_id = self.block_state_storage.add_entity(block_state.components);
+        let entity_id = self.block_state_storage.add(block_state.components);
         let block = self.registry.get_block(block_state.block_id).unwrap();
 
         // Update current state

@@ -1,5 +1,8 @@
-use engine::renderer::{MatComponent, MaterialInfo, TEXTURE_ID_NONE};
 use nalgebra_glm::Vec4;
+
+use engine::renderer::{MatComponent, MaterialInfo, TEXTURE_ID_NONE};
+
+const TEXTURE_ID_NAME: u16 = u16::MAX;
 
 pub struct Material {
     diffuse: MatComponent,

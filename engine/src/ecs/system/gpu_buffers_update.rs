@@ -1,30 +1,32 @@
 use std::sync::Arc;
+use std::time::Instant;
 
+use entity_data::{EntityId, SystemAccess, SystemHandler};
 use parking_lot::Mutex;
 
 use vk_wrapper as vkw;
 use vk_wrapper::WaitSemaphore;
 
 use crate::ecs::component;
-use crate::ecs::scene_storage;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
 use crate::renderer::vertex_mesh::RawVertexMesh;
 use crate::utils::HashMap;
 use crate::HashSet;
+
+const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
 
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
     pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
-    pub buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub sorted_buffer_updates_entities: &'a Vec<(Entity, f64)>,
-    pub pending_buffer_updates: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
+    pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub sorted_buffer_updates_entities: &'a Vec<(EntityId, f64)>,
+    pub pending_buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub run_time: f64,
 }
 
-impl GpuBuffersUpdate<'_> {
-    const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
-
-    pub fn run(&mut self) {
+impl SystemHandler for GpuBuffersUpdate<'_> {
+    fn run(&mut self, _: SystemAccess) {
+        let t0 = Instant::now();
         let transfer_queue = self.device.get_queue(vkw::Queue::TYPE_TRANSFER);
         let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
 
@@ -79,7 +81,7 @@ impl GpuBuffersUpdate<'_> {
                 total_copy_size += src_buffer.size();
                 self.pending_buffer_updates.insert(*entity, mesh);
 
-                if total_copy_size >= Self::MAX_TRANSFER_SIZE_PER_RUN {
+                if total_copy_size >= MAX_TRANSFER_SIZE_PER_RUN {
                     break;
                 }
             }
@@ -112,23 +114,30 @@ impl GpuBuffersUpdate<'_> {
                 &[],
             )])
             .unwrap();
+
+        let t1 = Instant::now();
+        self.run_time = (t1 - t0).as_secs_f64();
     }
 }
 
 pub(crate) struct CommitBufferUpdates<'a> {
-    pub updates: HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_meshes: &'a mut HashMap<Entity, Arc<RawVertexMesh>>,
-    pub vertex_mesh_comps: scene_storage::LockedStorage<'a, component::VertexMesh>,
+    pub updates: Vec<(EntityId, Arc<RawVertexMesh>)>,
+    pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub run_time: f64,
 }
 
-impl CommitBufferUpdates<'_> {
-    pub fn run(self) {
-        let vertex_mesh_comps = self.vertex_mesh_comps.read();
+impl SystemHandler for CommitBufferUpdates<'_> {
+    fn run(&mut self, data: SystemAccess) {
+        let t0 = Instant::now();
+        let vertex_mesh_comps = data.component::<component::VertexMesh>();
 
-        for (entity, updated_mesh) in self.updates {
-            if vertex_mesh_comps.contains(entity) {
+        for (entity, updated_mesh) in self.updates.drain(..) {
+            if vertex_mesh_comps.contains(&entity) {
                 self.vertex_meshes.insert(entity, updated_mesh);
             }
         }
+
+        let t1 = Instant::now();
+        self.run_time = (t1 - t0).as_secs_f64();
     }
 }

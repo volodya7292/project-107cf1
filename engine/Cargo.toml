@@ -13,6 +13,8 @@ crossbeam-channel = "0.5"
 noise = "0.8"
 fixedbitset = "0.4"
 index-pool = "1.0"
+entity_data = { path = "../../entity_data", features = ["rayon"] }
+#entity_data = { version = "1.7.0-rc1", features = ["rayon"] }
 smallvec = { version = "1.9", features = ["const_generics"] }
 ahash = "0.8"
 lazy_static = "1.4"
@@ -25,8 +27,10 @@ winit = "0.27"
 rusttype = "0.9"
 unicode-normalization = "0.1"
 moka = "0.9"
+bitvec = "1.0"
 vk-wrapper = { path = "vk-wrapper" }
 msdfgen = { path = "msdfgen" }
+#core = { path = "../core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos = { path = "macos" }

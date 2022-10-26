@@ -1,13 +1,13 @@
-use std::{marker::PhantomData, mem, ptr, slice};
 use std::ops::{Index, IndexMut};
-use std::sync::{Arc, atomic};
+use std::sync::{atomic, Arc};
+use std::{marker::PhantomData, mem, ptr, slice};
 
 use ash::vk;
 
 use crate::{AccessFlags, Device, Queue};
 
 #[derive(Copy, Clone)]
-pub struct BufferHandle(pub(crate) vk::Buffer);
+pub struct BufferHandle(pub vk::Buffer);
 
 pub trait BufferHandleImpl {
     fn handle(&self) -> BufferHandle;

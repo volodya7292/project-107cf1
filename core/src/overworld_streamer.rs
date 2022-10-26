@@ -4,15 +4,15 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Arc;
 use std::time::Instant;
 
+use entity_data::{EntityId, SystemHandler};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use smallvec::SmallVec;
 
-use engine::ecs::scene::Scene;
-use engine::ecs::{component, scene};
+use engine::ecs::component;
 use engine::queue::intensive_queue;
-use engine::renderer::Renderer;
+use engine::renderer::{Renderer, VertexMeshObject};
 use engine::unwrap_option;
 use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
 use vk_wrapper as vkw;
@@ -39,7 +39,7 @@ pub struct OverworldStreamer {
     loaded_clusters: LoadedClusters,
     overworld_generator: Arc<OverworldGenerator>,
     rclusters: HashMap<ClusterPos, RCluster>,
-    clusters_entities_to_remove: Vec<scene::Entity>,
+    clusters_entities_to_remove: Vec<EntityId>,
     clusters_entities_to_add: Vec<ClusterPos>,
     curr_loading_clusters_n: Arc<AtomicU32>,
     curr_clusters_intrinsics_updating_n: Arc<AtomicU32>,
@@ -50,13 +50,13 @@ const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
 
 #[derive(Default)]
 struct RClusterEntities {
-    solid: scene::Entity,
-    translucent: scene::Entity,
+    solid: EntityId,
+    translucent: EntityId,
 }
 
 impl RClusterEntities {
     fn is_null(&self) -> bool {
-        self.solid == scene::Entity::NULL && self.translucent == scene::Entity::NULL
+        self.solid == EntityId::NULL && self.translucent == EntityId::NULL
     }
 }
 
@@ -778,21 +778,13 @@ impl OverworldStreamer {
     }
 
     /// Creates/removes new render entities.
-    pub fn update_scene(&mut self, scene: &Scene) {
-        scene.remove_entities(&self.clusters_entities_to_remove);
-
-        // Reserve entities from scene (two for each cluster, solid and translucent)
-        let mut entities = scene.create_entities(self.clusters_entities_to_add.len() as u32 * 2);
-
-        let mut transform_comps = scene.storage_write::<component::Transform>();
-        let mut render_config_comps = scene.storage_write::<component::MeshRenderConfig>();
-        let mut vertex_mesh_comps = scene.storage_write::<component::VertexMesh>();
+    pub fn update_scene(&mut self, renderer: &mut Renderer) {
+        for obj in self.clusters_entities_to_remove.drain(..) {
+            renderer.remove_object(&obj);
+        }
 
         // Add components to the new entities
         for pos in &self.clusters_entities_to_add {
-            let entity_solid = entities.pop().unwrap();
-            let entity_translucent = entities.pop().unwrap();
-
             let transform_comp = component::Transform::new(
                 glm::convert(*pos.get()),
                 Vec3::new(0.0, 0.0, 0.0),
@@ -801,11 +793,16 @@ impl OverworldStreamer {
             let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
             let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
 
-            transform_comps.set(entity_solid, transform_comp);
-            render_config_comps.set(entity_solid, render_config_solid);
-
-            transform_comps.set(entity_translucent, transform_comp);
-            render_config_comps.set(entity_translucent, render_config_translucent);
+            let entity_solid = renderer.add_object(VertexMeshObject::new(
+                transform_comp,
+                render_config_solid,
+                Default::default(),
+            ));
+            let entity_translucent = renderer.add_object(VertexMeshObject::new(
+                transform_comp,
+                render_config_translucent,
+                Default::default(),
+            ));
 
             self.rclusters.get_mut(pos).unwrap().entities = RClusterEntities {
                 solid: entity_solid,
@@ -838,14 +835,16 @@ impl OverworldStreamer {
             if ready_to_set_mesh && !rcluster.entities.is_null() {
                 let meshes = rcluster.meshes.lock();
 
-                vertex_mesh_comps.set(
-                    rcluster.entities.solid,
-                    component::VertexMesh::new(&meshes.solid.raw()),
-                );
-                vertex_mesh_comps.set(
-                    rcluster.entities.translucent,
-                    component::VertexMesh::new(&meshes.transparent.raw()),
-                );
+                *renderer
+                    .access_object(rcluster.entities.solid)
+                    .get_mut::<component::VertexMesh>()
+                    .unwrap() = component::VertexMesh::new(&meshes.solid.raw());
+
+                *renderer
+                    .access_object(rcluster.entities.translucent)
+                    .get_mut::<component::VertexMesh>()
+                    .unwrap() = component::VertexMesh::new(&meshes.transparent.raw());
+
                 rcluster.mesh_changed.store(false, MO_RELAXED);
             }
         }

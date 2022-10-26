@@ -1,13 +1,14 @@
-use crate::ecs::component::Transform;
-use crate::ecs::scene_storage::Entity;
-use crate::utils::IndexSet;
 use std::ops::{Deref, DerefMut};
 
-pub struct Parent(pub Entity);
+use entity_data::EntityId;
+
+use crate::ecs::component::Transform;
+use crate::utils::IndexSet;
 
 #[derive(Default)]
-pub struct Children {
-    pub children: IndexSet<Entity>,
+pub struct Relation {
+    pub parent: EntityId,
+    pub children: IndexSet<EntityId>,
 }
 
 #[derive(Copy, Clone, Default)]

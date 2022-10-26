@@ -29,10 +29,9 @@ use core::physics::MOTION_EPSILON;
 use core::registry::Registry;
 use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::scene::Scene;
 use engine::queue::{coroutine_queue, intensive_queue};
-use engine::renderer::module::text_renderer::TextRenderer;
-use engine::renderer::{FontSet, Renderer};
+use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
+use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::utils::thread_pool::SafeThreadPool;
 use engine::utils::{HashMap, HashSet, MO_RELAXED};
@@ -192,25 +191,19 @@ impl Application for Game {
             )
             .unwrap(),
         );
-        let scene = renderer.scene_mut();
-        let text = scene.create_entity();
-        scene.storage_write::<component::SimpleText>().set(
-            text,
+        let text = renderer.add_object(TextObject::new(
+            component::Transform::new(
+                DVec3::new(self.player_pos.x, self.player_pos.y + 60.0, self.player_pos.z),
+                Vec3::default(),
+                Vec3::from_element(1.0),
+            ),
             component::SimpleText::new(StyledString::new(
                 "Govno, my is Gmine".to_owned(),
                 TextStyle::new().with_font(font_id).with_font_size(0.5),
             ))
             .with_max_width(3.0)
             .with_h_align(TextHAlign::LEFT),
-        );
-        scene.storage_write::<component::Transform>().set(
-            text,
-            component::Transform::new(
-                DVec3::new(self.player_pos.x, self.player_pos.y + 60.0, self.player_pos.z),
-                Vec3::default(),
-                Vec3::from_element(1.0),
-            ),
-        );
+        ));
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -376,7 +369,7 @@ impl Application for Game {
                 let mut streamer = streamer.lock();
 
                 let t0 = Instant::now();
-                streamer.update_scene(renderer.scene());
+                streamer.update_scene(renderer);
                 let t1 = Instant::now();
                 let el = (t1 - t0).as_secs_f64();
                 if el > 0.001 {

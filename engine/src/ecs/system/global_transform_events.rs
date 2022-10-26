@@ -1,71 +1,56 @@
+use std::time::Instant;
+use std::{mem, slice};
+
+use entity_data::{EntityId, SystemAccess, SystemHandler};
+use nalgebra_glm::Mat4;
+
+use vk_wrapper as vkw;
+
+use crate::ecs::component;
 use crate::ecs::component::internal::GlobalTransform;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity, Event};
-use crate::ecs::{component, scene_storage};
-use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate2, Renderable};
-use crate::utils::HashMap;
-use nalgebra_glm::Mat4;
-use std::{mem, slice};
-use vk_wrapper as vkw;
+use crate::utils::{HashMap, HashSet};
+use crate::{renderer, unwrap_option};
 
 // Updates global transform uniform buffers
 pub(crate) struct GlobalTransformEvents<'a> {
     pub uniform_buffer_updates: &'a mut BufferUpdate2,
-    pub global_transform_comps: scene_storage::LockedStorage<'a, GlobalTransform>,
-    pub renderer_comps: scene_storage::LockedStorage<'a, component::MeshRenderConfig>,
+    pub dirty_components: HashSet<EntityId>,
     pub material_pipelines: &'a [MaterialPipelineSet],
-    pub renderables: &'a HashMap<Entity, Renderable>,
+    pub renderables: &'a HashMap<EntityId, Renderable>,
+    pub run_time: f64,
 }
 
-impl GlobalTransformEvents<'_> {
-    fn global_transform_modified(
-        entity: Entity,
-        global_transform: &GlobalTransform,
-        render_config: Option<&component::MeshRenderConfig>,
-        buffer_updates: &mut BufferUpdate2,
-        material_pipelines: &[MaterialPipelineSet],
-        renderables: &HashMap<Entity, Renderable>,
-    ) {
-        if let Some(config) = render_config {
-            let pipe = &material_pipelines[config.mat_pipeline as usize];
+impl SystemHandler for GlobalTransformEvents<'_> {
+    fn run(&mut self, data: SystemAccess) {
+        let t0 = Instant::now();
+        let global_transform_comps = data.component::<GlobalTransform>();
+        let renderer_comps = data.component::<component::MeshRenderConfig>();
+
+        for entity in &self.dirty_components {
+            let global_transform = unwrap_option!(global_transform_comps.get(entity), continue);
+            let render_config = unwrap_option!(renderer_comps.get(entity), continue);
+
+            let pipe = &self.material_pipelines[render_config.mat_pipeline as usize];
 
             let matrix = global_transform.matrix_f32();
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
-            let renderable = &renderables[&entity];
-            let src_offset = buffer_updates.data.len();
+            let renderable = &self.renderables[&entity];
+            let src_offset = self.uniform_buffer_updates.data.len();
 
-            buffer_updates.data.extend_from_slice(matrix_bytes);
+            self.uniform_buffer_updates.data.extend_from_slice(matrix_bytes);
 
-            buffer_updates.regions.push(vkw::CopyRegion::new(
+            self.uniform_buffer_updates.regions.push(vkw::CopyRegion::new(
                 src_offset as u64,
                 renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE
                     + pipe.uniform_buffer_offset_model() as u64,
                 (matrix_bytes.len() as u64).try_into().unwrap(),
             ));
         }
-    }
 
-    pub fn run(&mut self) {
-        let events = self.global_transform_comps.write().events();
-        let global_transform_comps = self.global_transform_comps.read();
-        let renderer_comps = self.renderer_comps.read();
-
-        for event in events {
-            match event {
-                Event::Created(entity) | Event::Modified(entity) => {
-                    Self::global_transform_modified(
-                        entity,
-                        global_transform_comps.get(entity).unwrap(),
-                        renderer_comps.get(entity),
-                        self.uniform_buffer_updates,
-                        self.material_pipelines,
-                        self.renderables,
-                    );
-                }
-                _ => {}
-            }
-        }
+        let t1 = Instant::now();
+        self.run_time = (t1 - t0).as_secs_f64();
     }
 }

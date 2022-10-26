@@ -1,6 +1,8 @@
-use crate::renderer;
 use std::sync::Arc;
 
+use crate::renderer;
+
+#[derive(Default)]
 pub struct VertexMesh(pub(crate) Arc<renderer::vertex_mesh::RawVertexMesh>);
 
 impl VertexMesh {

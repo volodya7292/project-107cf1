@@ -26,6 +26,7 @@ use std::time::Instant;
 use std::{fs, iter, mem, slice};
 
 use basis_universal::TranscoderTextureFormat;
+use entity_data::{Archetype, Component, EntityId, EntityStorage, StaticArchetype, System, SystemAccess};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use nalgebra::{Matrix4, Vector4};
@@ -53,10 +54,9 @@ use vk_wrapper::{
     Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
-use crate::ecs::component::internal::{Children, GlobalTransform, Parent};
-use crate::ecs::scene::Scene;
-use crate::ecs::scene_storage::{ComponentStorageImpl, Entity};
+use crate::ecs::component::internal::{GlobalTransform, Relation};
 use crate::ecs::{component, system};
+pub use crate::renderer::dirty_components::DirtyComponents;
 use crate::renderer::module::RendererModule;
 use crate::utils::HashMap;
 use crate::{unwrap_option, utils};
@@ -68,6 +68,7 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
+mod dirty_components;
 mod helpers;
 pub mod module;
 
@@ -118,7 +119,10 @@ impl Display for RendererTimings {
 }
 
 pub struct Renderer {
-    scene: Scene,
+    storage: EntityStorage,
+    dirty_comps: DirtyComponents,
+    root_entity: EntityId,
+
     active_camera: Camera,
     camera_pos_pivot: DVec3,
     relative_camera_pos: DVec3,
@@ -187,20 +191,30 @@ pub struct Renderer {
     per_frame_ub: DeviceBuffer,
     material_buffer: DeviceBuffer,
     material_updates: HashMap<u32, MaterialInfo>,
-    vertex_mesh_updates: HashMap<Entity, Arc<RawVertexMesh>>,
-    vertex_mesh_pending_updates: HashMap<Entity, Arc<RawVertexMesh>>,
+    vertex_mesh_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
+    vertex_mesh_pending_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
 
     /// Entities ordered in respect to children order inside `Children` components:
     /// global parents are not in order, but all the children are.
-    ordered_entities: Vec<Entity>,
-    renderables: HashMap<Entity, Renderable>,
-    vertex_meshes: HashMap<Entity, Arc<RawVertexMesh>>,
+    ordered_entities: Vec<EntityId>,
+
+    renderables: HashMap<EntityId, Renderable>,
+    vertex_meshes: HashMap<EntityId, Arc<RawVertexMesh>>,
     pub(crate) material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
     // device_buffers: SlotVec<DeviceBuffer>,
     uniform_buffer_offsets: IndexPool,
 
+    // Temporary resources
+    renderables_to_destroy: Vec<Renderable>,
+    vertex_meshes_to_destroy: Vec<Arc<RawVertexMesh>>,
+
     modules: HashMap<TypeId, Box<dyn RendererModule + Send + Sync>>,
+}
+
+pub struct Internals<'a> {
+    storage: &'a mut EntityStorage,
+    dirty_comps: &'a mut DirtyComponents,
 }
 
 #[derive(Copy, Clone)]
@@ -375,7 +389,7 @@ pub(crate) enum BufferUpdate {
 }
 
 pub(crate) struct VMBufferUpdate {
-    pub entity: Entity,
+    pub entity: EntityId,
     pub mesh: Arc<RawVertexMesh>,
 }
 
@@ -488,6 +502,67 @@ fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
+pub trait SceneObject: StaticArchetype {}
+
+#[derive(Archetype)]
+pub struct VertexMeshObject {
+    global_transform: GlobalTransform,
+    relation: Relation,
+    transform: component::Transform,
+    render_config: component::MeshRenderConfig,
+    mesh: component::VertexMesh,
+}
+
+impl VertexMeshObject {
+    pub fn new(
+        transform: component::Transform,
+        render_config: component::MeshRenderConfig,
+        mesh: component::VertexMesh,
+    ) -> Self {
+        Self {
+            global_transform: Default::default(),
+            relation: Default::default(),
+            transform,
+            render_config,
+            mesh,
+        }
+    }
+}
+
+impl SceneObject for VertexMeshObject {}
+
+#[derive(Archetype)]
+pub struct SimpleObject {
+    global_transform: GlobalTransform,
+    relation: Relation,
+    transform: component::Transform,
+}
+
+impl SimpleObject {
+    pub fn new(transform: component::Transform) -> Self {
+        Self {
+            global_transform: Default::default(),
+            relation: Default::default(),
+            transform,
+        }
+    }
+}
+
+impl SceneObject for SimpleObject {}
+
+pub struct RenderObjectAccess<'a> {
+    entity_id: EntityId,
+    storage: &'a mut EntityStorage,
+    dirty_comps: &'a mut DirtyComponents,
+}
+
+impl RenderObjectAccess<'_> {
+    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
+        self.dirty_comps.add::<C>(&self.entity_id);
+        self.storage.get_mut(&self.entity_id)
+    }
+}
+
 impl Renderer {
     pub fn new(
         surface: &Arc<Surface>,
@@ -501,7 +576,9 @@ impl Renderer {
             device.load_pipeline_cache(&res).unwrap();
         }
 
-        let scene = Scene::new();
+        let mut storage = EntityStorage::new();
+        let root_entity = storage.add(SimpleObject::new(Default::default()));
+
         let active_camera = Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01);
 
         let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
@@ -870,9 +947,11 @@ impl Renderer {
             device.create_submit_packet(&[]).unwrap(),
         ];
 
-        // TODO: allocate necessarry buffers with capacity of MAX_OBJECTS
+        // TODO: allocate relevant buffers with capacity of MAX_OBJECTS
         let mut renderer = Renderer {
-            scene,
+            storage,
+            root_entity,
+            dirty_comps: Default::default(),
             active_camera,
             camera_pos_pivot: Default::default(),
             relative_camera_pos: Default::default(),
@@ -939,6 +1018,8 @@ impl Renderer {
             uniform_buffer_offsets: IndexPool::new(),
             ordered_entities: vec![],
             modules: Default::default(),
+            vertex_meshes_to_destroy: vec![],
+            renderables_to_destroy: vec![],
         };
         renderer.on_resize(size);
 
@@ -947,14 +1028,6 @@ impl Renderer {
 
     pub fn device(&self) -> &Arc<Device> {
         &self.device
-    }
-
-    pub fn scene(&self) -> &Scene {
-        &self.scene
-    }
-
-    pub fn scene_mut(&mut self) -> &mut Scene {
-        &mut self.scene
     }
 
     pub fn active_camera(&self) -> &Camera {
@@ -974,6 +1047,121 @@ impl Renderer {
         self.settings = settings;
     }
 
+    pub fn add_object(&mut self, object: impl SceneObject) -> EntityId {
+        let comp_ids = object.component_ids();
+        let entity = self.storage.add(object);
+
+        for id in comp_ids {
+            self.dirty_comps.add_with_component_id(id, &entity)
+        }
+
+        Self::add_children(&self.storage.access(), self.root_entity, &[entity]);
+
+        entity
+    }
+
+    fn on_object_remove(&mut self, id: &EntityId) {
+        // Free renderable resources if available
+        if let Some(renderable) = self.renderables.remove(id) {
+            self.renderables_to_destroy.push(renderable);
+        }
+
+        // Cache vertex mesh that's potentially being used in rendering
+        if let Some(mesh) = self.vertex_meshes.remove(id) {
+            self.vertex_meshes_to_destroy.push(mesh);
+        }
+
+        // Cache vertex meshes whose buffers is being transferring to the GPU
+        if let Some(pending_mesh) = self.vertex_mesh_pending_updates.remove(id) {
+            self.vertex_meshes_to_destroy.push(pending_mesh);
+        }
+
+        // New vertex mesh doesn't need to be uploaded to the GPU
+        self.vertex_mesh_updates.remove(id);
+
+        for module in self.modules.values_mut() {
+            let internals = Internals {
+                storage: &mut self.storage,
+                dirty_comps: &mut self.dirty_comps,
+            };
+            module.on_object_remove(id, internals);
+        }
+    }
+
+    // TODO CORE: move to core
+    pub fn add_children(access: &SystemAccess, parent: EntityId, children: &[EntityId]) {
+        let mut relation_comps = access.component_mut::<Relation>();
+
+        // let children_comp = self.children_comps.get_or_insert_default(parent);
+
+        for child in children {
+            let relation = relation_comps
+                .get_mut(child)
+                .expect("child must have a Relation component");
+
+            if relation.parent != EntityId::NULL {
+                panic!("child already has a parent assigned");
+            }
+
+            relation.parent = parent;
+        }
+
+        let mut parent_relation = relation_comps
+            .get_mut(&parent)
+            .expect("parent must have Relation component");
+        parent_relation.children.extend(children);
+    }
+
+    // TODO CORE: move to core
+    pub fn collect_children_recursively(
+        access: &SystemAccess,
+        entity: &EntityId,
+        children: &mut Vec<EntityId>,
+    ) {
+        let relation_comps = access.component::<Relation>();
+
+        let mut stack = Vec::<EntityId>::with_capacity(64);
+        stack.push(*entity);
+
+        while let Some(entity) = stack.pop() {
+            if let Some(relation) = relation_comps.get(&entity) {
+                children.extend(&relation.children);
+                stack.extend(&relation.children);
+            }
+        }
+    }
+
+    // TODO CORE: move to core
+    /// Removes object and its children
+    pub fn remove_object(&mut self, id: &EntityId) {
+        let mut entities_to_remove = Vec::with_capacity(64);
+        entities_to_remove.push(*id);
+
+        Self::collect_children_recursively(&self.storage.access(), id, &mut entities_to_remove);
+
+        for entity in entities_to_remove {
+            // Remove the entity from its parent's child list
+            if let Some(relation) = self.storage.get::<Relation>(&entity) {
+                let parent = relation.parent;
+
+                if let Some(parent) = self.storage.get_mut::<Relation>(&parent) {
+                    parent.children.remove(&entity);
+                }
+            }
+
+            self.on_object_remove(&entity);
+            self.storage.remove(&entity);
+        }
+    }
+
+    pub fn access_object(&mut self, id: EntityId) -> RenderObjectAccess {
+        RenderObjectAccess {
+            entity_id: id,
+            storage: &mut self.storage,
+            dirty_comps: &mut self.dirty_comps,
+        }
+    }
+
     fn on_update(&mut self) -> UpdateTimings {
         let mut timings = UpdateTimings::default();
         let total_t0 = Instant::now();
@@ -984,9 +1172,13 @@ impl Renderer {
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
         if self.relative_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
-            let mut global_transform = self.scene.global_transform();
+            let mut global_transform = self
+                .storage
+                .get_mut::<component::Transform>(&self.root_entity)
+                .unwrap();
             global_transform.position -= self.relative_camera_pos;
-            self.scene.set_global_transform(global_transform);
+
+            self.dirty_comps.add::<component::Transform>(&self.root_entity);
 
             self.relative_camera_pos = DVec3::default();
             self.camera_pos_pivot = camera.position();
@@ -994,8 +1186,13 @@ impl Renderer {
 
         // --------------------------------------------------------------------
         let mut update_cls = vec![];
+
         for module in self.modules.values_mut() {
-            if let Some(cl) = module.on_update(&mut self.scene) {
+            let internals = Internals {
+                storage: &mut self.storage,
+                dirty_comps: &mut self.dirty_comps,
+            };
+            if let Some(cl) = module.on_update(internals) {
                 update_cls.push(cl);
             }
         }
@@ -1003,6 +1200,20 @@ impl Renderer {
 
         let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
         unsafe { graphics_queue.submit(&mut self.modules_updates_submit).unwrap() };
+
+        // --------------------------------------------------------------------
+
+        // Destroy unused renderables
+        for renderable in self.renderables_to_destroy.drain(..) {
+            let object_desc_pool =
+                &mut self.material_pipelines[renderable.mat_pipeline as usize].per_object_desc_pool;
+
+            object_desc_pool.free(renderable.descriptor_sets[0]);
+
+            self.uniform_buffer_offsets
+                .return_id(renderable.uniform_buf_index)
+                .unwrap();
+        }
 
         // --------------------------------------------------------------------
 
@@ -1014,7 +1225,7 @@ impl Renderer {
         let mut buffer_updates = vec![];
 
         // Asynchronously acquire buffers from transfer queue to render queue
-        if !self.vertex_mesh_pending_updates.is_empty() {
+        if !self.vertex_mesh_pending_updates.is_empty() || !self.vertex_meshes_to_destroy.is_empty() {
             let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
             unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
         }
@@ -1023,75 +1234,71 @@ impl Renderer {
 
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
-            renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
             renderables: &mut self.renderables,
+            dirty_components: self.dirty_comps.take_changes::<component::MeshRenderConfig>(),
             buffer_updates: &mut buffer_updates,
             material_pipelines: &mut self.material_pipelines,
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
+            run_time: 0.0,
         };
-        let mut removed_vertex_mesh_entities = Vec::with_capacity(4096);
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
             vertex_meshes: &mut self.vertex_meshes,
-            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
+            dirty_components: self.dirty_comps.take_changes::<component::VertexMesh>(),
             buffer_updates: &mut self.vertex_mesh_updates,
-            removed_entities: &mut removed_vertex_mesh_entities,
+            run_time: 0.0,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
-            parent_comps: self.scene.storage::<Parent>(),
-            children_comps: self.scene.storage::<Children>(),
-            transform_comps: self.scene.storage::<component::Transform>(),
-            global_transform_comps: self.scene.storage::<GlobalTransform>(),
+            root_entity: self.root_entity,
+            dirty_transform_comps: self.dirty_comps.take_changes::<component::Transform>(),
             ordered_entities: &mut self.ordered_entities,
+            changed_global_transforms: Vec::with_capacity(4096),
+            run_time: 0.0,
         };
 
-        rayon::scope(|s| {
-            let t0 = Instant::now();
-            s.spawn(|_| renderer_events_system.run());
-            let t1 = Instant::now();
-            s.spawn(|_| vertex_mesh_system.run());
-            let t2 = Instant::now();
-            s.spawn(|_| hierarchy_propagation_system.run());
-            let t3 = Instant::now();
+        self.storage.dispatch_par([
+            System::new(&mut renderer_events_system).with_mut::<component::MeshRenderConfig>(),
+            System::new(&mut vertex_mesh_system).with_mut::<component::VertexMesh>(),
+            System::new(&mut hierarchy_propagation_system)
+                .with::<Relation>()
+                .with::<component::Transform>()
+                .with_mut::<GlobalTransform>(),
+        ]);
 
-            timings.batch0_render_events = (t1 - t0).as_secs_f64();
-            timings.batch0_vertex_meshes = (t2 - t1).as_secs_f64();
-            timings.batch0_hierarchy_propag = (t3 - t2).as_secs_f64();
-        });
+        timings.batch0_render_events = renderer_events_system.run_time;
+        timings.batch0_vertex_meshes = vertex_mesh_system.run_time;
+        timings.batch0_hierarchy_propag = hierarchy_propagation_system.run_time;
+
+        for entity in &hierarchy_propagation_system.changed_global_transforms {
+            self.dirty_comps.add::<GlobalTransform>(entity);
+        }
 
         let t11 = Instant::now();
         timings.systems_batch0 = (t11 - t00).as_secs_f64();
 
-        let mut global_transform_events_system = system::GlobalTransformEvents {
-            uniform_buffer_updates: &mut uniform_buffer_updates,
-            global_transform_comps: self.scene.storage::<GlobalTransform>(),
-            renderer_comps: self.scene.storage::<component::MeshRenderConfig>(),
-            material_pipelines: &self.material_pipelines,
-            renderables: &self.renderables,
-        };
-
         let t00 = Instant::now();
 
         // Wait for previous transfers before committing them
-        if !self.vertex_mesh_pending_updates.is_empty() {
-            self.transfer_submit[1].wait().unwrap();
-        }
+        // Depends on the transfer submits being made above
+        self.transfer_submit[0].wait().unwrap();
+        self.transfer_submit[1].wait().unwrap();
 
-        // Remove unnecessary updates to prevent buffer lifetime conflicts
-        // that result in destroying buffers when copying them to the GPU.
-        for entity in removed_vertex_mesh_entities {
-            self.vertex_mesh_pending_updates.remove(&entity);
-        }
+        // Drop unused vertex meshes (only after they've been updated
+        // to prevent buffer lifetime conflicts that result in
+        // destroying the buffers when copying them to the GPU).
+        self.vertex_meshes_to_destroy.clear();
 
         // Before updating new buffers, collect all the completed updates to commit them
-        let completed_updates = self.vertex_mesh_pending_updates.drain().collect();
+        let completed_updates: Vec<_> = self.vertex_mesh_pending_updates.drain().collect();
 
         // Sort by distance to perform updates of the nearest vertex meshes first
         let mut sorted_buffer_updates_entities: Vec<_> = {
-            let transforms = self.scene.storage_read::<GlobalTransform>();
+            // let transforms = self.scene.storage_read::<GlobalTransform>();
+            let access = self.storage.access();
+            let transforms = access.component::<GlobalTransform>();
             self.vertex_mesh_updates
                 .keys()
                 .map(|v| {
-                    if let Some(transform) = transforms.get(*v) {
+                    if let Some(transform) = transforms.get(v) {
                         (
                             *v,
                             (transform.position - self.relative_camera_pos).magnitude_squared(),
@@ -1102,8 +1309,15 @@ impl Renderer {
                 })
                 .collect()
         };
-        sorted_buffer_updates_entities.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        sorted_buffer_updates_entities.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
 
+        let mut global_transform_events_system = system::GlobalTransformEvents {
+            uniform_buffer_updates: &mut uniform_buffer_updates,
+            dirty_components: self.dirty_comps.take_changes::<GlobalTransform>(),
+            material_pipelines: &self.material_pipelines,
+            renderables: &self.renderables,
+            run_time: 0.0,
+        };
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_cl: &self.transfer_cl,
@@ -1111,26 +1325,25 @@ impl Renderer {
             buffer_updates: &mut self.vertex_mesh_updates,
             sorted_buffer_updates_entities: &sorted_buffer_updates_entities,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
+            run_time: 0.0,
         };
-        let commit_buffer_updates_system = system::CommitBufferUpdates {
+        let mut commit_buffer_updates_system = system::CommitBufferUpdates {
             updates: completed_updates,
             vertex_meshes: &mut self.vertex_meshes,
-            vertex_mesh_comps: self.scene.storage::<component::VertexMesh>(),
+            run_time: 0.0,
         };
 
-        rayon::scope(|s| {
-            let t0 = Instant::now();
-            s.spawn(|_| global_transform_events_system.run());
-            let t1 = Instant::now();
-            s.spawn(|_| buffer_update_system.run());
-            let t2 = Instant::now();
-            s.spawn(|_| commit_buffer_updates_system.run());
-            let t3 = Instant::now();
+        self.storage.dispatch_par([
+            System::new(&mut global_transform_events_system)
+                .with::<GlobalTransform>()
+                .with::<component::MeshRenderConfig>(),
+            System::new(&mut buffer_update_system),
+            System::new(&mut commit_buffer_updates_system).with::<component::VertexMesh>(),
+        ]);
 
-            timings.batch1_global_transforms = (t1 - t0).as_secs_f64();
-            timings.batch1_buffer_updates = (t2 - t1).as_secs_f64();
-            timings.batch1_updates_commit = (t3 - t2).as_secs_f64();
-        });
+        timings.batch1_global_transforms = global_transform_events_system.run_time;
+        timings.batch1_buffer_updates = buffer_update_system.run_time;
+        timings.batch1_updates_commit = commit_buffer_updates_system.run_time;
 
         // FIXME: VMA: parallel invocations (when creating Cluster meshes) of `vkAllocateMemory` causes huge stutters
 
@@ -1221,9 +1434,6 @@ impl Renderer {
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
-        let global_transform_comps = self.scene.storage_read::<GlobalTransform>();
-        let renderer_comps = self.scene.storage_read::<component::MeshRenderConfig>();
-
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
@@ -1274,10 +1484,10 @@ impl Renderer {
                     }
 
                     let renderable_id = self.ordered_entities[entity_index];
+                    let entry = self.storage.entry(&renderable_id).unwrap();
 
-                    let global_transform =
-                        unwrap_option!(global_transform_comps.get(renderable_id), continue);
-                    let render_config = unwrap_option!(renderer_comps.get(renderable_id), continue);
+                    let global_transform = unwrap_option!(entry.get::<GlobalTransform>(), continue);
+                    let render_config = unwrap_option!(entry.get::<component::MeshRenderConfig>(), continue);
                     let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
 
                     if vertex_mesh.vertex_count == 0 && render_config.fake_vertex_count == 0 {
@@ -1355,8 +1565,6 @@ impl Renderer {
     }
 
     fn record_g_cmd_lists(&self) {
-        let renderer_comps = self.scene.storage_read::<component::MeshRenderConfig>();
-
         let mat_pipelines = &self.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.g_solid_secondary_cls.len() + 1;
@@ -1383,7 +1591,10 @@ impl Renderer {
                     }
 
                     let renderable_id = self.ordered_entities[entity_index];
-                    let render_config = unwrap_option!(renderer_comps.get(renderable_id), continue);
+                    let render_config = unwrap_option!(
+                        self.storage.get::<component::MeshRenderConfig>(&renderable_id),
+                        continue
+                    );
 
                     // Occlusion culling can't handle arbitrary vertex representations,
                     // so check for fake_vertex_count also.
