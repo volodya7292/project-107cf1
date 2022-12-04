@@ -20,10 +20,11 @@ use vk_wrapper as vkw;
 
 use crate::overworld::block::{Block, BlockState};
 use crate::overworld::block_component;
-use crate::overworld::block_model::{quad_occludes_side, PackedVertex, Vertex};
+use crate::overworld::block_model::quad_occludes_side;
 use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
+use crate::overworld::liquid_level::LiquidLevel;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::position::ClusterBlockPos;
 use crate::registry::Registry;
@@ -53,46 +54,68 @@ pub fn neighbour_index_to_dir(index: usize) -> I32Vec3 {
 }
 
 #[inline]
-fn aligned_block_index(pos: &TVec3<usize>) -> usize {
+pub fn aligned_block_index(pos: &TVec3<usize>) -> usize {
     const ALIGNED_SIZE_SQR: usize = ALIGNED_SIZE * ALIGNED_SIZE;
     pos.x * ALIGNED_SIZE_SQR + pos.y * ALIGNED_SIZE + pos.z
 }
 
-struct NeighbourVertexIntrinsics {
-    corner: IntrinsicBlockData,
-    sides: [IntrinsicBlockData; 2],
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct CompactEntityId {
+    arch_id: u16,
+    /// Cluster size of 24^3 fits into 2^16 space.
+    id: u16,
 }
 
-impl NeighbourVertexIntrinsics {
-    #[inline]
-    fn calculate_ao(&self) -> u8 {
-        (self.corner.occluder.is_empty()
-            && self.sides[0].occluder.is_empty()
-            && self.sides[1].occluder.is_empty()) as u8
-            * 255
+impl CompactEntityId {
+    const NULL: Self = Self {
+        arch_id: u16::MAX,
+        id: u16::MAX,
+    };
+
+    fn new(entity_id: EntityId) -> Self {
+        Self {
+            arch_id: entity_id.archetype_id as u16,
+            id: entity_id.id as u16,
+        }
+    }
+
+    fn regular(&self) -> EntityId {
+        EntityId::new(self.arch_id as u32, self.id as u32)
+    }
+}
+
+impl Default for CompactEntityId {
+    fn default() -> Self {
+        Self::NULL
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct IntrinsicBlockData {
-    pub tex_model_id: u16,
+pub struct CellInfo {
+    pub entity_id: CompactEntityId,
+    pub block_id: u16,
+    pub liquid_id: u16,
     pub occluder: Occluder,
     pub light_level: LightLevel,
+    pub liquid_level: LiquidLevel,
 }
 
-impl Default for IntrinsicBlockData {
+impl Default for CellInfo {
     fn default() -> Self {
         Self {
-            tex_model_id: u16::MAX,
+            entity_id: Default::default(),
+            block_id: u16::MAX,
+            liquid_id: u16::MAX,
             occluder: Default::default(),
             light_level: Default::default(),
+            liquid_level: LiquidLevel::ZERO,
         }
     }
 }
 
 pub struct BlockData<'a> {
     pub(super) block_storage: &'a EntityStorage,
-    pub(super) inner_state: &'a InnerBlockState,
+    pub(super) info: &'a CellInfo,
 }
 
 pub trait BlockDataImpl {
@@ -103,66 +126,64 @@ pub trait BlockDataImpl {
 
 impl BlockDataImpl for BlockData<'_> {
     fn block_id(&self) -> u16 {
-        self.inner_state.block_id
+        self.info.block_id
     }
 
     fn get<C: Component>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.inner_state.entity_id)
+        self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 }
 
 pub struct BlockDataMut<'a> {
+    registry: &'a Registry,
     block_storage: &'a mut EntityStorage,
-    inner_state: &'a mut InnerBlockState,
+    info: &'a mut CellInfo,
 }
 
 impl BlockDataImpl for BlockDataMut<'_> {
     fn block_id(&self) -> u16 {
-        self.inner_state.block_id
+        self.info.block_id
     }
 
     fn get<C: Component>(&self) -> Option<&C> {
-        self.block_storage.get::<C>(&self.inner_state.entity_id)
+        self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 }
 
 impl BlockDataMut<'_> {
-    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
-        self.block_storage.get_mut::<C>(&self.inner_state.entity_id)
-    }
-}
+    pub fn set(&mut self, state: BlockState<impl ArchetypeState>) {
+        let block = self.registry.get_block(state.block_id).unwrap();
 
-#[derive(Copy, Clone)]
-pub struct InnerBlockState {
-    pub block_id: u16,
-    pub entity_id: EntityId,
-}
-
-impl Default for InnerBlockState {
-    fn default() -> Self {
-        Self {
-            block_id: u16::MAX,
-            entity_id: Default::default(),
+        // Remove previous block state if present
+        if self.info.entity_id != CompactEntityId::NULL {
+            self.block_storage.remove(&self.info.entity_id.regular());
         }
+
+        // Add new state to the storage
+        let entity_id = self.block_storage.add(state.components);
+
+        self.info.entity_id = CompactEntityId::new(entity_id);
+        self.info.block_id = state.block_id;
+        self.info.occluder = block.occluder();
     }
-}
 
-#[derive(Default)]
-pub struct Meshes {
-    pub solid: VertexMesh<PackedVertex, ()>,
-    pub transparent: VertexMesh<PackedVertex, ()>,
-}
+    pub fn liquid_id(&mut self) -> &mut u16 {
+        &mut self.info.liquid_id
+    }
 
-pub struct BuildResult {
-    pub meshes: Meshes,
-    pub empty: bool,
+    pub fn liquid_level_mut(&mut self) -> &mut LiquidLevel {
+        &mut self.info.liquid_level
+    }
+
+    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
+        self.block_storage.get_mut::<C>(&self.info.entity_id.regular())
+    }
 }
 
 pub struct RawCluster {
     registry: Arc<Registry>,
     block_state_storage: EntityStorage,
-    block_states: Vec<InnerBlockState>,
-    intrinsic_data: Vec<IntrinsicBlockData>,
+    cells: Vec<CellInfo>,
     light_addition_cache: VecDeque<TVec3<usize>>,
 }
 
@@ -175,78 +196,50 @@ impl RawCluster {
         Self {
             registry: Arc::clone(registry),
             block_state_storage: Default::default(),
-            block_states: vec![Default::default(); Self::VOLUME],
-            intrinsic_data: vec![Default::default(); ALIGNED_VOLUME],
+            cells: vec![Default::default(); ALIGNED_VOLUME],
             light_addition_cache: VecDeque::with_capacity(Self::SIZE * Self::SIZE),
         }
     }
 
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.registry
+    }
+
+    pub fn cells(&self) -> &[CellInfo] {
+        &self.cells
+    }
+
     /// Returns block data at `pos`
+    #[inline]
     pub fn get(&self, pos: &ClusterBlockPos) -> BlockData {
+        let aligned_pos = &pos.get().add_scalar(1);
         BlockData {
             block_storage: &self.block_state_storage,
-            inner_state: &self.block_states[pos.index()],
+            info: &self.cells[aligned_block_index(&aligned_pos)],
         }
     }
 
     /// Returns mutable block data at `pos`
+    #[inline]
     pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut {
+        let aligned_pos = &pos.get().add_scalar(1);
         BlockDataMut {
+            registry: &self.registry,
             block_storage: &mut self.block_state_storage,
-            inner_state: &mut self.block_states[pos.index()],
+            info: &mut self.cells[aligned_block_index(&aligned_pos)],
         }
     }
 
-    /// Sets the specified block at `pos`
-    pub fn set<A: ArchetypeState>(
-        &mut self,
-        pos: &ClusterBlockPos,
-        block_state: BlockState<A>,
-    ) -> BlockDataMut {
-        #[cold]
-        #[inline(never)]
-        fn assert_failed() -> ! {
-            panic!("Cluster::set_block failed: pos >= Cluster::SIZE");
-        }
-        if pos.0 >= TVec3::from_element(Self::SIZE) {
-            assert_failed();
-        }
-
-        let curr_state = &mut self.block_states[pos.index()];
-
-        // Remove previous block state if present
-        if curr_state.entity_id != EntityId::NULL {
-            self.block_state_storage.remove(&curr_state.entity_id);
-        }
-
-        let entity_id = self.block_state_storage.add(block_state.components);
-        let block = self.registry.get_block(block_state.block_id).unwrap();
-
-        // Update current state
-        *curr_state = InnerBlockState {
-            block_id: block_state.block_id,
-            entity_id,
-        };
-
-        // Set intrinsics
-        let index = aligned_block_index(&pos.0.add_scalar(1));
-        self.intrinsic_data[index].occluder = block.occluder();
-        self.intrinsic_data[index].tex_model_id = block.textured_model();
-
-        BlockDataMut {
-            block_storage: &mut self.block_state_storage,
-            inner_state: curr_state,
-        }
-    }
-
+    #[inline]
     pub fn get_light_level(&self, pos: &ClusterBlockPos) -> LightLevel {
-        let index = aligned_block_index(&pos.0.add_scalar(1));
-        self.intrinsic_data[index].light_level
+        let index = aligned_block_index(&pos.get().add_scalar(1));
+        self.cells[index].light_level
     }
 
-    pub fn set_light_level(&mut self, pos: &ClusterBlockPos, light_level: LightLevel) {
-        let index = aligned_block_index(&pos.0.add_scalar(1));
-        self.intrinsic_data[index].light_level = light_level;
+    #[inline]
+    pub fn set_light_level(&mut self, pos: &ClusterBlockPos, level: LightLevel) {
+        let index = aligned_block_index(&pos.get().add_scalar(1));
+        self.cells[index].light_level = level;
     }
 
     /// Checks if self inner edge is fully occluded
@@ -269,7 +262,7 @@ impl RawCluster {
                 let p = map_pos(&dir, i, j, Self::SIZE - 1).add_scalar(1);
                 let index = aligned_block_index(&glm::convert(p));
 
-                state &= self.intrinsic_data[index].occluder.occludes_side(facing);
+                state &= self.cells[index].occluder.occludes_side(facing);
 
                 if !state {
                     break;
@@ -280,7 +273,7 @@ impl RawCluster {
         state
     }
 
-    pub fn clear_outer_intrinsics(&mut self, side_offset: I32Vec3, value: IntrinsicBlockData) {
+    pub fn clear_outer_intrinsics(&mut self, side_offset: I32Vec3, value: CellInfo) {
         let size = Self::SIZE as i32;
         let b = side_offset.map(|v| v == -size || v == size);
 
@@ -289,7 +282,7 @@ impl RawCluster {
             let m = side_offset.map(|v| (v > 0) as u32);
             let dst_pos = m * (ALIGNED_SIZE - 1) as u32;
             let index = aligned_block_index(&glm::convert(dst_pos));
-            self.intrinsic_data[index] = value;
+            self.cells[index] = value;
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
             // Edge
             fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
@@ -301,7 +294,7 @@ impl RawCluster {
             for k in 0..Self::SIZE {
                 let dst_p = map_pos(&m, k + 1, ALIGNED_SIZE - 1);
                 let index = aligned_block_index(&glm::convert(dst_p));
-                self.intrinsic_data[index] = value;
+                self.cells[index] = value;
             }
         } else {
             // Side
@@ -323,7 +316,7 @@ impl RawCluster {
                 for l in 0..Self::SIZE {
                     let dst_p = map_pos(&dir, k + 1, l + 1, ALIGNED_SIZE - 1);
                     let index = aligned_block_index(&glm::convert(dst_p));
-                    self.intrinsic_data[index] = value;
+                    self.cells[index] = value;
                 }
             }
         }
@@ -343,7 +336,7 @@ impl RawCluster {
             let dst_index = aligned_block_index(&glm::convert(dst_p));
             let src_index = aligned_block_index(&glm::convert(src_p));
 
-            self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
+            self.cells[dst_index] = side_cluster.cells[src_index];
         } else if b.x && b.y || b.x && b.z || b.y && b.z {
             // Edge
             fn map_pos(m: &I32Vec3, k: usize, s: usize) -> TVec3<usize> {
@@ -359,7 +352,7 @@ impl RawCluster {
                 let dst_index = aligned_block_index(&glm::convert(dst_p));
                 let src_index = aligned_block_index(&glm::convert(src_p));
 
-                self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
+                self.cells[dst_index] = side_cluster.cells[src_index];
             }
         } else {
             // Side
@@ -385,7 +378,7 @@ impl RawCluster {
                     let dst_index = aligned_block_index(&glm::convert(dst_p));
                     let src_index = aligned_block_index(&glm::convert(src_p));
 
-                    self.intrinsic_data[dst_index] = side_cluster.intrinsic_data[src_index];
+                    self.cells[dst_index] = side_cluster.cells[src_index];
                 }
             }
         }
@@ -424,8 +417,7 @@ impl RawCluster {
                 let dst_index = aligned_block_index(&glm::convert(dst_p));
                 let src_index = aligned_block_index(&glm::convert(src_p));
 
-                self.intrinsic_data[dst_index].light_level =
-                    side_cluster.intrinsic_data[src_index].light_level;
+                self.cells[dst_index].light_level = side_cluster.cells[src_index].light_level;
                 self.light_addition_cache.push_back(glm::convert(dst_p));
             }
         }
@@ -441,7 +433,7 @@ impl RawCluster {
 
         while let Some(curr_pos) = self.light_addition_cache.pop_front() {
             let curr_index = aligned_block_index(&curr_pos);
-            let curr_level = self.intrinsic_data[curr_index].light_level;
+            let curr_level = self.cells[curr_index].light_level;
             let curr_color = curr_level.components();
 
             for i in 0..6 {
@@ -459,25 +451,21 @@ impl RawCluster {
                     continue;
                 }
 
-                let index = ClusterBlockPos(rel_pos - TVec3::from_element(1)).index();
                 let aligned_index = aligned_block_index(&rel_pos);
+                let cell = &mut self.cells[aligned_index];
 
-                let block = self.block_states[index];
-                let level = &mut self.intrinsic_data[aligned_index].light_level;
+                let block = self.registry.get_block(cell.block_id).unwrap();
+                let level = &mut cell.light_level;
                 let color = level.components();
 
-                let block = self.registry.get_block(block.block_id).unwrap();
-
-                if !self.registry.is_block_opaque(block)
-                    && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b))
-                {
+                if !block.is_opaque() && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b)) {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
                     *level = LightLevel::from_vec(new_color);
 
                     self.light_addition_cache.push_back(glm::convert(rel_pos));
 
                     let dirty_pos = rel_pos.map(|v| v - 1);
-                    dirty_parts.set_dirty(&ClusterBlockPos(dirty_pos));
+                    dirty_parts.set_dirty(&ClusterBlockPos::from_vec_unchecked(dirty_pos));
                 }
             }
         }
@@ -487,384 +475,7 @@ impl RawCluster {
 
     /// Propagates lighting where necessary in the cluster using light source at `block_pos`.
     pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) -> ClusterDirtySides {
-        self.light_addition_cache
-            .push_back(pos.offset(&TVec3::from_element(1)).0);
+        self.light_addition_cache.push_back(pos.get().add_scalar(1));
         self.propagate_pending_lighting()
-    }
-
-    /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.
-    #[inline]
-    fn get_vertex_neighbours(
-        &self,
-        block_pos: &I32Vec3,
-        vertex_pos: &Vec3,
-        facing: Facing,
-    ) -> NeighbourVertexIntrinsics {
-        let facing_dir = facing.direction();
-        let facing_comp = facing_dir.iter().cloned().position(|v| v != 0).unwrap_or(0);
-
-        let mut vertex_pos = *vertex_pos;
-        vertex_pos[facing_comp] = 0.0;
-
-        let mut center = Vec3::from_element(0.5);
-        center[facing_comp] = 0.0;
-
-        let side_dir: I32Vec3 = glm::convert_unchecked(glm::sign(&(vertex_pos - center)));
-
-        let side1_comp = (facing_comp + 1) % 3;
-        let side2_comp = (facing_comp + 2) % 3;
-
-        let mut side1_dir = I32Vec3::default();
-        side1_dir[side1_comp] = side_dir[side1_comp];
-
-        let mut side2_dir = I32Vec3::default();
-        side2_dir[side2_comp] = side_dir[side2_comp];
-
-        let new_pos = block_pos.add_scalar(1) + facing_dir;
-        let corner_pos = new_pos + side_dir;
-        let side1_pos = new_pos + side1_dir;
-        let side2_pos = new_pos + side2_dir;
-
-        let corner_index = aligned_block_index(&glm::convert_unchecked(corner_pos));
-        let side1_index = aligned_block_index(&glm::convert_unchecked(side1_pos));
-        let side2_index = aligned_block_index(&glm::convert_unchecked(side2_pos));
-
-        let corner = self.intrinsic_data[corner_index];
-        let side1 = self.intrinsic_data[side1_index];
-        let side2 = self.intrinsic_data[side2_index];
-
-        NeighbourVertexIntrinsics {
-            corner,
-            sides: [side1, side2],
-        }
-    }
-
-    #[inline]
-    fn calc_quad_lighting(&self, block_pos: &I32Vec3, quad: &mut [Vertex; 4], facing: Facing) {
-        const RELATIVE_SIDES: [[I32Vec3; 4]; 6] = [
-            [
-                Facing::NegativeY.direction(),
-                Facing::NegativeZ.direction(),
-                Facing::PositiveY.direction(),
-                Facing::PositiveZ.direction(),
-            ],
-            [
-                Facing::NegativeY.direction(),
-                Facing::NegativeZ.direction(),
-                Facing::PositiveY.direction(),
-                Facing::PositiveZ.direction(),
-            ],
-            [
-                Facing::NegativeX.direction(),
-                Facing::NegativeZ.direction(),
-                Facing::PositiveX.direction(),
-                Facing::PositiveZ.direction(),
-            ],
-            [
-                Facing::NegativeX.direction(),
-                Facing::NegativeZ.direction(),
-                Facing::PositiveX.direction(),
-                Facing::PositiveZ.direction(),
-            ],
-            [
-                Facing::NegativeX.direction(),
-                Facing::NegativeY.direction(),
-                Facing::PositiveX.direction(),
-                Facing::PositiveY.direction(),
-            ],
-            [
-                Facing::NegativeX.direction(),
-                Facing::NegativeY.direction(),
-                Facing::PositiveX.direction(),
-                Facing::PositiveY.direction(),
-            ],
-        ];
-
-        #[inline]
-        fn calc_weights(weight_indices: &[usize; 8], v_comps: &[f32; 12]) -> Vec4 {
-            Vec4::new(
-                v_comps[weight_indices[0]] * v_comps[weight_indices[1]],
-                v_comps[weight_indices[2]] * v_comps[weight_indices[3]],
-                v_comps[weight_indices[4]] * v_comps[weight_indices[5]],
-                v_comps[weight_indices[6]] * v_comps[weight_indices[7]],
-            )
-        }
-
-        fn blend_lighting(base: LightLevel, mut neighbours: [LightLevel; 3]) -> Vec3 {
-            for n in &mut neighbours {
-                if n.is_zero() {
-                    *n = base;
-                }
-            }
-
-            glm::convert::<_, Vec3>(
-                base.components()
-                    + neighbours[0].components()
-                    + neighbours[1].components()
-                    + neighbours[2].components(),
-            ) / (LightLevel::MAX_COMPONENT_VALUE as f32)
-                * 0.25
-        }
-
-        let sides = &RELATIVE_SIDES[facing as usize];
-
-        // FIXME: if block shape is not of full block, rel_pos = block_pos.
-        let dir = facing.direction();
-        let rel_pos = block_pos.add_scalar(1) + dir;
-
-        let base = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos))];
-        let side0 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0]))];
-        let side1 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1]))];
-        let side2 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2]))];
-        let side3 = self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3]))];
-
-        let corner01 =
-            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0] + sides[1]))];
-        let corner12 =
-            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1] + sides[2]))];
-        let corner23 =
-            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2] + sides[3]))];
-        let corner30 =
-            self.intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3] + sides[0]))];
-
-        // if min >= Vec3::from_element(1e-5) || max <= Vec3::from_element(1.0 - 1e-5) {
-        // Do bilinear interpolation because the quad is not covering full block face.
-
-        let lights = [
-            blend_lighting(
-                base.light_level,
-                [side0.light_level, side1.light_level, corner01.light_level],
-            ),
-            blend_lighting(
-                base.light_level,
-                [side1.light_level, side2.light_level, corner12.light_level],
-            ),
-            blend_lighting(
-                base.light_level,
-                [side3.light_level, side0.light_level, corner30.light_level],
-            ),
-            blend_lighting(
-                base.light_level,
-                [side2.light_level, side3.light_level, corner23.light_level],
-            ),
-        ];
-
-        let facing_comp = dir.iamax();
-        let vi = (facing_comp + 1) % 3;
-        let vj = (facing_comp + 2) % 3;
-
-        for v in quad {
-            let ij = Vec2::new(v.position[vi], v.position[vj]);
-            let inv_v = Vec2::from_element(1.0) - ij;
-            let weights = [inv_v.x * inv_v.y, ij.x * inv_v.y, inv_v.x * ij.y, ij.x * ij.y];
-
-            let lighting = lights[0] * weights[0]
-                + lights[1] * weights[1]
-                + lights[2] * weights[2]
-                + lights[3] * weights[3];
-
-            v.lighting = LightLevel::from_color(lighting).bits();
-        }
-
-        // quad[vert_ids[0]].lighting = blend_lighting(
-        //     base.light_level,
-        //     [side0.light_level, side1.light_level, corner01.light_level],
-        // )
-        //     .bits();
-        // quad[vert_ids[1]].lighting = blend_lighting(
-        //     base.light_level,
-        //     [side1.light_level, side2.light_level, corner12.light_level],
-        // )
-        //     .bits();
-        // quad[vert_ids[2]].lighting = blend_lighting(
-        //     base.light_level,
-        //     [side2.light_level, side3.light_level, corner23.light_level],
-        // )
-        //     .bits();
-        // quad[vert_ids[3]].lighting = blend_lighting(
-        //     base.light_level,
-        //     [side3.light_level, side0.light_level, corner30.light_level],
-        // )
-        //     .bits();
-
-        // } else {
-        // The quad covers full block face.
-        // let lighting = neighbour_index_to_dir();
-        // }
-    }
-
-    pub fn update_mesh(&self, device: &Arc<vkw::Device>) -> BuildResult {
-        #[inline]
-        fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
-            out.extend(vertices.iter().cloned().map(|mut v| {
-                v.position += pos;
-                v.pack()
-            }));
-        }
-
-        let intrinsics = &self.intrinsic_data;
-        let mut vertices = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
-        let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
-        let mut empty = true;
-
-        for x in 0..Self::SIZE {
-            for y in 0..Self::SIZE {
-                for z in 0..Self::SIZE {
-                    let pos = I32Vec3::new(x as i32, y as i32, z as i32);
-                    let posf: Vec3 = glm::convert(pos);
-                    let state = &self.block_states[ClusterBlockPos(glm::convert_unchecked(pos)).index()];
-                    let block = self.registry.get_block(state.block_id).unwrap();
-
-                    if !block.has_textured_model() {
-                        continue;
-                    }
-                    empty = false;
-
-                    let model = self
-                        .registry
-                        .get_textured_block_model(block.textured_model())
-                        .unwrap();
-
-                    if !model.get_inner_quads().is_empty() {
-                        // TODO: REMOVE: For inner quads use the light level of the current block
-                        // let aligned_pos = pos.add_scalar(1);
-                        // let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
-                        // let light_level = intrinsics[index].light_level;
-
-                        for mut quad in model.get_inner_quads() {
-                            let mut quad_vertices = quad.vertices;
-                            let normal = engine::utils::calc_triangle_normal(
-                                &quad_vertices[0].position,
-                                &quad_vertices[1].position,
-                                &quad_vertices[2].position,
-                            );
-
-                            self.calc_quad_lighting(
-                                &pos,
-                                &mut quad_vertices,
-                                Facing::from_normal_closest(&normal),
-                            );
-
-                            let vertices_vec = if quad.transparent {
-                                &mut vertices_translucent
-                            } else {
-                                &mut vertices
-                            };
-
-                            for mut v in quad_vertices {
-                                v.position += posf;
-                                v.normal = normal;
-
-                                vertices_vec.push(v.pack());
-                            }
-                        }
-                    }
-
-                    let index = aligned_block_index(&glm::convert_unchecked(pos.add_scalar(1)));
-                    let intrinsic_data = &intrinsics[index];
-
-                    for i in 0..6 {
-                        let facing = Facing::from_u8(i as u8);
-                        let rel = (pos + facing.direction()).add_scalar(1);
-                        let rel_index = aligned_block_index(&glm::convert_unchecked(rel));
-
-                        let rel_intrinsic_data = intrinsics[rel_index];
-                        let rel_occludes = rel_intrinsic_data.occluder.occludes_side(facing.mirror());
-
-                        // Do not emit face if this side is fully occluded
-                        if rel_occludes {
-                            continue;
-                        }
-
-                        // Do not emit face if side faces are of the same shape
-                        if model.merge_enabled()
-                            && (intrinsic_data.tex_model_id == rel_intrinsic_data.tex_model_id
-                                && model.side_shapes_equality()[facing.axis_idx()])
-                        {
-                            continue;
-                        }
-                        if let Some(rel_model) = self
-                            .registry
-                            .get_textured_block_model(rel_intrinsic_data.tex_model_id)
-                        {
-                            if model.merge_enabled()
-                                && model
-                                    .first_side_quad_vsorted(facing)
-                                    .cmp_ordered(rel_model.first_side_quad_vsorted(facing.mirror()))
-                            {
-                                continue;
-                            }
-                        }
-
-                        for quad in model.get_quads_by_facing(facing) {
-                            let mut quad_vertices = quad.vertices;
-
-                            let normal = engine::utils::calc_triangle_normal(
-                                &quad_vertices[0].position,
-                                &quad_vertices[1].position,
-                                &quad_vertices[2].position,
-                            );
-
-                            self.calc_quad_lighting(&pos, &mut quad_vertices, facing);
-
-                            for v in &mut quad_vertices {
-                                let neighbours = self.get_vertex_neighbours(&pos, &v.position, facing);
-                                v.position += posf;
-                                v.normal = normal;
-                                v.ao = neighbours.calculate_ao();
-                                // v.lighting = neighbours.calculate_lighting(intrinsic);
-                            }
-
-                            if quad_vertices[1].ao != quad_vertices[2].ao
-                                || quad_vertices[1].lighting != quad_vertices[2].lighting
-                            {
-                                let vc = quad_vertices;
-                                quad_vertices[1] = vc[0];
-                                quad_vertices[3] = vc[1];
-                                quad_vertices[0] = vc[2];
-                                quad_vertices[2] = vc[3];
-                            }
-
-                            let vertices_vec = if quad.transparent {
-                                &mut vertices_translucent
-                            } else {
-                                &mut vertices
-                            };
-
-                            vertices_vec.extend(quad_vertices.map(|v| v.pack()));
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut indices = vec![0; vertices.len() / 4 * 6];
-        let mut indices_translucent = vec![0; vertices_translucent.len() / 4 * 6];
-
-        let map_quad_ids = |quad_idx, chunk: &mut [u32]| {
-            let ind = (quad_idx * 4) as u32;
-            chunk[0] = ind;
-            chunk[1] = ind + 2;
-            chunk[2] = ind + 1;
-            chunk[3] = ind + 2;
-            chunk[4] = ind + 3;
-            chunk[5] = ind + 1;
-        };
-
-        for (i, chunk) in indices.chunks_exact_mut(6).enumerate() {
-            map_quad_ids(i, chunk);
-        }
-        for (i, chunk) in indices_translucent.chunks_exact_mut(6).enumerate() {
-            map_quad_ids(i, chunk);
-        }
-
-        let meshes = Meshes {
-            solid: device.create_vertex_mesh(&vertices, Some(&indices)).unwrap(),
-            transparent: device
-                .create_vertex_mesh(&vertices_translucent, Some(&indices_translucent))
-                .unwrap(),
-        };
-
-        BuildResult { meshes, empty }
     }
 }

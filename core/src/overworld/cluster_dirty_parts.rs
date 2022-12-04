@@ -20,7 +20,7 @@ impl ClusterDirtySides {
     }
 
     pub fn set_dirty(&mut self, pos: &ClusterBlockPos) {
-        let idx = raw_cluster::neighbour_index_from_pos(&glm::convert(pos.0));
+        let idx = raw_cluster::neighbour_index_from_pos(&glm::convert(*pos.get()));
         self.0 |= 1 << idx;
         // The center is never dirty
         self.0 &= !Self::CENTER_PART_MASK;

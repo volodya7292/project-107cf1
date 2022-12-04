@@ -1,5 +1,6 @@
-use nalgebra_glm::{I32Vec3, Vec3};
 use std::mem;
+
+use nalgebra_glm::{I32Vec3, Vec3};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -35,6 +36,9 @@ impl Facing {
         Facing::PositiveZ,
         Facing::NegativeZ,
     ];
+    pub const AXIS_X: usize = 0;
+    pub const AXIS_Y: usize = 1;
+    pub const AXIS_Z: usize = 2;
 
     pub const fn axis_idx(&self) -> usize {
         *self as usize / 2

@@ -53,13 +53,13 @@ impl Overworld {
                     if let Some(entry) = access.get_block(&BlockPos(pos)) {
                         let block_id = entry.block_id();
                         let block = reg.get_block(block_id).unwrap();
-                        if !block.has_textured_model() {
+
+                        if let Some(model) = reg.get_block_model(block.model_id()) {
+                            let pos: DVec3 = glm::convert(pos);
+                            blocks_aabbs.extend(model.aabbs().iter().map(|v| v.translate(pos)));
+                        } else {
                             continue;
                         }
-                        let model = reg.get_textured_block_model(block.textured_model()).unwrap();
-
-                        let pos: DVec3 = glm::convert(pos);
-                        blocks_aabbs.extend(model.aabbs().iter().map(|v| v.translate(pos)));
                     }
                 }
             }

@@ -17,9 +17,9 @@ pub use device::DeviceError;
 use device::DeviceWrapper;
 pub use entry::Entry;
 pub use fence::Fence;
+pub use format::Format;
 pub use format::BC_IMAGE_FORMATS;
 pub use format::DEPTH_FORMAT;
-pub use format::Format;
 pub use format::FORMAT_SIZES;
 pub use format::IMAGE_FORMATS;
 pub use framebuffer::Framebuffer;
@@ -93,4 +93,3 @@ pub mod sampler;
 pub mod shader;
 pub mod surface;
 pub mod swapchain;
-

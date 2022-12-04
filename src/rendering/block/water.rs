@@ -1,4 +1,4 @@
-use nalgebra_glm::{DVec3, Vec3};
+use algebra_glm::{DVec3, Vec3};
 
 use crate::overworld::block_model::{BlockModel, Quad};
 use crate::overworld::textured_block_model::{QuadMaterial, TexturedBlockModel};

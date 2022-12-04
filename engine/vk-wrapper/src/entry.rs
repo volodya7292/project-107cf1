@@ -6,8 +6,8 @@ use ash::vk;
 use log::{error, info, warn};
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 
-use crate::Instance;
 use crate::utils;
+use crate::Instance;
 
 pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_0;
 

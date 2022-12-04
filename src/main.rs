@@ -5,8 +5,11 @@ use engine::Engine;
 use crate::game::Game;
 
 mod client;
+mod default_resources;
 mod game;
 pub mod proto;
+mod rendering;
+mod resource_mapping;
 #[cfg(test)]
 mod tests;
 

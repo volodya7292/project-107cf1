@@ -65,7 +65,7 @@ impl AfterTickActionsStorage {
                     .copy_to_nonoverlapping(state.as_mut_ptr(), mem::size_of::<BlockState<A>>());
                 let state_init = state.assume_init();
 
-                access.set_block(pos, state_init)
+                access.update_block(pos, |data| data.set(state_init))
             },
         });
     }

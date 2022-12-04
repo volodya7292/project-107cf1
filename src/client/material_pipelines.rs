@@ -6,8 +6,8 @@ use engine::renderer::Renderer;
 use engine::resource_file::ResourceFile;
 use engine::uniform_struct_impl;
 use vk_wrapper as vkw;
-use vk_wrapper::PrimitiveTopology;
 use vk_wrapper::shader::VInputRate;
+use vk_wrapper::PrimitiveTopology;
 
 pub struct MaterialPipelines {
     cluster: u32,

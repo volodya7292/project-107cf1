@@ -11,11 +11,11 @@ use crate::overworld::Overworld;
 use crate::registry::Registry;
 
 pub mod event_handlers;
-pub mod water;
 
 #[derive(Copy, Clone)]
 pub struct Block {
-    textured_model: u16,
+    transparent: bool,
+    model_id: u16,
     occluder: Occluder,
     event_handlers: EventHandlers,
 }
@@ -23,7 +23,8 @@ pub struct Block {
 impl Default for Block {
     fn default() -> Self {
         Block {
-            textured_model: u16::MAX,
+            transparent: false,
+            model_id: u16::MAX,
             occluder: Default::default(),
             event_handlers: Default::default(),
         }
@@ -31,29 +32,76 @@ impl Default for Block {
 }
 
 impl Block {
-    pub fn new(registry: &Registry, textured_model: u16, event_handlers: EventHandlers) -> Block {
-        let model = registry.get_textured_block_model(textured_model);
-        Block {
-            textured_model,
-            occluder: model.map_or(Default::default(), |m| m.occluder()),
-            event_handlers,
-        }
+    pub fn transparent(&self) -> bool {
+        self.transparent
     }
 
-    pub fn new_simple(registry: &Registry, textured_model: u16) -> Block {
-        Self::new(registry, textured_model, Default::default())
-    }
-
-    pub fn textured_model(&self) -> u16 {
-        self.textured_model
-    }
-
-    pub fn has_textured_model(&self) -> bool {
-        self.textured_model != u16::MAX
+    pub fn model_id(&self) -> u16 {
+        self.model_id
     }
 
     pub fn occluder(&self) -> Occluder {
         self.occluder
+    }
+
+    pub fn event_handlers(&self) -> &EventHandlers {
+        &self.event_handlers
+    }
+
+    pub fn is_opaque(&self) -> bool {
+        self.occluder.is_full()
+    }
+
+    pub fn is_model_invisible(&self) -> bool {
+        self.model_id == Registry::MODEL_ID_NULL
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct BlockBuilder {
+    transparent: bool,
+    model_id: u16,
+    event_handlers: EventHandlers,
+}
+
+impl BlockBuilder {
+    pub fn new(model_id: u16) -> Self {
+        BlockBuilder {
+            transparent: false,
+            model_id,
+            event_handlers: Default::default(),
+        }
+    }
+
+    pub fn with_transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
+        self
+    }
+
+    pub fn with_event_handlers(mut self, event_handlers: EventHandlers) -> Self {
+        self.event_handlers = event_handlers;
+        self
+    }
+
+    pub fn build(self, registry: &Registry) -> Block {
+        let mut occluder = Occluder::EMPTY;
+
+        if !self.transparent {
+            if let Some(model) = registry.get_block_model(self.model_id) {
+                occluder = model.occluder();
+            }
+        }
+
+        Block {
+            transparent: self.transparent,
+            model_id: self.model_id,
+            occluder,
+            event_handlers: self.event_handlers,
+        }
+    }
+
+    pub fn model_id(&self) -> u16 {
+        self.model_id
     }
 
     pub fn event_handlers(&self) -> &EventHandlers {

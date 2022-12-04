@@ -19,11 +19,11 @@ use core::overworld::block::event_handlers::AfterTickActionsStorage;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
 use core::overworld::light_level::LightLevel;
+use core::overworld::liquid_level::LiquidLevel;
 use core::overworld::position::{BlockPos, ClusterPos};
 use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use core::overworld::Overworld;
 use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
-use core::overworld_streamer::OverworldStreamer;
 use core::physics::aabb::{AABBRayIntersection, AABB};
 use core::physics::MOTION_EPSILON;
 use core::registry::Registry;
@@ -39,14 +39,18 @@ use engine::{renderer, Application, Input};
 use renderer::camera;
 use vk_wrapper::Adapter;
 
+use crate::client::overworld::overworld_streamer::OverworldStreamer;
 use crate::client::{material_pipelines, utils};
-use crate::PROGRAM_NAME;
+use crate::default_resources::DefaultResourceMapping;
+use crate::resource_mapping::ResourceMapping;
+use crate::{default_resources, PROGRAM_NAME};
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
     registry: Arc<MainRegistry>,
+    res_map: Arc<DefaultResourceMapping>,
 
     cursor_rel: (f64, f64),
     game_tick_finished: Arc<AtomicBool>,
@@ -61,6 +65,7 @@ pub struct Game {
     look_at_block: Option<(BlockPos, Facing)>,
     block_set_cooldown: f64,
     curr_block: AnyBlockState,
+    set_water: bool,
 
     change_stream_pos: bool,
     player_collision_enabled: bool,
@@ -73,7 +78,9 @@ impl Game {
 
     pub fn init() -> Game {
         let resources = ResourceFile::open("resources").unwrap();
-        let main_registry = MainRegistry::init(&resources);
+        let main_registry = MainRegistry::init();
+        let res_map = DefaultResourceMapping::init(&main_registry, &resources);
+
         let game_tick_finished = Arc::new(AtomicBool::new(true));
         let overworld = Overworld::new(&main_registry, 0);
 
@@ -86,6 +93,7 @@ impl Game {
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),
+            res_map,
             cursor_rel: (0.0, 0.0),
             game_tick_finished: Arc::clone(&game_tick_finished),
             overworld,
@@ -96,7 +104,8 @@ impl Game {
             curr_jump_force: 0.0,
             look_at_block: None,
             block_set_cooldown: 0.0,
-            curr_block: main_registry.block_default.into_any(),
+            curr_block: main_registry.block_test.into_any(),
+            set_water: false,
             change_stream_pos: true,
             player_collision_enabled: false,
             cursor_grab: true,
@@ -161,19 +170,23 @@ impl Application for Game {
         {
             mat_pipelines = material_pipelines::create(&self.resources, renderer);
 
-            for (index, (ty, res_ref)) in self.registry.registry().textures().iter().enumerate() {
+            for (index, (ty, res_ref)) in self.res_map.storage().textures().iter().enumerate() {
                 renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
             }
 
-            for (id, material) in self.registry.registry().materials().iter().enumerate() {
+            for (id, material) in self.res_map.storage().materials().iter().enumerate() {
                 renderer.set_material(id as u32, material.info());
             }
         }
 
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
-        let mut overworld_streamer =
-            OverworldStreamer::new(renderer, mat_pipelines.cluster(), &self.overworld);
+        let mut overworld_streamer = OverworldStreamer::new(
+            renderer,
+            mat_pipelines.cluster(),
+            &self.overworld,
+            Arc::clone(self.res_map.storage()),
+        );
 
         // overworld_streamer.set_xz_render_distance(1024);
         overworld_streamer.set_xz_render_distance(256);
@@ -296,7 +309,7 @@ impl Application for Game {
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
         }
 
-        // Set block on mouse buttons
+        // Set block on mouse button click
         {
             if self.block_set_cooldown == 0.0 {
                 if input.mouse().is_button_pressed(MouseButton::Left) {
@@ -310,13 +323,17 @@ impl Application for Game {
                         let dir: I64Vec3 = glm::convert(facing.direction());
                         let set_pos = pos.offset(&dir);
 
-                        access.set_block(&set_pos, self.curr_block.clone());
-
-                        if self.curr_block.block_id == self.registry.block_glow.block_id {
-                            access.set_light(&set_pos, LightLevel::from_intensity(10));
+                        if self.set_water {
+                            access.set_liquid(&set_pos, self.res_map.material_water(), LiquidLevel::new(15));
                         } else {
-                            // Remove light to cause occlusion of nearby lights
-                            access.remove_light(&set_pos);
+                            access.update_block(&set_pos, |data| data.set(self.curr_block.clone()));
+
+                            if self.curr_block.block_id == self.registry.block_glow.block_id {
+                                access.set_light(&set_pos, LightLevel::from_intensity(10));
+                            } else {
+                                // Remove light to cause occlusion of nearby lights
+                                access.remove_light(&set_pos);
+                            }
                         }
 
                         self.block_set_cooldown = 0.15;
@@ -330,7 +347,7 @@ impl Application for Game {
 
                     if let Some(inter) = self.look_at_block {
                         let prev_block_id = access.get_block(&inter.0).unwrap().block_id();
-                        access.set_block(&inter.0, self.registry.block_empty);
+                        access.update_block(&inter.0, |data| data.set(self.registry.block_empty));
 
                         if prev_block_id == self.registry.block_glow.block_id {
                             access.remove_light(&inter.0);
@@ -443,14 +460,15 @@ impl Application for Game {
                                 main_window.set_cursor_visible(!self.cursor_grab);
                             }
                             VirtualKeyCode::Key1 => {
-                                self.curr_block = self.registry.block_default.into_any();
+                                self.curr_block = self.registry.block_test.into_any();
+                                self.set_water = false;
                             }
                             VirtualKeyCode::Key2 => {
                                 self.curr_block = self.registry.block_glow.into_any();
+                                self.set_water = false;
                             }
                             VirtualKeyCode::Key3 => {
-                                let idx = block::water::v4d_to_idx([6, 6, 6, 6], 7);
-                                self.curr_block = self.registry.water_states[idx].into_any();
+                                self.set_water = true;
                             }
                             _ => {}
                         }
@@ -503,7 +521,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
 
             if let Some(cluster) = &*cluster {
                 for (pos, block_data) in cluster.active_blocks() {
-                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(pos.0));
+                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
                     let block = registry.get_block(block_data.block_id()).unwrap();
 
                     if let Some(on_tick) = &block.event_handlers().on_tick {

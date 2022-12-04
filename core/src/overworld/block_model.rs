@@ -17,56 +17,6 @@ use crate::physics::aabb::AABB;
 
 const EQUITY_EPSILON: f32 = 1e-6;
 
-#[derive(Debug, Copy, Clone, Default)]
-#[repr(C)]
-pub struct PackedVertex {
-    pack1: UVec4,
-    pack2: u32,
-}
-attributes_impl!(PackedVertex, pack1, pack2);
-
-impl VertexPositionImpl for PackedVertex {
-    fn position(&self) -> Vec3 {
-        Vec3::new(
-            ((self.pack1[0] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
-            (self.pack1[0] & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
-            ((self.pack1[1] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
-        )
-    }
-}
-
-#[derive(Debug, Copy, Clone, Default)]
-pub struct Vertex {
-    pub position: Vec3,
-    pub normal: Vec3,
-    pub tex_uv: Vec2,
-    pub ao: u8,
-    pub lighting: u16,
-    pub material_id: u32,
-}
-
-impl Vertex {
-    pub fn pack(&self) -> PackedVertex {
-        let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (RawCluster::SIZE as f32) * 65535.0);
-        let enc_normal: U32Vec3 =
-            glm::convert_unchecked(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0));
-        let enc_tex_uv: U32Vec2 = glm::convert_unchecked(self.tex_uv / 64.0 * 65535.0);
-
-        let pack1_0 = ((enc_pos[0] & 0xffff) << 16) | (enc_pos[1] & 0xffff);
-        let pack1_1 = ((enc_pos[2] & 0xffff) << 16) | ((enc_normal[0] & 0xff) << 8) | (enc_normal[1] & 0xff);
-        let pack1_2 =
-            ((enc_normal[2] & 0xff) << 24) | ((self.ao as u32 & 0xff) << 16) | (self.material_id & 0xffff);
-        let pack1_3 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
-
-        let pack2_4 = self.lighting as u32;
-
-        PackedVertex {
-            pack1: UVec4::new(pack1_0, pack1_1, pack1_2, pack1_3),
-            pack2: pack2_4,
-        }
-    }
-}
-
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Quad {
     vertices: [Vec3; 4],

@@ -44,6 +44,7 @@ impl Drop for Buffer {
 }
 
 unsafe impl Send for Buffer {}
+
 unsafe impl Sync for Buffer {}
 
 #[derive(Clone)]
@@ -64,6 +65,7 @@ impl RawHostBuffer {
 }
 
 unsafe impl Send for RawHostBuffer {}
+
 unsafe impl Sync for RawHostBuffer {}
 
 #[derive(Clone)]
@@ -281,6 +283,7 @@ impl<T> BufferHandleImpl for HostBuffer<T> {
 }
 
 unsafe impl<T> Send for HostBuffer<T> {}
+
 unsafe impl<T> Sync for HostBuffer<T> {}
 
 pub struct DeviceBuffer {
@@ -310,6 +313,7 @@ impl DeviceBuffer {
 }
 
 unsafe impl Send for DeviceBuffer {}
+
 unsafe impl Sync for DeviceBuffer {}
 
 impl BufferHandleImpl for DeviceBuffer {

@@ -6,7 +6,7 @@ use crate::overworld::raw_cluster::RawCluster;
 
 /// Block position relative to cluster
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
-pub struct ClusterBlockPos(pub TVec3<usize>);
+pub struct ClusterBlockPos(TVec3<usize>);
 
 impl ClusterBlockPos {
     #[inline]

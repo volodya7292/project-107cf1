@@ -1,19 +1,19 @@
-use std::{mem, ptr, slice};
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::{mem, ptr, slice};
 
 use ash::vk;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 
+use crate::buffer::BufferHandleImpl;
+use crate::render_pass::vk_clear_value;
 use crate::{
     BufferBarrier, ClearValue, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout, Pipeline,
     PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
-use crate::buffer::BufferHandleImpl;
-use crate::render_pass::vk_clear_value;
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,

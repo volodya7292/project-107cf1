@@ -1486,9 +1486,12 @@ impl Renderer {
                     let renderable_id = self.ordered_entities[entity_index];
                     let entry = self.storage.entry(&renderable_id).unwrap();
 
-                    let global_transform = unwrap_option!(entry.get::<GlobalTransform>(), continue);
-                    let render_config = unwrap_option!(entry.get::<component::MeshRenderConfig>(), continue);
-                    let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
+                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
+                        (entry.get::<GlobalTransform>(),
+                           entry.get::<component::MeshRenderConfig>(),
+                           self.vertex_meshes.get(&renderable_id)) else {
+                        continue;
+                    };
 
                     if vertex_mesh.vertex_count == 0 && render_config.fake_vertex_count == 0 {
                         continue;

@@ -1,14 +1,14 @@
-use std::{ptr, slice};
 use std::sync::Arc;
+use std::{ptr, slice};
 
 use ash::vk;
 use ash::vk::Handle;
 use parking_lot::{Mutex, RwLock};
 use smallvec::SmallVec;
 
-use crate::{CmdList, Fence, pipeline::PipelineStageFlags, Semaphore, swapchain};
-use crate::{DeviceError, SwapchainImage};
 use crate::device::DeviceWrapper;
+use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
+use crate::{DeviceError, SwapchainImage};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueueType(pub(crate) u32);

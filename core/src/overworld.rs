@@ -37,12 +37,12 @@ pub mod cluster_dirty_parts;
 pub mod facing;
 pub mod generator;
 pub mod light_level;
+pub mod liquid_level;
 pub mod material;
 pub mod occluder;
 pub mod position;
 pub mod raw_cluster;
 pub mod structure;
-pub mod textured_block_model;
 
 // TODO Main world - 'The Origin'
 
@@ -142,10 +142,10 @@ impl Cluster {
 
 pub struct OverworldCluster {
     pub cluster: Arc<RwLock<Option<Cluster>>>,
-    pub(super) state: AtomicU32,
-    pub(super) dirty: AtomicBool,
+    pub state: AtomicU32,
+    pub dirty: AtomicBool,
 
-    pub(super) active_blocks: FixedBitSet,
+    pub active_blocks: FixedBitSet,
     pub may_have_active_blocks: AtomicBool,
 }
 

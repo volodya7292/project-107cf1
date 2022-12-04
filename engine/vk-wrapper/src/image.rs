@@ -170,6 +170,7 @@ impl Drop for ImageWrapper {
 }
 
 unsafe impl Send for ImageWrapper {}
+
 unsafe impl Sync for ImageWrapper {}
 
 pub struct Image {

@@ -15,6 +15,7 @@ use crate::overworld;
 use crate::overworld::block::{Block, BlockState};
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
+use crate::overworld::liquid_level::LiquidLevel;
 use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut, RawCluster};
 use crate::overworld::{
@@ -167,7 +168,7 @@ impl OverworldAccessor {
                 Some(cluster) => Some(cluster.raw.get(&pos.cluster_block_pos())),
                 None if access.locked_state == ClusterState::OffloadedEmpty => Some(BlockData {
                     block_storage: &EMPTY_BLOCK_STORAGE,
-                    inner_state: self.registry.inner_block_state_empty(),
+                    info: self.registry.inner_block_state_empty(),
                 }),
                 _ => None,
             })
@@ -187,31 +188,6 @@ impl OverworldAccessor {
 
             update_fn(&mut block_data);
 
-            let active = block_data
-                .get::<block_component::Activity>()
-                .map_or(false, |v| v.active);
-
-            cluster.active_blocks.set(cluster_block_pos.index(), active);
-            cluster.may_have_active_blocks |= active;
-
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Returns false if respective cluster is not loaded
-    pub fn set_block<A: ArchetypeState>(&mut self, pos: &BlockPos, state: BlockState<A>) -> bool {
-        if let Some(cluster) = self
-            .cache
-            .access_cluster_mut(&pos.cluster_pos())
-            .map(|access| access.cluster_mut())
-            .flatten()
-        {
-            let cluster_block_pos = pos.cluster_block_pos();
-            let mut block_data = cluster.raw.set(&cluster_block_pos, state);
-
-            // Determine activity
             let active = block_data
                 .get::<block_component::Activity>()
                 .map_or(false, |v| v.active);
@@ -248,6 +224,24 @@ impl OverworldAccessor {
         }
     }
 
+    /// Returns block builder or `None` if respective cluster is not loaded
+    pub fn set_liquid(&mut self, pos: &BlockPos, liquid_id: u16, liquid_level: LiquidLevel) {
+        if let Some(cluster) = self
+            .cache
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|access| access.cluster_mut())
+            .flatten()
+        {
+            let cluster_block_pos = pos.cluster_block_pos();
+            let mut cell = cluster.raw.get_mut(&cluster_block_pos);
+
+            *cell.liquid_id() = liquid_id;
+            *cell.liquid_level_mut() = liquid_level;
+
+            cluster.dirty_parts.set_dirty(&cluster_block_pos);
+        }
+    }
+
     /// Returns intersection facing and position of the block that specified ray intersect.
     pub fn get_block_at_ray(
         &mut self,
@@ -275,8 +269,8 @@ impl OverworldAccessor {
             if let Some(data) = &curr_block {
                 let block = registry.get_block(data.block_id()).unwrap();
 
-                if block.has_textured_model() {
-                    let model = registry.get_textured_block_model(block.textured_model()).unwrap();
+                if !block.is_model_invisible() {
+                    let model = registry.get_block_model(block.model_id()).unwrap();
                     let mut closest_inter = None;
                     let mut min_length = f64::MAX;
 
@@ -331,9 +325,7 @@ impl OverworldAccessor {
                 let level = self.get_light_level(&rel_pos).unwrap();
                 let color = level.components();
 
-                if !self.registry.is_block_opaque(&block)
-                    && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b))
-                {
+                if !block.is_opaque() && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b)) {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
                     self.set_light_level(&rel_pos, LightLevel::from_vec(new_color));
 

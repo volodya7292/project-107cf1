@@ -2,15 +2,70 @@ use std::ops::Range;
 
 use bit_vec::BitVec;
 use nalgebra_glm as glm;
-use nalgebra_glm::{Vec2, Vec3};
+use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
 use smallvec::{smallvec, SmallVec};
 
-use crate::overworld::block_model;
-use crate::overworld::block_model::{BlockModel, ContentType, Quad, Vertex};
-use crate::overworld::facing::Facing;
-use crate::overworld::occluder::Occluder;
-use crate::physics::aabb::AABB;
-use crate::registry::Registry;
+use core::overworld::block_model;
+use core::overworld::block_model::{BlockModel, ContentType, Quad};
+use core::overworld::facing::Facing;
+use core::overworld::occluder::Occluder;
+use core::overworld::raw_cluster::RawCluster;
+use core::physics::aabb::AABB;
+use core::registry::Registry;
+use engine::attributes_impl;
+use engine::renderer::vertex_mesh::VertexPositionImpl;
+
+use crate::resource_mapping::ResourceMapping;
+
+#[derive(Debug, Copy, Clone, Default)]
+#[repr(C)]
+pub struct PackedVertex {
+    pack1: UVec4,
+    pack2: u32,
+}
+attributes_impl!(PackedVertex, pack1, pack2);
+
+impl VertexPositionImpl for PackedVertex {
+    fn position(&self) -> Vec3 {
+        Vec3::new(
+            ((self.pack1[0] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
+            (self.pack1[0] & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
+            ((self.pack1[1] >> 16) & 0xffff) as f32 / 65535.0 * (RawCluster::SIZE as f32),
+        )
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Vertex {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub tex_uv: Vec2,
+    pub ao: u8,
+    pub lighting: u16,
+    pub material_id: u32,
+}
+
+impl Vertex {
+    pub fn pack(&self) -> PackedVertex {
+        let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (RawCluster::SIZE as f32) * 65535.0);
+        let enc_normal: U32Vec3 =
+            glm::convert_unchecked(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0));
+        let enc_tex_uv: U32Vec2 = glm::convert_unchecked(self.tex_uv / 64.0 * 65535.0);
+
+        let pack1_0 = ((enc_pos[0] & 0xffff) << 16) | (enc_pos[1] & 0xffff);
+        let pack1_1 = ((enc_pos[2] & 0xffff) << 16) | ((enc_normal[0] & 0xff) << 8) | (enc_normal[1] & 0xff);
+        let pack1_2 =
+            ((enc_normal[2] & 0xff) << 24) | ((self.ao as u32 & 0xff) << 16) | (self.material_id & 0xffff);
+        let pack1_3 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
+
+        let pack2_4 = self.lighting as u32;
+
+        PackedVertex {
+            pack1: UVec4::new(pack1_0, pack1_1, pack1_2, pack1_3),
+            pack2: pack2_4,
+        }
+    }
+}
 
 #[derive(Copy, Clone)]
 pub enum QuadRotation {
@@ -103,7 +158,7 @@ impl TexturedBlockModel {
     pub fn new(
         model: &BlockModel,
         quad_materials: &[QuadMaterial],
-        registry: &Registry,
+        res_map: &ResourceMapping,
     ) -> TexturedBlockModel {
         let mut tex_model = TexturedBlockModel {
             content_type: model.content_type(),
@@ -115,7 +170,7 @@ impl TexturedBlockModel {
             occluder: model.occluder(),
             quads_transparency: quad_materials
                 .iter()
-                .map(|m| registry.get_material(m.material_id).unwrap().translucent())
+                .map(|m| res_map.get_material(m.material_id).unwrap().translucent())
                 .collect(),
             merge_enabled: true,
             aabbs: model.aabbs().to_vec(),
@@ -155,7 +210,7 @@ impl TexturedBlockModel {
                     tex_model.first_side_quads_vsorted[f_i] = quad_sorted;
                 }
 
-                let mat = registry
+                let mat = res_map
                     .get_material(quad_materials[range.start + i].material_id)
                     .unwrap();
 
@@ -218,7 +273,7 @@ impl TexturedBlockModel {
                     })
                     .collect();
 
-                let mat = registry.get_material(q_mat.material_id).unwrap();
+                let mat = res_map.get_material(q_mat.material_id).unwrap();
 
                 TexturedQuad {
                     vertices: tex_vertices.into_inner().unwrap(),

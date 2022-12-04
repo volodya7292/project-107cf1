@@ -1,44 +1,68 @@
-use engine::ecs::scene::Scene;
-use engine::ecs::{component, scene};
-use engine::queue::intensive_queue;
-use engine::renderer::Renderer;
-use engine::unwrap_option;
-use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
-use smallvec::SmallVec;
 use std::collections::hash_map;
 use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::Arc;
 use std::time::Instant;
-use vk_wrapper as vkw;
 
-use crate::main_registry::MainRegistry;
-use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
-use crate::overworld::facing::Facing;
-use crate::overworld::generator::OverworldGenerator;
-use crate::overworld::occluder::Occluder;
-use crate::overworld::position::{BlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{IntrinsicBlockData, RawCluster};
-use crate::overworld::{
+use entity_data::{EntityId, SystemHandler};
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, U8Vec3, Vec3};
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use smallvec::SmallVec;
+
+use core::main_registry::MainRegistry;
+use core::overworld::cluster_dirty_parts::ClusterDirtySides;
+use core::overworld::facing::Facing;
+use core::overworld::generator::OverworldGenerator;
+use core::overworld::liquid_level::LiquidLevel;
+use core::overworld::occluder::Occluder;
+use core::overworld::position::{BlockPos, ClusterPos};
+use core::overworld::raw_cluster::{CellInfo, RawCluster};
+use core::overworld::{
     generator, raw_cluster, Cluster, ClusterState, LoadedClusters, Overworld, OverworldCluster,
 };
+use engine::ecs::component;
+use engine::queue::intensive_queue;
+use engine::renderer::{Renderer, VertexMeshObject};
+use engine::unwrap_option;
+use engine::utils::{HashMap, HashSet, MO_ACQUIRE, MO_RELAXED, MO_RELEASE};
+use vk_wrapper as vkw;
+
+use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
+use crate::resource_mapping::ResourceMapping;
 
 pub const FORCED_LOAD_RANGE: usize = 128;
 
-pub struct OverworldOrchestrator {
+pub struct OverworldStreamer {
+    device: Arc<vkw::Device>,
+    cluster_mat_pipeline: u32,
     stream_pos: DVec3,
     xz_render_distance: u64,
     y_render_distance: u64,
     loaded_clusters: LoadedClusters,
+    res_map: Arc<ResourceMapping>,
     overworld_generator: Arc<OverworldGenerator>,
+    rclusters: HashMap<ClusterPos, RCluster>,
+    clusters_entities_to_remove: Vec<EntityId>,
+    clusters_entities_to_add: Vec<ClusterPos>,
     curr_loading_clusters_n: Arc<AtomicU32>,
     curr_clusters_intrinsics_updating_n: Arc<AtomicU32>,
+    curr_clusters_meshes_updating_n: Arc<AtomicU32>,
 }
 
 const CLUSTER_ALL_NEIGHBOURS_3X3: u32 = ((1 << 27) - 1) & !(1 << 13);
+
+#[derive(Default)]
+struct RClusterEntities {
+    solid: EntityId,
+    translucent: EntityId,
+}
+
+impl RClusterEntities {
+    fn is_null(&self) -> bool {
+        self.solid == EntityId::NULL && self.translucent == EntityId::NULL
+    }
+}
 
 struct RCluster {
     creation_time: Instant,
@@ -61,7 +85,7 @@ struct RCluster {
     /// Mesh has been updated and it needs to be updated inside the VertexMesh scene component
     mesh_changed: Arc<AtomicBool>,
 
-    meshes: Arc<Mutex<raw_cluster::Meshes>>,
+    meshes: Arc<Mutex<ClusterMeshes>>,
 }
 
 struct ClusterPosDistance {
@@ -179,13 +203,18 @@ fn is_cluster_visibly_occluded(
     edges_occluded
 }
 
-impl OverworldOrchestrator {
+impl OverworldStreamer {
     const MIN_XZ_RENDER_DISTANCE: u64 = 128;
     const MAX_XZ_RENDER_DISTANCE: u64 = 1024;
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
     const MAX_Y_RENDER_DISTANCE: u64 = 512;
 
-    pub fn new(re: &Renderer, cluster_mat_pipeline: u32, overworld: &Overworld) -> Self {
+    pub fn new(
+        re: &Renderer,
+        cluster_mat_pipeline: u32,
+        overworld: &Overworld,
+        res_map: Arc<ResourceMapping>,
+    ) -> Self {
         Self {
             device: Arc::clone(re.device()),
             cluster_mat_pipeline,
@@ -193,6 +222,7 @@ impl OverworldOrchestrator {
             xz_render_distance: 128,
             y_render_distance: 128,
             loaded_clusters: Arc::clone(overworld.loaded_clusters()),
+            res_map,
             overworld_generator: Arc::clone(overworld.generator()),
             rclusters: Default::default(),
             clusters_entities_to_remove: Default::default(),
@@ -469,7 +499,7 @@ impl OverworldOrchestrator {
             let rcluster = rclusters.get_mut(pos).unwrap();
 
             if rcluster.needs_intrinsics_fill_at != 0 || rcluster.needs_intrinsics_clear_at != 0 {
-                // Do not update mesh when outer intrinsics is not filled yet
+                // Do not update mesh if outer intrinsics is not filled yet
                 rcluster.mesh_can_be_updated.store(false, MO_RELAXED);
             }
         }
@@ -672,10 +702,13 @@ impl OverworldOrchestrator {
 
                             cluster.raw.clear_outer_intrinsics(
                                 glm::convert(offset),
-                                IntrinsicBlockData {
-                                    tex_model_id: u16::MAX,
+                                CellInfo {
+                                    entity_id: Default::default(),
+                                    block_id: u16::MAX,
+                                    liquid_id: u16::MAX,
                                     occluder: offloaded_fill_occluder.unwrap(),
                                     light_level: Default::default(),
+                                    liquid_level: LiquidLevel::ZERO,
                                 },
                             );
                         }
@@ -718,6 +751,7 @@ impl OverworldOrchestrator {
             let updating_outer_intrinsics = Arc::clone(&rcluster.updating_outer_intrinsics);
             let meshes = Arc::clone(&rcluster.meshes);
             let device = Arc::clone(&self.device);
+            let res_map = Arc::clone(&self.res_map);
 
             curr_clusters_meshes_updating_n.fetch_add(1, MO_RELAXED);
 
@@ -730,7 +764,7 @@ impl OverworldOrchestrator {
                     return;
                 };
 
-                let result = cluster.raw.update_mesh(&device);
+                let result = cluster.raw.update_mesh(&device, &res_map);
                 *meshes.lock() = result.meshes;
 
                 // Determine edge intrinsics
@@ -758,21 +792,13 @@ impl OverworldOrchestrator {
     }
 
     /// Creates/removes new render entities.
-    pub fn update_scene(&mut self, scene: &Scene) {
-        scene.remove_entities(&self.clusters_entities_to_remove);
-
-        // Reserve entities from scene (two for each cluster, solid and translucent)
-        let mut entities = scene.create_entities(self.clusters_entities_to_add.len() as u32 * 2);
-
-        let mut transform_comps = scene.storage_write::<component::Transform>();
-        let mut render_config_comps = scene.storage_write::<component::MeshRenderConfig>();
-        let mut vertex_mesh_comps = scene.storage_write::<component::VertexMesh>();
+    pub fn update_scene(&mut self, renderer: &mut Renderer) {
+        for obj in self.clusters_entities_to_remove.drain(..) {
+            renderer.remove_object(&obj);
+        }
 
         // Add components to the new entities
         for pos in &self.clusters_entities_to_add {
-            let entity_solid = entities.pop().unwrap();
-            let entity_translucent = entities.pop().unwrap();
-
             let transform_comp = component::Transform::new(
                 glm::convert(*pos.get()),
                 Vec3::new(0.0, 0.0, 0.0),
@@ -781,11 +807,16 @@ impl OverworldOrchestrator {
             let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
             let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
 
-            transform_comps.set(entity_solid, transform_comp);
-            render_config_comps.set(entity_solid, render_config_solid);
-
-            transform_comps.set(entity_translucent, transform_comp);
-            render_config_comps.set(entity_translucent, render_config_translucent);
+            let entity_solid = renderer.add_object(VertexMeshObject::new(
+                transform_comp,
+                render_config_solid,
+                Default::default(),
+            ));
+            let entity_translucent = renderer.add_object(VertexMeshObject::new(
+                transform_comp,
+                render_config_translucent,
+                Default::default(),
+            ));
 
             self.rclusters.get_mut(pos).unwrap().entities = RClusterEntities {
                 solid: entity_solid,
@@ -818,14 +849,16 @@ impl OverworldOrchestrator {
             if ready_to_set_mesh && !rcluster.entities.is_null() {
                 let meshes = rcluster.meshes.lock();
 
-                vertex_mesh_comps.set(
-                    rcluster.entities.solid,
-                    component::VertexMesh::new(&meshes.solid.raw()),
-                );
-                vertex_mesh_comps.set(
-                    rcluster.entities.translucent,
-                    component::VertexMesh::new(&meshes.transparent.raw()),
-                );
+                *renderer
+                    .access_object(rcluster.entities.solid)
+                    .get_mut::<component::VertexMesh>()
+                    .unwrap() = component::VertexMesh::new(&meshes.solid.raw());
+
+                *renderer
+                    .access_object(rcluster.entities.translucent)
+                    .get_mut::<component::VertexMesh>()
+                    .unwrap() = component::VertexMesh::new(&meshes.transparent.raw());
+
                 rcluster.mesh_changed.store(false, MO_RELAXED);
             }
         }

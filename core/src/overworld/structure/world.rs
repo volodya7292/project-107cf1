@@ -490,9 +490,9 @@ pub fn gen_fn(
                 let pos = ClusterBlockPos::new(x, y, z);
 
                 if global_y <= height as i64 {
-                    cluster.set(&pos, registry.block_default);
+                    cluster.get_mut(&pos).set(registry.block_test);
                 } else {
-                    cluster.set(&pos, registry.block_empty);
+                    cluster.get_mut(&pos).set(registry.block_empty);
                 }
             }
         }
