@@ -141,7 +141,7 @@ impl Renderer {
             &PipelineConfig {
                 render_pass: &self.depth_render_pass,
                 signature: &translucency_depth_signature,
-                subpass_index: 0,
+                subpass_index: 1,
                 cull_back_faces,
                 blend_attachments: &[],
                 depth_test: true,

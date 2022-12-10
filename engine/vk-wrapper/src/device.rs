@@ -966,33 +966,45 @@ impl Device {
             })
             .collect();
 
-        let mut attachment_ref_count = 0;
+        let mut max_attachment_refs = 0;
         for subpass in subpasses {
-            attachment_ref_count += subpass.color.len();
-            if subpass.depth.is_some() {
-                attachment_ref_count += 1;
-            }
+            // + 1 for depth
+            max_attachment_refs += subpass.input.len() + subpass.color.len() + 1;
         }
 
+        let mut input_attachments = Vec::with_capacity(attachments.len());
         let mut color_attachments = Vec::with_capacity(attachments.len());
         let mut depth_attachments = Vec::with_capacity(attachments.len());
 
-        let mut native_attachment_refs = Vec::with_capacity(attachment_ref_count);
+        let mut native_attachment_refs = Vec::with_capacity(max_attachment_refs);
         let mut native_subpass_descs = Vec::with_capacity(subpasses.len());
 
         for subpass in subpasses {
-            // Color attachments
-            let color_att_ref_index = native_attachment_refs.len();
-            for color_attachment in &subpass.color {
+            // Input attachments
+            let input_att_ref_index = native_attachment_refs.len();
+            for attachment in &subpass.input {
                 native_attachment_refs.push(
                     vk::AttachmentReference::builder()
-                        .attachment(color_attachment.index)
-                        .layout(color_attachment.layout.0)
+                        .attachment(attachment.index)
+                        .layout(attachment.layout.0)
                         .build(),
                 );
+                if !input_attachments.contains(&attachment.index) {
+                    input_attachments.push(attachment.index);
+                }
+            }
 
-                if !color_attachments.contains(&color_attachment.index) {
-                    color_attachments.push(color_attachment.index);
+            // Color attachments
+            let color_att_ref_index = native_attachment_refs.len();
+            for attachment in &subpass.color {
+                native_attachment_refs.push(
+                    vk::AttachmentReference::builder()
+                        .attachment(attachment.index)
+                        .layout(attachment.layout.0)
+                        .build(),
+                );
+                if !color_attachments.contains(&attachment.index) {
+                    color_attachments.push(attachment.index);
                 }
             }
 
@@ -1017,9 +1029,13 @@ impl Device {
             // Build description
             let mut subpass_desc = vk::SubpassDescription::builder()
                 .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .input_attachments(
+                    &native_attachment_refs[input_att_ref_index..input_att_ref_index + subpass.input.len()],
+                )
                 .color_attachments(
                     &native_attachment_refs[color_att_ref_index..color_att_ref_index + subpass.color.len()],
                 );
+
             if subpass.depth.is_some() {
                 subpass_desc = subpass_desc
                     .depth_stencil_attachment(&native_attachment_refs[depth_att_ref_index as usize]);
@@ -1052,6 +1068,7 @@ impl Device {
             native: unsafe { self.wrapper.native.create_render_pass(&create_info, None)? },
             subpasses: subpasses.into(),
             attachments: attachments.to_vec(),
+            _input_attachments: input_attachments,
             _color_attachments: color_attachments,
             _depth_attachments: depth_attachments,
         }))

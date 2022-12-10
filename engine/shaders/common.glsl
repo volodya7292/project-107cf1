@@ -95,7 +95,7 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     vec2 dy = dFdy(tex_coord_pixels);
     float d = max(dot(dx, dx), dot(dy, dy));
     float lod = clamp(0.5 * log2(d), 0, mip_levels - 1);
-    
+
     // Calculate texture coordinates
     float pixel_offset = pixel_size * pow(2.0, lod);
 
@@ -117,16 +117,18 @@ void writeOutputAlbedo(vec4 albedo) {
     ivec2 coord = ivec2(gl_FragCoord.xy);
     uint coordIdx = info.frameSize.x * coord.y + coord.x;
     uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;
 
-    if (currDepth > depthsArray[coordIdx + (OIT_N_CLOSEST_LAYERS - 1) * sliceSize]) {
+    if (currDepth > depthsArray[coordIdx + lastLayerIdx * sliceSize]) {
         // The fragment falls behind closest depths => perform tail-blending
         outAlbedo = albedo;
         return;
     }
 
     uint start = 0;
-    uint end = OIT_N_CLOSEST_LAYERS - 1;
+    uint end = lastLayerIdx;
 
+    // Binary search: find suitable layer index based on closest depth
     while (start < end) {
         uint mid = (start + end) / 2;
         uint depth = depthsArray[coordIdx + mid * sliceSize];
@@ -138,24 +140,25 @@ void writeOutputAlbedo(vec4 albedo) {
     }
 
     // Insert albedo at corresponding index
+    // Note: this causes false positive error from vulkan synchronizaton validation
     imageStore(translucencyColorsArray, ivec3(coord, start), albedo);
     outAlbedo = vec4(0);
 }
 
-#endif // ENGINE_PIXEL_IO
+#endif // ENGINE_PIXEL_SHADER
 
 
 // R2 low discrepancy sequence
 // ----------------------------------------------------------------------------------------
-float r2_noise_1d(uint n) {
+float r2_seq_1d(uint n) {
     return fract(0.5 + 0.618033988749 * float(n));
 }
 
-vec2 r2_noise_2d(uint n) {
+vec2 r2_seq_2d(uint n) {
     return fract(0.5 + vec2(0.754877666246, 0.569840290998) * float(n));
 }
 
-vec3 r2_noise_3d(uint n) {
+vec3 r2_seq_3d(uint n) {
     return fract(0.5 + vec3(0.819172513396, 0.671043606703, 0.549700477901) * float(n));
 }
 // ----------------------------------------------------------------------------------------
@@ -183,4 +186,9 @@ void calc_trilinear_unit_coeffs(vec3 p, out float v[8]) {
     v[5] = xyz1[1];
     v[6] = xyz0[3];
     v[7] = xyz1[3];
+}
+
+// For projection with infinite far-plane and depth in range (0;1)
+float linearize_depth(float d, float z_near) {
+    return z_near / (1.0 - d);
 }

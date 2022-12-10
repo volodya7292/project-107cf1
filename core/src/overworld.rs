@@ -37,7 +37,7 @@ pub mod cluster_dirty_parts;
 pub mod facing;
 pub mod generator;
 pub mod light_level;
-pub mod liquid_level;
+pub mod liquid_state;
 pub mod material;
 pub mod occluder;
 pub mod position;

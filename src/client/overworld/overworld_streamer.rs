@@ -14,7 +14,7 @@ use core::main_registry::MainRegistry;
 use core::overworld::cluster_dirty_parts::ClusterDirtySides;
 use core::overworld::facing::Facing;
 use core::overworld::generator::OverworldGenerator;
-use core::overworld::liquid_level::LiquidLevel;
+use core::overworld::liquid_state::LiquidState;
 use core::overworld::occluder::Occluder;
 use core::overworld::position::{BlockPos, ClusterPos};
 use core::overworld::raw_cluster::{CellInfo, RawCluster};
@@ -705,10 +705,9 @@ impl OverworldStreamer {
                                 CellInfo {
                                     entity_id: Default::default(),
                                     block_id: u16::MAX,
-                                    liquid_id: u16::MAX,
                                     occluder: offloaded_fill_occluder.unwrap(),
                                     light_level: Default::default(),
-                                    liquid_level: LiquidLevel::ZERO,
+                                    liquid_state: LiquidState::NULL,
                                 },
                             );
                         }

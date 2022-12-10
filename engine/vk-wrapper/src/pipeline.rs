@@ -12,9 +12,12 @@ impl PipelineStageFlags {
     pub const TOP_OF_PIPE: Self = Self(vk::PipelineStageFlags::TOP_OF_PIPE);
     pub const TRANSFER: Self = Self(vk::PipelineStageFlags::TRANSFER);
     pub const COLOR_ATTACHMENT_OUTPUT: Self = Self(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+    /// Depth-stencil load and early fragment tests
+    pub const DS_LOAD_AND_EARLY_TESTS: Self = Self(vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS);
+    /// Late fragment tests and depth-stencil store
+    pub const LATE_TESTS_AND_DS_STORE: Self = Self(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS);
     pub const VERTEX_SHADER: Self = Self(vk::PipelineStageFlags::VERTEX_SHADER);
     pub const PIXEL_SHADER: Self = Self(vk::PipelineStageFlags::FRAGMENT_SHADER);
-    pub const LATE_FRAGMENT_TESTS: Self = Self(vk::PipelineStageFlags::LATE_FRAGMENT_TESTS);
     pub const COMPUTE: Self = Self(vk::PipelineStageFlags::COMPUTE_SHADER);
     pub const BOTTOM_OF_PIPE: Self = Self(vk::PipelineStageFlags::BOTTOM_OF_PIPE);
     pub const HOST: Self = Self(vk::PipelineStageFlags::HOST);
@@ -29,7 +32,8 @@ vk_bitflags_impl!(AccessFlags, vk::AccessFlags);
 impl AccessFlags {
     pub const COLOR_ATTACHMENT_READ: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_READ);
     pub const COLOR_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
-    pub const DEPTH_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
+    pub const DEPTH_STENCIL_ATTACHMENT_READ: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ);
+    pub const DEPTH_STENCIL_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
     pub const UNIFORM_READ: Self = Self(vk::AccessFlags::UNIFORM_READ);
     pub const TRANSFER_READ: Self = Self(vk::AccessFlags::TRANSFER_READ);
     pub const TRANSFER_WRITE: Self = Self(vk::AccessFlags::TRANSFER_WRITE);

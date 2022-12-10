@@ -51,7 +51,7 @@ use vk_wrapper::{
     Framebuffer, HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
     PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Sampler, SamplerFilter,
     SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
-    Subpass, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 
 use crate::ecs::component::internal::{GlobalTransform, Relation};
@@ -422,7 +422,7 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 8] = [
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 9] = [
         // Per frame info
         (
             BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 0),
@@ -492,6 +492,15 @@ lazy_static! {
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_IMAGE,
+                count: 1,
+            },
+        ),
+        // Solid depths attachment (only used in translucency depths pass)
+        (
+            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 7),
+            ShaderBinding {
+                stage_flags: ShaderStageFlags::PIXEL,
+                binding_type: BindingType::INPUT_ATTACHMENT,
                 count: 1,
             },
         ),
@@ -579,7 +588,7 @@ impl Renderer {
         let mut storage = EntityStorage::new();
         let root_entity = storage.add(SimpleObject::new(Default::default()));
 
-        let active_camera = Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.01);
+        let active_camera = Camera::new(1.0, std::f32::consts::FRAC_PI_2, 0.1);
 
         let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
         let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
@@ -634,14 +643,29 @@ impl Renderer {
                     final_layout: ImageLayout::SHADER_READ,
                     load_store: LoadStore::InitClearFinalSave,
                 }],
-                &[Subpass {
-                    color: vec![],
-                    depth: Some(AttachmentRef {
+                &[
+                    Subpass::new().with_depth(AttachmentRef {
                         index: 0,
                         layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
                     }),
+                    Subpass::new()
+                        .with_input(vec![AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::DEPTH_STENCIL_READ,
+                        }])
+                        .with_depth(AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::DEPTH_STENCIL_READ,
+                        }),
+                ],
+                &[SubpassDependency {
+                    src_subpass: 0,
+                    dst_subpass: 1,
+                    src_stage_mask: PipelineStageFlags::LATE_TESTS_AND_DS_STORE,
+                    dst_stage_mask: PipelineStageFlags::DS_LOAD_AND_EARLY_TESTS,
+                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
                 }],
-                &[],
             )
             .unwrap();
 
@@ -751,8 +775,8 @@ impl Renderer {
                 ],
                 &[
                     // Solid colors pass
-                    Subpass {
-                        color: vec![
+                    Subpass::new()
+                        .with_color(vec![
                             AttachmentRef {
                                 index: 0,
                                 layout: ImageLayout::COLOR_ATTACHMENT,
@@ -769,12 +793,11 @@ impl Renderer {
                                 index: 3,
                                 layout: ImageLayout::COLOR_ATTACHMENT,
                             },
-                        ],
-                        depth: Some(AttachmentRef {
+                        ])
+                        .with_depth(AttachmentRef {
                             index: 4,
                             layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
                         }),
-                    },
                 ],
                 &[],
             )
@@ -1446,10 +1469,6 @@ impl Renderer {
         );
         let frustum = Frustum::new(proj_mat * view_mat);
 
-        let translucency_consts = TranslucencyPushConsts {
-            frame_size: UVec2::new(self.surface_size.0, self.surface_size.1),
-        };
-
         self.depth_secondary_cls
             .par_iter()
             .zip(&self.translucency_depths_secondary_cls)
@@ -1472,7 +1491,7 @@ impl Renderer {
                     .begin_secondary_graphics(
                         true,
                         &self.depth_render_pass,
-                        0,
+                        1,
                         self.depth_framebuffer.as_ref(),
                     )
                     .unwrap();
@@ -1534,9 +1553,6 @@ impl Renderer {
                         );
                         if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
                             cl.bind_graphics_input(signature, DESC_SET_CUSTOM_PER_FRAME, *set, &[]);
-                        }
-                        if pipeline_id == PIPELINE_TRANSLUCENCY_DEPTHS {
-                            cl.push_constants(signature, &translucency_consts);
                         }
                     }
 
@@ -1686,6 +1702,8 @@ impl Renderer {
         // Render solid objects
         cl.execute_secondary(&self.depth_secondary_cls);
 
+        cl.next_subpass(true);
+
         // Find closest depths of translucent objects
         cl.execute_secondary(&self.translucency_depths_secondary_cls);
 
@@ -1703,7 +1721,7 @@ impl Renderer {
             &[
                 depth_image
                     .barrier()
-                    .src_access_mask(AccessFlags::DEPTH_ATTACHMENT_WRITE)
+                    .src_access_mask(AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
                     .dst_access_mask(AccessFlags::SHADER_READ)
                     .layout(ImageLayout::SHADER_READ),
                 depth_pyramid_image
@@ -2099,7 +2117,9 @@ impl Renderer {
             .create_image_2d(
                 Format::D32_FLOAT,
                 1,
-                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                    | ImageUsageFlags::INPUT_ATTACHMENT
+                    | ImageUsageFlags::SAMPLED,
                 new_size,
             )
             .unwrap();
@@ -2278,6 +2298,11 @@ impl Renderer {
                             ImageLayout::GENERAL,
                         ),
                     ),
+                    self.g_per_frame_pool.create_binding(
+                        7,
+                        0,
+                        BindingRes::Image(Arc::clone(&depth_image), None, ImageLayout::DEPTH_STENCIL_READ),
+                    ),
                 ],
             );
 
@@ -2328,13 +2353,10 @@ impl Renderer {
                         final_layout: ImageLayout::PRESENT,
                         load_store: LoadStore::FinalSave,
                     }],
-                    &[Subpass {
-                        color: vec![AttachmentRef {
-                            index: 0,
-                            layout: ImageLayout::COLOR_ATTACHMENT,
-                        }],
-                        depth: None,
-                    }],
+                    &[Subpass::new().with_color(vec![AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    }])],
                     &[],
                 )
                 .unwrap(),

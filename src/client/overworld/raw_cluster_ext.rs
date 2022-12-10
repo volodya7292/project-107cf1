@@ -5,7 +5,7 @@ use nalgebra_glm::{I32Vec3, TVec3, U32Vec2, U32Vec3, UVec4, Vec2, Vec3, Vec4};
 
 use core::overworld::facing::Facing;
 use core::overworld::light_level::LightLevel;
-use core::overworld::liquid_level::LiquidLevel;
+use core::overworld::liquid_state::LiquidState;
 use core::overworld::position::ClusterBlockPos;
 use core::overworld::raw_cluster::BlockDataImpl;
 use core::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
@@ -269,14 +269,17 @@ fn calc_liquid_height(intrinsics: &[CellInfo], cache: &mut LiquidHeightsCache, p
                 let rel_padded = pos.add_scalar(1) + glm::vec3(i, 0, j);
                 let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
 
-                let level = intrinsics[rel_padded_idx].liquid_level.get() as u32;
+                let level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
 
                 height += level;
                 count += level.min(1);
             }
         }
 
-        height as f32 / (count * LiquidLevel::MAX.get() as u32) as f32
+        let factor = height as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
+
+        // Limit max liquid height to 0.9
+        0.9 * factor
     })
 }
 
@@ -420,17 +423,23 @@ fn gen_block_vertices(
     let intrinsic_idx = aligned_block_index(&glm::convert_unchecked(pos.add_scalar(1)));
     let curr_cell = &cells[intrinsic_idx];
 
-    let contains_liquid = curr_cell.liquid_level.get() > 0;
-    let mut liquid_heights = [0_f32; 4];
+    let contains_liquid = curr_cell.liquid_state.level() > 0;
+    let mut liquid_heights = [1_f32; 4]; // by default liquid heights are at maximum
 
     // Calculate liquid heights if it is present
     if contains_liquid {
-        for i in 0..2 {
-            for j in 0..2 {
-                let rel = pos + glm::vec3(i, 0, j);
-                let height = calc_liquid_height(cells, liquid_cache, &rel);
-                liquid_heights[(i * 2 + j) as usize] = height;
-                println!("LIQ HEIGHT {}", height);
+        let top_cell = cluster.get_cell(&(pos + Facing::PositiveY.direction()));
+
+        if curr_cell.liquid_state.liquid_id() != top_cell.liquid_state.liquid_id()
+            || top_cell.liquid_state.level() == 0
+            || curr_cell.liquid_state.level() < LiquidState::MAX_LEVEL
+        {
+            for i in 0..2 {
+                for j in 0..2 {
+                    let rel = pos + glm::vec3(i, 0, j);
+                    let height = calc_liquid_height(cells, liquid_cache, &rel);
+                    liquid_heights[(i * 2 + j) as usize] = height;
+                }
             }
         }
     } else if block.is_model_invisible() {
@@ -480,25 +489,29 @@ fn gen_block_vertices(
         let rel_padded = (pos + facing.direction()).add_scalar(1);
         let rel_padded_index = aligned_block_index(&glm::convert_unchecked(rel_padded));
 
-        let rel_intrinsic_data = cells[rel_padded_index];
-        let rel_occludes = rel_intrinsic_data.occluder.occludes_side(facing.mirror());
+        let rel_cell = cells[rel_padded_index];
+        let rel_occludes = rel_cell.occluder.occludes_side(facing.mirror());
 
-        // Do not emit face if this side is fully occluded by neighbouring block
-        if rel_occludes {
-            continue;
-        }
-
-        // Render liquid
-        if contains_liquid && rel_intrinsic_data.liquid_level.get() == 0 {
+        // Render liquid quad if liquid is present
+        if contains_liquid
+            && (rel_cell.liquid_state.level() == 0
+                || (facing == Facing::NegativeY && !rel_cell.liquid_state.is_max())
+                || (facing == Facing::PositiveY && !curr_cell.liquid_state.is_max()))
+        {
             // Add respective liquid quad
             construct_liquid_quad(
                 &posf,
-                curr_cell.liquid_id,
+                curr_cell.liquid_state.liquid_id(),
                 &liquid_heights,
                 facing,
                 curr_cell.light_level,
                 vertices_translucent,
             );
+        }
+
+        // Do not emit face if this side is fully occluded by neighbouring block
+        if rel_occludes {
+            continue;
         }
 
         if block.is_model_invisible() {
@@ -508,13 +521,11 @@ fn gen_block_vertices(
 
         // Do not emit face if certain conditions are met
         if model.merge_enabled() {
-            if curr_cell.block_id == rel_intrinsic_data.block_id
-                && model.side_shapes_equality()[facing.axis_idx()]
-            {
+            if curr_cell.block_id == rel_cell.block_id && model.side_shapes_equality()[facing.axis_idx()] {
                 // Side faces are of the same shape
                 continue;
             } else {
-                let rel_model = res_map.textured_model_for_block(rel_intrinsic_data.block_id);
+                let rel_model = res_map.textured_model_for_block(rel_cell.block_id);
                 if model
                     .first_side_quad_vsorted(facing)
                     .cmp_ordered(rel_model.first_side_quad_vsorted(facing.mirror()))

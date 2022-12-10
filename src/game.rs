@@ -19,7 +19,7 @@ use core::overworld::block::event_handlers::AfterTickActionsStorage;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
 use core::overworld::light_level::LightLevel;
-use core::overworld::liquid_level::LiquidLevel;
+use core::overworld::liquid_state::LiquidState;
 use core::overworld::position::{BlockPos, ClusterPos};
 use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use core::overworld::Overworld;
@@ -324,7 +324,7 @@ impl Application for Game {
                         let set_pos = pos.offset(&dir);
 
                         if self.set_water {
-                            access.set_liquid(&set_pos, self.res_map.material_water(), LiquidLevel::new(15));
+                            access.set_liquid(&set_pos, LiquidState::new(self.res_map.material_water(), 15));
                         } else {
                             access.update_block(&set_pos, |data| data.set(self.curr_block.clone()));
 

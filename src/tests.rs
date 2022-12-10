@@ -4,9 +4,6 @@ use nalgebra_glm::{I32Vec3, Vec3};
 
 use engine::attributes_impl;
 
-use crate::game::overworld::block_model;
-use crate::game::overworld::block_model::Quad;
-
 #[derive(Default, Copy, Clone, PartialEq)]
 struct Vertex {
     position: na::Vector3<f32>,

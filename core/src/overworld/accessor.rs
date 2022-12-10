@@ -15,7 +15,7 @@ use crate::overworld;
 use crate::overworld::block::{Block, BlockState};
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
-use crate::overworld::liquid_level::LiquidLevel;
+use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut, RawCluster};
 use crate::overworld::{
@@ -225,7 +225,7 @@ impl OverworldAccessor {
     }
 
     /// Returns block builder or `None` if respective cluster is not loaded
-    pub fn set_liquid(&mut self, pos: &BlockPos, liquid_id: u16, liquid_level: LiquidLevel) {
+    pub fn set_liquid(&mut self, pos: &BlockPos, liquid_level: LiquidState) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -235,7 +235,6 @@ impl OverworldAccessor {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut cell = cluster.raw.get_mut(&cluster_block_pos);
 
-            *cell.liquid_id() = liquid_id;
             *cell.liquid_level_mut() = liquid_level;
 
             cluster.dirty_parts.set_dirty(&cluster_block_pos);

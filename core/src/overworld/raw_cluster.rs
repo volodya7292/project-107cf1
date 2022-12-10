@@ -24,7 +24,7 @@ use crate::overworld::block_model::quad_occludes_side;
 use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
-use crate::overworld::liquid_level::LiquidLevel;
+use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::position::ClusterBlockPos;
 use crate::registry::Registry;
@@ -94,10 +94,9 @@ impl Default for CompactEntityId {
 pub struct CellInfo {
     pub entity_id: CompactEntityId,
     pub block_id: u16,
-    pub liquid_id: u16,
     pub occluder: Occluder,
     pub light_level: LightLevel,
-    pub liquid_level: LiquidLevel,
+    pub liquid_state: LiquidState,
 }
 
 impl Default for CellInfo {
@@ -105,10 +104,9 @@ impl Default for CellInfo {
         Self {
             entity_id: Default::default(),
             block_id: u16::MAX,
-            liquid_id: u16::MAX,
             occluder: Default::default(),
             light_level: Default::default(),
-            liquid_level: LiquidLevel::ZERO,
+            liquid_state: LiquidState::NULL,
         }
     }
 }
@@ -167,12 +165,8 @@ impl BlockDataMut<'_> {
         self.info.occluder = block.occluder();
     }
 
-    pub fn liquid_id(&mut self) -> &mut u16 {
-        &mut self.info.liquid_id
-    }
-
-    pub fn liquid_level_mut(&mut self) -> &mut LiquidLevel {
-        &mut self.info.liquid_level
+    pub fn liquid_level_mut(&mut self) -> &mut LiquidState {
+        &mut self.info.liquid_state
     }
 
     pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
@@ -209,20 +203,27 @@ impl RawCluster {
         &self.cells
     }
 
-    /// Returns block data at `pos`
+    /// Returns block data at `pos`.
     #[inline]
     pub fn get(&self, pos: &ClusterBlockPos) -> BlockData {
-        let aligned_pos = &pos.get().add_scalar(1);
+        let aligned_pos = pos.get().add_scalar(1);
         BlockData {
             block_storage: &self.block_state_storage,
             info: &self.cells[aligned_block_index(&aligned_pos)],
         }
     }
 
-    /// Returns mutable block data at `pos`
+    /// Returns cell data at `pos`. Range: -1 <= pos[i] <= RawCluster::SIZE
+    #[inline]
+    pub fn get_cell(&self, pos: &I32Vec3) -> &CellInfo {
+        let aligned_pos = pos.add_scalar(1);
+        &self.cells[aligned_block_index(&glm::convert_unchecked(aligned_pos))]
+    }
+
+    /// Returns mutable block data at `pos`.
     #[inline]
     pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut {
-        let aligned_pos = &pos.get().add_scalar(1);
+        let aligned_pos = pos.get().add_scalar(1);
         BlockDataMut {
             registry: &self.registry,
             block_storage: &mut self.block_state_storage,
@@ -232,13 +233,15 @@ impl RawCluster {
 
     #[inline]
     pub fn get_light_level(&self, pos: &ClusterBlockPos) -> LightLevel {
-        let index = aligned_block_index(&pos.get().add_scalar(1));
+        let aligned_pos = pos.get().add_scalar(1);
+        let index = aligned_block_index(&aligned_pos);
         self.cells[index].light_level
     }
 
     #[inline]
     pub fn set_light_level(&mut self, pos: &ClusterBlockPos, level: LightLevel) {
-        let index = aligned_block_index(&pos.get().add_scalar(1));
+        let aligned_pos = pos.get().add_scalar(1);
+        let index = aligned_block_index(&aligned_pos);
         self.cells[index].light_level = level;
     }
 

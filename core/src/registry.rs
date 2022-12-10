@@ -53,10 +53,9 @@ impl Registry {
         registry.inner_block_state_empty = Some(CellInfo {
             entity_id: Default::default(),
             block_id: block_empty,
-            liquid_id: u16::MAX,
             occluder: Default::default(),
             light_level: Default::default(),
-            liquid_level: Default::default(),
+            liquid_state: Default::default(),
         });
 
         registry

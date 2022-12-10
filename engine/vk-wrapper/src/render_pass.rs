@@ -35,12 +35,36 @@ pub struct AttachmentRef {
 
 #[derive(Clone)]
 pub struct Subpass {
+    pub input: Vec<AttachmentRef>,
     pub color: Vec<AttachmentRef>,
     pub depth: Option<AttachmentRef>,
 }
 
 impl Subpass {
     pub const EXTERNAL: u32 = vk::SUBPASS_EXTERNAL;
+
+    pub fn new() -> Self {
+        Self {
+            input: vec![],
+            color: vec![],
+            depth: None,
+        }
+    }
+
+    pub fn with_input(mut self, att_refs: Vec<AttachmentRef>) -> Self {
+        self.input = att_refs;
+        self
+    }
+
+    pub fn with_color(mut self, att_refs: Vec<AttachmentRef>) -> Self {
+        self.color = att_refs;
+        self
+    }
+
+    pub fn with_depth(mut self, att_ref: AttachmentRef) -> Self {
+        self.depth = Some(att_ref);
+        self
+    }
 }
 
 pub struct SubpassDependency {
@@ -59,6 +83,7 @@ pub struct RenderPass {
     pub(crate) attachments: Vec<Attachment>,
     pub(crate) _color_attachments: Vec<u32>,
     pub(crate) _depth_attachments: Vec<u32>,
+    pub(crate) _input_attachments: Vec<u32>,
 }
 
 #[derive(Clone)]

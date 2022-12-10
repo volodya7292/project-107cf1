@@ -27,6 +27,7 @@ void main() {
     // Collect translucency
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
         if (depthsArray[coordIdx + i * sliceSize] == 0xFFFFFFFFu) {
+            // The following layers do not contain any colors, stop the loop
             break;
         } else {
             vec4 nextColor = imageLoad(translucencyColorsArray, ivec3(coord, i));

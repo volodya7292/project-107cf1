@@ -37,6 +37,7 @@ impl BindingType {
     pub const STORAGE_BUFFER: Self = Self(vk::DescriptorType::STORAGE_BUFFER);
     pub const SAMPLED_IMAGE: Self = Self(vk::DescriptorType::COMBINED_IMAGE_SAMPLER);
     pub const STORAGE_IMAGE: Self = Self(vk::DescriptorType::STORAGE_IMAGE);
+    pub const INPUT_ATTACHMENT: Self = Self(vk::DescriptorType::INPUT_ATTACHMENT);
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
