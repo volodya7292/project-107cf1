@@ -708,6 +708,7 @@ impl OverworldStreamer {
                                     occluder: offloaded_fill_occluder.unwrap(),
                                     light_level: Default::default(),
                                     liquid_state: LiquidState::NULL,
+                                    active: false,
                                 },
                             );
                         }

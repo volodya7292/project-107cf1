@@ -56,6 +56,7 @@ impl Registry {
             occluder: Default::default(),
             light_level: Default::default(),
             liquid_state: Default::default(),
+            active: false,
         });
 
         registry

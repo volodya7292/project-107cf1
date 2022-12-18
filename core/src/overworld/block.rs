@@ -18,6 +18,7 @@ pub struct Block {
     model_id: u16,
     occluder: Occluder,
     event_handlers: EventHandlers,
+    active_by_default: bool,
 }
 
 impl Default for Block {
@@ -27,6 +28,7 @@ impl Default for Block {
             model_id: u16::MAX,
             occluder: Default::default(),
             event_handlers: Default::default(),
+            active_by_default: false,
         }
     }
 }
@@ -55,11 +57,16 @@ impl Block {
     pub fn is_model_invisible(&self) -> bool {
         self.model_id == Registry::MODEL_ID_NULL
     }
+
+    pub fn active_by_default(&self) -> bool {
+        self.active_by_default
+    }
 }
 
 #[derive(Copy, Clone)]
 pub struct BlockBuilder {
     transparent: bool,
+    active_by_default: bool,
     model_id: u16,
     event_handlers: EventHandlers,
 }
@@ -68,6 +75,7 @@ impl BlockBuilder {
     pub fn new(model_id: u16) -> Self {
         BlockBuilder {
             transparent: false,
+            active_by_default: false,
             model_id,
             event_handlers: Default::default(),
         }
@@ -80,6 +88,11 @@ impl BlockBuilder {
 
     pub fn with_event_handlers(mut self, event_handlers: EventHandlers) -> Self {
         self.event_handlers = event_handlers;
+        self
+    }
+
+    pub fn with_active_by_default(mut self, active: bool) -> Self {
+        self.active_by_default = active;
         self
     }
 
@@ -97,6 +110,7 @@ impl BlockBuilder {
             model_id: self.model_id,
             occluder,
             event_handlers: self.event_handlers,
+            active_by_default: self.active_by_default,
         }
     }
 

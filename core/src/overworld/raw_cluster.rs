@@ -97,6 +97,7 @@ pub struct CellInfo {
     pub occluder: Occluder,
     pub light_level: LightLevel,
     pub liquid_state: LiquidState,
+    pub active: bool,
 }
 
 impl Default for CellInfo {
@@ -107,6 +108,7 @@ impl Default for CellInfo {
             occluder: Default::default(),
             light_level: Default::default(),
             liquid_state: LiquidState::NULL,
+            active: false,
         }
     }
 }
@@ -120,6 +122,8 @@ pub trait BlockDataImpl {
     fn block_id(&self) -> u16;
     /// Returns the specified block component `C`
     fn get<C: Component>(&self) -> Option<&C>;
+
+    fn active(&self) -> bool;
 }
 
 impl BlockDataImpl for BlockData<'_> {
@@ -129,6 +133,10 @@ impl BlockDataImpl for BlockData<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn active(&self) -> bool {
+        self.info.active
     }
 }
 
@@ -145,6 +153,10 @@ impl BlockDataImpl for BlockDataMut<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn active(&self) -> bool {
+        self.info.active
     }
 }
 
@@ -163,10 +175,15 @@ impl BlockDataMut<'_> {
         self.info.entity_id = CompactEntityId::new(entity_id);
         self.info.block_id = state.block_id;
         self.info.occluder = block.occluder();
+        self.info.active |= block.active_by_default();
     }
 
     pub fn liquid_level_mut(&mut self) -> &mut LiquidState {
         &mut self.info.liquid_state
+    }
+
+    pub fn active_mut(&mut self) -> &mut bool {
+        &mut self.info.active
     }
 
     pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {

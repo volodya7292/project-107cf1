@@ -107,10 +107,7 @@ impl Cluster {
             for y in 0..RawCluster::SIZE {
                 for z in 0..RawCluster::SIZE {
                     let pos = ClusterBlockPos::new(x, y, z);
-                    let active = raw
-                        .get(&pos)
-                        .get::<block_component::Activity>()
-                        .map_or(false, |v| v.active);
+                    let active = raw.get(&pos).active();
 
                     if active {
                         active_blocks.toggle(pos.index());
@@ -145,7 +142,6 @@ pub struct OverworldCluster {
     pub state: AtomicU32,
     pub dirty: AtomicBool,
 
-    pub active_blocks: FixedBitSet,
     pub may_have_active_blocks: AtomicBool,
 }
 
@@ -155,7 +151,6 @@ impl OverworldCluster {
             cluster: Default::default(),
             state: AtomicU32::new(ClusterState::Initial as u32),
             dirty: Default::default(),
-            active_blocks: FixedBitSet::with_capacity(RawCluster::VOLUME),
             may_have_active_blocks: Default::default(),
         }
     }

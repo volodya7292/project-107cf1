@@ -187,10 +187,7 @@ impl OverworldAccessor {
             let mut block_data = cluster.raw.get_mut(&cluster_block_pos);
 
             update_fn(&mut block_data);
-
-            let active = block_data
-                .get::<block_component::Activity>()
-                .map_or(false, |v| v.active);
+            let active = block_data.active();
 
             cluster.active_blocks.set(cluster_block_pos.index(), active);
             cluster.may_have_active_blocks |= active;
@@ -202,7 +199,7 @@ impl OverworldAccessor {
         }
     }
 
-    /// Returns block builder or `None` if respective cluster is not loaded
+    /// Returns light level or `None` if respective cluster is not loaded
     fn get_light_level(&mut self, pos: &BlockPos) -> Option<LightLevel> {
         let access = self.cache.access_cluster(&pos.cluster_pos())?;
         access
@@ -210,7 +207,7 @@ impl OverworldAccessor {
             .map(|cluster| cluster.raw.get_light_level(&pos.cluster_block_pos()))
     }
 
-    /// Returns block builder or `None` if respective cluster is not loaded
+    /// Sets light level if respective cluster is loaded
     fn set_light_level(&mut self, pos: &BlockPos, light_level: LightLevel) {
         if let Some(cluster) = self
             .cache

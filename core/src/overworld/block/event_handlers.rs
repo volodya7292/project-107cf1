@@ -4,6 +4,7 @@ use std::mem;
 use entity_data::{ArchetypeState, Component};
 use nalgebra_glm::I64Vec3;
 use smallvec::SmallVec;
+use winit::event::VirtualKeyCode::P;
 
 use engine::unwrap_option;
 use engine::utils::HashMap;
@@ -14,32 +15,26 @@ use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
 use crate::overworld::Overworld;
 
-/// Returns true if the specified state/component was successfully set.
+/// Returns true if the specified data was successfully applied.
 pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) -> bool;
 
-pub struct BlockStateInfo {
-    pub ptr: *const u8,
+pub struct StateChangeInfo {
+    pub data_ptr: *const u8,
     pub pos: BlockPos,
     pub apply_fn: ApplyFn,
 }
-unsafe impl Send for BlockStateInfo {}
-unsafe impl Sync for BlockStateInfo {}
-
-pub struct BlockComponentInfo {
-    pub ptr: *const u8,
-    pub pos: BlockPos,
-    pub apply_fn: ApplyFn,
-}
-unsafe impl Send for BlockComponentInfo {}
-unsafe impl Sync for BlockComponentInfo {}
+unsafe impl Send for StateChangeInfo {}
+unsafe impl Sync for StateChangeInfo {}
 
 /// Contains actions to perform after the tick.
 pub struct AfterTickActionsStorage {
     pub states: bumpalo::Bump,
     pub components: bumpalo::Bump,
+    pub activities: bumpalo::Bump,
 
-    pub states_infos: Vec<BlockStateInfo>,
-    pub components_infos: Vec<BlockComponentInfo>,
+    pub states_infos: Vec<StateChangeInfo>,
+    pub components_infos: Vec<StateChangeInfo>,
+    pub activity_infos: Vec<StateChangeInfo>,
 }
 
 impl AfterTickActionsStorage {
@@ -47,25 +42,29 @@ impl AfterTickActionsStorage {
         Self {
             states: Default::default(),
             components: Default::default(),
+            activities: Default::default(),
             states_infos: Vec::with_capacity(4096),
             components_infos: Vec::with_capacity(4096),
+            activity_infos: Vec::with_capacity(4096),
         }
     }
 
     pub fn set_block<A: ArchetypeState>(&mut self, pos: BlockPos, block_state: BlockState<A>) {
         let mut_ref = self.states.alloc(block_state);
 
-        self.states_infos.push(BlockStateInfo {
-            ptr: mut_ref as *const _ as *const u8,
+        self.states_infos.push(StateChangeInfo {
+            data_ptr: mut_ref as *const _ as *const u8,
             pos,
-            apply_fn: |access, pos, data| unsafe {
-                let mut state = mem::MaybeUninit::<BlockState<A>>::uninit();
+            apply_fn: |access, pos, data| {
+                let mut state_uninit = mem::MaybeUninit::<BlockState<A>>::uninit();
 
-                (data as *const BlockState<A>)
-                    .copy_to_nonoverlapping(state.as_mut_ptr(), mem::size_of::<BlockState<A>>());
-                let state_init = state.assume_init();
+                let state = unsafe {
+                    (data as *const BlockState<A>)
+                        .copy_to_nonoverlapping(state_uninit.as_mut_ptr(), mem::size_of::<BlockState<A>>());
+                    state_uninit.assume_init()
+                };
 
-                access.update_block(pos, |data| data.set(state_init))
+                access.update_block(pos, |data| data.set(state))
             },
         });
     }
@@ -73,19 +72,37 @@ impl AfterTickActionsStorage {
     pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         let mut_ref = self.components.alloc(component);
 
-        self.components_infos.push(BlockComponentInfo {
-            ptr: mut_ref as *const _ as *const u8,
+        self.components_infos.push(StateChangeInfo {
+            data_ptr: mut_ref as *const _ as *const u8,
             pos,
-            apply_fn: |access, pos, data| unsafe {
-                let mut component = mem::MaybeUninit::<C>::uninit();
+            apply_fn: |access, pos, data| {
+                let mut component_uninit = mem::MaybeUninit::<C>::uninit();
 
-                (data as *const C).copy_to_nonoverlapping(component.as_mut_ptr(), mem::size_of::<C>());
-                let component_init = component.assume_init();
+                let component = unsafe {
+                    (data as *const C)
+                        .copy_to_nonoverlapping(component_uninit.as_mut_ptr(), mem::size_of::<C>());
+                    component_uninit.assume_init()
+                };
 
                 access.update_block(pos, |data| {
                     if let Some(comp) = data.get_mut::<C>() {
-                        *comp = component_init
+                        *comp = component
                     }
+                })
+            },
+        });
+    }
+
+    pub fn set_active(&mut self, pos: BlockPos, active: bool) {
+        let mut_ref = self.components.alloc(active);
+
+        self.activity_infos.push(StateChangeInfo {
+            data_ptr: mut_ref as *const _ as *const u8,
+            pos,
+            apply_fn: |access, pos, data| {
+                let active = unsafe { *(data as *const bool) };
+                access.update_block(pos, |data| {
+                    *data.active_mut() = active;
                 })
             },
         });
@@ -107,6 +124,10 @@ impl AfterTickActionsBuilder<'_> {
 
     pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         self.storage.set_component(pos, component);
+    }
+
+    pub fn set_activity(&mut self, pos: BlockPos, active: bool) {
+        self.storage.set_active(pos, active);
     }
 }
 

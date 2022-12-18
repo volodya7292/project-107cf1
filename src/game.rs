@@ -541,16 +541,18 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
     let mut cluster_accessor = overworld.access();
     let total_after_actions = total_after_actions.lock();
 
-    // Note: first set components, and only after that set states which may be of different archetypes.
-    for actions in &*total_after_actions {
-        for info in &actions.components_infos {
-            let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.ptr);
-        }
+    // Note: first set components because that relate to the current block archetype
+    for info in total_after_actions.iter().flat_map(|v| &v.components_infos) {
+        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
     }
 
-    for actions in &*total_after_actions {
-        for info in &actions.states_infos {
-            let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.ptr);
-        }
+    // Set activities
+    for info in total_after_actions.iter().flat_map(|v| &v.activity_infos) {
+        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
+    }
+
+    // Set complete block states after the components and activities
+    for info in total_after_actions.iter().flat_map(|v| &v.states_infos) {
+        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
     }
 }

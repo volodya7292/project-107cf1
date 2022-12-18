@@ -23,18 +23,13 @@ use crate::registry::Registry;
 #[derive(Copy, Clone, Archetype)]
 pub struct StatelessBlock;
 
-#[derive(Copy, Clone, Archetype)]
-pub struct GlowBlockState {
-    activity: block_component::Activity,
-}
-
 pub struct MainRegistry {
     registry: Arc<Registry>,
     structure_world: u32,
     model_cube: u16,
     pub block_empty: BlockState<StatelessBlock>,
     pub block_test: BlockState<StatelessBlock>,
-    pub block_glow: BlockState<GlowBlockState>,
+    pub block_glow: BlockState<StatelessBlock>,
     // pub block_water: BlockState<StatelessBlock>,
 }
 
@@ -68,18 +63,17 @@ impl MainRegistry {
             BlockState::new(id, StatelessBlock)
         };
         let block_glow = {
-            let id = reg.register_block(BlockBuilder::new(model_cube).with_event_handlers(
-                block::EventHandlers::new().with_on_tick(|pos, _, _, mut after_actions| {
-                    after_actions.set_component(*pos, block_component::Activity { active: false });
-                    println!("ON TICK!");
-                }),
-            ));
-            BlockState::new(
-                id,
-                GlowBlockState {
-                    activity: block_component::Activity { active: true },
-                },
-            )
+            let id = reg.register_block(
+                BlockBuilder::new(model_cube)
+                    .with_active_by_default(true)
+                    .with_event_handlers(block::EventHandlers::new().with_on_tick(
+                        |pos, _, _, mut after_actions| {
+                            after_actions.set_activity(*pos, false);
+                            println!("ON TICK!");
+                        },
+                    )),
+            );
+            BlockState::new(id, StatelessBlock)
         };
 
         // Biomes

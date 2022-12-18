@@ -74,7 +74,7 @@ impl DeviceWrapper {
                 .object_name(c_name.as_c_str());
 
             if let Some(debug_utils) = &self.adapter.instance.debug_utils_ext {
-                debug_utils.debug_utils_set_object_name(self.native.handle(), &info)
+                debug_utils.set_debug_utils_object_name(self.native.handle(), &info)
             } else {
                 unreachable!()
             }
