@@ -1,8 +1,8 @@
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, TVec3, U32Vec3};
+use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, U32Vec3};
 
-use crate::overworld::raw_cluster;
 use crate::overworld::raw_cluster::RawCluster;
+use crate::overworld::{facing, raw_cluster};
 
 /// Block position relative to cluster
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
@@ -67,6 +67,11 @@ impl BlockPos {
     #[inline]
     pub fn offset(&self, offset: &I64Vec3) -> Self {
         BlockPos(self.0 + offset)
+    }
+
+    #[inline]
+    pub fn offset_i32(&self, offset: &I32Vec3) -> Self {
+        BlockPos(self.0 + glm::convert::<_, I64Vec3>(*offset))
     }
 
     #[inline]

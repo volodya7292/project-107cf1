@@ -29,6 +29,13 @@ impl LiquidState {
         }
     }
 
+    pub const fn max(liquid_id: u16) -> Self {
+        Self {
+            liquid_id,
+            state: Self::MAX_LEVEL,
+        }
+    }
+
     pub const fn liquid_id(&self) -> u16 {
         self.liquid_id
     }

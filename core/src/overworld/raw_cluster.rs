@@ -113,6 +113,7 @@ impl Default for CellInfo {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct BlockData<'a> {
     pub(super) block_storage: &'a EntityStorage,
     pub(super) info: &'a CellInfo,
@@ -123,6 +124,7 @@ pub trait BlockDataImpl {
     /// Returns the specified block component `C`
     fn get<C: Component>(&self) -> Option<&C>;
 
+    fn liquid_state(&self) -> &LiquidState;
     fn active(&self) -> bool;
 }
 
@@ -133,6 +135,10 @@ impl BlockDataImpl for BlockData<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn liquid_state(&self) -> &LiquidState {
+        &self.info.liquid_state
     }
 
     fn active(&self) -> bool {
@@ -153,6 +159,10 @@ impl BlockDataImpl for BlockDataMut<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn liquid_state(&self) -> &LiquidState {
+        &self.info.liquid_state
     }
 
     fn active(&self) -> bool {
@@ -178,7 +188,7 @@ impl BlockDataMut<'_> {
         self.info.active |= block.active_by_default();
     }
 
-    pub fn liquid_level_mut(&mut self) -> &mut LiquidState {
+    pub fn liquid_state_mut(&mut self) -> &mut LiquidState {
         &mut self.info.liquid_state
     }
 

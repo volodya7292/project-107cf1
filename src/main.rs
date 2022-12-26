@@ -21,7 +21,7 @@ fn parking_lot_deadlock_detection() {
     use std::time::Duration;
 
     thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(Duration::from_secs(5));
 
         let deadlocks = deadlock::check_deadlock();
         if deadlocks.is_empty() {

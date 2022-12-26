@@ -11,6 +11,7 @@ use engine::utils::HashMap;
 
 use crate::overworld::accessor::OverworldAccessor;
 use crate::overworld::block::{BlockData, BlockState};
+use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
 use crate::overworld::Overworld;
@@ -28,9 +29,11 @@ unsafe impl Sync for StateChangeInfo {}
 
 /// Contains actions to perform after the tick.
 pub struct AfterTickActionsStorage {
+    // TODO: use TypedArena
     pub states: bumpalo::Bump,
+    // TODO: use TypedArena
     pub components: bumpalo::Bump,
-    pub activities: bumpalo::Bump,
+    pub other_data: bumpalo::Bump,
 
     pub states_infos: Vec<StateChangeInfo>,
     pub components_infos: Vec<StateChangeInfo>,
@@ -42,7 +45,7 @@ impl AfterTickActionsStorage {
         Self {
             states: Default::default(),
             components: Default::default(),
-            activities: Default::default(),
+            other_data: Default::default(),
             states_infos: Vec::with_capacity(4096),
             components_infos: Vec::with_capacity(4096),
             activity_infos: Vec::with_capacity(4096),
@@ -94,7 +97,7 @@ impl AfterTickActionsStorage {
     }
 
     pub fn set_active(&mut self, pos: BlockPos, active: bool) {
-        let mut_ref = self.components.alloc(active);
+        let mut_ref = self.other_data.alloc(active);
 
         self.activity_infos.push(StateChangeInfo {
             data_ptr: mut_ref as *const _ as *const u8,
@@ -103,6 +106,21 @@ impl AfterTickActionsStorage {
                 let active = unsafe { *(data as *const bool) };
                 access.update_block(pos, |data| {
                     *data.active_mut() = active;
+                })
+            },
+        });
+    }
+
+    pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
+        let mut_ref = self.other_data.alloc(liquid);
+
+        self.activity_infos.push(StateChangeInfo {
+            data_ptr: mut_ref as *const _ as *const u8,
+            pos,
+            apply_fn: |access, pos, data| {
+                let liquid = unsafe { *(data as *const LiquidState) };
+                access.update_block(pos, |data| {
+                    *data.liquid_state_mut() = liquid;
                 })
             },
         });
@@ -124,6 +142,10 @@ impl AfterTickActionsBuilder<'_> {
 
     pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         self.storage.set_component(pos, component);
+    }
+
+    pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
+        self.storage.set_liquid(pos, liquid);
     }
 
     pub fn set_activity(&mut self, pos: BlockPos, active: bool) {

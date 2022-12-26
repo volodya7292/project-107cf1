@@ -324,7 +324,9 @@ impl Application for Game {
                         let set_pos = pos.offset(&dir);
 
                         if self.set_water {
-                            access.set_liquid(&set_pos, LiquidState::new(self.res_map.material_water(), 15));
+                            access.update_block(&set_pos, |data| {
+                                *data.liquid_state_mut() = LiquidState::source(self.res_map.material_water());
+                            });
                         } else {
                             access.update_block(&set_pos, |data| data.set(self.curr_block.clone()));
 
@@ -514,9 +516,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
 
     loaded_clusters.par_iter().for_each(|(cl_pos, o_cluster)| {
         if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
-            let mut has_active_blocks = false;
             let cluster = o_cluster.cluster.read();
-
             let mut after_actions = AfterTickActionsStorage::new();
 
             if let Some(cluster) = &*cluster {
@@ -524,16 +524,16 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
                     let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
                     let block = registry.get_block(block_data.block_id()).unwrap();
 
+                    // Check for liquid
+                    core::on_liquid_tick(&global_pos, block_data, overworld, after_actions.builder());
+
                     if let Some(on_tick) = &block.event_handlers().on_tick {
                         on_tick(&global_pos, block_data, overworld, after_actions.builder());
-                        has_active_blocks = true;
                     }
                 }
             }
-            o_cluster
-                .may_have_active_blocks
-                .store(has_active_blocks, MO_RELAXED);
 
+            o_cluster.may_have_active_blocks.store(false, MO_RELAXED);
             total_after_actions.lock().push(after_actions);
         }
     });
@@ -551,7 +551,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
         let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
     }
 
-    // Set complete block states after the components and activities
+    // Set complete block states after all modifications
     for info in total_after_actions.iter().flat_map(|v| &v.states_infos) {
         let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
     }

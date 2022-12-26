@@ -55,7 +55,8 @@ impl MainRegistry {
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let id = reg.register_block(BlockBuilder::new(Registry::MODEL_ID_NULL));
+            let id =
+                reg.register_block(BlockBuilder::new(Registry::MODEL_ID_NULL).with_can_pass_liquid(true));
             BlockState::new(id, StatelessBlock)
         };
         let block_default = {
