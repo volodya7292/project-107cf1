@@ -27,6 +27,7 @@ use core::overworld::liquid_state::LiquidState;
 use core::overworld::position::{BlockPos, ClusterPos};
 use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use core::overworld::Overworld;
+use core::overworld::ReadOnlyOverworld;
 use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use core::physics::aabb::{AABBRayIntersection, AABB};
 use core::physics::MOTION_EPSILON;
@@ -526,7 +527,8 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
             let mut has_active_blocks = false;
 
             if let Some(cluster) = &*cluster {
-                let mut accessor = overworld.access().into_read_only();
+                let read_only_overworld = ReadOnlyOverworld::new(overworld);
+                let mut accessor = read_only_overworld.access();
 
                 for (pos, block_data) in cluster.active_blocks() {
                     let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
@@ -536,7 +538,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
                     core::on_liquid_tick(
                         &global_pos,
                         block_data,
-                        overworld,
+                        read_only_overworld,
                         &mut accessor,
                         after_actions.builder(),
                     );
@@ -546,7 +548,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
                         on_tick(
                             &global_pos,
                             block_data,
-                            &overworld,
+                            read_only_overworld,
                             &mut accessor,
                             after_actions.builder(),
                         );

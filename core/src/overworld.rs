@@ -14,7 +14,7 @@ use engine::utils::white_noise::WhiteNoise;
 use engine::utils::{HashMap, UInt, MO_RELAXED};
 
 use crate::main_registry::MainRegistry;
-use crate::overworld::accessor::ClustersAccessorCache;
+use crate::overworld::accessor::{ClustersAccessorCache, ReadOnlyOverworldAccessor};
 use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::OverworldGenerator;
@@ -199,6 +199,25 @@ impl Overworld {
             Arc::clone(self.main_registry.registry()),
             Arc::clone(&self.loaded_clusters),
         )
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct ReadOnlyOverworld<'a> {
+    inner: &'a Overworld,
+}
+
+impl<'a> ReadOnlyOverworld<'a> {
+    pub fn new(inner: &'a Overworld) -> Self {
+        Self { inner }
+    }
+
+    pub fn main_registry(&self) -> &Arc<MainRegistry> {
+        &self.inner.main_registry
+    }
+
+    pub fn access(&self) -> ReadOnlyOverworldAccessor {
+        self.inner.access().into_read_only()
     }
 }
 

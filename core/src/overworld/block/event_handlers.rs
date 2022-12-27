@@ -14,7 +14,7 @@ use crate::overworld::block::{BlockData, BlockState};
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
-use crate::overworld::Overworld;
+use crate::overworld::{Overworld, ReadOnlyOverworld};
 
 /// Returns true if the specified data was successfully applied.
 pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8);
@@ -164,7 +164,7 @@ impl AfterTickActionsBuilder<'_> {
 pub type OnTickFn = fn(
     pos: &BlockPos,
     block_data: BlockData,
-    overworld: &Overworld,
+    overworld: ReadOnlyOverworld<'_>,
     accessor: &mut ReadOnlyOverworldAccessor,
     result: AfterTickActionsBuilder,
 );

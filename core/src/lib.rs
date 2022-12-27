@@ -8,7 +8,7 @@ use crate::overworld::facing::Facing;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
-use crate::overworld::Overworld;
+use crate::overworld::{Overworld, ReadOnlyOverworld};
 
 pub mod main_registry;
 pub mod overworld;
@@ -21,7 +21,7 @@ pub mod scene;
 pub fn on_liquid_tick(
     pos: &BlockPos,
     block_data: BlockData,
-    overworld: &Overworld,
+    overworld: ReadOnlyOverworld<'_>,
     access: &mut ReadOnlyOverworldAccessor,
     mut result: AfterTickActionsBuilder,
 ) {
