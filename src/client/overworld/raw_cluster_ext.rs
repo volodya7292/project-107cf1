@@ -261,25 +261,42 @@ fn calc_liquid_height(intrinsics: &[CellInfo], cache: &mut LiquidHeightsCache, p
 
     // Use a cache to reduce the number of calculations by a factor of ~4
     *entry.get_or_insert_with(|| {
+        let aligned_pos = pos.add_scalar(1);
         let mut height = 0_u32;
         let mut count = 0_u32;
+        let mut height_must_be_max = false;
 
-        for i in -1..=0_i32 {
+        'outer: for i in -1..=0_i32 {
             for j in -1..=0_i32 {
-                let rel_padded = pos.add_scalar(1) + glm::vec3(i, 0, j);
+                let rel_padded = aligned_pos + glm::vec3(i, 0, j);
+
+                let top_liquid_exists = {
+                    let rel_padded = rel_padded + Facing::PositiveY.direction();
+                    let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
+                    let level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
+                    level > 0
+                };
+                if top_liquid_exists {
+                    // Liquid level must be the highest for correct vertex joints
+                    height = LiquidState::MAX_LEVEL as u32;
+                    count = 1;
+                    height_must_be_max = true;
+                    break 'outer;
+                }
+
                 let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
+                let curr_level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
 
-                let level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
-
-                height += level;
-                count += level.min(1);
+                height += curr_level;
+                count += curr_level.min(1);
             }
         }
 
+        // if there is no liquid above all four corners, lower current level slightly
+        let top_factor = 1.0 - (!height_must_be_max as u32 as f32) * 0.1;
         let factor = height as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
 
-        // Limit max liquid height to 0.9
-        0.9 * factor
+        top_factor * factor
     })
 }
 
@@ -424,22 +441,15 @@ fn gen_block_vertices(
     let curr_cell = &cells[intrinsic_idx];
 
     let contains_liquid = curr_cell.liquid_state.level() > 0;
-    let mut liquid_heights = [1_f32; 4]; // by default liquid heights are at maximum
+    let mut liquid_heights = [0_f32; 4];
 
     // Calculate liquid heights if it is present
     if contains_liquid {
-        let top_cell = cluster.get_cell(&(pos + Facing::PositiveY.direction()));
-
-        if curr_cell.liquid_state.liquid_id() != top_cell.liquid_state.liquid_id()
-            || top_cell.liquid_state.level() == 0
-            || curr_cell.liquid_state.level() < LiquidState::MAX_LEVEL
-        {
-            for i in 0..2 {
-                for j in 0..2 {
-                    let rel = pos + glm::vec3(i, 0, j);
-                    let height = calc_liquid_height(cells, liquid_cache, &rel);
-                    liquid_heights[(i * 2 + j) as usize] = height;
-                }
+        for x in 0..2 {
+            for z in 0..2 {
+                let rel = pos + glm::vec3(x, 0, z);
+                let height = calc_liquid_height(cells, liquid_cache, &rel);
+                liquid_heights[(x * 2 + z) as usize] = height;
             }
         }
     } else if block.is_model_invisible() {

@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
-use parking_lot::Mutex;
 use smallvec::{smallvec, SmallVec};
 
 use vk_wrapper as vkw;
@@ -14,7 +13,7 @@ use vk_wrapper::DescriptorSet;
 
 use crate::ecs::component;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::{BufferUpdate, BufferUpdate1, DirtyComponents, Renderable};
+use crate::renderer::{BufferUpdate, BufferUpdate1, Renderable};
 use crate::unwrap_option;
 use crate::utils::{HashMap, HashSet};
 
