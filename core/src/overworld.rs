@@ -14,6 +14,7 @@ use engine::utils::white_noise::WhiteNoise;
 use engine::utils::{HashMap, UInt, MO_RELAXED};
 
 use crate::main_registry::MainRegistry;
+use crate::overworld::accessor::ClustersAccessorCache;
 use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::OverworldGenerator;
@@ -96,7 +97,6 @@ pub struct Cluster {
     pub raw: RawCluster,
     pub dirty_parts: ClusterDirtySides,
     pub active_blocks: FixedBitSet,
-    pub may_have_active_blocks: bool,
 }
 
 impl Cluster {
@@ -120,7 +120,6 @@ impl Cluster {
             raw,
             dirty_parts: ClusterDirtySides::all(),
             active_blocks,
-            may_have_active_blocks: true,
         }
     }
 

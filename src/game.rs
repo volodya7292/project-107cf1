@@ -15,7 +15,11 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 
 use core::main_registry::{MainRegistry, StatelessBlock};
+use core::overworld::accessor::ClustersAccessorCache;
+use core::overworld::accessor::ReadOnlyOverworldAccessor;
+use core::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use core::overworld::block::event_handlers::AfterTickActionsStorage;
+use core::overworld::block::event_handlers::StateChangeInfo;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
 use core::overworld::light_level::LightLevel;
@@ -324,9 +328,10 @@ impl Application for Game {
                         let set_pos = pos.offset(&dir);
 
                         if self.set_water {
-                            access.update_block(&set_pos, |data| {
-                                *data.liquid_state_mut() = LiquidState::source(self.res_map.material_water());
-                            });
+                            access.set_liquid_state(
+                                &set_pos,
+                                LiquidState::source(self.res_map.material_water()),
+                            );
                         } else {
                             access.update_block(&set_pos, |data| data.set(self.curr_block.clone()));
 
@@ -518,41 +523,76 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
         if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
             let cluster = o_cluster.cluster.read();
             let mut after_actions = AfterTickActionsStorage::new();
+            let mut has_active_blocks = false;
 
             if let Some(cluster) = &*cluster {
+                let mut accessor = overworld.access().into_read_only();
+
                 for (pos, block_data) in cluster.active_blocks() {
                     let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
                     let block = registry.get_block(block_data.block_id()).unwrap();
 
                     // Check for liquid
-                    core::on_liquid_tick(&global_pos, block_data, overworld, after_actions.builder());
+                    core::on_liquid_tick(
+                        &global_pos,
+                        block_data,
+                        overworld,
+                        &mut accessor,
+                        after_actions.builder(),
+                    );
 
+                    // Block-specific on-tick event
                     if let Some(on_tick) = &block.event_handlers().on_tick {
-                        on_tick(&global_pos, block_data, overworld, after_actions.builder());
+                        on_tick(
+                            &global_pos,
+                            block_data,
+                            &overworld,
+                            &mut accessor,
+                            after_actions.builder(),
+                        );
                     }
+
+                    has_active_blocks |= block_data.active();
                 }
             }
 
-            o_cluster.may_have_active_blocks.store(false, MO_RELAXED);
+            o_cluster
+                .may_have_active_blocks
+                .store(has_active_blocks, MO_RELAXED);
             total_after_actions.lock().push(after_actions);
         }
     });
 
-    let mut cluster_accessor = overworld.access();
     let total_after_actions = total_after_actions.lock();
+    let mut after_actions_by_cluster = HashMap::<ClusterPos, Vec<&StateChangeInfo>>::with_capacity(4096);
 
-    // Note: first set components because that relate to the current block archetype
-    for info in total_after_actions.iter().flat_map(|v| &v.components_infos) {
-        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
+    for info in std::iter::empty()
+        .chain(total_after_actions.iter().flat_map(|v| &v.components_infos))
+        .chain(total_after_actions.iter().flat_map(|v| &v.activity_infos))
+        .chain(total_after_actions.iter().flat_map(|v| &v.liquid_infos))
+        .chain(total_after_actions.iter().flat_map(|v| &v.states_infos))
+    {
+        let vec = after_actions_by_cluster
+            .entry(info.pos.cluster_pos())
+            .or_insert_with(|| Vec::with_capacity(64));
+        vec.push(info);
     }
 
-    // Set activities
-    for info in total_after_actions.iter().flat_map(|v| &v.activity_infos) {
-        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
-    }
+    while !after_actions_by_cluster.is_empty() {
+        after_actions_by_cluster.retain(|pos, actions| {
+            let mut access = overworld.access();
 
-    // Set complete block states after all modifications
-    for info in total_after_actions.iter().flat_map(|v| &v.states_infos) {
-        let success = (info.apply_fn)(&mut cluster_accessor, &info.pos, info.data_ptr);
+            if access.cache_mut().access_cluster_mut(pos).is_none() {
+                // Can't access cluster => retain and try again in the next iteration of outer loop
+                return true;
+            };
+
+            for action in actions {
+                // Safety: action's referenced data exists inside `total_after_actions`.
+                unsafe { action.apply(&mut access) };
+            }
+
+            false
+        });
     }
 }

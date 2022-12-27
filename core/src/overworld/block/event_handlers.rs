@@ -9,7 +9,7 @@ use winit::event::VirtualKeyCode::P;
 use engine::unwrap_option;
 use engine::utils::HashMap;
 
-use crate::overworld::accessor::OverworldAccessor;
+use crate::overworld::accessor::{OverworldAccessor, ReadOnlyOverworldAccessor};
 use crate::overworld::block::{BlockData, BlockState};
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
@@ -17,27 +17,34 @@ use crate::overworld::raw_cluster::BlockDataImpl;
 use crate::overworld::Overworld;
 
 /// Returns true if the specified data was successfully applied.
-pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) -> bool;
+pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8);
 
 pub struct StateChangeInfo {
-    pub data_ptr: *const u8,
     pub pos: BlockPos,
+    pub data_ptr: *const u8,
     pub apply_fn: ApplyFn,
 }
 unsafe impl Send for StateChangeInfo {}
 unsafe impl Sync for StateChangeInfo {}
 
+impl StateChangeInfo {
+    /// Safety: referenced data must be accessible and valid.
+    pub unsafe fn apply(&self, access: &mut OverworldAccessor) {
+        (self.apply_fn)(access, &self.pos, self.data_ptr)
+    }
+}
+
 /// Contains actions to perform after the tick.
 pub struct AfterTickActionsStorage {
-    // TODO: use TypedArena
     pub states: bumpalo::Bump,
-    // TODO: use TypedArena
     pub components: bumpalo::Bump,
-    pub other_data: bumpalo::Bump,
+    pub activities: bumpalo::Bump,
+    pub liquids: bumpalo::Bump,
 
     pub states_infos: Vec<StateChangeInfo>,
     pub components_infos: Vec<StateChangeInfo>,
     pub activity_infos: Vec<StateChangeInfo>,
+    pub liquid_infos: Vec<StateChangeInfo>,
 }
 
 impl AfterTickActionsStorage {
@@ -45,10 +52,12 @@ impl AfterTickActionsStorage {
         Self {
             states: Default::default(),
             components: Default::default(),
-            other_data: Default::default(),
+            activities: Default::default(),
+            liquids: Default::default(),
             states_infos: Vec::with_capacity(4096),
             components_infos: Vec::with_capacity(4096),
             activity_infos: Vec::with_capacity(4096),
+            liquid_infos: Vec::with_capacity(4096),
         }
     }
 
@@ -56,8 +65,8 @@ impl AfterTickActionsStorage {
         let mut_ref = self.states.alloc(block_state);
 
         self.states_infos.push(StateChangeInfo {
-            data_ptr: mut_ref as *const _ as *const u8,
             pos,
+            data_ptr: mut_ref as *const _ as *const u8,
             apply_fn: |access, pos, data| {
                 let mut state_uninit = mem::MaybeUninit::<BlockState<A>>::uninit();
 
@@ -67,7 +76,7 @@ impl AfterTickActionsStorage {
                     state_uninit.assume_init()
                 };
 
-                access.update_block(pos, |data| data.set(state))
+                access.update_block(pos, |data| data.set(state));
             },
         });
     }
@@ -76,8 +85,8 @@ impl AfterTickActionsStorage {
         let mut_ref = self.components.alloc(component);
 
         self.components_infos.push(StateChangeInfo {
-            data_ptr: mut_ref as *const _ as *const u8,
             pos,
+            data_ptr: mut_ref as *const _ as *const u8,
             apply_fn: |access, pos, data| {
                 let mut component_uninit = mem::MaybeUninit::<C>::uninit();
 
@@ -91,37 +100,35 @@ impl AfterTickActionsStorage {
                     if let Some(comp) = data.get_mut::<C>() {
                         *comp = component
                     }
-                })
+                });
             },
         });
     }
 
     pub fn set_active(&mut self, pos: BlockPos, active: bool) {
-        let mut_ref = self.other_data.alloc(active);
+        let mut_ref = self.activities.alloc(active);
 
         self.activity_infos.push(StateChangeInfo {
             data_ptr: mut_ref as *const _ as *const u8,
             pos,
-            apply_fn: |access, pos, data| {
+            apply_fn: |access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8| {
                 let active = unsafe { *(data as *const bool) };
                 access.update_block(pos, |data| {
                     *data.active_mut() = active;
-                })
+                });
             },
         });
     }
 
     pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
-        let mut_ref = self.other_data.alloc(liquid);
+        let mut_ref = self.liquids.alloc(liquid);
 
-        self.activity_infos.push(StateChangeInfo {
-            data_ptr: mut_ref as *const _ as *const u8,
+        self.liquid_infos.push(StateChangeInfo {
             pos,
-            apply_fn: |access, pos, data| {
+            data_ptr: mut_ref as *const _ as *const u8,
+            apply_fn: |access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8| {
                 let liquid = unsafe { *(data as *const LiquidState) };
-                access.update_block(pos, |data| {
-                    *data.liquid_state_mut() = liquid;
-                })
+                access.set_liquid_state(pos, liquid);
             },
         });
     }
@@ -154,8 +161,13 @@ impl AfterTickActionsBuilder<'_> {
 }
 
 /// Returns the actions to perform after the tick.
-pub type OnTickFn =
-    fn(pos: &BlockPos, block_data: BlockData, overworld: &Overworld, result: AfterTickActionsBuilder);
+pub type OnTickFn = fn(
+    pos: &BlockPos,
+    block_data: BlockData,
+    overworld: &Overworld,
+    accessor: &mut ReadOnlyOverworldAccessor,
+    result: AfterTickActionsBuilder,
+);
 
 /// Gets called when nearby block is set.
 pub type OnNearbyBlockSet = fn(

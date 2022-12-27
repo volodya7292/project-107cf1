@@ -68,7 +68,7 @@ impl MainRegistry {
                 BlockBuilder::new(model_cube)
                     .with_active_by_default(true)
                     .with_event_handlers(block::EventHandlers::new().with_on_tick(
-                        |pos, _, _, mut after_actions| {
+                        |pos, _, _, _, mut after_actions| {
                             after_actions.set_activity(*pos, false);
                             println!("ON TICK!");
                         },

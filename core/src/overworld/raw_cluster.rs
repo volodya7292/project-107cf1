@@ -124,6 +124,7 @@ pub trait BlockDataImpl {
     /// Returns the specified block component `C`
     fn get<C: Component>(&self) -> Option<&C>;
 
+    fn light_level(&self) -> LightLevel;
     fn liquid_state(&self) -> &LiquidState;
     fn active(&self) -> bool;
 }
@@ -135,6 +136,10 @@ impl BlockDataImpl for BlockData<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn light_level(&self) -> LightLevel {
+        self.info.light_level
     }
 
     fn liquid_state(&self) -> &LiquidState {
@@ -159,6 +164,10 @@ impl BlockDataImpl for BlockDataMut<'_> {
 
     fn get<C: Component>(&self) -> Option<&C> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
+    }
+
+    fn light_level(&self) -> LightLevel {
+        self.info.light_level
     }
 
     fn liquid_state(&self) -> &LiquidState {
@@ -186,6 +195,10 @@ impl BlockDataMut<'_> {
         self.info.block_id = state.block_id;
         self.info.occluder = block.occluder();
         self.info.active |= block.active_by_default();
+    }
+
+    pub fn light_level_mut(&mut self) -> &mut LightLevel {
+        &mut self.info.light_level
     }
 
     pub fn liquid_state_mut(&mut self) -> &mut LiquidState {
@@ -256,20 +269,6 @@ impl RawCluster {
             block_storage: &mut self.block_state_storage,
             info: &mut self.cells[aligned_block_index(&aligned_pos)],
         }
-    }
-
-    #[inline]
-    pub fn get_light_level(&self, pos: &ClusterBlockPos) -> LightLevel {
-        let aligned_pos = pos.get().add_scalar(1);
-        let index = aligned_block_index(&aligned_pos);
-        self.cells[index].light_level
-    }
-
-    #[inline]
-    pub fn set_light_level(&mut self, pos: &ClusterBlockPos, level: LightLevel) {
-        let aligned_pos = pos.get().add_scalar(1);
-        let index = aligned_block_index(&aligned_pos);
-        self.cells[index].light_level = level;
     }
 
     /// Checks if self inner edge is fully occluded

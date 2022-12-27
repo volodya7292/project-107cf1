@@ -3,6 +3,7 @@ use nalgebra_glm::{DVec3, I64Vec3};
 
 use aabb::AABB;
 
+use crate::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
 use crate::overworld::Overworld;

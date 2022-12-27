@@ -573,6 +573,7 @@ impl OverworldStreamer {
 
                 fill_neighbours.push((
                     p,
+                    state,
                     Arc::clone(&oclusters[&p]),
                     Arc::clone(&rclusters[&p].mesh_can_be_updated),
                     fill_occluder,
@@ -614,7 +615,7 @@ impl OverworldStreamer {
 
             // Remove unnecessary filling of neighbour cluster
             // (neighbour cluster is filled mutually with current cluster)
-            for (neighbour_pos, _, _, _) in &fill_neighbours {
+            for (neighbour_pos, _, _, _, _) in &fill_neighbours {
                 let rcluster = rclusters.get_mut(neighbour_pos).unwrap();
                 let mask = 1 << neighbour_dir_index(&neighbour_pos, &pos);
 
@@ -630,8 +631,13 @@ impl OverworldStreamer {
                         .raw
                         .clear_outer_intrinsics(glm::convert(offset), Default::default());
                 }
-                for (neighbour_pos, neighbour, neighbour_mesh_can_be_updated, offloaded_fill_occluder) in
-                    fill_neighbours
+                for (
+                    neighbour_pos,
+                    state,
+                    neighbour,
+                    neighbour_mesh_can_be_updated,
+                    offloaded_fill_occluder,
+                ) in fill_neighbours
                 {
                     // Use loop in case of failure to acquire a lock of one of the clusters
                     loop {
@@ -647,7 +653,7 @@ impl OverworldStreamer {
 
                         let cluster = unwrap_option!(cluster_guard.as_mut(), break);
 
-                        if neighbour.state() == ClusterState::Loaded {
+                        if state == ClusterState::Loaded {
                             let offset: I32Vec3 = glm::convert(neighbour_pos.get() - pos.get());
                             let neighbour_cluster = unwrap_option!(neighbour_cluster_guard.as_ref(), break);
 
@@ -697,7 +703,7 @@ impl OverworldStreamer {
                             if neighbour_cluster.dirty_parts.is_any() {
                                 neighbour.dirty.store(true, MO_RELAXED);
                             }
-                        } else if neighbour.state().is_empty_or_occluded() {
+                        } else if state.is_empty_or_occluded() {
                             let offset = neighbour_pos.get() - pos.get();
 
                             cluster.raw.clear_outer_intrinsics(
