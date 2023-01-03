@@ -48,8 +48,8 @@ impl Facing {
         *self as u8 % 2 == 1
     }
 
-    pub const fn direction(&self) -> I32Vec3 {
-        Self::DIRECTIONS[*self as usize]
+    pub const fn direction(&self) -> &I32Vec3 {
+        &Self::DIRECTIONS[*self as usize]
     }
 
     pub fn from_u8(v: u8) -> Facing {

@@ -9,6 +9,7 @@ use core::overworld::liquid_state::LiquidState;
 use core::overworld::position::ClusterBlockPos;
 use core::overworld::raw_cluster::BlockDataImpl;
 use core::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
+use core::registry::Registry;
 use engine::attributes_impl;
 use engine::renderer::vertex_mesh::{VertexMeshCreate, VertexPositionImpl};
 use engine::renderer::VertexMesh;
@@ -101,7 +102,7 @@ fn calc_quad_lighting(
     quad: &mut [Vertex; 4],
     facing: Facing,
 ) {
-    const RELATIVE_SIDES: [[I32Vec3; 4]; 6] = [
+    const RELATIVE_SIDES: [[&I32Vec3; 4]; 6] = [
         [
             Facing::NegativeY.direction(),
             Facing::NegativeZ.direction(),
@@ -256,45 +257,55 @@ type LiquidHeightsCache =
     Box<[[[Option<f32>; RawCluster::SIZE + 1]; RawCluster::SIZE]; RawCluster::SIZE + 1]>;
 
 /// Calculates liquid height at vertex in XZ-range 0..25
-fn calc_liquid_height(intrinsics: &[CellInfo], cache: &mut LiquidHeightsCache, pos: &I32Vec3) -> f32 {
+fn calc_liquid_height(
+    registry: &Registry,
+    intrinsics: &[CellInfo],
+    cache: &mut LiquidHeightsCache,
+    pos: &I32Vec3,
+) -> f32 {
     let entry = &mut cache[pos.x as usize][pos.y as usize][pos.z as usize];
 
     // Use a cache to reduce the number of calculations by a factor of ~4
     *entry.get_or_insert_with(|| {
         let aligned_pos = pos.add_scalar(1);
-        let mut height = 0_u32;
+        let mut height_sum = 0_u32;
         let mut count = 0_u32;
-        let mut height_must_be_max = false;
+        let mut level_bias_allowed = false;
 
         'outer: for i in -1..=0_i32 {
             for j in -1..=0_i32 {
                 let rel_padded = aligned_pos + glm::vec3(i, 0, j);
+                let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
+                let rel_data = &intrinsics[rel_padded_idx];
+                let rel_liquid = &rel_data.liquid_state;
+                let rel_block = registry.get_block(rel_data.block_id).unwrap();
+
+                if !rel_block.can_pass_liquid() {
+                    continue;
+                }
 
                 let top_liquid_exists = {
-                    let rel_padded = rel_padded + Facing::PositiveY.direction();
-                    let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
-                    let level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
-                    level > 0
+                    let top_rel_padded = rel_padded + Facing::PositiveY.direction();
+                    let top_rel_padded_idx = aligned_block_index(&glm::convert_unchecked(top_rel_padded));
+                    let top_level = intrinsics[top_rel_padded_idx].liquid_state.level();
+                    top_level > 0
                 };
-                if top_liquid_exists {
-                    // Liquid level must be the highest for correct vertex joints
-                    height = LiquidState::MAX_LEVEL as u32;
+                if rel_liquid.is_max() {
+                    // All four liquid levels must be highest to ensure correct vertex joints
+                    height_sum = LiquidState::MAX_LEVEL as u32;
                     count = 1;
-                    height_must_be_max = true;
+                    level_bias_allowed = !top_liquid_exists;
                     break 'outer;
                 }
 
-                let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
-                let curr_level = intrinsics[rel_padded_idx].liquid_state.level() as u32;
-
-                height += curr_level;
-                count += curr_level.min(1);
+                height_sum += rel_liquid.level() as u32;
+                count += 1;
             }
         }
 
         // if there is no liquid above all four corners, lower current level slightly
-        let top_factor = 1.0 - (!height_must_be_max as u32 as f32) * 0.1;
-        let factor = height as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
+        let top_factor = 1.0 - (level_bias_allowed as u32 as f32) * 0.1;
+        let factor = height_sum as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
 
         top_factor * factor
     })
@@ -344,7 +355,7 @@ fn construct_liquid_quad(
     let material_id = material_id as u32;
     let lighting = light_level.bits();
     let quad_vertices;
-    let mut normal: Vec3 = glm::convert(facing.direction());
+    let mut normal: Vec3 = glm::convert(*facing.direction());
 
     let quad_uv = [
         Vec2::new(0.0, 0.0),
@@ -448,7 +459,7 @@ fn gen_block_vertices(
         for x in 0..2 {
             for z in 0..2 {
                 let rel = pos + glm::vec3(x, 0, z);
-                let height = calc_liquid_height(cells, liquid_cache, &rel);
+                let height = calc_liquid_height(registry, cells, liquid_cache, &rel);
                 liquid_heights[(x * 2 + z) as usize] = height;
             }
         }

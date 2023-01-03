@@ -1,5 +1,6 @@
+use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
@@ -59,6 +60,7 @@ pub struct Game {
 
     cursor_rel: (f64, f64),
     game_tick_finished: Arc<AtomicBool>,
+    curr_tick: Arc<AtomicU64>,
 
     overworld: Arc<Overworld>,
     overworld_streamer: Option<Arc<Mutex<OverworldStreamer>>>,
@@ -101,6 +103,7 @@ impl Game {
             res_map,
             cursor_rel: (0.0, 0.0),
             game_tick_finished: Arc::clone(&game_tick_finished),
+            curr_tick: Arc::new(Default::default()),
             overworld,
             overworld_streamer: None,
             player_pos: glm::convert(spawn_point.0),
@@ -314,6 +317,8 @@ impl Application for Game {
             camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
         }
 
+        // TODO: set blocks only in on_tick handler
+
         // Set block on mouse button click
         {
             if self.block_set_cooldown == 0.0 {
@@ -325,7 +330,7 @@ impl Application for Game {
                         access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
 
                     if let Some((pos, facing)) = self.look_at_block {
-                        let dir: I64Vec3 = glm::convert(facing.direction());
+                        let dir: I64Vec3 = glm::convert(*facing.direction());
                         let set_pos = pos.offset(&dir);
 
                         if self.set_water {
@@ -389,6 +394,7 @@ impl Application for Game {
             let overworld = Arc::clone(&self.overworld);
             let streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
             let game_tick_finished = Arc::clone(&self.game_tick_finished);
+            let curr_tick = self.curr_tick.fetch_add(1, MO_RELAXED);
 
             {
                 let mut streamer = streamer.lock();
@@ -409,7 +415,7 @@ impl Application for Game {
                 }
             }
 
-            coroutine_queue().spawn(|| game_tick(overworld, streamer, game_tick_finished));
+            coroutine_queue().spawn(move || game_tick(curr_tick, overworld, streamer, game_tick_finished));
             // println!("as {}", renderer.device().calc_real_device_mem_usage());
         }
     }
@@ -419,6 +425,7 @@ impl Application for Game {
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
+        renderer: &mut Renderer,
     ) {
         use winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
@@ -467,6 +474,24 @@ impl Application for Game {
                                 self.grab_cursor(main_window, !self.cursor_grab);
                                 main_window.set_cursor_visible(!self.cursor_grab);
                             }
+                            VirtualKeyCode::J => {
+                                let camera = renderer.active_camera();
+                                let mut access = self.overworld.access();
+                                let block = access.get_block_at_ray(
+                                    &camera.position(),
+                                    &glm::convert(camera.direction()),
+                                    7.0,
+                                );
+                                if let Some((pos, facing)) = block {
+                                    let pos = pos.offset_i32(&Facing::PositiveY.direction());
+                                    let data = access.get_block(&pos);
+
+                                    if let Some(data) = data {
+                                        let level = data.liquid_state().level();
+                                        println!("LIQ LEVEL: {level}");
+                                    }
+                                }
+                            }
                             VirtualKeyCode::Key1 => {
                                 self.curr_block = self.registry.block_test.into_any();
                                 self.set_water = false;
@@ -497,7 +522,9 @@ impl Application for Game {
     }
 }
 
+// TODO: move this to the core
 pub fn game_tick(
+    tick: u64,
     overworld: Arc<Overworld>,
     streamer: Arc<Mutex<OverworldStreamer>>,
     finished: Arc<AtomicBool>,
@@ -509,12 +536,12 @@ pub fn game_tick(
     // let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
-    process_active_blocks(&overworld, &dirty_clusters);
+    process_active_blocks(tick, &overworld, &dirty_clusters);
 
     finished.store(true, atomic::Ordering::Relaxed);
 }
 
-pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<ClusterPos>) {
+pub fn process_active_blocks(tick: u64, overworld: &Overworld, dirty_clusters: &HashSet<ClusterPos>) {
     let loaded_clusters = overworld.loaded_clusters().read();
     let registry = overworld.main_registry().registry();
 
@@ -536,6 +563,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
 
                     // Check for liquid
                     core::on_liquid_tick(
+                        tick,
                         &global_pos,
                         block_data,
                         read_only_overworld,
@@ -546,6 +574,7 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
                     // Block-specific on-tick event
                     if let Some(on_tick) = &block.event_handlers().on_tick {
                         on_tick(
+                            tick,
                             &global_pos,
                             block_data,
                             read_only_overworld,
@@ -565,23 +594,45 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
         }
     });
 
+    struct AllChanges<'a> {
+        params: Vec<&'a StateChangeInfo>,
+        activities: HashMap<BlockPos, bool>,
+    }
+
+    impl Default for AllChanges<'_> {
+        fn default() -> Self {
+            Self {
+                params: Vec::with_capacity(256),
+                activities: HashMap::with_capacity(256),
+            }
+        }
+    }
+
     let total_after_actions = total_after_actions.lock();
-    let mut after_actions_by_cluster = HashMap::<ClusterPos, Vec<&StateChangeInfo>>::with_capacity(4096);
+    let mut after_actions_by_cluster = HashMap::<ClusterPos, AllChanges>::with_capacity(4096);
 
     for info in std::iter::empty()
         .chain(total_after_actions.iter().flat_map(|v| &v.components_infos))
-        .chain(total_after_actions.iter().flat_map(|v| &v.activity_infos))
-        .chain(total_after_actions.iter().flat_map(|v| &v.liquid_infos))
         .chain(total_after_actions.iter().flat_map(|v| &v.states_infos))
+        .chain(total_after_actions.iter().flat_map(|v| &v.liquid_infos))
     {
-        let vec = after_actions_by_cluster
+        let changes = after_actions_by_cluster
             .entry(info.pos.cluster_pos())
-            .or_insert_with(|| Vec::with_capacity(64));
-        vec.push(info);
+            .or_default();
+        changes.params.push(info);
+    }
+
+    for info in total_after_actions.iter().flat_map(|v| &v.activity_infos) {
+        let changes = after_actions_by_cluster
+            .entry(info.pos.cluster_pos())
+            .or_default();
+
+        let curr_activity = changes.activities.entry(info.pos).or_insert(false);
+        *curr_activity |= info.active;
     }
 
     while !after_actions_by_cluster.is_empty() {
-        after_actions_by_cluster.retain(|pos, actions| {
+        after_actions_by_cluster.retain(|pos, changes| {
             let mut access = overworld.access();
 
             if access.cache_mut().access_cluster_mut(pos).is_none() {
@@ -589,9 +640,15 @@ pub fn process_active_blocks(overworld: &Overworld, dirty_clusters: &HashSet<Clu
                 return true;
             };
 
-            for action in actions {
+            for action in &changes.params {
                 // Safety: action's referenced data exists inside `total_after_actions`.
+                // Note: `action` can't fail because we have read-write access to the cluster at `pos`.
                 unsafe { action.apply(&mut access) };
+            }
+            for (pos, activity) in &changes.activities {
+                access.update_block(pos, |v| {
+                    *v.active_mut() = *activity;
+                });
             }
 
             false

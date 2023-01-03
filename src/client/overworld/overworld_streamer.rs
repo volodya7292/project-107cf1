@@ -145,7 +145,7 @@ fn get_side_clusters(pos: &ClusterPos) -> SmallVec<[ClusterPos; 26]> {
 }
 
 fn get_side_cluster_by_facing(pos: ClusterPos, facing: Facing) -> ClusterPos {
-    pos.offset(&glm::convert(facing.direction()))
+    pos.offset(&glm::convert(*facing.direction()))
 }
 
 fn neighbour_dir_index(pos: &ClusterPos, target: &ClusterPos) -> usize {

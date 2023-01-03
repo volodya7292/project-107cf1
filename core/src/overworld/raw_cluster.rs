@@ -197,10 +197,12 @@ impl BlockDataMut<'_> {
         self.info.active |= block.active_by_default();
     }
 
+    /// Raw mutable access to light level.
     pub fn light_level_mut(&mut self) -> &mut LightLevel {
         &mut self.info.light_level
     }
 
+    /// Raw mutable access to liquid state.
     pub fn liquid_state_mut(&mut self) -> &mut LiquidState {
         &mut self.info.liquid_state
     }
@@ -288,7 +290,7 @@ impl RawCluster {
 
         for i in 0..Self::SIZE {
             for j in 0..Self::SIZE {
-                let p = map_pos(&dir, i, j, Self::SIZE - 1).add_scalar(1);
+                let p = map_pos(dir, i, j, Self::SIZE - 1).add_scalar(1);
                 let index = aligned_block_index(&glm::convert(p));
 
                 state &= self.cells[index].occluder.occludes_side(facing);

@@ -1,3 +1,23 @@
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use lazy_static::lazy_static;
+use winit::event::WindowEvent;
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::Window;
+
+use vk_wrapper as vkw;
+
+use crate::input::{Keyboard, Mouse};
+use crate::queue::realtime_queue;
+use crate::renderer::module::text_renderer::TextRenderer;
+use crate::renderer::{FPSLimit, Renderer, RendererTimings};
+use crate::utils::thread_pool::{SafeThreadPool, TaskPriority};
+use crate::utils::{HashSet, MO_RELAXED};
+
 pub mod ecs;
 pub mod input;
 mod platform;
@@ -7,23 +27,6 @@ pub mod resource_file;
 #[cfg(test)]
 mod tests;
 pub mod utils;
-
-use crate::input::{Keyboard, Mouse};
-use crate::queue::realtime_queue;
-use crate::renderer::module::text_renderer::TextRenderer;
-use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-use crate::utils::thread_pool::{SafeThreadPool, TaskPriority};
-use crate::utils::{HashSet, MO_RELAXED};
-use lazy_static::lazy_static;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use vk_wrapper as vkw;
-use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::Window;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -88,6 +91,7 @@ pub trait Application {
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
+        renderer: &mut Renderer,
     );
 }
 
@@ -238,7 +242,8 @@ impl Engine {
                 _ => {}
             }
 
-            self.app.on_event(event, &self.main_window, control_flow);
+            self.app
+                .on_event(event, &self.main_window, control_flow, &mut self.renderer);
         });
     }
 }

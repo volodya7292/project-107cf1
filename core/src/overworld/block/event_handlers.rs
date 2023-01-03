@@ -9,7 +9,9 @@ use winit::event::VirtualKeyCode::P;
 use engine::unwrap_option;
 use engine::utils::HashMap;
 
-use crate::overworld::accessor::{OverworldAccessor, ReadOnlyOverworldAccessor};
+use crate::overworld::accessor::{
+    OverworldAccessor, ReadOnlyOverworldAccessor, ReadOnlyOverworldAccessorImpl,
+};
 use crate::overworld::block::{BlockData, BlockState};
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
@@ -34,17 +36,30 @@ impl StateChangeInfo {
     }
 }
 
+pub struct ActivityChangeInfo {
+    pub pos: BlockPos,
+    pub active: bool,
+}
+
+fn liquid_apply_fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) {
+    let curr_block = access.get_block(pos).unwrap();
+    let new_liquid = unsafe { *(data as *const LiquidState) };
+
+    if new_liquid.level() > curr_block.liquid_state().level() {
+        access.set_liquid_state(pos, new_liquid);
+    }
+}
+
 /// Contains actions to perform after the tick.
 pub struct AfterTickActionsStorage {
     pub states: bumpalo::Bump,
     pub components: bumpalo::Bump,
-    pub activities: bumpalo::Bump,
     pub liquids: bumpalo::Bump,
 
     pub states_infos: Vec<StateChangeInfo>,
     pub components_infos: Vec<StateChangeInfo>,
-    pub activity_infos: Vec<StateChangeInfo>,
     pub liquid_infos: Vec<StateChangeInfo>,
+    pub activity_infos: Vec<ActivityChangeInfo>,
 }
 
 impl AfterTickActionsStorage {
@@ -52,12 +67,11 @@ impl AfterTickActionsStorage {
         Self {
             states: Default::default(),
             components: Default::default(),
-            activities: Default::default(),
             liquids: Default::default(),
             states_infos: Vec::with_capacity(4096),
             components_infos: Vec::with_capacity(4096),
-            activity_infos: Vec::with_capacity(4096),
             liquid_infos: Vec::with_capacity(4096),
+            activity_infos: Vec::with_capacity(4096),
         }
     }
 
@@ -106,18 +120,7 @@ impl AfterTickActionsStorage {
     }
 
     pub fn set_active(&mut self, pos: BlockPos, active: bool) {
-        let mut_ref = self.activities.alloc(active);
-
-        self.activity_infos.push(StateChangeInfo {
-            data_ptr: mut_ref as *const _ as *const u8,
-            pos,
-            apply_fn: |access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8| {
-                let active = unsafe { *(data as *const bool) };
-                access.update_block(pos, |data| {
-                    *data.active_mut() = active;
-                });
-            },
-        });
+        self.activity_infos.push(ActivityChangeInfo { pos, active });
     }
 
     pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
@@ -126,10 +129,7 @@ impl AfterTickActionsStorage {
         self.liquid_infos.push(StateChangeInfo {
             pos,
             data_ptr: mut_ref as *const _ as *const u8,
-            apply_fn: |access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8| {
-                let liquid = unsafe { *(data as *const LiquidState) };
-                access.set_liquid_state(pos, liquid);
-            },
+            apply_fn: liquid_apply_fn,
         });
     }
 
@@ -162,6 +162,7 @@ impl AfterTickActionsBuilder<'_> {
 
 /// Returns the actions to perform after the tick.
 pub type OnTickFn = fn(
+    tick: u64,
     pos: &BlockPos,
     block_data: BlockData,
     overworld: ReadOnlyOverworld<'_>,

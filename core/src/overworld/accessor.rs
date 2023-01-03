@@ -100,16 +100,15 @@ impl ClustersAccessorCache {
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster_mut(&mut self, cluster_pos: &ClusterPos) -> Option<&mut AccessGuard> {
         // Fast path
-        if self.clusters_cache.contains_key(cluster_pos) {
-            if let hash_map::Entry::Occupied(e) = self.clusters_cache.entry(*cluster_pos) {
-                if let AccessGuardLock::Write(_) = &e.get().lock {
-                    let mut_ref = e.into_mut();
+        if let hash_map::Entry::Occupied(e) = self.clusters_cache.entry(*cluster_pos) {
+            if let AccessGuardLock::Write(_) = &e.get().lock {
+                let mut_ref = e.into_mut();
 
-                    // TODO: use NLL when https://github.com/rust-lang/rust/issues/51545 is fixed
-                    return Some(unsafe { &mut *(mut_ref as *mut AccessGuard) });
-                } else {
-                    e.remove();
-                }
+                // TODO: use NLL when https://github.com/rust-lang/rust/issues/51545 is fixed
+                // return Some(mut_ref);
+                return Some(unsafe { &mut *(mut_ref as *mut _) });
+            } else {
+                e.remove();
             }
         }
 
@@ -296,13 +295,11 @@ impl OverworldAccessor {
 
             *data.liquid_state_mut() = liquid;
 
-            // If there is a liquid source, it must spread
-            if liquid.is_source() {
-                *data.active_mut() = true;
-                cluster
-                    .active_blocks
-                    .set(cluster_block_pos.index(), data.active());
-            }
+            // The liquid must spread or vanish
+            *data.active_mut() = true;
+            cluster
+                .active_blocks
+                .set(cluster_block_pos.index(), data.active());
 
             cluster.dirty_parts.set_dirty(&cluster_block_pos);
         }
