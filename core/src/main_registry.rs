@@ -1,22 +1,14 @@
-use std::default::Default;
 use std::sync::Arc;
 
 use entity_data::Archetype;
-use entity_data::ArchetypeState;
-use nalgebra_glm::{DVec3, U64Vec3, Vec3, Vec4};
+use nalgebra_glm::{DVec3, U64Vec3, Vec3};
 
-use engine::renderer::{MatComponent, MaterialInfo, TextureAtlasType, TEXTURE_ID_NONE};
-use engine::resource_file::ResourceFile;
-
-use crate::overworld;
-use crate::overworld::block::event_handlers::AfterTickActionsStorage;
-use crate::overworld::block::{Block, BlockBuilder, BlockState};
+use crate::overworld::block::{BlockBuilder, BlockState};
 use crate::overworld::block_model::BlockModel;
-use crate::overworld::material::Material;
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::world::Biome;
 use crate::overworld::structure::{world, Structure};
-use crate::overworld::{block, block_component, block_model, structure};
+use crate::overworld::{block, block_model};
 use crate::physics::aabb::AABB;
 use crate::registry::Registry;
 

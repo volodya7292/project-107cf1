@@ -17,10 +17,6 @@ use rstar::{Envelope, Point, RTree};
 use smallvec::SmallVec;
 
 pub use biome::Biome;
-use engine::utils::noise::{HybridNoise, ParamNoise};
-use engine::utils::voronoi_noise::VoronoiNoise2D;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl};
 use overworld::raw_cluster;
 
 use crate::overworld;
@@ -32,6 +28,10 @@ use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::Structure;
 use crate::overworld::Overworld;
 use crate::registry::Registry;
+use crate::utils::noise::{HybridNoise, ParamNoise};
+use crate::utils::voronoi_noise::VoronoiNoise2D;
+use crate::utils::white_noise::WhiteNoise;
+use crate::utils::{ConcurrentCache, ConcurrentCacheImpl};
 
 pub mod biome;
 

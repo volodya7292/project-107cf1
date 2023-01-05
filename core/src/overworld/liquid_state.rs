@@ -1,6 +1,3 @@
-use std::cmp::Ordering;
-use std::ops::Deref;
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct LiquidState {
     liquid_id: u16,

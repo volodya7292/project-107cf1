@@ -2,9 +2,10 @@ use std::time::Instant;
 
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 
+use core::utils::HashSet;
+
 use crate::ecs::component;
 use crate::ecs::component::internal::{GlobalTransform, Relation};
-use crate::utils::HashSet;
 
 // Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {

@@ -1,13 +1,7 @@
-use std::any::TypeId;
 use std::mem;
+use std::sync::Arc;
 
 use entity_data::{ArchetypeState, Component};
-use nalgebra_glm::I64Vec3;
-use smallvec::SmallVec;
-use winit::event::VirtualKeyCode::P;
-
-use engine::unwrap_option;
-use engine::utils::HashMap;
 
 use crate::overworld::accessor::{
     OverworldAccessor, ReadOnlyOverworldAccessor, ReadOnlyOverworldAccessorImpl,
@@ -16,7 +10,8 @@ use crate::overworld::block::{BlockData, BlockState};
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
-use crate::overworld::{Overworld, ReadOnlyOverworld};
+use crate::overworld::Overworld;
+use crate::registry::Registry;
 
 /// Returns true if the specified data was successfully applied.
 pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8);
@@ -51,7 +46,7 @@ fn liquid_apply_fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const 
 }
 
 /// Contains actions to perform after the tick.
-pub struct AfterTickActionsStorage {
+pub struct OverworldActionsStorage {
     pub states: bumpalo::Bump,
     pub components: bumpalo::Bump,
     pub liquids: bumpalo::Bump,
@@ -62,7 +57,7 @@ pub struct AfterTickActionsStorage {
     pub activity_infos: Vec<ActivityChangeInfo>,
 }
 
-impl AfterTickActionsStorage {
+impl OverworldActionsStorage {
     pub fn new() -> Self {
         Self {
             states: Default::default(),
@@ -133,16 +128,16 @@ impl AfterTickActionsStorage {
         });
     }
 
-    pub fn builder(&mut self) -> AfterTickActionsBuilder {
-        AfterTickActionsBuilder { storage: self }
+    pub fn builder(&mut self) -> OverworldActionsBuilder {
+        OverworldActionsBuilder { storage: self }
     }
 }
 
-pub struct AfterTickActionsBuilder<'a> {
-    storage: &'a mut AfterTickActionsStorage,
+pub struct OverworldActionsBuilder<'a> {
+    storage: &'a mut OverworldActionsStorage,
 }
 
-impl AfterTickActionsBuilder<'_> {
+impl OverworldActionsBuilder<'_> {
     pub fn set_block<A: ArchetypeState>(&mut self, pos: BlockPos, block_state: BlockState<A>) {
         self.storage.set_block(pos, block_state);
     }
@@ -160,14 +155,14 @@ impl AfterTickActionsBuilder<'_> {
     }
 }
 
-/// Returns the actions to perform after the tick.
+/// Collects actions to perform after the tick.
 pub type OnTickFn = fn(
     tick: u64,
     pos: &BlockPos,
     block_data: BlockData,
-    overworld: ReadOnlyOverworld<'_>,
+    registry: &Arc<Registry>,
     accessor: &mut ReadOnlyOverworldAccessor,
-    result: AfterTickActionsBuilder,
+    result: OverworldActionsBuilder,
 );
 
 /// Gets called when nearby block is set.
@@ -175,7 +170,7 @@ pub type OnNearbyBlockSet = fn(
     block_data: BlockData,
     near_by_block: BlockData,
     overworld: &Overworld,
-    after_tick_actions: AfterTickActionsBuilder,
+    after_tick_actions: OverworldActionsBuilder,
 );
 
 #[derive(Copy, Clone, Default)]

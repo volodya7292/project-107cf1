@@ -1,8 +1,12 @@
 use nalgebra_glm::Vec4;
 
-use engine::renderer::{MatComponent, MaterialInfo, TEXTURE_ID_NONE};
+#[derive(Copy, Clone)]
+pub enum MatComponent {
+    Texture(u16),
+    Color(Vec4),
+}
 
-const TEXTURE_ID_NAME: u16 = u16::MAX;
+const TEXTURE_ID_NONE: u16 = u16::MAX;
 
 pub struct Material {
     diffuse: MatComponent,
@@ -47,7 +51,7 @@ impl Material {
         self.translucent
     }
 
-    pub fn info(&self) -> MaterialInfo {
-        MaterialInfo::new(self.diffuse, self.specular, self.normal_tex_id, self.emission)
-    }
+    // pub fn info(&self) -> MaterialInfo {
+    //     MaterialInfo::new(self.diffuse, self.specular, self.normal_tex_id, self.emission)
+    // }
 }

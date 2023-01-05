@@ -1,7 +1,14 @@
-use crate::{utils, SafeThreadPool, TaskPriority};
-use lazy_static::lazy_static;
+use std::future::Future;
+use std::sync::Arc;
 use std::thread;
-use utils::HashMap;
+
+use futures_lite::future;
+use lazy_static::lazy_static;
+
+use core::utils::threading;
+use core::utils::HashMap;
+
+use crate::{SafeThreadPool, TaskPriority};
 
 lazy_static! {
     static ref QUEUES: HashMap<TaskPriority, SafeThreadPool> = {
@@ -21,16 +28,25 @@ lazy_static! {
                 SafeThreadPool::new(render_threads, TaskPriority::Realtime).unwrap(),
             ),
             (
-                TaskPriority::Coroutine,
-                SafeThreadPool::new(coroutine_threads, TaskPriority::Coroutine).unwrap(),
-            ),
-            (
-                TaskPriority::Intensive,
-                SafeThreadPool::new(intensive_threads, TaskPriority::Intensive).unwrap(),
+                TaskPriority::Default,
+                SafeThreadPool::new(intensive_threads, TaskPriority::Default).unwrap(),
             ),
         ]
         .into_iter()
         .collect()
+    };
+    static ref COROUTINE_EXECUTOR: Arc<async_executor::Executor<'static>> = {
+        let executor = Arc::new(async_executor::Executor::new());
+        {
+            let executor = Arc::clone(&executor);
+            threading::spawn_thread(
+                move || {
+                    future::block_on(executor.run(future::pending::<()>()));
+                },
+                TaskPriority::Default,
+            );
+        }
+        executor
     };
 }
 
@@ -38,10 +54,10 @@ pub fn realtime_queue() -> &'static SafeThreadPool {
     &QUEUES[&TaskPriority::Realtime]
 }
 
-pub fn coroutine_queue() -> &'static SafeThreadPool {
-    &QUEUES[&TaskPriority::Coroutine]
+pub fn default_queue() -> &'static SafeThreadPool {
+    &QUEUES[&TaskPriority::Default]
 }
 
-pub fn intensive_queue() -> &'static SafeThreadPool {
-    &QUEUES[&TaskPriority::Intensive]
+pub fn spawn_coroutine<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) {
+    COROUTINE_EXECUTOR.spawn(future).detach();
 }

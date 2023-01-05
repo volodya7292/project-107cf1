@@ -376,7 +376,7 @@ fn construct_liquid_quad(
                 Vec3::new(1.0, liquid_heights[2], 0.0),
             ];
             normal =
-                engine::utils::calc_triangle_normal(&quad_vertices[0], &quad_vertices[1], &quad_vertices[2]);
+                core::utils::calc_triangle_normal(&quad_vertices[0], &quad_vertices[1], &quad_vertices[2]);
         }
         Facing::NegativeX => {
             quad_vertices = [
@@ -476,7 +476,7 @@ fn gen_block_vertices(
 
         for mut quad in model.get_inner_quads() {
             let mut quad_vertices = quad.vertices;
-            let normal = engine::utils::calc_triangle_normal(
+            let normal = core::utils::calc_triangle_normal(
                 &quad_vertices[0].position,
                 &quad_vertices[1].position,
                 &quad_vertices[2].position,
@@ -561,7 +561,7 @@ fn gen_block_vertices(
         for quad in model.get_quads_by_facing(facing) {
             let mut quad_vertices = quad.vertices;
 
-            let normal = engine::utils::calc_triangle_normal(
+            let normal = core::utils::calc_triangle_normal(
                 &quad_vertices[0].position,
                 &quad_vertices[1].position,
                 &quad_vertices[2].position,

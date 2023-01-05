@@ -1,17 +1,14 @@
 use std::convert::TryInto;
 
-use engine::renderer::{MaterialInfo, TextureAtlasType};
-use engine::resource_file::ResourceRef;
-use engine::utils::HashMap;
-
 use crate::overworld;
 use crate::overworld::block::{Block, BlockBuilder};
 use crate::overworld::block_model::BlockModel;
-use crate::overworld::material::Material;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::{BlockData, CellInfo};
 use crate::overworld::structure::world::{biome, Biome};
 use crate::overworld::structure::Structure;
+use crate::utils::resource_file::ResourceRef;
+use crate::utils::HashMap;
 
 pub struct Registry {
     structures: Vec<Structure>,

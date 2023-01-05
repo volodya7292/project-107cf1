@@ -1,14 +1,24 @@
+use std::sync::Arc;
+
 use nalgebra_glm as glm;
+use parking_lot::Mutex;
+use rayon::prelude::*;
+
+pub use macos;
 
 use crate::overworld::accessor::{
     OverworldAccessor, ReadOnlyOverworldAccessor, ReadOnlyOverworldAccessorImpl,
 };
-use crate::overworld::block::event_handlers::{AfterTickActionsBuilder, AfterTickActionsStorage};
+use crate::overworld::block::event_handlers::{
+    OverworldActionsBuilder, OverworldActionsStorage, StateChangeInfo,
+};
 use crate::overworld::facing::Facing;
 use crate::overworld::liquid_state::LiquidState;
-use crate::overworld::position::BlockPos;
+use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
-use crate::overworld::{Overworld, ReadOnlyOverworld};
+use crate::overworld::LoadedClusters;
+use crate::registry::Registry;
+use crate::utils::{HashMap, HashSet, MO_RELAXED};
 
 pub mod main_registry;
 pub mod overworld;
@@ -17,20 +27,20 @@ pub mod overworld;
 pub mod physics;
 pub mod registry;
 pub mod scene;
+pub mod utils;
 
 pub fn on_liquid_tick(
     tick: u64,
     pos: &BlockPos,
     block_data: BlockData,
-    overworld: ReadOnlyOverworld<'_>,
+    registry: &Registry,
     access: &mut ReadOnlyOverworldAccessor,
-    mut result: AfterTickActionsBuilder,
+    mut result: OverworldActionsBuilder,
 ) {
     if tick % 10 != 0 {
         return;
     }
 
-    let registry = overworld.main_registry().registry();
     let curr_liquid = block_data.liquid_state();
 
     // Propagate liquid downwards
@@ -45,7 +55,7 @@ pub fn on_liquid_tick(
         return;
     };
 
-    let mut can_spread = curr_liquid.level() > 2; // TODO: adjust minimum spread level
+    let can_spread = curr_liquid.level() > 2; // TODO: adjust minimum spread level
     let mut do_spread = curr_liquid.is_source();
 
     if can_spread && !do_spread {
@@ -109,6 +119,140 @@ pub fn on_liquid_tick(
     if !can_spread || do_spread {
         result.set_activity(*pos, false);
     }
+}
+
+pub fn process_active_blocks(
+    tick: u64,
+    registry: &Arc<Registry>,
+    loaded_clusters: &LoadedClusters,
+    dirty_clusters: &HashSet<ClusterPos>,
+) -> Vec<OverworldActionsStorage> {
+    let total_after_actions = Mutex::new(Vec::with_capacity(loaded_clusters.read().len()));
+
+    loaded_clusters.read().par_iter().for_each(|(cl_pos, o_cluster)| {
+        if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
+            let cluster = o_cluster.cluster.read();
+            let mut after_actions = OverworldActionsStorage::new();
+            let mut has_active_blocks = false;
+
+            if let Some(cluster) = &*cluster {
+                let mut accessor = OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters))
+                    .into_read_only();
+
+                for (pos, block_data) in cluster.active_blocks() {
+                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
+                    let block = registry.get_block(block_data.block_id()).unwrap();
+
+                    // Check for liquid
+                    on_liquid_tick(
+                        tick,
+                        &global_pos,
+                        block_data,
+                        &registry,
+                        &mut accessor,
+                        after_actions.builder(),
+                    );
+
+                    // Block-specific on-tick event
+                    if let Some(on_tick) = &block.event_handlers().on_tick {
+                        on_tick(
+                            tick,
+                            &global_pos,
+                            block_data,
+                            &registry,
+                            &mut accessor,
+                            after_actions.builder(),
+                        );
+                    }
+
+                    has_active_blocks |= block_data.active();
+                }
+            }
+
+            o_cluster
+                .may_have_active_blocks
+                .store(has_active_blocks, MO_RELAXED);
+            total_after_actions.lock().push(after_actions);
+        }
+    });
+
+    total_after_actions.into_inner()
+}
+
+fn apply_overworld_actions(
+    registry: &Arc<Registry>,
+    loaded_clusters: &LoadedClusters,
+    actions: &[OverworldActionsStorage],
+) {
+    struct AllChanges<'a> {
+        params: Vec<&'a StateChangeInfo>,
+        activities: HashMap<BlockPos, bool>,
+    }
+
+    impl Default for AllChanges<'_> {
+        fn default() -> Self {
+            Self {
+                params: Vec::with_capacity(256),
+                activities: HashMap::with_capacity(256),
+            }
+        }
+    }
+
+    let mut after_actions_by_cluster = HashMap::<ClusterPos, AllChanges>::with_capacity(4096);
+
+    for info in std::iter::empty()
+        .chain(actions.iter().flat_map(|v| &v.components_infos))
+        .chain(actions.iter().flat_map(|v| &v.states_infos))
+        .chain(actions.iter().flat_map(|v| &v.liquid_infos))
+    {
+        let changes = after_actions_by_cluster
+            .entry(info.pos.cluster_pos())
+            .or_default();
+        changes.params.push(info);
+    }
+
+    for info in actions.iter().flat_map(|v| &v.activity_infos) {
+        let changes = after_actions_by_cluster
+            .entry(info.pos.cluster_pos())
+            .or_default();
+
+        let curr_activity = changes.activities.entry(info.pos).or_insert(false);
+        *curr_activity |= info.active;
+    }
+
+    while !after_actions_by_cluster.is_empty() {
+        after_actions_by_cluster.retain(|pos, changes| {
+            let mut access = OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters));
+
+            if access.cache_mut().access_cluster_mut(pos).is_none() {
+                // Can't access cluster => retain and try again in the next iteration of outer loop
+                return true;
+            };
+
+            for action in &changes.params {
+                // Safety: action's referenced data exists inside `total_after_actions`.
+                // Note: `action` can't fail because we have read-write access to the cluster at `pos`.
+                unsafe { action.apply(&mut access) };
+            }
+            for (pos, activity) in &changes.activities {
+                access.update_block(pos, |v| {
+                    *v.active_mut() = *activity;
+                });
+            }
+
+            false
+        });
+    }
+}
+
+pub fn on_tick(
+    tick: u64,
+    dirty_clusters: &HashSet<ClusterPos>,
+    registry: Arc<Registry>,
+    loaded_clusters: &LoadedClusters,
+) {
+    let actions = process_active_blocks(tick, &registry, &loaded_clusters, &dirty_clusters);
+    apply_overworld_actions(&registry, &loaded_clusters, &actions)
 }
 
 /*

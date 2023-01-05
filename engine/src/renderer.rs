@@ -37,6 +37,8 @@ use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 
 use camera::{Camera, Frustum};
+use core::unwrap_option;
+use core::utils::HashMap;
 use material_pipeline::MaterialPipelineSet;
 pub use module::text_renderer::FontSet;
 use texture_atlas::TextureAtlas;
@@ -57,9 +59,8 @@ use vk_wrapper::{
 use crate::ecs::component::internal::{GlobalTransform, Relation};
 use crate::ecs::{component, system};
 pub use crate::renderer::dirty_components::DirtyComponents;
+use crate::renderer::material::MatComponent;
 use crate::renderer::module::RendererModule;
-use crate::utils::HashMap;
-use crate::{unwrap_option, utils};
 
 mod texture_atlas;
 
@@ -70,6 +71,7 @@ pub mod vertex_mesh;
 pub mod camera;
 mod dirty_components;
 mod helpers;
+pub mod material;
 pub mod module;
 
 // TODO: Defragment VK memory (every frame?).
@@ -308,12 +310,6 @@ pub struct MaterialInfo {
     pub(crate) diffuse: Vec4,
     pub(crate) specular: Vec4,
     pub(crate) emission: Vec4,
-}
-
-#[derive(Copy, Clone)]
-pub enum MatComponent {
-    Texture(u16),
-    Color(Vec4),
 }
 
 impl MaterialInfo {
@@ -1129,7 +1125,7 @@ impl Renderer {
             relation.parent = parent;
         }
 
-        let mut parent_relation = relation_comps
+        let parent_relation = relation_comps
             .get_mut(&parent)
             .expect("parent must have Relation component");
         parent_relation.children.extend(children);
@@ -1195,7 +1191,7 @@ impl Renderer {
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
         if self.relative_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
-            let mut global_transform = self
+            let global_transform = self
                 .storage
                 .get_mut::<component::Transform>(&self.root_entity)
                 .unwrap();
@@ -2132,8 +2128,8 @@ impl Renderer {
                     // Note: prev_power_of_two makes sure all reductions are at most by 2x2
                     // which makes sure they are conservative
                     (
-                        utils::prev_power_of_two(new_size.0),
-                        utils::prev_power_of_two(new_size.1),
+                        core::utils::prev_power_of_two(new_size.0),
+                        core::utils::prev_power_of_two(new_size.1),
                     ),
                     "depth_pyramid",
                 )
@@ -2307,37 +2303,32 @@ impl Renderer {
             );
 
             let albedo = self.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-            unsafe {
-                self.device.update_descriptor_set(
-                    self.compose_desc,
-                    &[
-                        self.compose_pool.create_binding(
-                            0,
-                            0,
-                            BindingRes::Image(Arc::clone(albedo), None, ImageLayout::SHADER_READ),
+            self.device.update_descriptor_set(
+                self.compose_desc,
+                &[
+                    self.compose_pool.create_binding(
+                        0,
+                        0,
+                        BindingRes::Image(Arc::clone(albedo), None, ImageLayout::SHADER_READ),
+                    ),
+                    self.compose_pool
+                        .create_binding(1, 0, BindingRes::Buffer(self.per_frame_ub.handle())),
+                    self.compose_pool.create_binding(
+                        5,
+                        0,
+                        BindingRes::Buffer(self.translucency_depths_image.as_ref().unwrap().handle()),
+                    ),
+                    self.compose_pool.create_binding(
+                        6,
+                        0,
+                        BindingRes::Image(
+                            Arc::clone(self.translucency_colors_image.as_ref().unwrap()),
+                            None,
+                            ImageLayout::GENERAL,
                         ),
-                        self.compose_pool.create_binding(
-                            1,
-                            0,
-                            BindingRes::Buffer(self.per_frame_ub.handle()),
-                        ),
-                        self.compose_pool.create_binding(
-                            5,
-                            0,
-                            BindingRes::Buffer(self.translucency_depths_image.as_ref().unwrap().handle()),
-                        ),
-                        self.compose_pool.create_binding(
-                            6,
-                            0,
-                            BindingRes::Image(
-                                Arc::clone(self.translucency_colors_image.as_ref().unwrap()),
-                                None,
-                                ImageLayout::GENERAL,
-                            ),
-                        ),
-                    ],
-                )
-            };
+                    ),
+                ],
+            );
         }
     }
 

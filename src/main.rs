@@ -1,6 +1,8 @@
+use std::time::{Duration, Instant};
+
 use simple_logger::SimpleLogger;
 
-use engine::Engine;
+use engine::{utils, Engine};
 
 use crate::game::Game;
 
@@ -40,7 +42,6 @@ fn parking_lot_deadlock_detection() {
 }
 
 fn main() {
-    // std::process::exit(0);
     parking_lot_deadlock_detection();
 
     SimpleLogger::new()
@@ -50,6 +51,10 @@ fn main() {
 
     let game = Box::new(Game::init());
     let engine = Engine::init(PROGRAM_NAME, 4, game);
+
+    engine::queue::spawn_coroutine(async {
+        println!("govno");
+    });
 
     engine.run();
 }

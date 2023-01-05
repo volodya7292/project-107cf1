@@ -11,6 +11,8 @@ use rayon::prelude::*;
 use rusttype::{Font, GlyphId};
 use unicode_normalization::UnicodeNormalization;
 
+use core::utils::unsafe_slice::UnsafeSlice;
+use core::utils::HashMap;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
@@ -26,8 +28,6 @@ use crate::ecs::component::SimpleText;
 use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::VertexMeshCreate;
 use crate::renderer::{Internals, SceneObject};
-use crate::utils::unsafe_slice::UnsafeSlice;
-use crate::utils::HashMap;
 use crate::{HashSet, Renderer};
 
 const GLYPH_SIZE: u32 = 64;

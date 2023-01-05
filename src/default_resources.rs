@@ -3,8 +3,9 @@ use std::sync::Arc;
 use nalgebra_glm::Vec4;
 
 use core::main_registry::MainRegistry;
-use engine::renderer::{MatComponent, TextureAtlasType};
-use engine::resource_file::ResourceFile;
+use core::utils::resource_file::ResourceFile;
+use engine::renderer::material::MatComponent;
+use engine::renderer::TextureAtlasType;
 
 use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};

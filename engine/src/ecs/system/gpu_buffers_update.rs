@@ -4,13 +4,12 @@ use std::time::Instant;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use parking_lot::Mutex;
 
+use core::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 use vk_wrapper::WaitSemaphore;
 
 use crate::ecs::component;
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::utils::HashMap;
-use crate::HashSet;
 
 const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
 

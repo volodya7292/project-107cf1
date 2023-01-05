@@ -4,12 +4,13 @@ use std::fmt::Formatter;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
+use std::sync::Arc;
 use std::{fmt, io};
 
-use crate::utils::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt};
 use parking_lot::Mutex;
-use std::sync::Arc;
+
+use crate::utils::HashMap;
 
 #[derive(Debug)]
 pub enum Error {

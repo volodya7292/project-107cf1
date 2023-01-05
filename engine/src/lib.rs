@@ -9,21 +9,20 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
 
+use core::utils::threading::{SafeThreadPool, TaskPriority};
+use core::utils::{HashSet, MO_RELAXED};
 use vk_wrapper as vkw;
 
 use crate::input::{Keyboard, Mouse};
 use crate::queue::realtime_queue;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-use crate::utils::thread_pool::{SafeThreadPool, TaskPriority};
-use crate::utils::{HashSet, MO_RELAXED};
 
 pub mod ecs;
 pub mod input;
 mod platform;
 pub mod queue;
 pub mod renderer;
-pub mod resource_file;
 #[cfg(test)]
 mod tests;
 pub mod utils;
@@ -217,7 +216,7 @@ impl Engine {
                     if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
                         expected_dt = 1.0 / (limit as f64);
                         let to_wait = (expected_dt - self.delta_time).max(0.0);
-                        utils::high_precision_sleep(
+                        core::utils::high_precision_sleep(
                             Duration::from_secs_f64(to_wait),
                             Duration::from_micros(50),
                         );

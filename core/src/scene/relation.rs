@@ -1,6 +1,6 @@
 use entity_data::EntityId;
 
-use engine::utils::IndexSet;
+use crate::utils::IndexSet;
 
 #[derive(Default)]
 pub struct Relation {

@@ -258,7 +258,7 @@ impl TexturedBlockModel {
             .map(|(quad, q_mat)| {
                 let material_id = q_mat.material_id as u32;
                 let vertices = quad.vertices();
-                let normal = engine::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
+                let normal = core::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
 
                 let tex_vertices: SmallVec<[_; 4]> = vertices
                     .iter()

@@ -2,8 +2,9 @@ use std::ops::{Deref, DerefMut};
 
 use entity_data::EntityId;
 
+use core::utils::IndexSet;
+
 use crate::ecs::component::Transform;
-use crate::utils::IndexSet;
 
 #[derive(Default)]
 pub struct Relation {

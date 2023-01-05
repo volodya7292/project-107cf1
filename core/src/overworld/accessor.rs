@@ -1,27 +1,21 @@
 use std::collections::{hash_map, VecDeque};
 use std::sync::Arc;
 
-use entity_data::ArchetypeState;
 use entity_data::EntityStorage;
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
+use nalgebra_glm::{DVec3, I64Vec3};
 use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::RawRwLock;
 
-use engine::utils::{HashMap, MO_RELAXED};
-
-use crate::overworld;
-use crate::overworld::block::{Block, BlockState};
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
-use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut, RawCluster};
-use crate::overworld::{
-    block_component, raw_cluster, Cluster, ClusterState, LoadedClusters, OverworldCluster,
-};
+use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
+use crate::overworld::{Cluster, ClusterState, LoadedClusters, OverworldCluster};
 use crate::registry::Registry;
+use crate::utils::{HashMap, MO_RELAXED};
 
 lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
@@ -269,7 +263,7 @@ impl OverworldAccessor {
             let mut block_data = cluster.raw.get_mut(&cluster_block_pos);
 
             update_fn(&mut block_data);
-            let mut active_after_update = block_data.active();
+            let active_after_update = block_data.active();
 
             cluster
                 .active_blocks
@@ -440,6 +434,6 @@ impl ReadOnlyOverworldAccessorImpl for ReadOnlyOverworldAccessor {
         ray_dir: &DVec3,
         max_ray_length: f64,
     ) -> Option<(BlockPos, Facing)> {
-        self.get_block_at_ray(ray_origin, ray_dir, max_ray_length)
+        self.inner.get_block_at_ray(ray_origin, ray_dir, max_ray_length)
     }
 }

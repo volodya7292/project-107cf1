@@ -4,6 +4,8 @@ use std::sync::Arc;
 use basis_universal::TranscodeParameters;
 use smallvec::SmallVec;
 
+use core::utils::resource_file::ResourceRef;
+use core::utils::UInt;
 use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
 
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
@@ -12,9 +14,7 @@ use crate::renderer::{
     MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
     PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
-use crate::resource_file::ResourceRef;
-use crate::utils::UInt;
-use crate::{utils, Renderer};
+use crate::Renderer;
 
 impl Renderer {
     pub fn load_texture_into_atlas(
@@ -32,7 +32,7 @@ impl Renderer {
         let width = img_info.m_width;
         let height = img_info.m_height;
 
-        if !utils::is_pow_of_2(width as u64)
+        if !core::utils::is_pow_of_2(width as u64)
             || width != height
             || width < (self.settings.texture_quality as u32)
         {

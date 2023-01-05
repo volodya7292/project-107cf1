@@ -7,13 +7,12 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{I64Vec3, U64Vec3};
 use once_cell::sync::OnceCell;
 
-use engine::utils::UInt;
-
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
 use crate::overworld::{raw_cluster, Overworld};
+use crate::utils::UInt;
 
 pub mod world;
 

@@ -1,28 +1,4 @@
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
-use std::sync::Arc;
-
-use bit_vec::BitVec;
-use fixedbitset::FixedBitSet;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3, U32Vec3, U64Vec3, Vec3};
-use parking_lot::RwLock;
-use rand::Rng;
-
-use accessor::OverworldAccessor;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{HashMap, UInt, MO_RELAXED};
-
-use crate::main_registry::MainRegistry;
-use crate::overworld::accessor::{ClustersAccessorCache, ReadOnlyOverworldAccessor};
-use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
-use crate::overworld::facing::Facing;
-use crate::overworld::generator::OverworldGenerator;
-use crate::overworld::position::{ClusterBlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
-use crate::overworld::structure::{Structure, StructuresIter};
-
-pub mod accessor;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 /// World generation:
 /// 1. Terrain
 ///   Temperature & humidity maps (perlin noise) - implicit biomes
@@ -31,6 +7,24 @@ pub mod accessor;
 /// 2. Ores
 /// 3. Structures
 /// 4. Features
+use std::sync::Arc;
+
+use fixedbitset::FixedBitSet;
+use nalgebra_glm::{I64Vec3, U32Vec3};
+use parking_lot::RwLock;
+
+use accessor::OverworldAccessor;
+
+use crate::main_registry::MainRegistry;
+use crate::overworld::accessor::ReadOnlyOverworldAccessor;
+use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::generator::OverworldGenerator;
+use crate::overworld::position::{ClusterBlockPos, ClusterPos};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
+use crate::utils::{HashMap, MO_RELAXED};
+
+pub mod accessor;
+
 pub mod block;
 pub mod block_component;
 pub mod block_model;
@@ -39,8 +33,8 @@ pub mod facing;
 pub mod generator;
 pub mod light_level;
 pub mod liquid_state;
-pub mod material;
 pub mod occluder;
+// pub mod overworld_streamer;
 pub mod position;
 pub mod raw_cluster;
 pub mod structure;

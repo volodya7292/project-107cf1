@@ -7,7 +7,6 @@ use parking_lot::Mutex;
 use vk_wrapper::CmdList;
 
 use crate::renderer;
-use crate::renderer::Renderer;
 
 pub mod text_renderer;
 

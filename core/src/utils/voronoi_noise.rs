@@ -1,8 +1,10 @@
-use crate::utils::white_noise::WhiteNoise;
+use std::ops::Range;
+
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec2, I64Vec2};
 use rand::Rng;
-use std::ops::Range;
+
+use crate::utils::white_noise::WhiteNoise;
 
 const MIN_DIST_BETWEEN_POINTS: f64 = 0.2;
 // Note: clamp to 0.9 to avoid generating thin geometries

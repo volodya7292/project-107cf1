@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use core::overworld::block_model::BlockModel;
 use core::registry::Registry;
-use engine::renderer::{MatComponent, TextureAtlasType};
-use engine::resource_file::ResourceRef;
+use core::utils::resource_file::ResourceRef;
+use engine::renderer::material::MatComponent;
+use engine::renderer::TextureAtlasType;
 
 use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};

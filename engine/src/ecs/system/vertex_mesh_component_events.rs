@@ -3,9 +3,10 @@ use std::time::Instant;
 
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 
+use core::utils::{HashMap, HashSet};
+
 use crate::ecs::component;
 use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::utils::{HashMap, HashSet};
 
 pub(crate) struct VertexMeshCompEvents<'a> {
     pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,

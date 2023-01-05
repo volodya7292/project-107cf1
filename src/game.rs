@@ -2,7 +2,8 @@ use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{atomic, Arc};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use approx::AbsDiffEq;
 use entity_data::AnyState;
@@ -19,7 +20,7 @@ use core::main_registry::{MainRegistry, StatelessBlock};
 use core::overworld::accessor::ClustersAccessorCache;
 use core::overworld::accessor::ReadOnlyOverworldAccessor;
 use core::overworld::accessor::ReadOnlyOverworldAccessorImpl;
-use core::overworld::block::event_handlers::AfterTickActionsStorage;
+use core::overworld::block::event_handlers::OverworldActionsStorage;
 use core::overworld::block::event_handlers::StateChangeInfo;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
@@ -33,14 +34,15 @@ use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use core::physics::aabb::{AABBRayIntersection, AABB};
 use core::physics::MOTION_EPSILON;
 use core::registry::Registry;
+use core::utils::resource_file::ResourceFile;
+use core::utils::threading::SafeThreadPool;
+use core::utils::timer::IntervalTimer;
+use core::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::queue::{coroutine_queue, intensive_queue};
+use engine::queue::default_queue;
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
 use engine::renderer::Renderer;
-use engine::resource_file::ResourceFile;
-use engine::utils::thread_pool::SafeThreadPool;
-use engine::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::{renderer, Application, Input};
 use renderer::camera;
 use vk_wrapper::Adapter;
@@ -59,7 +61,7 @@ pub struct Game {
     res_map: Arc<DefaultResourceMapping>,
 
     cursor_rel: (f64, f64),
-    game_tick_finished: Arc<AtomicBool>,
+    tick_timer: IntervalTimer,
     curr_tick: Arc<AtomicU64>,
 
     overworld: Arc<Overworld>,
@@ -88,7 +90,6 @@ impl Game {
         let main_registry = MainRegistry::init();
         let res_map = DefaultResourceMapping::init(&main_registry, &resources);
 
-        let game_tick_finished = Arc::new(AtomicBool::new(true));
         let overworld = Overworld::new(&main_registry, 0);
 
         let spawn_point = overworld.generator().gen_spawn_point();
@@ -102,7 +103,8 @@ impl Game {
             registry: Arc::clone(&main_registry),
             res_map,
             cursor_rel: (0.0, 0.0),
-            game_tick_finished: Arc::clone(&game_tick_finished),
+            tick_timer: IntervalTimer::new(Duration::from_millis(20)),
+            // TODO: save tick_count_state to disk
             curr_tick: Arc::new(Default::default()),
             overworld,
             overworld_streamer: None,
@@ -203,7 +205,29 @@ impl Application for Game {
 
         self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
 
+        {
+            let registry = Arc::clone(self.registry.registry());
+            let overworld_streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
+            let curr_tick = Arc::clone(&self.curr_tick);
+
+            self.tick_timer.start(move || {
+                let curr_tick = curr_tick.fetch_add(1, MO_RELAXED);
+                let mut streamer = overworld_streamer.lock();
+                let dirty_clusters = streamer.update();
+
+                default_queue().install(|| {
+                    core::on_tick(
+                        curr_tick,
+                        &dirty_clusters,
+                        Arc::clone(&registry),
+                        streamer.loaded_clusters(),
+                    )
+                });
+            });
+        }
+
         // -------------------------------------------------------
+
         let text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
         let font_id = text_renderer.register_font(
             FontSet::from_bytes(
@@ -390,34 +414,33 @@ impl Application for Game {
             // }
         }
 
-        if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
-            let overworld = Arc::clone(&self.overworld);
-            let streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
-            let game_tick_finished = Arc::clone(&self.game_tick_finished);
-            let curr_tick = self.curr_tick.fetch_add(1, MO_RELAXED);
-
-            {
-                let mut streamer = streamer.lock();
-
-                let t0 = Instant::now();
-                streamer.update_scene(renderer);
-                let t1 = Instant::now();
-                let el = (t1 - t0).as_secs_f64();
-                if el > 0.001 {
-                    println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
-                }
-
-                let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
-                // let p = DVec3::new(43.0, 0.0, -44.0);
-
-                if self.change_stream_pos {
-                    streamer.set_stream_pos(p);
-                }
-            }
-
-            coroutine_queue().spawn(move || game_tick(curr_tick, overworld, streamer, game_tick_finished));
-            // println!("as {}", renderer.device().calc_real_device_mem_usage());
-        }
+        // if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
+        //     let overworld = Arc::clone(&self.overworld);
+        //     let streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
+        //     let game_tick_finished = Arc::clone(&self.game_tick_finished);
+        //
+        //     {
+        //         let mut streamer = streamer.lock();
+        //
+        //         let t0 = Instant::now();
+        //         streamer.update_scene(renderer);
+        //         let t1 = Instant::now();
+        //         let el = (t1 - t0).as_secs_f64();
+        //         if el > 0.001 {
+        //             println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
+        //         }
+        //
+        //         let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
+        //         // let p = DVec3::new(43.0, 0.0, -44.0);
+        //
+        //         if self.change_stream_pos {
+        //             streamer.set_stream_pos(p);
+        //         }
+        //     }
+        //
+        //     coroutine_queue().spawn(move || game_tick(overworld, streamer, game_tick_finished));
+        //     // println!("as {}", renderer.device().calc_real_device_mem_usage());
+        // }
     }
 
     fn on_event(
@@ -524,7 +547,6 @@ impl Application for Game {
 
 // TODO: move this to the core
 pub fn game_tick(
-    tick: u64,
     overworld: Arc<Overworld>,
     streamer: Arc<Mutex<OverworldStreamer>>,
     finished: Arc<AtomicBool>,
@@ -536,122 +558,7 @@ pub fn game_tick(
     // let t1 = Instant::now();
     // println!("tick time: {}", (t1 - t0).as_secs_f64());
 
-    process_active_blocks(tick, &overworld, &dirty_clusters);
+    // process_active_blocks(tick, &overworld, &dirty_clusters);
 
     finished.store(true, atomic::Ordering::Relaxed);
-}
-
-pub fn process_active_blocks(tick: u64, overworld: &Overworld, dirty_clusters: &HashSet<ClusterPos>) {
-    let loaded_clusters = overworld.loaded_clusters().read();
-    let registry = overworld.main_registry().registry();
-
-    let total_after_actions = Mutex::new(Vec::with_capacity(loaded_clusters.len()));
-
-    loaded_clusters.par_iter().for_each(|(cl_pos, o_cluster)| {
-        if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
-            let cluster = o_cluster.cluster.read();
-            let mut after_actions = AfterTickActionsStorage::new();
-            let mut has_active_blocks = false;
-
-            if let Some(cluster) = &*cluster {
-                let read_only_overworld = ReadOnlyOverworld::new(overworld);
-                let mut accessor = read_only_overworld.access();
-
-                for (pos, block_data) in cluster.active_blocks() {
-                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
-                    let block = registry.get_block(block_data.block_id()).unwrap();
-
-                    // Check for liquid
-                    core::on_liquid_tick(
-                        tick,
-                        &global_pos,
-                        block_data,
-                        read_only_overworld,
-                        &mut accessor,
-                        after_actions.builder(),
-                    );
-
-                    // Block-specific on-tick event
-                    if let Some(on_tick) = &block.event_handlers().on_tick {
-                        on_tick(
-                            tick,
-                            &global_pos,
-                            block_data,
-                            read_only_overworld,
-                            &mut accessor,
-                            after_actions.builder(),
-                        );
-                    }
-
-                    has_active_blocks |= block_data.active();
-                }
-            }
-
-            o_cluster
-                .may_have_active_blocks
-                .store(has_active_blocks, MO_RELAXED);
-            total_after_actions.lock().push(after_actions);
-        }
-    });
-
-    struct AllChanges<'a> {
-        params: Vec<&'a StateChangeInfo>,
-        activities: HashMap<BlockPos, bool>,
-    }
-
-    impl Default for AllChanges<'_> {
-        fn default() -> Self {
-            Self {
-                params: Vec::with_capacity(256),
-                activities: HashMap::with_capacity(256),
-            }
-        }
-    }
-
-    let total_after_actions = total_after_actions.lock();
-    let mut after_actions_by_cluster = HashMap::<ClusterPos, AllChanges>::with_capacity(4096);
-
-    for info in std::iter::empty()
-        .chain(total_after_actions.iter().flat_map(|v| &v.components_infos))
-        .chain(total_after_actions.iter().flat_map(|v| &v.states_infos))
-        .chain(total_after_actions.iter().flat_map(|v| &v.liquid_infos))
-    {
-        let changes = after_actions_by_cluster
-            .entry(info.pos.cluster_pos())
-            .or_default();
-        changes.params.push(info);
-    }
-
-    for info in total_after_actions.iter().flat_map(|v| &v.activity_infos) {
-        let changes = after_actions_by_cluster
-            .entry(info.pos.cluster_pos())
-            .or_default();
-
-        let curr_activity = changes.activities.entry(info.pos).or_insert(false);
-        *curr_activity |= info.active;
-    }
-
-    while !after_actions_by_cluster.is_empty() {
-        after_actions_by_cluster.retain(|pos, changes| {
-            let mut access = overworld.access();
-
-            if access.cache_mut().access_cluster_mut(pos).is_none() {
-                // Can't access cluster => retain and try again in the next iteration of outer loop
-                return true;
-            };
-
-            for action in &changes.params {
-                // Safety: action's referenced data exists inside `total_after_actions`.
-                // Note: `action` can't fail because we have read-write access to the cluster at `pos`.
-                unsafe { action.apply(&mut access) };
-            }
-            for (pos, activity) in &changes.activities {
-                access.update_block(pos, |v| {
-                    *v.active_mut() = *activity;
-                });
-            }
-
-            false
-        });
-    }
 }

@@ -11,16 +11,15 @@ use parking_lot::RwLock;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
 
-use engine::utils::noise::HybridNoise;
-use engine::utils::white_noise::WhiteNoise;
-use engine::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
-
 use crate::main_registry::MainRegistry;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster;
 use crate::overworld::raw_cluster::RawCluster;
 use crate::overworld::structure::world::WorldState;
 use crate::overworld::structure::{Structure, StructuresIter};
+use crate::utils::noise::HybridNoise;
+use crate::utils::white_noise::WhiteNoise;
+use crate::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 
@@ -132,7 +131,7 @@ impl OverworldGenerator {
         let start_octant = start_cluster_pos.map(|v| v.div_euclid(clusters_per_octant));
 
         let mut queue = VecDeque::with_capacity(volume);
-        let mut traversed_nodes = BitVec::from_elem(volume, false);
+        let traversed_nodes = BitVec::from_elem(volume, false);
 
         queue.push_back(start_octant);
 
@@ -164,7 +163,7 @@ impl OverworldGenerator {
         let world_pos = self.gen_world_pos(BlockPos(I64Vec3::zeros()));
         let world_seed = self.get_world_seed(world_pos.center_pos);
 
-        let mut cache = self
+        let cache = self
             .structure_states
             .get_with((world_st.uid(), world_pos.center_pos), || {
                 Arc::new(OnceCell::new())
@@ -188,7 +187,7 @@ impl OverworldGenerator {
         }
 
         let world_seed = self.get_world_seed(world_pos.center_pos);
-        let mut cache = self
+        let cache = self
             .structure_states
             .get_with((world_st.uid(), world_pos.center_pos), || {
                 Arc::new(OnceCell::new())

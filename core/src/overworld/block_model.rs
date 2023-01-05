@@ -3,16 +3,10 @@ use std::ops::Range;
 use approx::AbsDiffEq;
 use glm::BVec3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
-use smallvec::{smallvec, SmallVec};
-
-use engine::attributes_impl;
-use engine::renderer::vertex_mesh::VertexPositionImpl;
+use nalgebra_glm::Vec3;
 
 use crate::overworld::facing::Facing;
 use crate::overworld::occluder::Occluder;
-use crate::overworld::raw_cluster;
-use crate::overworld::raw_cluster::RawCluster;
 use crate::physics::aabb::AABB;
 
 const EQUITY_EPSILON: f32 = 1e-6;

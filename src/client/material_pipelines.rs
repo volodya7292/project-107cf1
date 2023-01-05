@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use nalgebra as na;
 
+use core::utils::resource_file::ResourceFile;
 use engine::renderer::Renderer;
-use engine::resource_file::ResourceFile;
 use engine::uniform_struct_impl;
 use vk_wrapper as vkw;
 use vk_wrapper::shader::VInputRate;

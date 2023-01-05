@@ -4,14 +4,15 @@ use std::{mem, slice};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use nalgebra_glm::Mat4;
 
+use core::unwrap_option;
+use core::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 
 use crate::ecs::component;
 use crate::ecs::component::internal::GlobalTransform;
+use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate2, Renderable};
-use crate::utils::{HashMap, HashSet};
-use crate::{renderer, unwrap_option};
 
 // Updates global transform uniform buffers
 pub(crate) struct GlobalTransformEvents<'a> {

@@ -1,26 +1,12 @@
-use std::any::TypeId;
 use std::collections::VecDeque;
-use std::convert::TryInto;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use bit_vec::BitVec;
 use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
-use fixedbitset::FixedBitSet;
-use glm::{I32Vec3, U32Vec3, Vec3};
-use lazy_static::lazy_static;
+use glm::I32Vec3;
 use nalgebra_glm as glm;
-use nalgebra_glm::{TVec3, U8Vec3, Vec2, Vec4};
-use parking_lot::{RwLock, RwLockReadGuard};
+use nalgebra_glm::TVec3;
 
-use engine::renderer::vertex_mesh::VertexMeshCreate;
-use engine::renderer::VertexMesh;
-use engine::utils::MO_RELAXED;
-use vk_wrapper as vkw;
-
-use crate::overworld::block::{Block, BlockState};
-use crate::overworld::block_component;
-use crate::overworld::block_model::quad_occludes_side;
+use crate::overworld::block::BlockState;
 use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
@@ -39,10 +25,10 @@ pub fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
     p.x * 9 + p.y * 3 + p.z
 }
 
-fn neighbour_index_from_aligned_pos(pos: &TVec3<usize>) -> usize {
-    let p = pos.map(|v| (v > 1) as usize + (v == RawCluster::SIZE) as usize);
-    p.x * 9 + p.y * 3 + p.z
-}
+// fn neighbour_index_from_aligned_pos(pos: &TVec3<usize>) -> usize {
+//     let p = pos.map(|v| (v > 1) as usize + (v == RawCluster::SIZE) as usize);
+//     p.x * 9 + p.y * 3 + p.z
+// }
 
 pub fn neighbour_index_from_dir(dir: &I32Vec3) -> usize {
     let p = dir.add_scalar(1);

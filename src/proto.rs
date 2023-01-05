@@ -11,9 +11,9 @@ use core::overworld::position::BlockPos;
 use core::overworld::structure::world::biome::MeanTemperature;
 use core::overworld::structure::world::WorldState;
 use core::registry::Registry;
-use engine::utils::noise::HybridNoise;
-use engine::utils::voronoi_noise::VoronoiNoise2D;
-use engine::utils::white_noise::WhiteNoise;
+use core::utils::noise::HybridNoise;
+use core::utils::voronoi_noise::VoronoiNoise2D;
+use core::utils::white_noise::WhiteNoise;
 
 pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];

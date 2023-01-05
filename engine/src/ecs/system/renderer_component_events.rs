@@ -7,6 +7,8 @@ use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
 use smallvec::{smallvec, SmallVec};
 
+use core::unwrap_option;
+use core::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::DescriptorSet;
@@ -14,8 +16,6 @@ use vk_wrapper::DescriptorSet;
 use crate::ecs::component;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate, BufferUpdate1, Renderable};
-use crate::unwrap_option;
-use crate::utils::{HashMap, HashSet};
 
 pub(crate) struct RendererComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
