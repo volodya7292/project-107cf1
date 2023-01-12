@@ -7,6 +7,7 @@ use parking_lot::{Condvar, Mutex};
 use rayon::ThreadBuilder;
 
 /// Safe thread pool that joins all threads on drop.
+#[derive(Debug)]
 pub struct SafeThreadPool {
     inner: Option<rayon::ThreadPool>,
     threads: Vec<Arc<(Mutex<bool>, Condvar)>>,

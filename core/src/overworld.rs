@@ -17,24 +17,27 @@ use accessor::OverworldAccessor;
 
 use crate::main_registry::MainRegistry;
 use crate::overworld::accessor::ReadOnlyOverworldAccessor;
-use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
+pub use crate::overworld::orchestrator::OverworldOrchestrator;
 use crate::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
+use crate::registry::Registry;
 use crate::utils::{HashMap, MO_RELAXED};
 
 pub mod accessor;
 
+pub mod actions_storage;
 pub mod block;
 pub mod block_component;
 pub mod block_model;
-pub mod cluster_dirty_parts;
+pub mod cluster_part_set;
 pub mod facing;
 pub mod generator;
 pub mod light_level;
 pub mod liquid_state;
 pub mod occluder;
-// pub mod overworld_streamer;
+pub mod orchestrator;
 pub mod position;
 pub mod raw_cluster;
 pub mod structure;
@@ -47,12 +50,10 @@ pub mod structure;
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
 pub enum ClusterState {
+    /// The cluster is not ready to be read or written to.
     Initial,
-    Loading,
     /// The cluster is available in read/write mode
     Loaded,
-    /// The cluster is not needed anymore
-    Discarded,
     /// The cluster is invisible because it is empty and is offloaded to reduce memory usage
     OffloadedEmpty,
     /// The cluster is invisible relative to camera and is offloaded to reduce memory usage
@@ -60,13 +61,28 @@ pub enum ClusterState {
 }
 
 impl ClusterState {
+    /// Whether cluster is loaded
+    pub fn is_loaded(&self) -> bool {
+        (*self == Self::Loaded) || self.is_offloaded()
+    }
+
+    /// Whether cluster is loaded
+    pub fn is_writable(&self) -> bool {
+        *self == Self::Loaded
+    }
+
     /// Whether cluster can be accessed in read-only mode
     pub fn is_readable(&self) -> bool {
         matches!(*self, Self::Loaded | Self::OffloadedEmpty)
     }
 
-    /// Whether cluster can be accessed in read-only mode
+    /// Whether cluster is empty or occluded by its neighbours
     pub fn is_empty_or_occluded(&self) -> bool {
+        matches!(*self, Self::OffloadedEmpty | Self::OffloadedOccluded)
+    }
+
+    /// Whether cluster is offloaded due to emptiness or full occlusion by neighbours
+    pub fn is_offloaded(&self) -> bool {
         matches!(*self, Self::OffloadedEmpty | Self::OffloadedOccluded)
     }
 
@@ -82,39 +98,60 @@ pub fn cluster_block_pos_from_global(global_pos: &I64Vec3) -> U32Vec3 {
     global_pos.map(|v| v.rem_euclid(RawCluster::SIZE as i64) as u32)
 }
 
+pub fn is_cell_empty(registry: &Registry, data: impl BlockDataImpl) -> bool {
+    let block = registry.get_block(data.block_id()).unwrap();
+    block.is_model_invisible() && data.liquid_state().level() == 0
+}
+
 // Cluster lifecycle
 // ----------------------------------
 // LOADING -> LOADED | DISCARDED
 // LOADED  -> DISCARDED
 
-pub struct Cluster {
+pub struct TrackingCluster {
     pub raw: RawCluster,
-    pub dirty_parts: ClusterDirtySides,
-    pub active_blocks: FixedBitSet,
+    pub dirty_parts: ClusterPartSet,
+    pub active_cells: FixedBitSet,
+    pub empty_cells: FixedBitSet,
 }
 
-impl Cluster {
-    pub fn new(raw: RawCluster) -> Cluster {
-        let mut active_blocks = FixedBitSet::with_capacity(RawCluster::VOLUME);
+impl TrackingCluster {
+    pub fn new(registry: &Registry, raw: RawCluster) -> TrackingCluster {
+        let mut active_cells = FixedBitSet::with_capacity(RawCluster::VOLUME);
+        let mut empty_cells = FixedBitSet::with_capacity(RawCluster::VOLUME);
 
         for x in 0..RawCluster::SIZE {
             for y in 0..RawCluster::SIZE {
                 for z in 0..RawCluster::SIZE {
                     let pos = ClusterBlockPos::new(x, y, z);
-                    let active = raw.get(&pos).active();
+                    let pos_idx = pos.index();
+                    let data = raw.get(&pos);
 
-                    if active {
-                        active_blocks.toggle(pos.index());
-                    }
+                    let active = data.active();
+                    let empty = is_cell_empty(registry, data);
+
+                    active_cells.set(pos_idx, active);
+                    empty_cells.set(pos_idx, empty);
                 }
             }
         }
 
         Self {
             raw,
-            dirty_parts: ClusterDirtySides::all(),
-            active_blocks,
+            dirty_parts: ClusterPartSet::ALL,
+            active_cells,
+            empty_cells,
         }
+    }
+
+    /// Complexity: O(N), where N is RawCluster::VOLUME.
+    pub fn is_empty(&self) -> bool {
+        self.empty_cells.as_slice().iter().all(|v| *v == !0)
+    }
+
+    /// Complexity: O(N), where N is RawCluster::VOLUME.
+    pub fn has_active_blocks(&self) -> bool {
+        self.active_cells.as_slice().iter().any(|v| *v != 0)
     }
 
     pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
@@ -123,7 +160,7 @@ impl Cluster {
     }
 
     pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {
-        self.active_blocks.ones().map(|idx| {
+        self.active_cells.ones().map(|idx| {
             let block_pos = ClusterBlockPos::from_index(idx);
             (block_pos, self.raw.get(&block_pos))
         })
@@ -131,20 +168,20 @@ impl Cluster {
 }
 
 pub struct OverworldCluster {
-    pub cluster: Arc<RwLock<Option<Cluster>>>,
-    pub state: AtomicU32,
+    pub cluster: Arc<RwLock<Option<TrackingCluster>>>,
+    pub state: Arc<AtomicU32>,
     pub dirty: AtomicBool,
-
-    pub may_have_active_blocks: AtomicBool,
+    /// Managed by [OverworldOrchestrator].
+    pub has_active_blocks: AtomicBool,
 }
 
 impl OverworldCluster {
     pub fn new() -> Self {
         Self {
             cluster: Default::default(),
-            state: AtomicU32::new(ClusterState::Initial as u32),
-            dirty: Default::default(),
-            may_have_active_blocks: Default::default(),
+            state: Arc::new(AtomicU32::new(ClusterState::Initial as u32)),
+            dirty: AtomicBool::new(false),
+            has_active_blocks: Default::default(),
         }
     }
 
@@ -153,7 +190,7 @@ impl OverworldCluster {
     }
 }
 
-pub type LoadedClusters = Arc<RwLock<HashMap<ClusterPos, Arc<OverworldCluster>>>>;
+pub type LoadedClusters = Arc<RwLock<HashMap<ClusterPos, OverworldCluster>>>;
 
 pub struct Overworld {
     seed: u64,

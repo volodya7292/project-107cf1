@@ -24,13 +24,8 @@ pub struct ClusterMeshes {
     pub transparent: VertexMesh<PackedVertex, ()>,
 }
 
-pub struct ClusterBuildResult {
-    pub meshes: ClusterMeshes,
-    pub empty: bool,
-}
-
 pub trait ClientRawCluster {
-    fn update_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterBuildResult;
+    fn build_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterMeshes;
 }
 
 struct NeighbourVertexIntrinsics {
@@ -430,7 +425,6 @@ fn construct_liquid_quad(
     );
 }
 
-/// Returns true if the block is empty.
 fn gen_block_vertices(
     cluster: &RawCluster,
     res_map: &ResourceMapping,
@@ -438,7 +432,7 @@ fn gen_block_vertices(
     liquid_cache: &mut LiquidHeightsCache,
     vertices: &mut Vec<PackedVertex>,
     vertices_translucent: &mut Vec<PackedVertex>,
-) -> bool {
+) {
     let registry = cluster.registry();
     let cells = cluster.cells();
 
@@ -464,7 +458,7 @@ fn gen_block_vertices(
             }
         }
     } else if block.is_model_invisible() {
-        return true;
+        return;
     }
 
     // Generate inner faces
@@ -596,12 +590,10 @@ fn gen_block_vertices(
             vertices_vec.extend(quad_vertices.map(|v| v.pack()));
         }
     }
-
-    false
 }
 
 impl ClientRawCluster for RawCluster {
-    fn update_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterBuildResult {
+    fn build_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterMeshes {
         #[inline]
         fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
             out.extend(vertices.iter().cloned().map(|mut v| {
@@ -613,14 +605,12 @@ impl ClientRawCluster for RawCluster {
         let mut vertices = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
         let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
         let mut liquid_cache = LiquidHeightsCache::default();
-        let mut cluster_is_empty = true;
 
         for x in 0..Self::SIZE {
             for y in 0..Self::SIZE {
                 for z in 0..Self::SIZE {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
-
-                    let block_is_empty = gen_block_vertices(
+                    gen_block_vertices(
                         self,
                         res_map,
                         &pos,
@@ -628,10 +618,6 @@ impl ClientRawCluster for RawCluster {
                         &mut vertices,
                         &mut vertices_translucent,
                     );
-
-                    if !block_is_empty {
-                        cluster_is_empty = false;
-                    }
                 }
             }
         }
@@ -663,9 +649,6 @@ impl ClientRawCluster for RawCluster {
                 .unwrap(),
         };
 
-        ClusterBuildResult {
-            meshes,
-            empty: cluster_is_empty,
-        }
+        meshes
     }
 }

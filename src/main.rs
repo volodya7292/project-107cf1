@@ -1,3 +1,4 @@
+use std::thread;
 use std::time::{Duration, Instant};
 
 use simple_logger::SimpleLogger;
@@ -41,8 +42,24 @@ fn parking_lot_deadlock_detection() {
     });
 }
 
+fn init_threads() {
+    let mut available_threads = thread::available_parallelism().unwrap().get();
+
+    let render_threads = (available_threads / 2).min(3);
+    available_threads = available_threads.saturating_sub(render_threads).max(1);
+
+    let coroutine_threads = 1;
+    available_threads = available_threads.saturating_sub(coroutine_threads).max(1);
+
+    let default_threads = available_threads;
+
+    core::execution::init(default_threads, coroutine_threads);
+    engine::execution::init(render_threads);
+}
+
 fn main() {
     parking_lot_deadlock_detection();
+    init_threads();
 
     SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
@@ -52,7 +69,7 @@ fn main() {
     let game = Box::new(Game::init());
     let engine = Engine::init(PROGRAM_NAME, 4, game);
 
-    engine::queue::spawn_coroutine(async {
+    core::execution::spawn_coroutine(async {
         println!("govno");
     });
 

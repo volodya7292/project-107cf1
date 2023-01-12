@@ -9,23 +9,25 @@ use approx::AbsDiffEq;
 use entity_data::AnyState;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 
+use core::execution::default_queue;
 use core::main_registry::{MainRegistry, StatelessBlock};
 use core::overworld::accessor::ClustersAccessorCache;
 use core::overworld::accessor::ReadOnlyOverworldAccessor;
 use core::overworld::accessor::ReadOnlyOverworldAccessorImpl;
-use core::overworld::block::event_handlers::OverworldActionsStorage;
-use core::overworld::block::event_handlers::StateChangeInfo;
+use core::overworld::actions_storage::OverworldActionsStorage;
+use core::overworld::actions_storage::StateChangeInfo;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
 use core::overworld::light_level::LightLevel;
 use core::overworld::liquid_state::LiquidState;
+use core::overworld::orchestrator::OverworldOrchestrator;
 use core::overworld::position::{BlockPos, ClusterPos};
 use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use core::overworld::Overworld;
@@ -40,20 +42,21 @@ use core::utils::timer::IntervalTimer;
 use core::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::queue::default_queue;
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
 use engine::renderer::Renderer;
 use engine::{renderer, Application, Input};
 use renderer::camera;
 use vk_wrapper::Adapter;
 
-use crate::client::overworld::overworld_streamer::OverworldStreamer;
+use crate::{default_resources, PROGRAM_NAME};
+// use crate::client::overworld::overworld_streamer::OverworldStreamer;
 use crate::client::{material_pipelines, utils};
 use crate::default_resources::DefaultResourceMapping;
+use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::resource_mapping::ResourceMapping;
-use crate::{default_resources, PROGRAM_NAME};
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
+const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
@@ -62,27 +65,14 @@ pub struct Game {
 
     cursor_rel: (f64, f64),
     tick_timer: IntervalTimer,
-    curr_tick: Arc<AtomicU64>,
 
-    overworld: Arc<Overworld>,
-    overworld_streamer: Option<Arc<Mutex<OverworldStreamer>>>,
+    main_state: Arc<Mutex<MainState>>,
+    overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
 
-    player_pos: DVec3,
-    player_aabb: AABB,
-    fall_time: f64,
-    curr_jump_force: f64,
-    look_at_block: Option<(BlockPos, Facing)>,
-    block_set_cooldown: f64,
-    curr_block: AnyBlockState,
-    set_water: bool,
-
-    change_stream_pos: bool,
-    player_collision_enabled: bool,
     cursor_grab: bool,
 }
 
 impl Game {
-    const MOVEMENT_SPEED: f64 = 16.0;
     const MOUSE_SENSITIVITY: f64 = 0.2;
 
     pub fn init() -> Game {
@@ -98,26 +88,46 @@ impl Game {
         // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
 
+        let player_pos = glm::convert(spawn_point.0);
+        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+
+        let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
+        overworld_orchestrator.set_xz_render_distance(256);
+        // overworld_streamer.set_xz_render_distance(1024);
+        overworld_orchestrator.set_y_render_distance(256);
+        overworld_orchestrator.set_stream_pos(player_pos);
+
+        let main_state = Arc::new(Mutex::new(MainState {
+            tick_count: 0,
+            overworld,
+            overworld_orchestrator: Arc::new(Mutex::new(overworld_orchestrator)),
+            res_map: Arc::clone(&res_map),
+            player_pos,
+            player_orientation: Default::default(),
+            player_direction: Default::default(),
+            player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
+            fall_time: 0.0,
+            curr_jump_force: 0.0,
+            look_at_block: None,
+            block_set_cooldown: 0.0,
+            do_set_block: false,
+            curr_block: main_registry.block_test.into_any(),
+            set_water: false,
+            change_stream_pos: true,
+            player_collision_enabled: false,
+            do_remove_block: false,
+        }));
+
+        // TODO: save tick_count_state to disk
+
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),
             res_map,
             cursor_rel: (0.0, 0.0),
             tick_timer: IntervalTimer::new(Duration::from_millis(20)),
-            // TODO: save tick_count_state to disk
-            curr_tick: Arc::new(Default::default()),
-            overworld,
-            overworld_streamer: None,
-            player_pos: glm::convert(spawn_point.0),
-            player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
-            fall_time: 0.0,
-            curr_jump_force: 0.0,
-            look_at_block: None,
-            block_set_cooldown: 0.0,
-            curr_block: main_registry.block_test.into_any(),
-            set_water: false,
-            change_stream_pos: true,
-            player_collision_enabled: false,
+            main_state,
+            overworld_renderer: None,
             cursor_grab: true,
         };
         program
@@ -189,39 +199,25 @@ impl Application for Game {
             }
         }
 
-        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+        let state = self.main_state.lock();
 
-        let mut overworld_streamer = OverworldStreamer::new(
-            renderer,
+        let overworld_renderer = OverworldRenderer::new(
+            Arc::clone(renderer.device()),
             mat_pipelines.cluster(),
-            &self.overworld,
             Arc::clone(self.res_map.storage()),
+            Arc::clone(state.overworld_orchestrator.lock().loaded_clusters()),
         );
+        drop(state);
 
-        // overworld_streamer.set_xz_render_distance(1024);
-        overworld_streamer.set_xz_render_distance(256);
-        overworld_streamer.set_y_render_distance(256);
-        overworld_streamer.set_stream_pos(self.player_pos);
-
-        self.overworld_streamer = Some(Arc::new(Mutex::new(overworld_streamer)));
+        self.overworld_renderer = Some(Arc::new(Mutex::new(overworld_renderer)));
 
         {
-            let registry = Arc::clone(self.registry.registry());
-            let overworld_streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
-            let curr_tick = Arc::clone(&self.curr_tick);
+            let main_state = Arc::clone(&self.main_state);
+            let overworld_renderer = Arc::clone(&self.overworld_renderer.as_ref().unwrap());
 
             self.tick_timer.start(move || {
-                let curr_tick = curr_tick.fetch_add(1, MO_RELAXED);
-                let mut streamer = overworld_streamer.lock();
-                let dirty_clusters = streamer.update();
-
                 default_queue().install(|| {
-                    core::on_tick(
-                        curr_tick,
-                        &dirty_clusters,
-                        Arc::clone(&registry),
-                        streamer.loaded_clusters(),
-                    )
+                    on_tick(Arc::clone(&main_state), Arc::clone(&overworld_renderer));
                 });
             });
         }
@@ -236,9 +232,10 @@ impl Application for Game {
             )
             .unwrap(),
         );
+        let player_pos = self.main_state.lock().player_pos;
         let text = renderer.add_object(TextObject::new(
             component::Transform::new(
-                DVec3::new(self.player_pos.x, self.player_pos.y + 60.0, self.player_pos.z),
+                DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z),
                 Vec3::default(),
                 Vec3::from_element(1.0),
             ),
@@ -253,6 +250,7 @@ impl Application for Game {
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
         let kb = input.keyboard();
+        let mut curr_state = self.main_state.lock();
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
@@ -270,20 +268,64 @@ impl Application for Game {
             vel_left_right += 1;
         }
         if kb.is_key_pressed(VirtualKeyCode::Space) {
-            if !self.player_collision_enabled {
+            if !curr_state.player_collision_enabled {
                 vel_up_down += 1;
             }
-            // self.curr_jump_force = 5.7;
-            self.curr_jump_force = 14.0;
+            curr_state.curr_jump_force = 14.0;
         }
         if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
         }
 
+        let prev_pos = curr_state.player_pos;
+        let ms = MOVEMENT_SPEED * delta_time;
+        let mut motion_delta = DVec3::default();
+
+        // Handle translation
+        motion_delta.y += vel_up_down as f64 * ms;
+        motion_delta += camera::move_xz(
+            curr_state.player_orientation,
+            vel_front_back as f64 * ms,
+            vel_left_right as f64 * ms,
+        );
+
+        let mut new_jump_force = curr_state.curr_jump_force;
+        let mut new_fall_time = curr_state.fall_time;
+
+        if curr_state.player_collision_enabled {
+            let mut blocks = curr_state.overworld.access();
+            if blocks
+                .get_block(&BlockPos::from_f64(&curr_state.player_pos))
+                .is_some()
+            {
+                // Free fall
+                motion_delta.y -= (core::physics::G_ACCEL * curr_state.fall_time) * delta_time;
+
+                // Jump force
+                motion_delta.y += curr_state.curr_jump_force * delta_time;
+            }
+            drop(blocks);
+
+            let new_pos = curr_state
+                .overworld
+                .move_entity(prev_pos, motion_delta, &curr_state.player_aabb);
+
+            if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
+                // Note: the ground is reached
+                new_jump_force = 0.0;
+                // println!("GROUND HIT");
+                new_fall_time = delta_time;
+            } else {
+                new_fall_time += delta_time;
+            }
+
+            curr_state.player_pos = new_pos;
+        } else {
+            curr_state.player_pos += motion_delta;
+        }
+
         {
             let camera = renderer.active_camera_mut();
-            let ms = Self::MOVEMENT_SPEED * delta_time;
-            let mut motion_delta = DVec3::from_element(0.0);
 
             // Handle rotation
             let cursor_offset = Vec2::new(self.cursor_rel.0 as f32, self.cursor_rel.1 as f32)
@@ -295,152 +337,33 @@ impl Application for Game {
             // rotation.y += delta_time as f32;
 
             camera.set_rotation(rotation);
+            camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET);
             self.cursor_rel = (0.0, 0.0);
 
-            // Handle translation
-            motion_delta.y += vel_up_down as f64 * ms;
-            motion_delta += camera::move_xz(
-                camera.rotation(),
-                vel_front_back as f64 * ms,
-                vel_left_right as f64 * ms,
-            );
-
-            let prev_pos = self.player_pos;
-
-            if self.player_collision_enabled {
-                {
-                    let mut blocks = self.overworld.access();
-
-                    if blocks.get_block(&BlockPos::from_f64(&self.player_pos)).is_some() {
-                        // Free fall
-                        motion_delta.y -= (core::physics::G_ACCEL * self.fall_time) * delta_time;
-
-                        // Jump force
-                        motion_delta.y += self.curr_jump_force * delta_time;
-                    }
-                }
-
-                let new_pos = self
-                    .overworld
-                    .move_entity(prev_pos, motion_delta, &self.player_aabb);
-
-                if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
-                    // Note: the ground is reached
-                    self.curr_jump_force = 0.0;
-                    // println!("GROUND HIT");
-                    self.fall_time = delta_time;
-                } else {
-                    self.fall_time += delta_time;
-                }
-
-                self.player_pos = new_pos;
-            } else {
-                self.player_pos = prev_pos + motion_delta;
-            }
-
-            camera.set_position(self.player_pos + DVec3::new(0.0, 0.625, 0.0));
+            curr_state.player_orientation = rotation;
+            curr_state.player_direction = camera.direction();
         }
 
-        // TODO: set blocks only in on_tick handler
-
-        // Set block on mouse button click
+        // Handle Look-at
         {
-            if self.block_set_cooldown == 0.0 {
-                if input.mouse().is_button_pressed(MouseButton::Left) {
-                    let mut access = self.overworld.access();
-                    let camera = renderer.active_camera();
-
-                    self.look_at_block =
-                        access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
-
-                    if let Some((pos, facing)) = self.look_at_block {
-                        let dir: I64Vec3 = glm::convert(*facing.direction());
-                        let set_pos = pos.offset(&dir);
-
-                        if self.set_water {
-                            access.set_liquid_state(
-                                &set_pos,
-                                LiquidState::source(self.res_map.material_water()),
-                            );
-                        } else {
-                            access.update_block(&set_pos, |data| data.set(self.curr_block.clone()));
-
-                            if self.curr_block.block_id == self.registry.block_glow.block_id {
-                                access.set_light(&set_pos, LightLevel::from_intensity(10));
-                            } else {
-                                // Remove light to cause occlusion of nearby lights
-                                access.remove_light(&set_pos);
-                            }
-                        }
-
-                        self.block_set_cooldown = 0.15;
-                    }
-                } else if input.mouse().is_button_pressed(MouseButton::Right) {
-                    let mut access = self.overworld.access();
-                    let camera = renderer.active_camera();
-
-                    self.look_at_block =
-                        access.get_block_at_ray(&camera.position(), &glm::convert(camera.direction()), 3.0);
-
-                    if let Some(inter) = self.look_at_block {
-                        let prev_block_id = access.get_block(&inter.0).unwrap().block_id();
-                        access.update_block(&inter.0, |data| data.set(self.registry.block_empty));
-
-                        if prev_block_id == self.registry.block_glow.block_id {
-                            access.remove_light(&inter.0);
-                        } else {
-                            // Set corresponding light level if there is a light nearby
-                            access.check_neighbour_lighting(&inter.0);
-                        }
-
-                        self.block_set_cooldown = 0.15;
-                    }
-                }
-            }
-
-            self.block_set_cooldown = (self.block_set_cooldown - delta_time).max(0.0);
-
-            // if let Some(a) = blocks.set_block(I64Vec3::new(-2, 63, -5), self.registry.block_default()) {
-            //     a.build();
-            // }
-            // if let Some(a) = a.set_block(I64Vec3::new(1, 60, 0), self.registry.block_default()) {
-            //     a.build();
-            // }
-            // let b = a.get_block(
-            //     glm::try_convert::<DVec3, I64Vec3>(self.player_pos.map(|v| v.div_euclid(1.0))).unwrap(),
-            // );
-            // if let Some(b) = b {
-            //     println!("{} {}", b.block().archetype(), b.block().has_textured_model());
-            // }
+            let cam_pos = curr_state.player_pos + PLAYER_CAMERA_OFFSET;
+            let cam_dir = curr_state.player_direction;
+            let mut access = curr_state.overworld.access();
+            curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
         }
 
-        // if self.game_tick_finished.swap(false, atomic::Ordering::Relaxed) {
-        //     let overworld = Arc::clone(&self.overworld);
-        //     let streamer = Arc::clone(self.overworld_streamer.as_ref().unwrap());
-        //     let game_tick_finished = Arc::clone(&self.game_tick_finished);
-        //
-        //     {
-        //         let mut streamer = streamer.lock();
-        //
-        //         let t0 = Instant::now();
-        //         streamer.update_scene(renderer);
-        //         let t1 = Instant::now();
-        //         let el = (t1 - t0).as_secs_f64();
-        //         if el > 0.001 {
-        //             println!("update_renderer time: {}", (t1 - t0).as_secs_f64());
-        //         }
-        //
-        //         let p = DVec3::new(self.player_pos.x, self.player_pos.y, self.player_pos.z);
-        //         // let p = DVec3::new(43.0, 0.0, -44.0);
-        //
-        //         if self.change_stream_pos {
-        //             streamer.set_stream_pos(p);
-        //         }
-        //     }
-        //
-        //     coroutine_queue().spawn(move || game_tick(overworld, streamer, game_tick_finished));
-        //     // println!("as {}", renderer.device().calc_real_device_mem_usage());
-        // }
+        if input.mouse().is_button_pressed(MouseButton::Left) {
+            curr_state.do_set_block = true;
+        } else if input.mouse().is_button_pressed(MouseButton::Right) {
+            curr_state.do_remove_block = true;
+        }
+
+        drop(curr_state);
+
+        {
+            let mut overworld_renderer = self.overworld_renderer.as_ref().unwrap().lock();
+            overworld_renderer.update_scene(renderer);
+        }
     }
 
     fn on_event(
@@ -466,15 +389,17 @@ impl Application for Game {
                         return;
                     }
                     if input.state == ElementState::Released {
+                        let mut curr_state = self.main_state.lock_arc();
+
                         match input.virtual_keycode.unwrap() {
                             VirtualKeyCode::Escape => {
                                 *control_flow = ControlFlow::Exit;
                             }
                             VirtualKeyCode::L => {
-                                self.change_stream_pos = !self.change_stream_pos;
+                                curr_state.change_stream_pos = !curr_state.change_stream_pos;
                             }
                             VirtualKeyCode::C => {
-                                self.player_collision_enabled = !self.player_collision_enabled;
+                                curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
                             }
                             VirtualKeyCode::F11 => {
                                 if let Some(_) = main_window.fullscreen() {
@@ -487,10 +412,12 @@ impl Application for Game {
                                 }
                             }
                             VirtualKeyCode::P => {
-                                println!("{}", self.player_pos);
+                                println!("{}", curr_state.player_pos);
                                 println!(
                                     "{:?}",
-                                    self.player_pos.map(|v| v.rem_euclid(RawCluster::SIZE as f64))
+                                    curr_state
+                                        .player_pos
+                                        .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
                                 );
                             }
                             VirtualKeyCode::T => {
@@ -498,33 +425,34 @@ impl Application for Game {
                                 main_window.set_cursor_visible(!self.cursor_grab);
                             }
                             VirtualKeyCode::J => {
-                                let camera = renderer.active_camera();
-                                let mut access = self.overworld.access();
-                                let block = access.get_block_at_ray(
-                                    &camera.position(),
-                                    &glm::convert(camera.direction()),
-                                    7.0,
-                                );
-                                if let Some((pos, facing)) = block {
-                                    let pos = pos.offset_i32(&Facing::PositiveY.direction());
-                                    let data = access.get_block(&pos);
-
-                                    if let Some(data) = data {
-                                        let level = data.liquid_state().level();
-                                        println!("LIQ LEVEL: {level}");
-                                    }
-                                }
+                                // TODO: move into on_tick
+                                // let camera = renderer.active_camera();
+                                // let mut access = curr_state.overworld.access();
+                                // let block = access.get_block_at_ray(
+                                //     &camera.position(),
+                                //     &glm::convert(camera.direction()),
+                                //     7.0,
+                                // );
+                                // if let Some((pos, facing)) = block {
+                                //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
+                                //     let data = access.get_block(&pos);
+                                //
+                                //     if let Some(data) = data {
+                                //         let level = data.liquid_state().level();
+                                //         println!("LIQ LEVEL: {level}");
+                                //     }
+                                // }
                             }
                             VirtualKeyCode::Key1 => {
-                                self.curr_block = self.registry.block_test.into_any();
-                                self.set_water = false;
+                                curr_state.curr_block = self.registry.block_test.into_any();
+                                curr_state.set_water = false;
                             }
                             VirtualKeyCode::Key2 => {
-                                self.curr_block = self.registry.block_glow.into_any();
-                                self.set_water = false;
+                                curr_state.curr_block = self.registry.block_glow.into_any();
+                                curr_state.set_water = false;
                             }
                             VirtualKeyCode::Key3 => {
-                                self.set_water = true;
+                                curr_state.set_water = true;
                             }
                             _ => {}
                         }
@@ -545,20 +473,118 @@ impl Application for Game {
     }
 }
 
-// TODO: move this to the core
-pub fn game_tick(
+#[derive(Clone)]
+struct MainState {
+    tick_count: u64,
     overworld: Arc<Overworld>,
-    streamer: Arc<Mutex<OverworldStreamer>>,
-    finished: Arc<AtomicBool>,
-) {
-    let mut streamer = streamer.lock();
+    overworld_orchestrator: Arc<Mutex<OverworldOrchestrator>>,
+    res_map: Arc<DefaultResourceMapping>,
 
-    // let t0 = Instant::now();
-    let dirty_clusters = streamer.update();
-    // let t1 = Instant::now();
-    // println!("tick time: {}", (t1 - t0).as_secs_f64());
+    player_pos: DVec3,
+    player_orientation: Vec3,
+    player_direction: Vec3,
+    player_aabb: AABB,
+    fall_time: f64,
+    curr_jump_force: f64,
+    look_at_block: Option<(BlockPos, Facing)>,
+    curr_block: AnyBlockState,
+    set_water: bool,
 
-    // process_active_blocks(tick, &overworld, &dirty_clusters);
+    change_stream_pos: bool,
+    player_collision_enabled: bool,
+    block_set_cooldown: f64,
+    do_set_block: bool,
+    do_remove_block: bool,
+}
 
-    finished.store(true, atomic::Ordering::Relaxed);
+const MOVEMENT_SPEED: f64 = 16.0;
+
+fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<OverworldRenderer>>) {
+    let curr_state = main_state.lock().clone();
+
+    let curr_tick = curr_state.tick_count;
+    let mut new_actions = OverworldActionsStorage::new();
+
+    player_on_update(&main_state, &mut new_actions);
+
+    let update_res = core::on_tick(
+        curr_tick,
+        &curr_state.overworld.main_registry().registry(),
+        &mut curr_state.overworld_orchestrator.lock(),
+        &new_actions,
+    );
+
+    let mut overworld_renderer = overworld_renderer.lock();
+    overworld_renderer.update(&update_res, Duration::from_millis(10));
+
+    main_state.lock().tick_count += 1;
+}
+
+fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut OverworldActionsStorage) {
+    let curr_state = main_state.lock().clone();
+    let registry = curr_state.overworld.main_registry();
+
+    // TODO: calculate precisely.
+    let delta_time = 0.02;
+
+    let mut new_block_set_cooldown = curr_state.block_set_cooldown;
+
+    // Set block on mouse button click
+    if curr_state.block_set_cooldown == 0.0 {
+        if curr_state.do_set_block {
+            let mut access = curr_state.overworld.access();
+
+            if let Some((pos, facing)) = curr_state.look_at_block {
+                let dir: I64Vec3 = glm::convert(*facing.direction());
+                let set_pos = pos.offset(&dir);
+
+                if curr_state.set_water {
+                    access
+                        .set_liquid_state(&set_pos, LiquidState::source(curr_state.res_map.material_water()));
+                } else {
+                    access.update_block(&set_pos, |data| data.set(curr_state.curr_block.clone()));
+
+                    if curr_state.curr_block.block_id == registry.block_glow.block_id {
+                        access.set_light(&set_pos, LightLevel::from_intensity(10));
+                    } else {
+                        // Remove light to cause occlusion of nearby lights
+                        access.remove_light(&set_pos);
+                    }
+                }
+
+                new_block_set_cooldown = 0.15;
+            }
+        } else if curr_state.do_remove_block {
+            let mut access = curr_state.overworld.access();
+
+            if let Some(inter) = curr_state.look_at_block {
+                let prev_block_id = access.get_block(&inter.0).unwrap().block_id();
+                access.update_block(&inter.0, |data| data.set(registry.block_empty));
+
+                if prev_block_id == registry.block_glow.block_id {
+                    access.remove_light(&inter.0);
+                } else {
+                    // Set corresponding light level if there is a light nearby
+                    access.check_neighbour_lighting(&inter.0);
+                }
+
+                new_block_set_cooldown = 0.15;
+            }
+        }
+    } else {
+        new_block_set_cooldown = (curr_state.block_set_cooldown - delta_time).max(0.0);
+    }
+
+    if curr_state.change_stream_pos {
+        curr_state
+            .overworld_orchestrator
+            .lock()
+            .set_stream_pos(curr_state.player_pos);
+    }
+
+    let mut main_state = main_state.lock();
+
+    main_state.do_set_block = false;
+    main_state.do_remove_block = false;
+    main_state.block_set_cooldown = new_block_set_cooldown;
 }

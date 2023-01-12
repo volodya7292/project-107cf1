@@ -88,7 +88,7 @@ impl BlockPos {
 }
 
 /// Global cluster position
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Default, Debug)]
 pub struct ClusterPos(I64Vec3);
 
 impl ClusterPos {
@@ -115,6 +115,11 @@ impl ClusterPos {
     #[inline]
     pub fn offset(&self, offset: &I64Vec3) -> ClusterPos {
         ClusterPos(self.0 + offset * RawCluster::SIZE as i64)
+    }
+
+    #[inline]
+    pub fn offset_i32(&self, offset: &I32Vec3) -> ClusterPos {
+        ClusterPos(self.0 + glm::convert::<_, I64Vec3>(*offset) * RawCluster::SIZE as i64)
     }
 }
 

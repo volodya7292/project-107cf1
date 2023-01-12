@@ -13,15 +13,15 @@ use core::utils::threading::{SafeThreadPool, TaskPriority};
 use core::utils::{HashSet, MO_RELAXED};
 use vk_wrapper as vkw;
 
+use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
-use crate::queue::realtime_queue;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 
 pub mod ecs;
+pub mod execution;
 pub mod input;
 mod platform;
-pub mod queue;
 pub mod renderer;
 #[cfg(test)]
 mod tests;

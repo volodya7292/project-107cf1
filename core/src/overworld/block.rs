@@ -132,11 +132,11 @@ impl BlockBuilder {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy)]
 pub struct BlockState<A: ArchetypeState> {
     pub block_id: u16,
     pub components: A,
-    clone_any_fn: fn(&AnyState) -> AnyState,
+    clone_any_fn: fn(&A) -> A,
 }
 
 impl<A: StaticArchetype + Clone> BlockState<A> {
@@ -144,16 +144,26 @@ impl<A: StaticArchetype + Clone> BlockState<A> {
         Self {
             block_id,
             components: state,
-            clone_any_fn: |f: &AnyState| f.downcast_ref::<A>().unwrap().clone().into_any(),
+            clone_any_fn: |f: &A| f.clone(),
         }
     }
 }
 
-impl<A: StaticArchetype> BlockState<A> {
+impl<A: StaticArchetype + Clone> BlockState<A> {
     pub fn into_any(self) -> BlockState<AnyState> {
         BlockState {
             block_id: self.block_id,
             components: self.components.into_any(),
+            clone_any_fn: |f| f.downcast_ref::<A>().unwrap().clone().into_any(),
+        }
+    }
+}
+
+impl<A: ArchetypeState> Clone for BlockState<A> {
+    fn clone(&self) -> Self {
+        Self {
+            block_id: self.block_id,
+            components: (self.clone_any_fn)(&self.components),
             clone_any_fn: self.clone_any_fn,
         }
     }
@@ -162,23 +172,15 @@ impl<A: StaticArchetype> BlockState<A> {
 pub type AnyBlockState = BlockState<AnyState>;
 
 impl AnyBlockState {
-    pub fn clone(&self) -> Self {
-        Self {
-            block_id: self.block_id,
-            components: (self.clone_any_fn)(&self.components),
-            clone_any_fn: self.clone_any_fn,
-        }
-    }
-
     pub fn downcast<A, B>(self) -> Option<BlockState<B>>
     where
         A: ArchetypeState,
-        B: StaticArchetype,
+        B: StaticArchetype + Clone,
     {
         Some(BlockState {
             block_id: self.block_id,
             components: self.components.downcast()?,
-            clone_any_fn: self.clone_any_fn,
+            clone_any_fn: |f| f.clone(),
         })
     }
 }

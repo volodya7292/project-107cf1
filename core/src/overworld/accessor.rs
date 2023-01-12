@@ -13,7 +13,7 @@ use crate::overworld::light_level::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
-use crate::overworld::{Cluster, ClusterState, LoadedClusters, OverworldCluster};
+use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
 use crate::registry::Registry;
 use crate::utils::{HashMap, MO_RELAXED};
 
@@ -22,21 +22,20 @@ lazy_static! {
 }
 
 pub struct AccessGuard {
-    o_cluster: Arc<OverworldCluster>,
     locked_state: ClusterState,
     lock: AccessGuardLock,
 }
 
 pub enum AccessGuardLock {
-    Read(ArcRwLockReadGuard<RawRwLock, Option<Cluster>>),
-    Write(ArcRwLockWriteGuard<RawRwLock, Option<Cluster>>),
+    Read(ArcRwLockReadGuard<RawRwLock, Option<TrackingCluster>>),
+    Write(ArcRwLockWriteGuard<RawRwLock, Option<TrackingCluster>>),
 }
 
 impl AccessGuard {
     /// Returns cluster for the specified global block position.
     /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster(&self) -> Option<&Cluster> {
+    pub fn cluster(&self) -> Option<&TrackingCluster> {
         match &self.lock {
             AccessGuardLock::Read(g) => g.as_ref(),
             AccessGuardLock::Write(g) => g.as_ref(),
@@ -46,7 +45,7 @@ impl AccessGuard {
     /// Returns cluster for the specified global block position.
     /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster_mut(&mut self) -> Option<&mut Cluster> {
+    pub fn cluster_mut(&mut self) -> Option<&mut TrackingCluster> {
         match &mut self.lock {
             AccessGuardLock::Write(g) => g.as_mut(),
             _ => unreachable!(),
@@ -73,17 +72,16 @@ impl ClustersAccessorCache {
             hash_map::Entry::Occupied(e) => Some(e.into_mut()),
             hash_map::Entry::Vacant(e) => {
                 let clusters = self.loaded_clusters.read();
-                let o_cluster = Arc::clone(clusters.get(cluster_pos)?);
+                let o_cluster = clusters.get(cluster_pos)?;
                 let state = o_cluster.state();
 
                 if !state.is_readable() {
                     return None;
                 }
 
-                let lock = AccessGuardLock::Read(o_cluster.cluster.try_read_arc()?);
+                let lock = AccessGuardLock::Read(o_cluster.cluster.read_arc());
 
                 Some(e.insert(AccessGuard {
-                    o_cluster,
                     locked_state: state,
                     lock,
                 }))
@@ -93,36 +91,49 @@ impl ClustersAccessorCache {
 
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster_mut(&mut self, cluster_pos: &ClusterPos) -> Option<&mut AccessGuard> {
-        // Fast path
-        if let hash_map::Entry::Occupied(e) = self.clusters_cache.entry(*cluster_pos) {
-            if let AccessGuardLock::Write(_) = &e.get().lock {
-                let mut_ref = e.into_mut();
+        match self.clusters_cache.entry(*cluster_pos) {
+            hash_map::Entry::Occupied(e) => {
+                let guard = e.into_mut();
 
-                // TODO: use NLL when https://github.com/rust-lang/rust/issues/51545 is fixed
-                // return Some(mut_ref);
-                return Some(unsafe { &mut *(mut_ref as *mut _) });
-            } else {
-                e.remove();
+                if let AccessGuardLock::Read(_) = &guard.lock {
+                    replace_with::replace_with_or_abort(&mut guard.lock, |v| {
+                        let read_guard = if let AccessGuardLock::Read(v) = v {
+                            v
+                        } else {
+                            unreachable!()
+                        };
+
+                        let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
+                        drop(read_guard);
+
+                        let clusters = self.loaded_clusters.read();
+                        let ocluster = clusters.get(cluster_pos).unwrap();
+                        ocluster.dirty.store(true, MO_RELAXED);
+
+                        AccessGuardLock::Write(rwlock.write_arc())
+                    });
+                }
+
+                Some(guard)
             }
-        }
+            hash_map::Entry::Vacant(e) => {
+                let clusters = self.loaded_clusters.read();
+                let o_cluster = clusters.get(cluster_pos)?;
+                let state = o_cluster.state();
 
-        // Slow path: lock for writes
-        let clusters = self.loaded_clusters.read();
-        let o_cluster = Arc::clone(clusters.get(cluster_pos)?);
-        let state = o_cluster.state();
+                if state != ClusterState::Loaded {
+                    None
+                } else {
+                    o_cluster.dirty.store(true, MO_RELAXED);
 
-        if state != ClusterState::Loaded {
-            None
-        } else {
-            let lock = AccessGuardLock::Write(o_cluster.cluster.try_write_arc()?);
+                    let lock = AccessGuardLock::Write(o_cluster.cluster.write_arc());
 
-            o_cluster.dirty.store(true, MO_RELAXED);
-
-            Some(self.clusters_cache.entry(*cluster_pos).or_insert(AccessGuard {
-                o_cluster,
-                locked_state: state,
-                lock,
-            }))
+                    Some(e.insert(AccessGuard {
+                        locked_state: state,
+                        lock,
+                    }))
+                }
+            }
         }
     }
 }
@@ -260,15 +271,16 @@ impl OverworldAccessor {
             .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
+            let pos_idx = cluster_block_pos.index();
             let mut block_data = cluster.raw.get_mut(&cluster_block_pos);
 
             update_fn(&mut block_data);
             let active_after_update = block_data.active();
+            let empty_after_update = is_cell_empty(&self.registry, block_data);
 
-            cluster
-                .active_blocks
-                .set(cluster_block_pos.index(), active_after_update);
-            cluster.dirty_parts.set_dirty(&cluster_block_pos);
+            cluster.active_cells.set(pos_idx, active_after_update);
+            cluster.empty_cells.set(pos_idx, empty_after_update);
+            cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
 
             true
         } else {
@@ -291,11 +303,9 @@ impl OverworldAccessor {
 
             // The liquid must spread or vanish
             *data.active_mut() = true;
-            cluster
-                .active_blocks
-                .set(cluster_block_pos.index(), data.active());
+            cluster.active_cells.set(cluster_block_pos.index(), data.active());
 
-            cluster.dirty_parts.set_dirty(&cluster_block_pos);
+            cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
         }
     }
 
@@ -312,7 +322,7 @@ impl OverworldAccessor {
 
             *data.light_level_mut() = light_level;
 
-            cluster.dirty_parts.set_dirty(&cluster_block_pos);
+            cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
         }
     }
 

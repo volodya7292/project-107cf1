@@ -28,7 +28,7 @@ fixedbitset = "0.4"
 replace_with = "0.1"
 lazy_static = "1.4"
 parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision", "deadlock_detection"] }
-once_cell = "1.13"
+once_cell = "1.17"
 rstar = "0.9"
 bumpalo = "3.11"
 index-pool = "1.0"
@@ -37,6 +37,9 @@ byteorder = "1.4"
 ahash = "0.8"
 moka = "0.9"
 indexmap = "1.9"
+async-executor = "1.5"
+async-channel = "1.8"
+futures-lite = "1.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos = { path = "../core/macos" }

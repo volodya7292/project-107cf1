@@ -1,34 +1,54 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use nalgebra_glm as glm;
+pub use once_cell;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 
 pub use macos;
+use overworld::actions_storage::{OverworldActionsBuilder, OverworldActionsStorage, StateChangeInfo};
 
 use crate::overworld::accessor::{
     OverworldAccessor, ReadOnlyOverworldAccessor, ReadOnlyOverworldAccessorImpl,
 };
-use crate::overworld::block::event_handlers::{
-    OverworldActionsBuilder, OverworldActionsStorage, StateChangeInfo,
-};
 use crate::overworld::facing::Facing;
 use crate::overworld::liquid_state::LiquidState;
+use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
 use crate::overworld::LoadedClusters;
 use crate::registry::Registry;
-use crate::utils::{HashMap, HashSet, MO_RELAXED};
+use crate::utils::{HashMap, MO_RELAXED};
 
 pub mod main_registry;
 pub mod overworld;
 // pub mod overworld_orchestrator;
 // pub mod overworld_renderer;
+pub mod execution;
 pub mod physics;
 pub mod registry;
 pub mod scene;
 pub mod utils;
 
+/*
+
+Liquid spread algorithm:
+
+if the block is a source:
+    spread further
+    deactivate itself
+else:
+    if a least one neighbour has neighbour_liquid_level == curr_liquid_level + 1:
+        spread (curr_liquid_level - 1)
+        deactivate itself
+    else:
+        curr_liquid_level -= 1;
+        activate neighbours
+        if curr_liquid_level == 0:
+            deactivate itself
+
+ */
 pub fn on_liquid_tick(
     tick: u64,
     pos: &BlockPos,
@@ -125,26 +145,38 @@ pub fn process_active_blocks(
     tick: u64,
     registry: &Arc<Registry>,
     loaded_clusters: &LoadedClusters,
-    dirty_clusters: &HashSet<ClusterPos>,
 ) -> Vec<OverworldActionsStorage> {
     let total_after_actions = Mutex::new(Vec::with_capacity(loaded_clusters.read().len()));
 
     loaded_clusters.read().par_iter().for_each(|(cl_pos, o_cluster)| {
-        if o_cluster.may_have_active_blocks.load(MO_RELAXED) || dirty_clusters.contains(cl_pos) {
-            let cluster = o_cluster.cluster.read();
-            let mut after_actions = OverworldActionsStorage::new();
-            let mut has_active_blocks = false;
+        if !o_cluster.has_active_blocks.load(MO_RELAXED) {
+            return;
+        }
 
-            if let Some(cluster) = &*cluster {
-                let mut accessor = OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters))
-                    .into_read_only();
+        let cluster = o_cluster.cluster.read();
+        let mut after_actions = OverworldActionsStorage::new();
 
-                for (pos, block_data) in cluster.active_blocks() {
-                    let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
-                    let block = registry.get_block(block_data.block_id()).unwrap();
+        if let Some(cluster) = &*cluster {
+            let mut accessor =
+                OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters)).into_read_only();
 
-                    // Check for liquid
-                    on_liquid_tick(
+            for (pos, block_data) in cluster.active_blocks() {
+                let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
+                let block = registry.get_block(block_data.block_id()).unwrap();
+
+                // Check for liquid
+                on_liquid_tick(
+                    tick,
+                    &global_pos,
+                    block_data,
+                    &registry,
+                    &mut accessor,
+                    after_actions.builder(),
+                );
+
+                // Block-specific on-tick event
+                if let Some(on_tick) = &block.event_handlers().on_tick {
+                    on_tick(
                         tick,
                         &global_pos,
                         block_data,
@@ -152,28 +184,11 @@ pub fn process_active_blocks(
                         &mut accessor,
                         after_actions.builder(),
                     );
-
-                    // Block-specific on-tick event
-                    if let Some(on_tick) = &block.event_handlers().on_tick {
-                        on_tick(
-                            tick,
-                            &global_pos,
-                            block_data,
-                            &registry,
-                            &mut accessor,
-                            after_actions.builder(),
-                        );
-                    }
-
-                    has_active_blocks |= block_data.active();
                 }
             }
-
-            o_cluster
-                .may_have_active_blocks
-                .store(has_active_blocks, MO_RELAXED);
-            total_after_actions.lock().push(after_actions);
         }
+
+        total_after_actions.lock().push(after_actions);
     });
 
     total_after_actions.into_inner()
@@ -182,7 +197,7 @@ pub fn process_active_blocks(
 fn apply_overworld_actions(
     registry: &Arc<Registry>,
     loaded_clusters: &LoadedClusters,
-    actions: &[OverworldActionsStorage],
+    actions: &[&OverworldActionsStorage],
 ) {
     struct AllChanges<'a> {
         params: Vec<&'a StateChangeInfo>,
@@ -247,30 +262,17 @@ fn apply_overworld_actions(
 
 pub fn on_tick(
     tick: u64,
-    dirty_clusters: &HashSet<ClusterPos>,
-    registry: Arc<Registry>,
-    loaded_clusters: &LoadedClusters,
-) {
-    let actions = process_active_blocks(tick, &registry, &loaded_clusters, &dirty_clusters);
-    apply_overworld_actions(&registry, &loaded_clusters, &actions)
+    registry: &Arc<Registry>,
+    overworld_orchestrator: &mut OverworldOrchestrator,
+    additional_actions: &OverworldActionsStorage,
+) -> OverworldUpdateResult {
+    let loaded_clusters = Arc::clone(overworld_orchestrator.loaded_clusters());
+
+    let active_blocks_actions = process_active_blocks(tick, registry, &loaded_clusters);
+
+    let mut actions_storages: Vec<_> = active_blocks_actions.iter().collect();
+    actions_storages.push(additional_actions);
+    apply_overworld_actions(registry, &loaded_clusters, &actions_storages);
+
+    overworld_orchestrator.update(Duration::from_millis(5))
 }
-
-/*
-
-current block props:
-    curr_liquid_level
-
-if the block is a source:
-    spread further
-    deactivate itself
-else:
-    if a least one neighbour has neighbour_liquid_level == curr_liquid_level + 1:
-        spread (curr_liquid_level - 1)
-        deactivate itself
-    else:
-        curr_liquid_level -= 1;
-        activate neighbours
-        if curr_liquid_level == 0:
-            deactivate itself
-
- */

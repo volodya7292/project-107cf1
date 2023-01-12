@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::TVec3;
 
 use crate::overworld::block::BlockState;
-use crate::overworld::cluster_dirty_parts::ClusterDirtySides;
+use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::facing::Facing;
 use crate::overworld::light_level::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
@@ -19,11 +19,6 @@ pub const N_PARTS: usize = 27; // 1 (center) + 6 sides + 12 edges + 8 corners
 
 const ALIGNED_SIZE: usize = RawCluster::SIZE + 2;
 const ALIGNED_VOLUME: usize = ALIGNED_SIZE * ALIGNED_SIZE * ALIGNED_SIZE;
-
-pub fn neighbour_index_from_pos(pos: &TVec3<usize>) -> usize {
-    let p = pos.map(|v| (v > 0) as usize + (v == RawCluster::SIZE - 1) as usize);
-    p.x * 9 + p.y * 3 + p.z
-}
 
 // fn neighbour_index_from_aligned_pos(pos: &TVec3<usize>) -> usize {
 //     let p = pos.map(|v| (v > 1) as usize + (v == RawCluster::SIZE) as usize);
@@ -260,7 +255,7 @@ impl RawCluster {
     }
 
     /// Checks if self inner edge is fully occluded
-    pub fn check_edge_fully_occluded(&self, facing: Facing) -> bool {
+    pub fn is_side_fully_occluded(&self, facing: Facing) -> bool {
         let dir = facing.direction();
         let mut state = true;
 
@@ -290,7 +285,7 @@ impl RawCluster {
         state
     }
 
-    pub fn clear_outer_intrinsics(&mut self, side_offset: I32Vec3, value: CellInfo) {
+    pub fn clear_auxiliary_cells(&mut self, side_offset: I32Vec3, value: CellInfo) {
         let size = Self::SIZE as i32;
         let b = side_offset.map(|v| v == -size || v == size);
 
@@ -339,7 +334,7 @@ impl RawCluster {
         }
     }
 
-    pub fn paste_outer_intrinsics(&mut self, side_cluster: &RawCluster, side_offset: I32Vec3) {
+    pub fn paste_auxiliary_cells(&mut self, side_cluster: &RawCluster, side_offset: I32Vec3) {
         let size = Self::SIZE as i32;
         let b = side_offset.map(|v| v == -size || v == size);
 
@@ -405,12 +400,12 @@ impl RawCluster {
         &mut self,
         side_cluster: &RawCluster,
         side_offset: I32Vec3,
-    ) -> ClusterDirtySides {
+    ) -> ClusterPartSet {
         let size = Self::SIZE as i32;
 
         if side_offset.abs().sum() != size {
             // Not a side but corner or edge offset
-            return ClusterDirtySides::none();
+            return ClusterPartSet::NONE;
         }
 
         fn map_pos(d: &I32Vec3, k: usize, l: usize, v: usize) -> TVec3<usize> {
@@ -443,10 +438,10 @@ impl RawCluster {
     }
 
     /// Propagates lighting from boundaries into the cluster
-    fn propagate_pending_lighting(&mut self) -> ClusterDirtySides {
+    fn propagate_pending_lighting(&mut self) -> ClusterPartSet {
         const MAX_BOUNDARY: usize = (ALIGNED_SIZE - 1) as usize;
 
-        let mut dirty_parts = ClusterDirtySides::none();
+        let mut dirty_parts = ClusterPartSet::NONE;
 
         while let Some(curr_pos) = self.light_addition_cache.pop_front() {
             let curr_index = aligned_block_index(&curr_pos);
@@ -469,21 +464,26 @@ impl RawCluster {
                 }
 
                 let aligned_index = aligned_block_index(&rel_pos);
-                let cell = &mut self.cells[aligned_index];
+                let rel_cell = &mut self.cells[aligned_index];
 
-                let block = self.registry.get_block(cell.block_id).unwrap();
-                let level = &mut cell.light_level;
-                let color = level.components();
+                let rel_block = self.registry.get_block(rel_cell.block_id).unwrap();
+                let rel_level = &mut rel_cell.light_level;
+                let rel_color = rel_level.components();
 
-                if !block.is_opaque() && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b)) {
-                    let new_color = curr_color.map(|v| v.saturating_sub(1));
-                    *level = LightLevel::from_vec(new_color);
-
-                    self.light_addition_cache.push_back(glm::convert(rel_pos));
-
-                    let dirty_pos = rel_pos.map(|v| v - 1);
-                    dirty_parts.set_dirty(&ClusterBlockPos::from_vec_unchecked(dirty_pos));
+                if rel_block.is_opaque() {
+                    continue;
                 }
+                if glm::all(&rel_color.add_scalar(2).zip_map(&curr_color, |a, b| a > b)) {
+                    continue;
+                }
+
+                let new_color = curr_color.map(|v| v.saturating_sub(1));
+                *rel_level = LightLevel::from_vec(new_color);
+
+                let dirty_pos = rel_pos.map(|v| v - 1);
+                dirty_parts.set_from_block_pos(&ClusterBlockPos::from_vec_unchecked(dirty_pos));
+
+                self.light_addition_cache.push_back(glm::convert(rel_pos));
             }
         }
 
@@ -491,7 +491,7 @@ impl RawCluster {
     }
 
     /// Propagates lighting where necessary in the cluster using light source at `block_pos`.
-    pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) -> ClusterDirtySides {
+    pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) -> ClusterPartSet {
         self.light_addition_cache.push_back(pos.get().add_scalar(1));
         self.propagate_pending_lighting()
     }
