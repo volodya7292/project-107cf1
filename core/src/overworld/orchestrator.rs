@@ -89,7 +89,7 @@ fn calc_cluster_layout(
     layout
 }
 
-fn get_side_clusters(pos: &ClusterPos) -> SmallVec<[ClusterPos; 26]> {
+pub fn get_side_clusters(pos: &ClusterPos) -> SmallVec<[ClusterPos; 26]> {
     let mut neighbours = SmallVec::<[ClusterPos; 26]>::new();
 
     for x in -1..2 {
@@ -449,11 +449,11 @@ impl OverworldOrchestrator {
     pub fn update(&mut self, max_processing_time: Duration) -> OverworldUpdateResult {
         let t_start = Instant::now();
         let mut res = OverworldUpdateResult {
-            processed_dirty_clusters: HashMap::with_capacity(1024),
-            updated_auxiliary_parts: Vec::with_capacity(1024),
-            new_clusters: Vec::with_capacity(1024),
-            removed_clusters: Vec::with_capacity(1024),
-            offloaded_clusters: Vec::with_capacity(1024),
+            processed_dirty_clusters: Default::default(),
+            updated_auxiliary_parts: Default::default(),
+            new_clusters: Default::default(),
+            removed_clusters: Default::default(),
+            offloaded_clusters: Default::default(),
         };
         // Lock loaded_clusters so no accessor can modify clusters
         let mut o_clusters = self.loaded_clusters.write();
@@ -491,7 +491,7 @@ impl OverworldOrchestrator {
             dirty_clusters.insert(*pos, dirty_parts);
         }
 
-        let to_offload = Mutex::new(Vec::with_capacity(dirty_clusters.len()));
+        let to_offload = Mutex::new(Vec::with_capacity(1024));
 
         // 3. Check dirty clusters for emptiness, active blocks, and side occlusion
         // Note: this must be done for all dirty clusters in one orchestrator update
@@ -626,53 +626,58 @@ impl OverworldOrchestrator {
         });
 
         let mut clusters_generating = 0;
-        let mut reloaded_clusters = Vec::with_capacity(128);
+        let mut reloaded_clusters = Vec::with_capacity(1024);
+        let registry = self.overworld_generator.main_registry().registry();
 
         // 9. Load(generate) clusters which are !ready or (not present in o_clusters and !RCluster::occluded)
-        rayon::scope(|s| {
-            let registry = self.overworld_generator.main_registry().registry();
+        for chunk in clusters_diff.sorted_layout.chunks(rayon::current_num_threads()) {
+            rayon::scope(|s| {
+                for d_pos in chunk {
+                    let pos = &d_pos.pos;
+                    let o_cluster = o_clusters.get(pos).unwrap();
+                    let r_cluster = r_clusters.get_mut(pos).unwrap();
+                    let state = o_cluster.state();
 
-            for d_pos in &clusters_diff.sorted_layout {
-                let pos = &d_pos.pos;
-                let o_cluster = o_clusters.get(pos).unwrap();
-                let r_cluster = r_clusters.get(pos).unwrap();
-                let state = o_cluster.state();
+                    let in_forced_load_range = is_cluster_in_forced_load_range(pos, &self.stream_pos);
 
-                let in_forced_load_range = is_cluster_in_forced_load_range(pos, &self.stream_pos);
+                    if state == ClusterState::Loaded
+                        || (!in_forced_load_range && r_cluster.is_empty_or_occluded())
+                    {
+                        continue;
+                    }
+                    if state.is_empty_or_occluded() {
+                        reloaded_clusters.push(*pos);
+                    }
 
-                if state == ClusterState::Loaded
-                    || (!in_forced_load_range && r_cluster.is_empty_or_occluded())
-                {
-                    continue;
+                    s.spawn(|_| {
+                        let mut cluster = self.overworld_generator.create_cluster();
+                        self.overworld_generator.generate_cluster(&mut cluster, *pos);
+
+                        *o_cluster.cluster.write() = Some(TrackingCluster::new(registry, cluster));
+                        o_cluster.state.store(ClusterState::Loaded as u32, MO_RELEASE);
+                        o_cluster.dirty.store(true, MO_RELEASE);
+                    });
+                    r_cluster.needs_auxiliary_fill_at = ClusterPartSet::ALL;
+
+                    clusters_generating += 1;
                 }
-                if state.is_empty_or_occluded() {
-                    reloaded_clusters.push(*pos);
-                }
+            });
 
-                s.spawn(|_| {
-                    let mut cluster = self.overworld_generator.create_cluster();
-                    self.overworld_generator.generate_cluster(&mut cluster, *pos);
-
-                    *o_cluster.cluster.write() = Some(TrackingCluster::new(registry, cluster));
-                    o_cluster.state.store(ClusterState::Loaded as u32, MO_RELEASE);
-                    o_cluster.dirty.store(true, MO_RELEASE);
-                });
-
-                clusters_generating += 1;
-                dirty_clusters.insert(*pos, ClusterPartSet::ALL);
-
-                let t1 = Instant::now();
-                if clusters_generating > 0 && t1.duration_since(t_start) >= max_processing_time {
-                    break;
-                }
+            let t1 = Instant::now();
+            if clusters_generating > 0 && t1.duration_since(t_start) >= max_processing_time {
+                break;
             }
-        });
+        }
 
         res.processed_dirty_clusters = dirty_clusters;
-        res.new_clusters = clusters_diff.new;
-        res.new_clusters.extend(reloaded_clusters);
+        res.new_clusters = clusters_diff
+            .new
+            .iter()
+            .chain(reloaded_clusters.iter())
+            .cloned()
+            .collect();
         res.removed_clusters = clusters_diff.to_remove;
-        res.offloaded_clusters.extend(to_offload.iter().map(|v| v.0));
+        res.offloaded_clusters = to_offload.iter().map(|v| v.0).collect();
 
         res
     }

@@ -265,6 +265,7 @@ pub fn on_tick(
     registry: &Arc<Registry>,
     overworld_orchestrator: &mut OverworldOrchestrator,
     additional_actions: &OverworldActionsStorage,
+    orchestrator_max_processing_time: Duration,
 ) -> OverworldUpdateResult {
     let loaded_clusters = Arc::clone(overworld_orchestrator.loaded_clusters());
 
@@ -274,5 +275,5 @@ pub fn on_tick(
     actions_storages.push(additional_actions);
     apply_overworld_actions(registry, &loaded_clusters, &actions_storages);
 
-    overworld_orchestrator.update(Duration::from_millis(5))
+    overworld_orchestrator.update(orchestrator_max_processing_time)
 }

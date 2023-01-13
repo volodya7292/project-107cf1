@@ -512,10 +512,11 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
         &curr_state.overworld.main_registry().registry(),
         &mut curr_state.overworld_orchestrator.lock(),
         &new_actions,
+        Duration::from_millis(5),
     );
 
     let mut overworld_renderer = overworld_renderer.lock();
-    overworld_renderer.update(&update_res, Duration::from_millis(10));
+    overworld_renderer.update(curr_state.player_pos, &update_res, Duration::from_millis(5));
 
     main_state.lock().tick_count += 1;
 }

@@ -3,10 +3,11 @@ use std::time::{Duration, Instant};
 
 use entity_data::EntityId;
 use nalgebra_glm as glm;
-use nalgebra_glm::Vec3;
+use nalgebra_glm::{DVec3, I64Vec3, Vec3};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 
+use core::overworld::orchestrator::get_side_clusters;
 use core::overworld::orchestrator::OverworldUpdateResult;
 use core::overworld::position::ClusterPos;
 use core::overworld::LoadedClusters;
@@ -31,12 +32,6 @@ pub struct OverworldRenderer {
     to_update_mesh: Mutex<HashMap<ClusterPos, ClusterMeshes>>,
 
     entities: HashMap<ClusterPos, ClusterEntities>,
-    // /// Whether `edge_intrinsics` has been determined, only then `occluded` can be set
-    // edge_intrinsics_determined: Arc<AtomicBool>,
-    // /// All conditions are met for the vertex mesh to be updated
-    // mesh_can_be_updated: Arc<AtomicBool>,
-    // /// Mesh has been updated and it needs to be updated inside the VertexMesh scene component
-    // mesh_changed: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -71,7 +66,7 @@ impl OverworldRenderer {
         }
     }
 
-    pub fn update(&mut self, overworld_update: &OverworldUpdateResult, max_execution_time: Duration) {
+    pub fn manage_changes(&mut self, overworld_update: &OverworldUpdateResult) {
         self.dirty_clusters
             .extend(overworld_update.processed_dirty_clusters.iter().map(|v| v.0));
 
@@ -99,43 +94,51 @@ impl OverworldRenderer {
             self.to_add.remove(pos);
             self.dirty_clusters.remove(pos);
         }
+    }
 
-        // -----------------------------------------------------------------------------------------------
+    pub fn update(
+        &mut self,
+        stream_pos: DVec3,
+        overworld_update: &OverworldUpdateResult,
+        max_execution_time: Duration,
+    ) {
+        let t_start = Instant::now();
+
+        self.manage_changes(overworld_update);
+
+        let stream_pos_i: I64Vec3 = glm::convert_unchecked(stream_pos);
         let o_clusters = self.loaded_clusters.read();
 
-        let to_build_meshes: Vec<_> = self
-            .dirty_clusters
-            .iter()
-            .cloned()
-            // TODO
-            // .take(max_mesh_updates)
-            .take(10)
-            .collect();
-
-        for pos in &to_build_meshes {
-            self.dirty_clusters.remove(pos);
-        }
-
-        to_build_meshes.par_iter().for_each(|pos| {
-            let o_cluster = o_clusters.get(pos).unwrap();
-            if !o_cluster.state().is_loaded() {
-                println!("{:?} {}", o_cluster.state(), o_cluster.state().is_offloaded());
-            }
-            let t_cluster_guard = o_cluster.cluster.read();
-            let t_cluster = t_cluster_guard.as_ref().unwrap();
-
-            let meshes = t_cluster.raw.build_mesh(&self.device, &self.resource_mapping);
-
-            self.to_update_mesh.lock().insert(*pos, meshes);
+        // Sort dirty clusters by distance from observer
+        let mut dirty_clusters_sorted: Vec<_> = self.dirty_clusters.iter().cloned().collect();
+        dirty_clusters_sorted.par_sort_by_cached_key(|pos| {
+            let diff = pos.get() - stream_pos_i;
+            diff.dot(&diff)
         });
+
+        // Build new meshes for dirty clusters
+        for chunk in dirty_clusters_sorted.chunks(rayon::current_num_threads()) {
+            chunk.par_iter().for_each(|pos| {
+                let o_cluster = o_clusters.get(pos).unwrap();
+                let t_cluster_guard = o_cluster.cluster.read();
+                let t_cluster = t_cluster_guard.as_ref().unwrap();
+
+                let meshes = t_cluster.raw.build_mesh(&self.device, &self.resource_mapping);
+                self.to_update_mesh.lock().insert(*pos, meshes);
+            });
+
+            for pos in chunk {
+                self.dirty_clusters.remove(pos);
+            }
+
+            let t1 = Instant::now();
+            if t1.duration_since(t_start) >= max_execution_time {
+                break;
+            }
+        }
     }
 
     pub fn update_scene(&mut self, renderer: &mut Renderer) {
-        // TODO: remove
-        for gov in &self.to_remove {
-            assert!(!self.dirty_clusters.contains(gov));
-        }
-
         let mut to_update_mesh = self.to_update_mesh.lock();
 
         // Remove objects
@@ -177,9 +180,16 @@ impl OverworldRenderer {
             );
         }
 
-        // Update meshes
-        for (pos, meshes) in to_update_mesh.drain() {
+        // Update meshes for scene objects
+        to_update_mesh.retain(|pos, meshes| {
             let entities = self.entities.get(&pos).unwrap();
+
+            for neighbour in get_side_clusters(&pos) {
+                if self.dirty_clusters.contains(&neighbour) {
+                    // Retain, do mesh update later when neighbours are ready
+                    return true;
+                }
+            }
 
             *renderer
                 .access_object(entities.solid)
@@ -190,6 +200,8 @@ impl OverworldRenderer {
                 .access_object(entities.translucent)
                 .get_mut::<component::VertexMesh>()
                 .unwrap() = component::VertexMesh::new(&meshes.transparent.raw());
-        }
+
+            false
+        });
     }
 }
