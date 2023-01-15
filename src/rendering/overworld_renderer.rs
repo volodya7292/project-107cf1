@@ -123,7 +123,7 @@ impl OverworldRenderer {
                 let t_cluster_guard = o_cluster.cluster.read();
                 let t_cluster = t_cluster_guard.as_ref().unwrap();
 
-                let meshes = t_cluster.raw.build_mesh(&self.device, &self.resource_mapping);
+                let meshes = t_cluster.raw().build_mesh(&self.device, &self.resource_mapping);
                 self.to_update_mesh.lock().insert(*pos, meshes);
             });
 

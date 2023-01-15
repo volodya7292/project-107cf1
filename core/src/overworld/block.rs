@@ -14,6 +14,7 @@ pub struct Block {
     occluder: Occluder,
     event_handlers: EventHandlers,
     active_by_default: bool,
+    can_pass_light: bool,
     can_pass_liquid: bool,
 }
 
@@ -25,6 +26,7 @@ impl Default for Block {
             occluder: Default::default(),
             event_handlers: Default::default(),
             active_by_default: false,
+            can_pass_light: false,
             can_pass_liquid: false,
         }
     }
@@ -59,6 +61,10 @@ impl Block {
         self.active_by_default
     }
 
+    pub fn can_pass_light(&self) -> bool {
+        self.can_pass_light
+    }
+
     pub fn can_pass_liquid(&self) -> bool {
         self.can_pass_liquid
     }
@@ -68,6 +74,7 @@ impl Block {
 pub struct BlockBuilder {
     transparent: bool,
     active_by_default: bool,
+    can_pass_light: bool,
     can_pass_liquid: bool,
     model_id: u16,
     event_handlers: EventHandlers,
@@ -78,6 +85,7 @@ impl BlockBuilder {
         BlockBuilder {
             transparent: false,
             active_by_default: false,
+            can_pass_light: false,
             can_pass_liquid: false,
             model_id,
             event_handlers: Default::default(),
@@ -96,6 +104,11 @@ impl BlockBuilder {
 
     pub fn with_active_by_default(mut self, active: bool) -> Self {
         self.active_by_default = active;
+        self
+    }
+
+    pub fn with_can_pass_light(mut self, can_pass_light: bool) -> Self {
+        self.can_pass_light = can_pass_light;
         self
     }
 
@@ -119,6 +132,7 @@ impl BlockBuilder {
             occluder,
             event_handlers: self.event_handlers,
             active_by_default: self.active_by_default,
+            can_pass_light: self.can_pass_light,
             can_pass_liquid: self.can_pass_liquid,
         }
     }

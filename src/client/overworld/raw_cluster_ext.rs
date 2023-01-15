@@ -4,7 +4,7 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{I32Vec3, TVec3, U32Vec2, U32Vec3, UVec4, Vec2, Vec3, Vec4};
 
 use core::overworld::facing::Facing;
-use core::overworld::light_level::LightLevel;
+use core::overworld::light_state::LightState;
 use core::overworld::liquid_state::LiquidState;
 use core::overworld::position::ClusterBlockPos;
 use core::overworld::raw_cluster::BlockDataImpl;
@@ -146,7 +146,7 @@ fn calc_quad_lighting(
         )
     }
 
-    fn blend_lighting(base: LightLevel, mut neighbours: [LightLevel; 3]) -> Vec3 {
+    fn blend_lighting(base: LightState, mut neighbours: [LightState; 3]) -> Vec3 {
         for n in &mut neighbours {
             if n.is_zero() {
                 *n = base;
@@ -158,7 +158,7 @@ fn calc_quad_lighting(
                 + neighbours[0].components()
                 + neighbours[1].components()
                 + neighbours[2].components(),
-        ) / (LightLevel::MAX_COMPONENT_VALUE as f32)
+        ) / (LightState::MAX_COMPONENT_VALUE as f32)
             * 0.25
     }
 
@@ -217,7 +217,7 @@ fn calc_quad_lighting(
         let lighting =
             lights[0] * weights[0] + lights[1] * weights[1] + lights[2] * weights[2] + lights[3] * weights[3];
 
-        v.lighting = LightLevel::from_color(lighting).bits();
+        v.lighting = LightState::from_color(lighting).bits();
     }
 
     // quad[vert_ids[0]].lighting = blend_lighting(
@@ -311,7 +311,7 @@ fn construct_liquid_quad(
     material_id: u16,
     liquid_heights: &[f32; 4],
     facing: Facing,
-    light_level: LightLevel,
+    light_level: LightState,
     vertices: &mut Vec<PackedVertex>,
 ) {
     const P000: Vec3 = Vec3::new(0.0, 0.0, 0.0);

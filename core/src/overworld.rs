@@ -34,7 +34,7 @@ pub mod block_model;
 pub mod cluster_part_set;
 pub mod facing;
 pub mod generator;
-pub mod light_level;
+pub mod light_state;
 pub mod liquid_state;
 pub mod occluder;
 pub mod orchestrator;
@@ -109,10 +109,10 @@ pub fn is_cell_empty(registry: &Registry, data: impl BlockDataImpl) -> bool {
 // LOADED  -> DISCARDED
 
 pub struct TrackingCluster {
-    pub raw: RawCluster,
-    pub dirty_parts: ClusterPartSet,
-    pub active_cells: FixedBitSet,
-    pub empty_cells: FixedBitSet,
+    pub(crate) raw: RawCluster,
+    pub(crate) dirty_parts: ClusterPartSet,
+    pub(crate) active_cells: FixedBitSet,
+    pub(crate) empty_cells: FixedBitSet,
 }
 
 impl TrackingCluster {
@@ -144,6 +144,10 @@ impl TrackingCluster {
         }
     }
 
+    pub fn raw(&self) -> &RawCluster {
+        &self.raw
+    }
+
     /// Complexity: O(N), where N is RawCluster::VOLUME.
     pub fn is_empty(&self) -> bool {
         self.empty_cells.as_slice().iter().all(|v| *v == !0)
@@ -154,7 +158,7 @@ impl TrackingCluster {
         self.active_cells.as_slice().iter().any(|v| *v != 0)
     }
 
-    pub fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
+    pub(crate) fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
         let dirty_parts = self.raw.propagate_lighting(pos);
         self.dirty_parts = dirty_parts;
     }

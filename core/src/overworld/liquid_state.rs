@@ -8,7 +8,7 @@ impl LiquidState {
     const SOURCE_MASK: u8 = 0b10000000;
     const LEVEL_MASK: u8 = 0b00001111;
 
-    pub const NULL: Self = Self::new(u16::MAX, 0);
+    pub const NONE: Self = Self::new(u16::MAX, 0);
     pub const MAX_LEVEL: u8 = 15;
 
     pub const fn new(liquid_id: u16, value: u8) -> Self {
@@ -41,6 +41,10 @@ impl LiquidState {
         self.state & Self::LEVEL_MASK
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.level() == 0
+    }
+
     pub const fn is_max(&self) -> bool {
         self.level() == Self::MAX_LEVEL
     }
@@ -52,6 +56,6 @@ impl LiquidState {
 
 impl Default for LiquidState {
     fn default() -> Self {
-        Self::NULL
+        Self::NONE
     }
 }

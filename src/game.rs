@@ -25,7 +25,7 @@ use core::overworld::actions_storage::OverworldActionsStorage;
 use core::overworld::actions_storage::StateChangeInfo;
 use core::overworld::block::{AnyBlockState, Block, BlockState};
 use core::overworld::facing::Facing;
-use core::overworld::light_level::LightLevel;
+use core::overworld::light_state::LightState;
 use core::overworld::liquid_state::LiquidState;
 use core::overworld::orchestrator::OverworldOrchestrator;
 use core::overworld::position::{BlockPos, ClusterPos};
@@ -532,42 +532,29 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
 
     // Set block on mouse button click
     if curr_state.block_set_cooldown == 0.0 {
-        if curr_state.do_set_block {
-            let mut access = curr_state.overworld.access();
+        let mut access = curr_state.overworld.access().into_read_only();
 
+        if curr_state.do_set_block {
             if let Some((pos, facing)) = curr_state.look_at_block {
                 let dir: I64Vec3 = glm::convert(*facing.direction());
                 let set_pos = pos.offset(&dir);
 
                 if curr_state.set_water {
-                    access
-                        .set_liquid_state(&set_pos, LiquidState::source(curr_state.res_map.material_water()));
+                    new_actions.set_liquid(set_pos, LiquidState::source(curr_state.res_map.material_water()));
                 } else {
-                    access.update_block(&set_pos, |data| data.set(curr_state.curr_block.clone()));
+                    new_actions.set_block(set_pos, curr_state.curr_block.clone());
 
                     if curr_state.curr_block.block_id == registry.block_glow.block_id {
-                        access.set_light(&set_pos, LightLevel::from_intensity(10));
+                        new_actions.set_light(set_pos, LightState::from_intensity(10));
                     } else {
-                        // Remove light to cause occlusion of nearby lights
-                        access.remove_light(&set_pos);
                     }
                 }
 
                 new_block_set_cooldown = 0.15;
             }
         } else if curr_state.do_remove_block {
-            let mut access = curr_state.overworld.access();
-
             if let Some(inter) = curr_state.look_at_block {
-                let prev_block_id = access.get_block(&inter.0).unwrap().block_id();
-                access.update_block(&inter.0, |data| data.set(registry.block_empty));
-
-                if prev_block_id == registry.block_glow.block_id {
-                    access.remove_light(&inter.0);
-                } else {
-                    // Set corresponding light level if there is a light nearby
-                    access.check_neighbour_lighting(&inter.0);
-                }
+                new_actions.set_block(inter.0, registry.block_empty);
 
                 new_block_set_cooldown = 0.15;
             }

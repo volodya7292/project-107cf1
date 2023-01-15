@@ -9,7 +9,7 @@ use nalgebra_glm::TVec3;
 use crate::overworld::block::BlockState;
 use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::facing::Facing;
-use crate::overworld::light_level::LightLevel;
+use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::position::ClusterBlockPos;
@@ -76,7 +76,7 @@ pub struct CellInfo {
     pub entity_id: CompactEntityId,
     pub block_id: u16,
     pub occluder: Occluder,
-    pub light_level: LightLevel,
+    pub light_level: LightState,
     pub liquid_state: LiquidState,
     pub active: bool,
 }
@@ -88,7 +88,7 @@ impl Default for CellInfo {
             block_id: u16::MAX,
             occluder: Default::default(),
             light_level: Default::default(),
-            liquid_state: LiquidState::NULL,
+            liquid_state: LiquidState::NONE,
             active: false,
         }
     }
@@ -105,7 +105,7 @@ pub trait BlockDataImpl {
     /// Returns the specified block component `C`
     fn get<C: Component>(&self) -> Option<&C>;
 
-    fn light_level(&self) -> LightLevel;
+    fn light_state(&self) -> LightState;
     fn liquid_state(&self) -> &LiquidState;
     fn active(&self) -> bool;
 }
@@ -119,7 +119,7 @@ impl BlockDataImpl for BlockData<'_> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 
-    fn light_level(&self) -> LightLevel {
+    fn light_state(&self) -> LightState {
         self.info.light_level
     }
 
@@ -147,7 +147,7 @@ impl BlockDataImpl for BlockDataMut<'_> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 
-    fn light_level(&self) -> LightLevel {
+    fn light_state(&self) -> LightState {
         self.info.light_level
     }
 
@@ -179,7 +179,7 @@ impl BlockDataMut<'_> {
     }
 
     /// Raw mutable access to light level.
-    pub fn light_level_mut(&mut self) -> &mut LightLevel {
+    pub fn light_state_mut(&mut self) -> &mut LightState {
         &mut self.info.light_level
     }
 
@@ -478,7 +478,7 @@ impl RawCluster {
                 }
 
                 let new_color = curr_color.map(|v| v.saturating_sub(1));
-                *rel_level = LightLevel::from_vec(new_color);
+                *rel_level = LightState::from_vec(new_color);
 
                 let dirty_pos = rel_pos.map(|v| v - 1);
                 dirty_parts.set_from_block_pos(&ClusterBlockPos::from_vec_unchecked(dirty_pos));

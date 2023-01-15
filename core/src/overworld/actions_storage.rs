@@ -4,6 +4,7 @@ use entity_data::{ArchetypeState, Component};
 
 use crate::overworld::accessor::{OverworldAccessor, ReadOnlyOverworldAccessorImpl};
 use crate::overworld::block::BlockState;
+use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
@@ -37,13 +38,14 @@ pub struct ActivityChangeInfo {
     pub active: bool,
 }
 
-fn liquid_apply_fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8) {
-    let curr_block = access.get_block(pos).unwrap();
-    let new_liquid = unsafe { *(data as *const LiquidState) };
+pub struct LightChangeInfo {
+    pub pos: BlockPos,
+    pub light: LightState,
+}
 
-    if new_liquid.level() > curr_block.liquid_state().level() {
-        access.set_liquid_state(pos, new_liquid);
-    }
+pub struct LiquidChangeInfo {
+    pub pos: BlockPos,
+    pub liquid: LiquidState,
 }
 
 unsafe fn drop_typed<T>(data: *mut u8) {
@@ -55,11 +57,12 @@ unsafe fn drop_typed<T>(data: *mut u8) {
 pub struct OverworldActionsStorage {
     pub states: bumpalo::Bump,
     pub components: bumpalo::Bump,
-    pub liquids: bumpalo::Bump,
 
     pub states_infos: Vec<StateChangeInfo>,
     pub components_infos: Vec<StateChangeInfo>,
-    pub liquid_infos: Vec<StateChangeInfo>,
+    pub liquid_infos: Vec<LiquidChangeInfo>,
+    pub set_light_infos: Vec<LightChangeInfo>,
+    pub remove_light_positions: Vec<BlockPos>,
     pub activity_infos: Vec<ActivityChangeInfo>,
 }
 
@@ -68,27 +71,22 @@ impl OverworldActionsStorage {
         Self {
             states: Default::default(),
             components: Default::default(),
-            liquids: Default::default(),
             states_infos: Vec::with_capacity(4096),
             components_infos: Vec::with_capacity(4096),
             liquid_infos: Vec::with_capacity(4096),
+            set_light_infos: Vec::with_capacity(4096),
+            remove_light_positions: Vec::with_capacity(4096),
             activity_infos: Vec::with_capacity(4096),
         }
     }
 
     pub fn clear(&mut self) {
-        for info in self
-            .states_infos
-            .iter_mut()
-            .chain(&mut self.components_infos)
-            .chain(&mut self.liquid_infos)
-        {
+        for info in self.states_infos.iter_mut().chain(&mut self.components_infos) {
             (info.drop_data_fn)(info.data_ptr);
         }
 
         self.states.reset();
         self.components.reset();
-        self.liquids.reset();
     }
 
     pub fn set_block<A: ArchetypeState>(&mut self, pos: BlockPos, block_state: BlockState<A>) {
@@ -141,15 +139,16 @@ impl OverworldActionsStorage {
         self.activity_infos.push(ActivityChangeInfo { pos, active });
     }
 
-    pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
-        let mut_ref = self.liquids.alloc(liquid);
+    pub fn set_light(&mut self, pos: BlockPos, light: LightState) {
+        self.set_light_infos.push(LightChangeInfo { pos, light });
+    }
 
-        self.liquid_infos.push(StateChangeInfo {
-            pos,
-            data_ptr: mut_ref as *mut _ as *mut u8,
-            apply_fn: liquid_apply_fn,
-            drop_data_fn: |p| unsafe { drop_typed::<LiquidState>(p) },
-        });
+    pub fn remove_light(&mut self, pos: BlockPos) {
+        self.remove_light_positions.push(pos);
+    }
+
+    pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
+        self.liquid_infos.push(LiquidChangeInfo { pos, liquid });
     }
 
     pub fn builder(&mut self) -> OverworldActionsBuilder {
@@ -168,6 +167,14 @@ impl OverworldActionsBuilder<'_> {
 
     pub fn set_component<C: Component>(&mut self, pos: BlockPos, component: C) {
         self.storage.set_component(pos, component);
+    }
+
+    pub fn set_light(&mut self, pos: BlockPos, light: LightState) {
+        self.storage.set_light(pos, light);
+    }
+
+    pub fn remove_light(&mut self, pos: BlockPos) {
+        self.storage.remove_light(pos);
     }
 
     pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {

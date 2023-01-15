@@ -9,13 +9,13 @@ use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
 use parking_lot::RawRwLock;
 
 use crate::overworld::facing::Facing;
-use crate::overworld::light_level::LightLevel;
+use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
 use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
 use crate::registry::Registry;
-use crate::utils::{HashMap, MO_RELAXED};
+use crate::utils::{HashMap, HashSet, MO_RELAXED};
 
 lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
@@ -310,7 +310,7 @@ impl OverworldAccessor {
     }
 
     /// Sets light level if the respective cluster is loaded
-    fn set_light_level(&mut self, pos: &BlockPos, light_level: LightLevel) {
+    fn set_light_level(&mut self, pos: &BlockPos, light_level: LightState) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -320,7 +320,7 @@ impl OverworldAccessor {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
 
-            *data.light_level_mut() = light_level;
+            *data.light_state_mut() = light_level;
 
             cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
         }
@@ -329,7 +329,7 @@ impl OverworldAccessor {
     fn propagate_light_addition(&mut self, queue: &mut VecDeque<BlockPos>) {
         while let Some(curr_pos) = queue.pop_front() {
             let block = self.get_block(&curr_pos).unwrap();
-            let curr_level = block.light_level();
+            let curr_level = block.light_state();
             let curr_color = curr_level.components();
 
             for i in 0..6 {
@@ -339,12 +339,12 @@ impl OverworldAccessor {
                 let block_id = self.get_block(&rel_pos).unwrap().block_id();
                 let block = *self.registry.get_block(block_id).unwrap();
                 let data = self.get_block(&rel_pos).unwrap();
-                let level = data.light_level();
+                let level = data.light_state();
                 let color = level.components();
 
                 if !block.is_opaque() && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b)) {
                     let new_color = curr_color.map(|v| v.saturating_sub(1));
-                    self.set_light_level(&rel_pos, LightLevel::from_vec(new_color));
+                    self.set_light_level(&rel_pos, LightState::from_vec(new_color));
 
                     queue.push_back(rel_pos);
                 }
@@ -353,7 +353,7 @@ impl OverworldAccessor {
     }
 
     /// Use breadth-first search to set lighting across all lit area
-    pub fn set_light(&mut self, pos: &BlockPos, light_level: LightLevel) {
+    pub fn set_light(&mut self, pos: &BlockPos, light_level: LightState) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -362,15 +362,15 @@ impl OverworldAccessor {
         {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
-            *data.light_level_mut() = light_level;
+            *data.light_state_mut() = light_level;
             cluster.propagate_lighting(&cluster_block_pos);
         }
     }
 
     pub fn remove_light(&mut self, global_pos: &BlockPos) {
         let curr_data = self.get_block(&global_pos).unwrap();
-        let curr_level = curr_data.light_level();
-        self.set_light_level(global_pos, LightLevel::ZERO);
+        let curr_level = curr_data.light_state();
+        self.set_light_level(global_pos, LightState::ZERO);
 
         let mut removal_queue = VecDeque::with_capacity((curr_level.components().max() as usize * 2).pow(3));
         let mut addition_queue = VecDeque::with_capacity(removal_queue.capacity());
@@ -384,12 +384,12 @@ impl OverworldAccessor {
                 let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
                 let rel_pos = curr_pos.offset(&dir);
 
-                let level = self.get_block(&rel_pos).unwrap().light_level();
+                let level = self.get_block(&rel_pos).unwrap().light_state();
                 let color = level.components();
 
                 if glm::any(&color.zip_map(&curr_color, |a, b| a < b)) {
                     if !level.is_zero() {
-                        self.set_light_level(&rel_pos, LightLevel::ZERO);
+                        self.set_light_level(&rel_pos, LightState::ZERO);
                         removal_queue.push_back((rel_pos, level));
                     }
                 }
@@ -405,25 +405,6 @@ impl OverworldAccessor {
             let cluster_block_pos = pos.cluster_block_pos();
             if let Some(cluster) = cluster.cluster_mut() {
                 cluster.propagate_lighting(&cluster_block_pos);
-            }
-        }
-    }
-
-    /// Useful for restoring lighting from neighbours when removing block at `block_pos`.
-    pub fn check_neighbour_lighting(&mut self, pos: &BlockPos) {
-        for i in 0..6 {
-            let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
-            let rel_pos = pos.offset(&dir);
-
-            let cluster = self.cache.access_cluster_mut(&pos.cluster_pos());
-
-            if let Some(cluster) = cluster.map(|access| access.cluster_mut()).flatten() {
-                let cluster_block_pos = rel_pos.cluster_block_pos();
-                let level = cluster.raw.get(&cluster_block_pos).light_level();
-
-                if !level.is_zero() {
-                    cluster.propagate_lighting(&cluster_block_pos);
-                }
             }
         }
     }

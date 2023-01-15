@@ -1,9 +1,9 @@
 use nalgebra_glm::{U8Vec3, Vec3};
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
-pub struct LightLevel(u16);
+pub struct LightState(u16);
 
-impl LightLevel {
+impl LightState {
     pub const MAX_COMPONENT_VALUE: u8 = 31;
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self::from_intensity(Self::MAX_COMPONENT_VALUE);

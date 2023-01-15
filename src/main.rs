@@ -70,7 +70,7 @@ fn main() {
     let engine = Engine::init(PROGRAM_NAME, 4, game);
 
     core::execution::spawn_coroutine(async {
-        println!("govno");
+        println!("coroutine test!");
     });
 
     engine.run();
