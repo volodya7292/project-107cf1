@@ -532,8 +532,6 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
 
     // Set block on mouse button click
     if curr_state.block_set_cooldown == 0.0 {
-        let mut access = curr_state.overworld.access().into_read_only();
-
         if curr_state.do_set_block {
             if let Some((pos, facing)) = curr_state.look_at_block {
                 let dir: I64Vec3 = glm::convert(*facing.direction());

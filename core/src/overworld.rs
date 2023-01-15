@@ -160,7 +160,7 @@ impl TrackingCluster {
 
     pub(crate) fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
         let dirty_parts = self.raw.propagate_lighting(pos);
-        self.dirty_parts = dirty_parts;
+        self.dirty_parts |= dirty_parts;
     }
 
     pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {
