@@ -18,7 +18,7 @@ pub(crate) struct GpuBuffersUpdate<'a> {
     pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
     pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
     pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
-    pub sorted_buffer_updates_entities: &'a Vec<(EntityId, f64)>,
+    pub sorted_buffer_updates_entities: &'a Vec<(EntityId, f32)>,
     pub pending_buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,
 }

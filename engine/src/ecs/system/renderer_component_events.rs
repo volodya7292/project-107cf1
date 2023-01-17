@@ -51,7 +51,7 @@ impl RendererComponentEvents<'_> {
                 if buf_res.changed {
                     let data = mem::take(&mut buf_res.buffer);
 
-                    buffer_updates.push(BufferUpdate::Type1(BufferUpdate1 {
+                    buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
                         buffer: buf_res.device_buffer.handle(),
                         offset: 0,
                         data: data.into(),

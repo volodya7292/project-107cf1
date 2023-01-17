@@ -37,7 +37,7 @@ struct Vertex {
     vec3 tangent;
 };
 
-struct Camera {
+struct PerspectiveCamera {
     vec4 pos;
     vec4 dir;
     mat4 proj;
@@ -47,10 +47,18 @@ struct Camera {
     float fovy;
 };
 
+struct OrthoCamera {
+    mat4 proj;
+    mat4 view;
+    mat4 proj_view;
+};
+
 struct FrameInfo {
-    Camera camera;
+    PerspectiveCamera camera;
+    OrthoCamera overlay_camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
-    uvec2 frameSize;
+    uvec2 frame_size;
+    float frame_aspect;
 };
 
 
@@ -115,8 +123,8 @@ void writeOutputAlbedo(vec4 albedo) {
 
     uint currDepth = floatBitsToUint(gl_FragCoord.z);
     ivec2 coord = ivec2(gl_FragCoord.xy);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;
 
     if (currDepth > depthsArray[coordIdx + lastLayerIdx * sliceSize]) {

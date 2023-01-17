@@ -742,6 +742,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         vertex_inputs: &HashMap<&str, (Format, VInputRate)>,
+        name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
@@ -884,10 +885,16 @@ impl Device {
         }
 
         let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
+        let native = unsafe { self.wrapper.native.create_shader_module(&create_info, None)? };
+
+        unsafe {
+            self.wrapper
+                .debug_set_object_name(vk::ObjectType::SHADER_MODULE, native.as_raw(), name)?;
+        }
 
         Ok(Arc::new(Shader {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.native.create_shader_module(&create_info, None)? },
+            native,
             stage,
             vertex_location_inputs: vertex_loc_inputs,
             named_bindings,
@@ -900,6 +907,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         input_formats: &[(&str, Format, VInputRate)],
+        name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
         self.create_shader(
             code,
@@ -908,15 +916,24 @@ impl Device {
                 .cloned()
                 .map(|(name, format, rate)| (name, (format, rate)))
                 .collect(),
+            name,
         )
     }
 
-    pub fn create_pixel_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new())
+    pub fn create_pixel_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        name: &str,
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), name)
     }
 
-    pub fn create_compute_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new())
+    pub fn create_compute_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        name: &str,
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), name)
     }
 
     pub fn create_render_pass(

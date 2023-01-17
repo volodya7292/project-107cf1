@@ -3,7 +3,6 @@
 
 layout(early_fragment_tests) in;
 
-#define FN_TEXTURE_ATLAS
 #define ENGINE_PIXEL_SHADER
 #include "../../engine/shaders/common.glsl"
 

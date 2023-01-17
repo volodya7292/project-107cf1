@@ -23,6 +23,7 @@ fn create_vertex_shader(
     device: &Arc<vkw::Device>,
     code: &[u8],
     input_formats: &[(&str, vkw::Format)],
+    name: &str,
 ) -> Result<Arc<vkw::Shader>, vkw::DeviceError> {
     device.create_vertex_shader(
         code,
@@ -31,6 +32,7 @@ fn create_vertex_shader(
             .cloned()
             .map(|(name, format)| (name, format, VInputRate::VERTEX))
             .collect::<Vec<_>>(),
+        name,
     )
 }
 
@@ -45,10 +47,14 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
                 ("inPack1", vkw::Format::RGBA32_UINT),
                 ("inPack2", vkw::Format::R32_UINT),
             ],
+            "cluster.vert",
         )
         .unwrap();
         let pixel = device
-            .create_pixel_shader(&resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap())
+            .create_pixel_shader(
+                &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
+                "cluster.frag",
+            )
             .unwrap();
 
         renderer.register_material_pipeline::<BasicUniformInfo>(

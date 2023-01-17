@@ -331,7 +331,7 @@ impl Application for Game {
             let cursor_offset = Vec2::new(self.cursor_rel.0 as f32, self.cursor_rel.1 as f32)
                 * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
 
-            let mut rotation = camera.rotation();
+            let mut rotation = *camera.rotation();
             rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
             rotation.y += cursor_offset.x;
             // rotation.y += delta_time as f32;

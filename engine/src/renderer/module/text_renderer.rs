@@ -308,10 +308,14 @@ impl TextRenderer {
                     ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
                     ("inScale", Format::R32_FLOAT, VInputRate::INSTANCE),
                 ],
+                "text_char.vert",
             )
             .unwrap();
         let pixel_shader = device
-            .create_pixel_shader(include_bytes!("../../../shaders/build/text_char.frag.spv"))
+            .create_pixel_shader(
+                include_bytes!("../../../shaders/build/text_char.frag.spv"),
+                "text_char.frag",
+            )
             .unwrap();
         // let signature = device
         //     .create_pipeline_signature(&[vertex_shader, pixel_shader], &[])

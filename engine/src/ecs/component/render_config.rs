@@ -54,7 +54,17 @@ impl Resource {
     }
 }
 
+#[derive(Eq, PartialEq)]
+#[repr(u8)]
+pub enum RenderStage {
+    /// Renders regular 3D objects.
+    MAIN,
+    /// Renders objects after the `MAIN` stage.
+    OVERLAY,
+}
+
 pub struct MeshRenderConfig {
+    pub(crate) stage: RenderStage,
     pub(crate) mat_pipeline: u32,
     /// binding id -> Resource
     pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
@@ -66,6 +76,7 @@ pub struct MeshRenderConfig {
 impl Default for MeshRenderConfig {
     fn default() -> Self {
         Self {
+            stage: RenderStage::MAIN,
             mat_pipeline: u32::MAX,
             resources: Default::default(),
             translucent: false,
@@ -78,6 +89,7 @@ impl Default for MeshRenderConfig {
 impl MeshRenderConfig {
     pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
         MeshRenderConfig {
+            stage: RenderStage::MAIN,
             mat_pipeline,
             resources: Default::default(),
             translucent,
@@ -86,6 +98,13 @@ impl MeshRenderConfig {
         }
     }
 
+    pub fn with_stage(mut self, stage: RenderStage) -> Self {
+        self.stage = stage;
+        self
+    }
+
+    /// An object may not have an allocated vertex mesh to render,
+    /// in that case the shader can infer necessary vertices from gl_VertexIndex (useful for rendering a single quad).
     pub fn with_fake_vertex_count(mut self, vertex_count: u32) -> Self {
         self.fake_vertex_count = vertex_count;
         self

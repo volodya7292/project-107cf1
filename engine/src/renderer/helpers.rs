@@ -11,7 +11,7 @@ use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags}
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
     BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
+    MAX_BASIC_UNIFORM_BLOCK_SIZE, N_MAX_MATERIALS, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
     PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
@@ -186,18 +186,9 @@ impl Renderer {
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
-        assert!(id < MAX_MATERIAL_COUNT);
+        assert!(id < N_MAX_MATERIALS);
         self.material_updates.insert(id, info);
     }
-
-    /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
-    // pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-    //     self.vertex_mesh_updates.contains_key(&entity)
-    //         || self
-    //             .vertex_mesh_pending_updates
-    //             .iter()
-    //             .any(|v| v.entity == entity)
-    // }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
     pub(crate) unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
@@ -220,12 +211,12 @@ impl Renderer {
                 let update = &updates[i];
 
                 let (copy_size, new_used_size) = match update {
-                    BufferUpdate::Type1(update) => {
+                    BufferUpdate::WithOffset(update) => {
                         let copy_size = update.data.len() as u64;
                         assert!(copy_size <= staging_size);
                         (copy_size, used_size + copy_size)
                     }
-                    BufferUpdate::Type2(update) => {
+                    BufferUpdate::Regions(update) => {
                         let copy_size = update.data.len() as u64;
                         assert!(copy_size <= staging_size);
                         (copy_size, used_size + copy_size)
@@ -238,7 +229,7 @@ impl Renderer {
                 }
 
                 match update {
-                    BufferUpdate::Type1(update) => {
+                    BufferUpdate::WithOffset(update) => {
                         self.staging_buffer.write(used_size as u64, &update.data);
                         cl.copy_buffer_to_device(
                             &self.staging_buffer,
@@ -248,7 +239,7 @@ impl Renderer {
                             copy_size,
                         );
                     }
-                    BufferUpdate::Type2(update) => {
+                    BufferUpdate::Regions(update) => {
                         self.staging_buffer.write(used_size as u64, &update.data);
 
                         let regions: SmallVec<[CopyRegion; 64]> = update

@@ -30,8 +30,8 @@ void main() {
 
     ivec2 coord = ivec2(gl_FragCoord.xy);
     uint currDepth = floatBitsToUint(gl_FragCoord.z);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
 
     // Early transparency depth test (check farthest layer)
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;

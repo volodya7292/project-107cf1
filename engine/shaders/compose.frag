@@ -19,8 +19,8 @@ layout(set = 0, binding = 6, rgba8) uniform image2DArray translucencyColorsArray
  
 void main() {
     ivec2 coord = ivec2(gl_FragCoord.xy);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
 
     vec4 currColor = vec4(0);
 
