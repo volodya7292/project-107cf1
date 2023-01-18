@@ -1,13 +1,10 @@
-use std::{mem, ptr};
-
-use entity_data::{ArchetypeState, Component};
-
-use crate::overworld::accessor::{OverworldAccessor, ReadOnlyOverworldAccessorImpl};
+use crate::overworld::accessor::OverworldAccessor;
 use crate::overworld::block::BlockState;
 use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
-use crate::overworld::raw_cluster::BlockDataImpl;
+use entity_data::{ArchetypeState, Component};
+use std::{mem, ptr};
 
 /// Returns true if the specified data was successfully applied.
 pub type ApplyFn = fn(access: &mut OverworldAccessor, pos: &BlockPos, data: *const u8);

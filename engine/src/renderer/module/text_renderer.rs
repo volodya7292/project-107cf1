@@ -1,18 +1,23 @@
-use std::any::Any;
-use std::collections::hash_map;
-use std::mem;
-use std::sync::Arc;
-
+use crate::ecs::component;
+use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
+use crate::ecs::component::SimpleText;
+use crate::renderer::module::RendererModule;
+use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
+use crate::renderer::{Internals, SceneObject};
+use crate::{HashSet, Renderer};
+use core::utils::unsafe_slice::UnsafeSlice;
+use core::utils::HashMap;
 use entity_data::{Archetype, EntityId};
 use fixedbitset::FixedBitSet;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rusttype::{Font, GlyphId};
+use std::any::Any;
+use std::collections::hash_map;
+use std::mem;
+use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
-
-use core::utils::unsafe_slice::UnsafeSlice;
-use core::utils::HashMap;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
@@ -21,14 +26,6 @@ use vk_wrapper::{
     ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, Queue, Sampler, SamplerFilter,
     SamplerMipmap,
 };
-
-use crate::ecs::component;
-use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
-use crate::ecs::component::SimpleText;
-use crate::renderer::module::RendererModule;
-use crate::renderer::vertex_mesh::VertexMeshCreate;
-use crate::renderer::{Internals, SceneObject};
-use crate::{HashSet, Renderer};
 
 const GLYPH_SIZE: u32 = 64;
 const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
@@ -692,7 +689,7 @@ impl RendererModule for TextRenderer {
     }
 
     fn on_update(&mut self, internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
-        let mut dirty_texts = internals.dirty_comps.take_changes::<SimpleText>();
+        let dirty_texts = internals.dirty_comps.take_changes::<SimpleText>();
 
         for seq in self.sequences_to_destroy.drain(..) {
             self.allocator.free(&seq.glyphs);
@@ -725,12 +722,16 @@ impl RendererModule for TextRenderer {
 
             let mesh = self
                 .device
-                .create_instanced_vertex_mesh::<(), GlyphInstance>(&[], &instances, None)
+                .create_instanced_vertex_mesh::<(), GlyphInstance>(
+                    VAttributes::WithoutData(4),
+                    VAttributes::Slice(&instances),
+                    None,
+                )
                 .unwrap();
 
             *entry.get_mut::<component::VertexMesh>().unwrap() = component::VertexMesh::new(&mesh.raw());
             *entry.get_mut::<component::MeshRenderConfig>().unwrap() =
-                component::MeshRenderConfig::new(self.mat_pipeline, true).with_fake_vertex_count(4);
+                component::MeshRenderConfig::new(self.mat_pipeline, true)
         }
 
         let staging_cl = Arc::clone(&self.staging_cl);

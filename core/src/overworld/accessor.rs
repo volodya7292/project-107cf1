@@ -1,13 +1,3 @@
-use std::collections::{hash_map, VecDeque};
-use std::sync::Arc;
-
-use entity_data::EntityStorage;
-use lazy_static::lazy_static;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
-use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
-use parking_lot::RawRwLock;
-
 use crate::overworld::facing::Facing;
 use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
@@ -15,7 +5,15 @@ use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
 use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
 use crate::registry::Registry;
-use crate::utils::{HashMap, HashSet, MO_RELAXED};
+use crate::utils::{HashMap, MO_RELAXED};
+use entity_data::EntityStorage;
+use lazy_static::lazy_static;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I64Vec3};
+use parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
+use parking_lot::RawRwLock;
+use std::collections::{hash_map, VecDeque};
+use std::sync::Arc;
 
 lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();

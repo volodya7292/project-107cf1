@@ -1,20 +1,17 @@
-use std::mem;
-use std::sync::Arc;
-
-use basis_universal::TranscodeParameters;
-use smallvec::SmallVec;
-
-use core::utils::resource_file::ResourceRef;
-use core::utils::UInt;
-use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
-
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
     BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
     MAX_BASIC_UNIFORM_BLOCK_SIZE, N_MAX_MATERIALS, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
-    PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
+    PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
+use basis_universal::TranscodeParameters;
+use core::utils::resource_file::ResourceRef;
+use core::utils::UInt;
+use smallvec::SmallVec;
+use std::mem;
+use std::sync::Arc;
+use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
 
 impl Renderer {
     pub fn load_texture_into_atlas(
@@ -170,6 +167,18 @@ impl Renderer {
                 blend_attachments: &[albedo_attachment_id],
                 depth_test: true,
                 depth_write: false,
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_OVERLAY,
+            &PipelineConfig {
+                render_pass: &self.g_render_pass,
+                signature: &main_signature,
+                subpass_index: 1,
+                cull_back_faces,
+                blend_attachments: &[albedo_attachment_id],
+                depth_test: true,
+                depth_write: true,
             },
         );
 

@@ -1,6 +1,5 @@
-use nalgebra::Matrix4;
 use nalgebra_glm as glm;
-use nalgebra_glm::{DMat4, DVec3, Mat4, TMat, TMat4, TVec3, Vec3, Vec4};
+use nalgebra_glm::{DVec3, Mat4, Vec3, Vec4};
 
 #[derive(Copy, Clone)]
 pub struct PerspectiveCamera {
@@ -104,7 +103,7 @@ impl OrthoCamera {
     }
 
     pub fn projection(&self) -> Mat4 {
-        glm::ortho_rh_zo(-1.0, 1.0, -1.0, 1.0, 0.0, 1024.0)
+        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, 0.0, 1024.0)
     }
 
     pub fn position(&self) -> &DVec3 {

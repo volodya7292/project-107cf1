@@ -1,21 +1,10 @@
-use std::collections::hash_map;
-use std::f32::consts::FRAC_PI_2;
-use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{atomic, Arc};
-use std::thread;
-use std::time::{Duration, Instant};
-
+use crate::client::utils;
+use crate::default_resources::DefaultResourceMapping;
+use crate::rendering::material_pipelines;
+use crate::rendering::overworld_renderer::OverworldRenderer;
+use crate::resource_mapping::ResourceMapping;
+use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
-use entity_data::AnyState;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
-use parking_lot::{Mutex, RwLock};
-use rayon::prelude::*;
-use rayon::ThreadPool;
-use winit::event::{MouseButton, VirtualKeyCode};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
-
 use core::execution::default_queue;
 use core::main_registry::{MainRegistry, StatelessBlock};
 use core::overworld::accessor::ClustersAccessorCache;
@@ -41,19 +30,28 @@ use core::utils::threading::SafeThreadPool;
 use core::utils::timer::IntervalTimer;
 use core::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::ecs::component;
+use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::renderer::Renderer;
+use engine::renderer::{Renderer, VertexMeshObject};
 use engine::{renderer, Application, Input};
+use entity_data::AnyState;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
+use parking_lot::{Mutex, RwLock};
+use rayon::prelude::*;
+use rayon::ThreadPool;
 use renderer::camera;
+use std::collections::hash_map;
+use std::f32::consts::FRAC_PI_2;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{atomic, Arc};
+use std::thread;
+use std::time::{Duration, Instant};
 use vk_wrapper::Adapter;
-
-use crate::{default_resources, PROGRAM_NAME};
-// use crate::client::overworld::overworld_streamer::OverworldStreamer;
-use crate::client::{material_pipelines, utils};
-use crate::default_resources::DefaultResourceMapping;
-use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::resource_mapping::ResourceMapping;
+use winit::event::{MouseButton, VirtualKeyCode};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
@@ -234,17 +232,26 @@ impl Application for Game {
         );
         let player_pos = self.main_state.lock().player_pos;
         let text = renderer.add_object(TextObject::new(
-            component::Transform::new(
-                DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z),
-                Vec3::default(),
-                Vec3::from_element(1.0),
-            ),
+            component::Transform::new().with_position(DVec3::new(
+                player_pos.x,
+                player_pos.y + 60.0,
+                player_pos.z,
+            )),
             component::SimpleText::new(StyledString::new(
                 "Govno, my is Gmine".to_owned(),
                 TextStyle::new().with_font(font_id).with_font_size(0.5),
             ))
             .with_max_width(3.0)
             .with_h_align(TextHAlign::LEFT),
+        ));
+
+        let panel = renderer.add_object(VertexMeshObject::new(
+            component::Transform::new()
+                .with_position(DVec3::new(0.0, 0.0, 1.0))
+                .with_scale(Vec3::new(0.5, 0.5, 1.0))
+                .with_use_parent_transform(false),
+            component::MeshRenderConfig::new(mat_pipelines.panel(), false).with_stage(RenderStage::OVERLAY),
+            component::VertexMesh::without_data(4, 1),
         ));
     }
 

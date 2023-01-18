@@ -1,8 +1,6 @@
+use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
-
-use smallvec::SmallVec;
-
 use vk_wrapper as vkw;
 
 pub struct BufferResource {
@@ -70,7 +68,6 @@ pub struct MeshRenderConfig {
     pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
     pub(crate) translucent: bool,
     pub(crate) visible: bool,
-    pub(crate) fake_vertex_count: u32,
 }
 
 impl Default for MeshRenderConfig {
@@ -81,7 +78,6 @@ impl Default for MeshRenderConfig {
             resources: Default::default(),
             translucent: false,
             visible: false,
-            fake_vertex_count: 0,
         }
     }
 }
@@ -94,19 +90,11 @@ impl MeshRenderConfig {
             resources: Default::default(),
             translucent,
             visible: true,
-            fake_vertex_count: 0,
         }
     }
 
     pub fn with_stage(mut self, stage: RenderStage) -> Self {
         self.stage = stage;
-        self
-    }
-
-    /// An object may not have an allocated vertex mesh to render,
-    /// in that case the shader can infer necessary vertices from gl_VertexIndex (useful for rendering a single quad).
-    pub fn with_fake_vertex_count(mut self, vertex_count: u32) -> Self {
-        self.fake_vertex_count = vertex_count;
         self
     }
 

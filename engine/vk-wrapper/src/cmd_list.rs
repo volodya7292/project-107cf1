@@ -1,11 +1,3 @@
-use std::num::NonZeroU64;
-use std::sync::Arc;
-use std::{mem, ptr, slice};
-
-use ash::vk;
-use parking_lot::Mutex;
-use smallvec::SmallVec;
-
 use crate::buffer::BufferHandleImpl;
 use crate::render_pass::vk_clear_value;
 use crate::{
@@ -14,6 +6,12 @@ use crate::{
 };
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
+use ash::vk;
+use parking_lot::Mutex;
+use smallvec::SmallVec;
+use std::num::NonZeroU64;
+use std::sync::Arc;
+use std::{mem, ptr, slice};
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -300,6 +298,10 @@ impl CmdList {
     pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(BufferHandle, u64)]) {
         let mut native_buffers = [vk::Buffer::default(); 16];
         let mut offsets = [0u64; 16];
+
+        if buffers.is_empty() {
+            return;
+        }
 
         for (i, (buffer, offset)) in buffers.iter().enumerate() {
             native_buffers[i] = buffer.0;

@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use nalgebra_glm as glm;
-use nalgebra_glm::{I32Vec3, TVec3, U32Vec2, U32Vec3, UVec4, Vec2, Vec3, Vec4};
-
+use crate::rendering::textured_block_model::{PackedVertex, TexturedBlockModel, Vertex};
+use crate::resource_mapping::ResourceMapping;
 use core::overworld::facing::Facing;
 use core::overworld::light_state::LightState;
 use core::overworld::liquid_state::LiquidState;
@@ -11,12 +8,12 @@ use core::overworld::raw_cluster::BlockDataImpl;
 use core::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
 use core::registry::Registry;
 use engine::attributes_impl;
-use engine::renderer::vertex_mesh::{VertexMeshCreate, VertexPositionImpl};
+use engine::renderer::vertex_mesh::{VAttributes, VertexMeshCreate, VertexPositionImpl};
 use engine::renderer::VertexMesh;
+use nalgebra_glm as glm;
+use nalgebra_glm::{I32Vec3, TVec3, U32Vec2, U32Vec3, UVec4, Vec2, Vec3, Vec4};
+use std::sync::Arc;
 use vk_wrapper as vkw;
-
-use crate::rendering::textured_block_model::{PackedVertex, TexturedBlockModel, Vertex};
-use crate::resource_mapping::ResourceMapping;
 
 #[derive(Default)]
 pub struct ClusterMeshes {
@@ -643,9 +640,14 @@ impl ClientRawCluster for RawCluster {
         }
 
         let meshes = ClusterMeshes {
-            solid: device.create_vertex_mesh(&vertices, Some(&indices)).unwrap(),
+            solid: device
+                .create_vertex_mesh(VAttributes::Slice(&vertices), Some(&indices))
+                .unwrap(),
             transparent: device
-                .create_vertex_mesh(&vertices_translucent, Some(&indices_translucent))
+                .create_vertex_mesh(
+                    VAttributes::Slice(&vertices_translucent),
+                    Some(&indices_translucent),
+                )
                 .unwrap(),
         };
 

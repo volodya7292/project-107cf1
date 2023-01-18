@@ -9,7 +9,6 @@ use crate::ecs::component;
 use crate::renderer::vertex_mesh::RawVertexMesh;
 
 pub(crate) struct VertexMeshCompEvents<'a> {
-    pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub dirty_components: HashSet<EntityId>,
     pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,

@@ -9,7 +9,6 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
 
-use core::utils::threading::{SafeThreadPool, TaskPriority};
 use core::utils::{HashSet, MO_RELAXED};
 use vk_wrapper as vkw;
 

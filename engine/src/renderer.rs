@@ -19,28 +19,32 @@
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
-use std::any::TypeId;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use std::time::Instant;
-use std::{fs, iter, mem, slice};
-
+use crate::ecs::component::internal::{GlobalTransform, Relation};
+use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::{component, system};
+use crate::renderer::camera::OrthoCamera;
+pub use crate::renderer::dirty_components::DirtyComponents;
+use crate::renderer::material::MatComponent;
+use crate::renderer::module::RendererModule;
 use basis_universal::TranscoderTextureFormat;
+use camera::{Frustum, PerspectiveCamera};
+use core::utils::HashMap;
 use entity_data::{Archetype, Component, EntityId, EntityStorage, StaticArchetype, System, SystemAccess};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
+use material_pipeline::MaterialPipelineSet;
+pub use module::text_renderer::FontSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, Mat4, U32Vec4, UVec2, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-
-use camera::{Frustum, PerspectiveCamera};
-use core::unwrap_option;
-use core::utils::HashMap;
-use material_pipeline::MaterialPipelineSet;
-pub use module::text_renderer::FontSet;
+use std::any::TypeId;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use std::time::Instant;
+use std::{fs, iter, mem, slice};
 use texture_atlas::TextureAtlas;
 use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
@@ -55,14 +59,6 @@ use vk_wrapper::{
     SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
     Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
-
-use crate::ecs::component::internal::{GlobalTransform, Relation};
-use crate::ecs::component::render_config::RenderStage;
-use crate::ecs::{component, system};
-use crate::renderer::camera::OrthoCamera;
-pub use crate::renderer::dirty_components::DirtyComponents;
-use crate::renderer::material::MatComponent;
-use crate::renderer::module::RendererModule;
 
 mod texture_atlas;
 
@@ -140,7 +136,7 @@ pub struct Renderer {
     device: Arc<Device>,
 
     texture_atlases: [TextureAtlas; 4],
-    tex_atlas_sampler: Arc<Sampler>,
+    _tex_atlas_sampler: Arc<Sampler>,
 
     staging_buffer: HostBuffer<u8>,
     transfer_cl: [Arc<Mutex<CmdList>>; 2],
@@ -189,9 +185,11 @@ pub struct Renderer {
     g_render_pass: Arc<RenderPass>,
     g_framebuffer: Option<Arc<Framebuffer>>,
     g_per_frame_pool: DescriptorPool,
-    g_dyn_pool: DescriptorPool,
     g_per_frame_in: DescriptorSet,
-    g_dyn_in: DescriptorSet,
+    /// Pool for dynamic generic uniform descriptor
+    /// with dynamic offset, of size [MAX_BASIC_UNIFORM_BLOCK_SIZE].
+    _g_dynamic_pool: DescriptorPool,
+    g_dynamic_in: DescriptorSet,
 
     translucency_depths_pixel_shader: Arc<Shader>,
     translucency_depths_image: Option<DeviceBuffer>,
@@ -209,6 +207,7 @@ pub struct Renderer {
     ordered_entities: Vec<EntityId>,
 
     renderables: HashMap<EntityId, Renderable>,
+    /// Meshes ready to be used on GPU (their staging buffers have been uploaded to GPU)
     vertex_meshes: HashMap<EntityId, Arc<RawVertexMesh>>,
     material_pipelines: Vec<MaterialPipelineSet>,
     uniform_buffer_basic: DeviceBuffer,
@@ -308,11 +307,6 @@ struct FrameInfoUniforms {
 }
 
 #[repr(C)]
-struct TranslucencyPushConsts {
-    frame_size: UVec2,
-}
-
-#[repr(C)]
 struct GPassConsts {
     is_translucent_pass: u32,
 }
@@ -400,11 +394,6 @@ pub(crate) enum BufferUpdate {
     Regions(BufferUpdate2),
 }
 
-pub(crate) struct VMBufferUpdate {
-    pub entity: EntityId,
-    pub mesh: Arc<RawVertexMesh>,
-}
-
 pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 
 pub const N_MAX_OBJECTS: u32 = 65535;
@@ -426,6 +415,7 @@ const PIPELINE_DEPTH_WRITE: u32 = 0;
 const PIPELINE_TRANSLUCENCY_DEPTHS: u32 = 1;
 const PIPELINE_COLOR: u32 = 2;
 const PIPELINE_COLOR_WITH_BLENDING: u32 = 3;
+const PIPELINE_OVERLAY: u32 = 4;
 
 lazy_static! {
     static ref PIPELINE_CACHE_FILENAME: &'static str = if cfg!(debug_assertions) {
@@ -1046,7 +1036,7 @@ impl Renderer {
             settings,
             device: Arc::clone(device),
             texture_atlases,
-            tex_atlas_sampler,
+            _tex_atlas_sampler: tex_atlas_sampler,
             staging_buffer,
             transfer_cl,
             transfer_submit,
@@ -1078,9 +1068,9 @@ impl Renderer {
             g_render_pass,
             g_framebuffer: None,
             g_per_frame_pool,
-            g_dyn_pool,
+            _g_dynamic_pool: g_dyn_pool,
             g_per_frame_in,
-            g_dyn_in,
+            g_dynamic_in: g_dyn_in,
             translucency_depths_pixel_shader,
             translucency_depths_image: None,
             translucency_colors_image: None,
@@ -1329,7 +1319,6 @@ impl Renderer {
             run_time: 0.0,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
-            vertex_meshes: &mut self.vertex_meshes,
             dirty_components: self.dirty_comps.take_changes::<component::VertexMesh>(),
             buffer_updates: &mut self.vertex_mesh_updates,
             run_time: 0.0,
@@ -1582,32 +1571,32 @@ impl Renderer {
                     let entry = self.storage.entry(&renderable_id).unwrap();
 
                     let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransform>(),
-                           entry.get::<component::MeshRenderConfig>(),
-                           self.vertex_meshes.get(&renderable_id)) else {
+                        (entry.get::<GlobalTransform>(), entry.get::<component::MeshRenderConfig>(), self.vertex_meshes.get(&renderable_id)) else {
                         continue;
                     };
 
-                    if vertex_mesh.vertex_count == 0 && render_config.fake_vertex_count == 0 {
+                    if render_config.stage != RenderStage::MAIN || !render_config.visible || vertex_mesh.is_empty() {
                         continue;
                     }
 
-                    let sphere = vertex_mesh.sphere();
-                    let center = sphere.center() + global_transform.position_f32();
-                    let radius = sphere.radius() * global_transform.scale.max();
+                    if let Some(sphere) = vertex_mesh.sphere() {
+                        let center = sphere.center() + global_transform.position_f32();
+                        let radius = sphere.radius() * global_transform.scale.max();
 
-                    if !render_config.visible
-                        || render_config.stage != RenderStage::MAIN
-                        || (!frustum.is_sphere_visible(&center, radius)
-                            && render_config.fake_vertex_count == 0)
-                    {
-                        continue;
+                        if !frustum.is_sphere_visible(&center, radius) {
+                            continue;
+                        }
+
+                        curr_cull_objects.push(CullObject {
+                            sphere: Vec4::new(center.x, center.y, center.z, radius),
+                            id: entity_index as u32,
+                        });
+                    } else {
+                        curr_cull_objects.push(CullObject {
+                            sphere: Default::default(),
+                            id: entity_index as u32,
+                        });
                     }
-
-                    curr_cull_objects.push(CullObject {
-                        sphere: Vec4::new(center.x, center.y, center.z, radius),
-                        id: entity_index as u32,
-                    });
 
                     let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let renderable = &self.renderables[&renderable_id];
@@ -1636,16 +1625,11 @@ impl Renderer {
                     cl.bind_graphics_input(
                         pipeline.signature(),
                         DESC_SET_CUSTOM_PER_OBJECT,
-                        self.g_dyn_in,
+                        self.g_dynamic_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    if vertex_mesh.vertex_count > 0 {
-                        cl.bind_and_draw_vertex_mesh(vertex_mesh);
-                    } else if vertex_mesh.instance_count > 0 {
-                        cl.bind_vertex_buffers(0, &vertex_mesh.bindings());
-                        cl.draw_instanced(render_config.fake_vertex_count, 0, 0, vertex_mesh.instance_count);
-                    }
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
 
                 cl_sol.end().unwrap();
@@ -1687,21 +1671,22 @@ impl Renderer {
                     }
 
                     let renderable_id = self.ordered_entities[entity_index];
-                    let render_config = unwrap_option!(
-                        self.storage.get::<component::MeshRenderConfig>(&renderable_id),
-                        continue
-                    );
-
-                    // Occlusion culling can't handle arbitrary vertex representations,
-                    // so check for fake_vertex_count also.
-                    if self.visibility_host_buffer[entity_index] == 0 && render_config.fake_vertex_count == 0
-                    {
+                    let Some(render_config) = self.storage.get::<component::MeshRenderConfig>(&renderable_id) else {
+                        continue;
+                    };
+                    if render_config.stage != RenderStage::MAIN {
                         continue;
                     }
 
-                    let vertex_mesh = unwrap_option!(self.vertex_meshes.get(&renderable_id), continue);
-                    let renderable = self.renderables.get(&renderable_id).unwrap();
+                    let Some(vertex_mesh) = self.vertex_meshes.get(&renderable_id) else {
+                        continue;
+                    };
 
+                    if self.visibility_host_buffer[entity_index] == 0 && vertex_mesh.is_empty() {
+                        continue;
+                    }
+
+                    let renderable = self.renderables.get(&renderable_id).unwrap();
                     let mut consts = GPassConsts {
                         is_translucent_pass: 0,
                     };
@@ -1733,16 +1718,11 @@ impl Renderer {
                     cl.bind_graphics_input(
                         signature,
                         DESC_SET_CUSTOM_PER_OBJECT,
-                        self.g_dyn_in,
+                        self.g_dynamic_in,
                         &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
                     );
 
-                    if vertex_mesh.vertex_count > 0 {
-                        cl.bind_and_draw_vertex_mesh(vertex_mesh);
-                    } else {
-                        cl.bind_vertex_buffers(0, &vertex_mesh.bindings());
-                        cl.draw_instanced(render_config.fake_vertex_count, 0, 0, vertex_mesh.instance_count);
-                    }
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
 
                 cl_sol.end().unwrap();
@@ -1758,20 +1738,20 @@ impl Renderer {
             .unwrap();
 
         for renderable_id in &self.ordered_entities {
-            let render_config = unwrap_option!(
-                self.storage.get::<component::MeshRenderConfig>(renderable_id),
-                continue
-            );
-
+            let Some(render_config) = self.storage.get::<component::MeshRenderConfig>(renderable_id) else {
+                continue;
+            };
             if render_config.stage != RenderStage::OVERLAY {
                 continue;
             }
 
-            let vertex_mesh = unwrap_option!(self.vertex_meshes.get(renderable_id), continue);
+            let Some(vertex_mesh) = self.vertex_meshes.get(renderable_id) else {
+                continue;
+            };
             let renderable = self.renderables.get(renderable_id).unwrap();
 
             let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-            let pipeline = mat_pipeline.get_pipeline(PIPELINE_COLOR_WITH_BLENDING).unwrap();
+            let pipeline = mat_pipeline.get_pipeline(PIPELINE_OVERLAY).unwrap();
             let signature = pipeline.signature();
 
             let already_bound = cl.bind_pipeline(pipeline);
@@ -1780,7 +1760,7 @@ impl Renderer {
                 if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
                     cl.bind_graphics_input(signature, DESC_SET_CUSTOM_PER_FRAME, *set, &[]);
                 }
-                let mut consts = GPassConsts {
+                let consts = GPassConsts {
                     is_translucent_pass: 1,
                 };
                 cl.push_constants(signature, &consts);
@@ -1789,16 +1769,11 @@ impl Renderer {
             cl.bind_graphics_input(
                 signature,
                 DESC_SET_CUSTOM_PER_OBJECT,
-                self.g_dyn_in,
+                self.g_dynamic_in,
                 &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
             );
 
-            if vertex_mesh.vertex_count > 0 {
-                cl.bind_and_draw_vertex_mesh(vertex_mesh);
-            } else {
-                cl.bind_vertex_buffers(0, &vertex_mesh.bindings());
-                cl.draw_instanced(render_config.fake_vertex_count, 0, 0, vertex_mesh.instance_count);
-            }
+            cl.bind_and_draw_vertex_mesh(vertex_mesh);
         }
 
         cl.end().unwrap();
@@ -2009,8 +1984,8 @@ impl Renderer {
                 ClearValue::Undefined,
                 ClearValue::Undefined,
                 ClearValue::Undefined,
-                ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0]),
-                ClearValue::ColorF32([0.0, 0.0, 0.0, 1.0]),
+                ClearValue::Undefined,
+                ClearValue::Depth(1.0),
             ],
             true,
         );
@@ -2254,17 +2229,6 @@ impl Renderer {
         self.active_camera.set_aspect(new_size.0, new_size.1);
 
         let depth_image = self
-            .device
-            .create_image_2d(
-                Format::D32_FLOAT,
-                1,
-                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                    | ImageUsageFlags::INPUT_ATTACHMENT
-                    | ImageUsageFlags::SAMPLED,
-                new_size,
-            )
-            .unwrap();
-        let overlay_depth_image = self
             .device
             .create_image_2d(
                 Format::D32_FLOAT,

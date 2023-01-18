@@ -1,12 +1,6 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use entity_data::EntityId;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, Vec3};
-use parking_lot::Mutex;
-use rayon::prelude::*;
-
+use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
+use crate::default_resources::DefaultResourceMapping;
+use crate::resource_mapping::ResourceMapping;
 use core::overworld::orchestrator::get_side_clusters;
 use core::overworld::orchestrator::OverworldUpdateResult;
 use core::overworld::position::ClusterPos;
@@ -14,11 +8,14 @@ use core::overworld::LoadedClusters;
 use core::utils::{HashMap, HashSet};
 use engine::ecs::component;
 use engine::renderer::{Renderer, VertexMeshObject};
+use entity_data::EntityId;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I64Vec3, Vec3};
+use parking_lot::Mutex;
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use vk_wrapper as vkw;
-
-use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
-use crate::default_resources::DefaultResourceMapping;
-use crate::resource_mapping::ResourceMapping;
 
 pub struct OverworldRenderer {
     device: Arc<vkw::Device>,
@@ -152,11 +149,7 @@ impl OverworldRenderer {
 
         // Add new objects
         for pos in self.to_add.drain() {
-            let transform_comp = component::Transform::new(
-                glm::convert(*pos.get()),
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 1.0, 1.0),
-            );
+            let transform_comp = component::Transform::new().with_position(glm::convert(*pos.get()));
             let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
             let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
 

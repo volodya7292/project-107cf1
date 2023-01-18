@@ -1,11 +1,8 @@
-use std::time::Instant;
-
-use entity_data::{EntityId, SystemAccess, SystemHandler};
-
-use core::utils::HashSet;
-
 use crate::ecs::component;
 use crate::ecs::component::internal::{GlobalTransform, Relation};
+use core::utils::HashSet;
+use entity_data::{EntityId, SystemAccess, SystemHandler};
+use std::time::Instant;
 
 // Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {
@@ -62,10 +59,10 @@ impl SystemHandler for HierarchyPropagation<'_> {
                 self.changed_global_transforms.push(entity);
             }
 
-            if let Some(children) = relation_comps.get(&entity).map(|v| &v.children) {
+            if let Some(relation) = relation_comps.get(&entity) {
                 // Because we're popping from the stack, insert in reverse order
                 // to preserve the right order of insertion to `ordered_entities`
-                stack.extend(children.iter().rev().map(|e| StackEntry {
+                stack.extend(relation.children.iter().rev().map(|e| StackEntry {
                     entity: *e,
                     parent_global_transform_changed: global_transform_changed,
                     parent_global_transform: *global_transform,
