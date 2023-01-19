@@ -1185,19 +1185,15 @@ impl Device {
 
         let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
 
-        for (i, bindings) in native_bindings.iter().enumerate() {
-            if bindings.is_empty() {
-                continue;
-            }
-
-            let mut binding_flags_info =
-                vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
+        for (set_idx, bindings) in native_bindings.iter().enumerate() {
+            let mut binding_flags_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder()
+                .binding_flags(&binding_flags[set_idx]);
 
             let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
                 .bindings(bindings)
                 .push_next(&mut binding_flags_info);
 
-            native_descriptor_sets[i] = unsafe {
+            native_descriptor_sets[set_idx] = unsafe {
                 self.wrapper
                     .native
                     .create_descriptor_set_layout(&create_info, None)?
@@ -1217,7 +1213,6 @@ impl Device {
                 size: push_constants_size,
             };
 
-            // Layout
             let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
                 .iter()
                 .cloned()
@@ -1417,11 +1412,9 @@ impl Device {
 
         let pipeline_cache = self.pipeline_cache.lock();
         let native_pipeline = unsafe {
-            self.wrapper.native.create_graphics_pipelines(
-                *pipeline_cache,
-                slice::from_ref(&create_info),
-                None,
-            )
+            self.wrapper
+                .native
+                .create_graphics_pipelines(*pipeline_cache, &[create_info.build()], None)
         };
         if let Err((_, err)) = native_pipeline {
             return Err(err.into());

@@ -30,7 +30,7 @@ pub(crate) struct BindingMapping {
     array_index: u32,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DescriptorSet {
     pub(crate) native: vk::DescriptorSet,
     pub(crate) id: u32,
@@ -41,6 +41,12 @@ impl DescriptorSet {
         native: vk::DescriptorSet::null(),
         id: u32::MAX,
     };
+}
+
+impl Default for DescriptorSet {
+    fn default() -> Self {
+        Self::NULL
+    }
 }
 
 pub struct NativeDescriptorPool {
@@ -62,35 +68,29 @@ impl DescriptorPool {
         &self,
         set_layout_id: u32,
         max_sets: u32,
-    ) -> Result<Option<vk::DescriptorPool>, vk::Result> {
+    ) -> Result<vk::DescriptorPool, vk::Result> {
         let mut pool_sizes = self.signature.descriptor_sizes[set_layout_id as usize].clone();
         for mut pool_size in &mut pool_sizes {
             pool_size.descriptor_count *= max_sets;
-        }
-        if pool_sizes.is_empty() {
-            return Ok(None);
         }
 
         let pool_info = vk::DescriptorPoolCreateInfo::builder()
             .max_sets(max_sets)
             .pool_sizes(&pool_sizes);
 
-        Ok(Some(unsafe {
+        Ok(unsafe {
             self.device
                 .wrapper
                 .native
                 .create_descriptor_pool(&pool_info, None)?
-        }))
+        })
     }
 
     pub(crate) fn alloc_next_pool(&mut self, size: u32) -> Result<(), vk::Result> {
         let new_pool = self.create_native_pool(self.set_layout_id, size)?;
-        if new_pool.is_none() {
-            return Ok(());
-        }
 
         let next_pool = NativeDescriptorPool {
-            handle: new_pool.unwrap(),
+            handle: new_pool,
             size,
         };
         let layouts = vec![self.signature.native[self.set_layout_id as usize]; size as usize];
@@ -118,10 +118,6 @@ impl DescriptorPool {
     /// Allocate a new descriptor from the pool.
     /// If the pool doesn't have layout (its descriptor sizes = 0), this returns `DescriptorSet::NULL`.
     pub fn alloc(&mut self) -> Result<DescriptorSet, vk::Result> {
-        if self.native.is_empty() {
-            return Ok(DescriptorSet::NULL);
-        }
-
         if let Some(id) = self.free_sets.ones().next() {
             self.free_sets.toggle(id);
             Ok(self.allocated[id])
@@ -132,9 +128,8 @@ impl DescriptorPool {
     }
 
     pub fn free(&mut self, descriptor_set: DescriptorSet) {
-        if descriptor_set != DescriptorSet::NULL {
-            self.free_sets.insert(descriptor_set.id as usize);
-        }
+        assert_ne!(descriptor_set, DescriptorSet::NULL);
+        self.free_sets.insert(descriptor_set.id as usize);
     }
 
     pub fn create_binding(&self, id: u32, array_index: u32, res: BindingRes) -> Binding {
@@ -189,9 +184,7 @@ impl Device {
                 panic!("descriptor_set = NULL");
             }
 
-            for i in range.clone() {
-                let binding = &bindings[i];
-
+            for binding in &bindings[range.clone()] {
                 let mut write_info = vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor_set.native)
                     .dst_binding(binding.id)
