@@ -7,10 +7,10 @@
 layout(location = 0) in uvec4 inPack1;
 layout(location = 1) in uint inPack2;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 0, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 1, binding = 0) uniform ObjectData {
+layout(set = DESC_SET_CUSTOM_PER_OBJECT, binding = 0) uniform ObjectData {
     mat4 model;
 };
 

@@ -11,11 +11,13 @@ use core::unwrap_option;
 use core::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::DescriptorSet;
+use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};
 
 use crate::ecs::component;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::{BufferUpdate, BufferUpdate1, Renderable};
+use crate::renderer::{
+    BufferUpdate, BufferUpdate1, Renderable, CUSTOM_OBJECT_DESCRIPTOR_IDX, MAX_BASIC_UNIFORM_BLOCK_SIZE,
+};
 
 pub(crate) struct RendererComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -23,13 +25,14 @@ pub(crate) struct RendererComponentEvents<'a> {
     pub dirty_components: HashSet<EntityId>,
     pub buffer_updates: &'a mut Vec<BufferUpdate>,
     pub material_pipelines: &'a mut [MaterialPipelineSet],
+    pub uniform_buffer_basic: &'a DeviceBuffer,
     pub uniform_buffer_offsets: &'a mut IndexPool,
     pub run_time: f64,
 }
 
 impl RendererComponentEvents<'_> {
     fn renderer_comp_created(renderable: &mut Renderable, object_desc_pool: &mut vkw::DescriptorPool) {
-        renderable.descriptor_sets = smallvec![object_desc_pool.alloc().unwrap()];
+        renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX] = object_desc_pool.alloc().unwrap();
     }
 
     fn renderer_comp_modified(
@@ -39,12 +42,19 @@ impl RendererComponentEvents<'_> {
         binding_updates: &mut Vec<vkw::Binding>,
         object_desc_pool: &mut vkw::DescriptorPool,
         desc_updates: &mut Vec<(DescriptorSet, Range<usize>)>,
+        uniform_buffer_basic: &DeviceBuffer,
     ) {
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
         let inputs = &mut renderable.descriptor_sets;
+        let mut new_binding_updates: SmallVec<[vkw::Binding; 4]> = smallvec![];
 
-        let mut updates: SmallVec<[vkw::Binding; 4]> = smallvec![];
+        // Add default uniform buffer binding
+        new_binding_updates.push(object_desc_pool.create_binding(
+            0,
+            0,
+            BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
+        ));
 
         for (binding_id, res) in &mut config.resources {
             if let component::render_config::Resource::Buffer(buf_res) = res {
@@ -58,7 +68,7 @@ impl RendererComponentEvents<'_> {
                     }));
                     buf_res.changed = false;
 
-                    updates.push(object_desc_pool.create_binding(
+                    new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
                         vkw::BindingRes::Buffer(buf_res.device_buffer.handle()),
@@ -67,11 +77,12 @@ impl RendererComponentEvents<'_> {
             }
         }
 
-        let s0 = binding_updates.len();
-        binding_updates.extend(updates);
-        let s = s0..binding_updates.len();
-        if !s.is_empty() {
-            desc_updates.push((inputs[0], s));
+        if !new_binding_updates.is_empty() {
+            let s0 = binding_updates.len();
+            binding_updates.extend(new_binding_updates);
+            let bindings_range = s0..binding_updates.len();
+
+            desc_updates.push((inputs[CUSTOM_OBJECT_DESCRIPTOR_IDX], bindings_range));
         }
     }
 
@@ -125,6 +136,7 @@ impl SystemHandler for RendererComponentEvents<'_> {
                 &mut binding_updates,
                 object_desc_pool,
                 &mut desc_updates,
+                self.uniform_buffer_basic,
             );
             self.renderables.insert(*entity, renderable);
         }

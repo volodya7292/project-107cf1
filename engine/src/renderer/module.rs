@@ -1,14 +1,12 @@
-use std::any::Any;
-use std::sync::Arc;
-
+use crate::renderer;
 use entity_data::EntityId;
 use parking_lot::Mutex;
-
+use std::any::Any;
+use std::sync::Arc;
 use vk_wrapper::CmdList;
 
-use crate::renderer;
-
 pub mod text_renderer;
+pub mod ui_renderer;
 
 pub trait RendererModule {
     /// Note: entity rendering resources (e.g. vertex mesh) may be in use, destroy it only in `Self::on_update`.

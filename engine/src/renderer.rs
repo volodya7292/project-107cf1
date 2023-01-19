@@ -186,10 +186,6 @@ pub struct Renderer {
     g_framebuffer: Option<Arc<Framebuffer>>,
     g_per_frame_pool: DescriptorPool,
     g_per_frame_in: DescriptorSet,
-    /// Pool for dynamic generic uniform descriptor
-    /// with dynamic offset, of size [MAX_BASIC_UNIFORM_BLOCK_SIZE].
-    _g_dynamic_pool: DescriptorPool,
-    g_dynamic_in: DescriptorSet,
 
     translucency_depths_pixel_shader: Arc<Shader>,
     translucency_depths_image: Option<DeviceBuffer>,
@@ -370,11 +366,14 @@ struct CullConstants {
     object_count: u32,
 }
 
+pub(crate) const N_CUSTOM_DESCRIPTORS: usize = 1;
+pub(crate) const CUSTOM_OBJECT_DESCRIPTOR_IDX: usize = 0;
+
 pub(crate) struct Renderable {
     pub buffers: SmallVec<[DeviceBuffer; 4]>,
     pub mat_pipeline: u32,
     pub uniform_buf_index: usize,
-    pub descriptor_sets: SmallVec<[DescriptorSet; 4]>,
+    pub descriptor_sets: [DescriptorSet; N_CUSTOM_DESCRIPTORS],
 }
 
 pub(crate) struct BufferUpdate1 {
@@ -401,12 +400,14 @@ pub const N_MAX_MATERIALS: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
 pub const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
 
+// Note: by Pipeline Layout Compatibility, the least frequently changing descriptors are placed first.
+// https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#descriptorsets-compatibility
 /// General descriptor set for engine-related resources
 pub const DESC_SET_GENERAL_PER_FRAME: u32 = 0;
-/// Descriptor set for custom per-object data (model matrix is mandatory)
-pub const DESC_SET_CUSTOM_PER_OBJECT: u32 = 1;
 /// Specific to material pipeline descriptor set for its per-frame resources
-pub const DESC_SET_CUSTOM_PER_FRAME: u32 = 2;
+pub const DESC_SET_CUSTOM_PER_FRAME: u32 = 1;
+/// Descriptor set for custom per-object data (model matrix is mandatory)
+pub const DESC_SET_CUSTOM_PER_OBJECT: u32 = 2;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
@@ -854,10 +855,8 @@ impl Renderer {
         let g_signature = device
             .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
-        let mut g_per_frame_pool = g_signature.create_pool(0, 1).unwrap();
-        let mut g_dyn_pool = g_signature.create_pool(1, 1).unwrap();
+        let mut g_per_frame_pool = g_signature.create_pool(DESC_SET_GENERAL_PER_FRAME, 1).unwrap();
         let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
-        let g_dyn_in = g_dyn_pool.alloc().unwrap();
 
         let depth_secondary_cls = iter::repeat_with(|| {
             graphics_queue
@@ -980,14 +979,6 @@ impl Renderer {
                     ),
                 ],
             );
-            device.update_descriptor_set(
-                g_dyn_in,
-                &[g_dyn_pool.create_binding(
-                    0,
-                    0,
-                    BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
-                )],
-            );
         }
 
         let transfer_cl = [
@@ -1068,9 +1059,7 @@ impl Renderer {
             g_render_pass,
             g_framebuffer: None,
             g_per_frame_pool,
-            _g_dynamic_pool: g_dyn_pool,
             g_per_frame_in,
-            g_dynamic_in: g_dyn_in,
             translucency_depths_pixel_shader,
             translucency_depths_image: None,
             translucency_colors_image: None,
@@ -1166,8 +1155,6 @@ impl Renderer {
     // TODO CORE: move to core
     pub fn add_children(access: &SystemAccess, parent: EntityId, children: &[EntityId]) {
         let mut relation_comps = access.component_mut::<Relation>();
-
-        // let children_comp = self.children_comps.get_or_insert_default(parent);
 
         for child in children {
             let relation = relation_comps
@@ -1315,6 +1302,7 @@ impl Renderer {
             dirty_components: self.dirty_comps.take_changes::<component::MeshRenderConfig>(),
             buffer_updates: &mut buffer_updates,
             material_pipelines: &mut self.material_pipelines,
+            uniform_buffer_basic: &self.uniform_buffer_basic,
             uniform_buffer_offsets: &mut self.uniform_buffer_offsets,
             run_time: 0.0,
         };
@@ -1608,26 +1596,13 @@ impl Renderer {
                     };
                     let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
+                    cl.bind_pipeline(pipeline);
 
-                    let already_bound = cl.bind_pipeline(pipeline);
-                    if !already_bound {
-                        cl.bind_graphics_input(
-                            signature,
-                            DESC_SET_GENERAL_PER_FRAME,
-                            self.g_per_frame_in,
-                            &[],
-                        );
-                        if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
-                            cl.bind_graphics_input(signature, DESC_SET_CUSTOM_PER_FRAME, *set, &[]);
-                        }
-                    }
-
-                    cl.bind_graphics_input(
-                        pipeline.signature(),
-                        DESC_SET_CUSTOM_PER_OBJECT,
-                        self.g_dynamic_in,
-                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
-                    );
+                    let mut descriptors = [DescriptorSet::default(); 3];
+                    descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.g_per_frame_in;
+                    descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
+                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] = renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32]);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
@@ -1701,26 +1676,14 @@ impl Renderer {
                     let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
 
-                    let already_bound = cl.bind_pipeline(pipeline);
-                    if !already_bound {
-                        cl.bind_graphics_input(
-                            signature,
-                            DESC_SET_GENERAL_PER_FRAME,
-                            self.g_per_frame_in,
-                            &[],
-                        );
-                        if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
-                            cl.bind_graphics_input(signature, DESC_SET_CUSTOM_PER_FRAME, *set, &[]);
-                        }
-                        cl.push_constants(signature, &consts);
-                    }
+                    cl.bind_pipeline(pipeline);
 
-                    cl.bind_graphics_input(
-                        signature,
-                        DESC_SET_CUSTOM_PER_OBJECT,
-                        self.g_dynamic_in,
-                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
-                    );
+                    let mut descriptors = [DescriptorSet::default(); 3];
+                    descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.g_per_frame_in;
+                    descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
+                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] = renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32]);
+                    cl.push_constants(signature, &consts);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
@@ -1753,25 +1716,23 @@ impl Renderer {
             let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
             let pipeline = mat_pipeline.get_pipeline(PIPELINE_OVERLAY).unwrap();
             let signature = pipeline.signature();
+            cl.bind_pipeline(pipeline);
 
-            let already_bound = cl.bind_pipeline(pipeline);
-            if !already_bound {
-                cl.bind_graphics_input(signature, DESC_SET_GENERAL_PER_FRAME, self.g_per_frame_in, &[]);
-                if let Some((_, set)) = &mat_pipeline.custom_per_frame_uniform_desc {
-                    cl.bind_graphics_input(signature, DESC_SET_CUSTOM_PER_FRAME, *set, &[]);
-                }
-                let consts = GPassConsts {
-                    is_translucent_pass: 1,
-                };
-                cl.push_constants(signature, &consts);
-            }
-
-            cl.bind_graphics_input(
+            let mut descriptors = [DescriptorSet::default(); 3];
+            descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.g_per_frame_in;
+            descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
+            descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] =
+                renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+            cl.bind_graphics_inputs(
                 signature,
-                DESC_SET_CUSTOM_PER_OBJECT,
-                self.g_dynamic_in,
+                0,
+                &descriptors,
                 &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
             );
+            let consts = GPassConsts {
+                is_translucent_pass: 1,
+            };
+            cl.push_constants(signature, &consts);
 
             cl.bind_and_draw_vertex_mesh(vertex_mesh);
         }
@@ -1843,7 +1804,12 @@ impl Renderer {
         let mut out_size = depth_pyramid_image.size_2d();
 
         for i in 0..(depth_pyramid_image.mip_levels() as usize) {
-            cl.bind_compute_input(&self.depth_pyramid_signature, 0, self.depth_pyramid_descs[i], &[]);
+            cl.bind_compute_inputs(
+                &self.depth_pyramid_signature,
+                0,
+                &[self.depth_pyramid_descs[i]],
+                &[],
+            );
 
             let constants = DepthPyramidConstants {
                 out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
@@ -1906,7 +1872,7 @@ impl Renderer {
         );
 
         cl.bind_pipeline(&self.cull_pipeline);
-        cl.bind_compute_input(&self.cull_signature, 0, self.cull_desc, &[]);
+        cl.bind_compute_inputs(&self.cull_signature, 0, &[self.cull_desc], &[]);
 
         let pyramid_size = depth_pyramid_image.size_2d();
         let constants = CullConstants {
@@ -2052,7 +2018,7 @@ impl Renderer {
             false,
         );
         final_cl.bind_pipeline(self.compose_pipeline.as_ref().unwrap());
-        final_cl.bind_graphics_input(&self.compose_signature, 0, self.compose_desc, &[]);
+        final_cl.bind_graphics_inputs(&self.compose_signature, 0, &[self.compose_desc], &[]);
         final_cl.draw(3, 0);
         final_cl.end_render_pass();
 

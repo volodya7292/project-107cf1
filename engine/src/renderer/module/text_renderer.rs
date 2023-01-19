@@ -380,14 +380,14 @@ impl TextRenderer {
             )
             .unwrap();
 
-        let (pool, descriptor) = pipe.create_custom_frame_uniform_descriptor().unwrap();
+        let per_frame_pool = &mut pipe.per_frame_desc_pool;
 
         unsafe {
             device.update_descriptor_set(
-                *descriptor,
+                pipe.per_frame_desc,
                 &[
-                    pool.create_binding(0, 0, BindingRes::Buffer(uniform_buffer.handle())),
-                    pool.create_binding(
+                    per_frame_pool.create_binding(0, 0, BindingRes::Buffer(uniform_buffer.handle())),
+                    per_frame_pool.create_binding(
                         1,
                         0,
                         BindingRes::Image(

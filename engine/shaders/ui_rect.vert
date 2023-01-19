@@ -5,15 +5,19 @@
 layout(set = 0, binding = 0, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 1, binding = 0) uniform ObjectData {
+layout(set = DESC_SET_CUSTOM_PER_OBJECT, binding = 0) uniform ObjectData {
     mat4 model;
 };
 
-layout (location = 0) out vec2 outUV;
+layout(location = 0) out Output {
+    vec2 texCoord;
+} vs_out;
 
 void main() {
     vec2 pos2d = vec2(gl_VertexIndex >> 1, gl_VertexIndex & 1);
-
     vec4 worldPos = model * vec4(pos2d, 0.0, 1.0);
+
+    vs_out.texCoord = vec2(pos2d.x, 1.0 - pos2d.y);
+
     gl_Position = info.overlay_camera.proj_view * worldPos;
 }

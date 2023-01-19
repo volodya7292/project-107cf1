@@ -8,9 +8,15 @@
 #define THREAD_GROUP_HEIGHT 8
 #define THREAD_GROUP_1D_WIDTH (THREAD_GROUP_WIDTH * THREAD_GROUP_HEIGHT)
 
+/// General descriptor set for engine-related resources
+#define DESC_SET_GENERAL_PER_FRAME 0
+/// Specific to material pipeline descriptor set for its per-frame resources
+#define DESC_SET_CUSTOM_PER_FRAME 1
+/// Descriptor set for custom per-object data
+#define DESC_SET_CUSTOM_PER_OBJECT 2
+
 #define M_PI 3.1415927f
 #define SQRT_2 1.4142136f
-
 #define FLT_MAX 3.402823466e+38f
 
 struct Material {
@@ -68,20 +74,20 @@ layout(location = 1) out vec4 outSpecular;
 layout(location = 2) out vec4 outEmission;
 layout(location = 3) out vec4 outNormal;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 0, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 0, binding = 1, scalar) readonly buffer Materials {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 1, scalar) readonly buffer Materials {
     Material materials[];
 };
-layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
-layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
-layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 2) uniform sampler2D albedoAtlas;
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 3) uniform sampler2D specularAtlas;
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 4) uniform sampler2D normalAtlas;
 
-layout(set = 0, binding = 5, std430) coherent buffer TranslucentDepthsArray {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 5, std430) coherent buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
-layout(set = 0, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
 
 layout(push_constant) uniform PushConstants {
     uint isTranslucentPass;

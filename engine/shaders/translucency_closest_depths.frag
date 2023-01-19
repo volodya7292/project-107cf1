@@ -4,12 +4,12 @@
 
 layout(early_fragment_tests) in;
 
-layout (input_attachment_index = 0, set = 0, binding = 7) uniform subpassInput inputSolidDepth;
+layout (input_attachment_index = 0, set = DESC_SET_GENERAL_PER_FRAME, binding = 7) uniform subpassInput inputSolidDepth;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 0, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 0, binding = 5, std430) coherent buffer DepthsArray {
+layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 5, std430) coherent buffer DepthsArray {
     uint transparencyDepthsArray[];
 };
 

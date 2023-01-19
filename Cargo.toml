@@ -21,11 +21,11 @@ engine = { path = "engine" }
 vk-wrapper = { path = "engine/vk-wrapper" }
 core = { path = "core" }
 log = "0.4"
-simple_logger = "3.0"
-nalgebra = "0.31"
-nalgebra-glm = "0.17"
+simple_logger = "4.0"
+nalgebra = "0.32"
+nalgebra-glm = "0.18"
 image = { version = "0.24", default-features = false, features = ["png"] }
-rayon = "1.5"
+rayon = "1.6"
 crossbeam-channel = "0.5"
 futures = "0.3"
 noise = { version = "0.8", default-features = false }

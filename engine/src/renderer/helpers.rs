@@ -1,8 +1,8 @@
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, N_MAX_MATERIALS, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
-    PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY, PIPELINE_TRANSLUCENCY_DEPTHS,
+    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_FRAME,
+    DESC_SET_CUSTOM_PER_OBJECT, MAX_BASIC_UNIFORM_BLOCK_SIZE, N_MAX_MATERIALS, PIPELINE_COLOR,
+    PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
 use basis_universal::TranscodeParameters;
@@ -104,6 +104,8 @@ impl Renderer {
             )
             .unwrap();
 
+        let mut per_frame_desc_pool = main_signature.create_pool(DESC_SET_CUSTOM_PER_FRAME, 1).unwrap();
+        let per_frame_desc = per_frame_desc_pool.alloc().unwrap();
         let per_object_desc_pool = main_signature
             .create_pool(DESC_SET_CUSTOM_PER_OBJECT, 16)
             .unwrap();
@@ -116,7 +118,8 @@ impl Renderer {
             uniform_buffer_size: mem::size_of::<T>() as u32,
             uniform_buffer_model_offset: T::model_offset(),
             per_object_desc_pool,
-            custom_per_frame_uniform_desc: None,
+            per_frame_desc_pool,
+            per_frame_desc,
         };
 
         let albedo_attachment_id = 0;

@@ -71,13 +71,13 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
         let vertex = create_vertex_shader(
             &device,
             // &resources
-            //     .get("../../engine/shaders/build/panel.vert.spv")
+            //     .get("../../engine/shaders/build/ui_rect.vert.spv")
             //     .unwrap()
             //     .read()
             //     .unwrap(),
-            include_bytes!("../../engine/shaders/build/panel.vert.spv"),
+            include_bytes!("../../engine/shaders/build/ui_rect.vert.spv"),
             &[],
-            "panel.vert",
+            "ui_rect.vert",
         )
         .unwrap();
         let pixel = device
