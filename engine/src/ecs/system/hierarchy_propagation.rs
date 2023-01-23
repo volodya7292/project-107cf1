@@ -51,11 +51,7 @@ impl SystemHandler for HierarchyPropagation<'_> {
 
             if global_transform_changed {
                 let model_transform = transform_comps.get(&entity).unwrap();
-
-                let new_global_transform: GlobalTransform =
-                    parent_global_transform.combine(model_transform).into();
-
-                *global_transform = new_global_transform;
+                *global_transform = parent_global_transform.combine(model_transform);
                 self.changed_global_transforms.push(entity);
             }
 

@@ -1,19 +1,20 @@
-use entity_data::{EntityId, SystemAccess};
+use entity_data::{EntityId, EntityStorage, SystemAccess};
 
 use crate::scene::relation::Relation;
 
 pub mod relation;
 
-pub fn collect_children_recursively(access: &SystemAccess, entity: EntityId, children: &mut Vec<EntityId>) {
+/// Pushes new children to `children` in breadth-first order.
+pub fn collect_children_recursively(access: &SystemAccess, entity: &EntityId, children: &mut Vec<EntityId>) {
     let relation_comps = access.component::<Relation>();
 
-    let mut stack = Vec::<EntityId>::with_capacity(64);
-    stack.push(entity);
+    let mut to_visit = Vec::<EntityId>::with_capacity(256);
+    to_visit.push(*entity);
 
-    while let Some(entity) = stack.pop() {
+    while let Some(entity) = to_visit.pop() {
         if let Some(relation) = relation_comps.get(&entity) {
             children.extend(&relation.children);
-            stack.extend(&relation.children);
+            to_visit.extend(&relation.children);
         }
     }
 }

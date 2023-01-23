@@ -231,28 +231,35 @@ impl Application for Game {
             .unwrap(),
         );
         let player_pos = self.main_state.lock().player_pos;
-        let text = renderer.add_object(TextObject::new(
-            component::Transform::new().with_position(DVec3::new(
-                player_pos.x,
-                player_pos.y + 60.0,
-                player_pos.z,
-            )),
-            component::SimpleText::new(StyledString::new(
-                "Govno, my is Gmine".to_owned(),
-                TextStyle::new().with_font(font_id).with_font_size(0.5),
-            ))
-            .with_max_width(3.0)
-            .with_h_align(TextHAlign::LEFT),
-        ));
+        let text = renderer.add_object(
+            None,
+            TextObject::new(
+                component::Transform::new().with_position(DVec3::new(
+                    player_pos.x,
+                    player_pos.y + 60.0,
+                    player_pos.z,
+                )),
+                component::SimpleText::new(StyledString::new(
+                    "Govno, my is Gmine".to_owned(),
+                    TextStyle::new().with_font(font_id).with_font_size(0.5),
+                ))
+                .with_max_width(3.0)
+                .with_h_align(TextHAlign::LEFT),
+            ),
+        );
 
-        let panel = renderer.add_object(VertexMeshObject::new(
-            component::Transform::new()
-                .with_position(DVec3::new(0.0, 0.0, 1.0))
-                .with_scale(Vec3::new(0.5, 0.5, 1.0))
-                .with_use_parent_transform(false),
-            component::MeshRenderConfig::new(mat_pipelines.panel(), false).with_stage(RenderStage::OVERLAY),
-            component::VertexMesh::without_data(4, 1),
-        ));
+        let panel = renderer.add_object(
+            None,
+            VertexMeshObject::new(
+                component::Transform::new()
+                    .with_position(DVec3::new(0.0, 0.0, 1.0))
+                    .with_scale(Vec3::new(0.5, 0.5, 1.0))
+                    .with_use_parent_transform(false),
+                component::MeshRenderConfig::new(mat_pipelines.panel(), false)
+                    .with_stage(RenderStage::OVERLAY),
+                component::VertexMesh::without_data(4, 1),
+            ),
+        );
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {

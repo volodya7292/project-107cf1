@@ -153,16 +153,14 @@ impl OverworldRenderer {
             let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
             let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
 
-            let entity_solid = renderer.add_object(VertexMeshObject::new(
-                transform_comp,
-                render_config_solid,
-                Default::default(),
-            ));
-            let entity_translucent = renderer.add_object(VertexMeshObject::new(
-                transform_comp,
-                render_config_translucent,
-                Default::default(),
-            ));
+            let entity_solid = renderer.add_object(
+                None,
+                VertexMeshObject::new(transform_comp, render_config_solid, Default::default()),
+            );
+            let entity_translucent = renderer.add_object(
+                None,
+                VertexMeshObject::new(transform_comp, render_config_translucent, Default::default()),
+            );
 
             self.entities.insert(
                 pos,

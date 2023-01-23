@@ -4,6 +4,7 @@ pub(crate) mod internal;
 pub mod render_config;
 pub mod simple_text;
 pub mod transform;
+pub mod ui;
 pub mod vertex_mesh;
 
 pub use render_config::MeshRenderConfig;

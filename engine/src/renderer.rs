@@ -28,6 +28,7 @@ use crate::renderer::material::MatComponent;
 use crate::renderer::module::RendererModule;
 use basis_universal::TranscoderTextureFormat;
 use camera::{Frustum, PerspectiveCamera};
+use core::scene;
 use core::utils::HashMap;
 use entity_data::{Archetype, Component, EntityId, EntityStorage, StaticArchetype, System, SystemAccess};
 use index_pool::IndexPool;
@@ -514,7 +515,9 @@ fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
-pub trait SceneObject: StaticArchetype {}
+pub trait SceneObject: StaticArchetype {
+    fn on_added(_renderer: &mut Renderer, _entity: EntityId) {}
+}
 
 #[derive(Archetype)]
 pub struct VertexMeshObject {
@@ -1111,7 +1114,7 @@ impl Renderer {
         self.settings = settings;
     }
 
-    pub fn add_object(&mut self, object: impl SceneObject) -> EntityId {
+    pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> EntityId {
         let comp_ids = object.component_ids();
         let entity = self.storage.add(object);
 
@@ -1119,7 +1122,10 @@ impl Renderer {
             self.dirty_comps.add_with_component_id(id, &entity)
         }
 
-        Self::add_children(&self.storage.access(), self.root_entity, &[entity]);
+        let parent = parent.unwrap_or(self.root_entity);
+        Self::add_children(&self.storage.access(), parent, &[entity]);
+
+        O::on_added(self, entity);
 
         entity
     }
@@ -1175,31 +1181,12 @@ impl Renderer {
     }
 
     // TODO CORE: move to core
-    pub fn collect_children_recursively(
-        access: &SystemAccess,
-        entity: &EntityId,
-        children: &mut Vec<EntityId>,
-    ) {
-        let relation_comps = access.component::<Relation>();
-
-        let mut stack = Vec::<EntityId>::with_capacity(64);
-        stack.push(*entity);
-
-        while let Some(entity) = stack.pop() {
-            if let Some(relation) = relation_comps.get(&entity) {
-                children.extend(&relation.children);
-                stack.extend(&relation.children);
-            }
-        }
-    }
-
-    // TODO CORE: move to core
     /// Removes object and its children
     pub fn remove_object(&mut self, id: &EntityId) {
-        let mut entities_to_remove = Vec::with_capacity(64);
+        let mut entities_to_remove = Vec::with_capacity(256);
         entities_to_remove.push(*id);
 
-        Self::collect_children_recursively(&self.storage.access(), id, &mut entities_to_remove);
+        scene::collect_children_recursively(&self.storage.access(), id, &mut entities_to_remove);
 
         for entity in entities_to_remove {
             // Remove the entity from its parent's child list
