@@ -4,8 +4,8 @@ use std::{mem, slice};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use nalgebra_glm::Mat4;
 
-use core::unwrap_option;
-use core::utils::{HashMap, HashSet};
+use base::unwrap_option;
+use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 
 use crate::ecs::component;

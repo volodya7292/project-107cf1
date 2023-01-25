@@ -1,11 +1,12 @@
-use nalgebra_glm::DVec2;
+use nalgebra_glm::Vec2;
+use std::sync::atomic::AtomicUsize;
 
-pub type Factor = f64;
+pub type Factor = f32;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Position {
     Auto,
-    Relative(DVec2),
+    Relative(Vec2),
 }
 
 impl Default for Position {
@@ -16,8 +17,8 @@ impl Default for Position {
 
 #[derive(Copy, Clone)]
 pub enum Sizing {
-    Exact(f64),
-    Preferred(f64),
+    Exact(f32),
+    Preferred(f32),
     Grow(Factor),
     FitContent,
 }
@@ -30,10 +31,16 @@ impl Default for Sizing {
 
 #[derive(Default, Copy, Clone)]
 pub struct Padding {
-    left: f64,
-    right: f64,
-    top: f64,
-    bottom: f64,
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl Padding {
+    pub(crate) fn size(&self) -> Vec2 {
+        Vec2::new(self.left + self.right, self.top + self.bottom)
+    }
 }
 
 #[repr(u8)]
@@ -68,7 +75,7 @@ pub enum FlowAlign {
     Start,
     Center,
     End,
-    SpaceBetween,
+    // SpaceBetween,
 }
 
 impl Default for FlowAlign {
@@ -88,21 +95,15 @@ impl Default for FlowAlign {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum Alignment {
-    TopLeft,
-    TopCenter,
-    TopRight,
-    CenterLeft,
+pub enum CrossAlign {
+    Start,
     Center,
-    CenterRight,
-    BottomLeft,
-    BottomCenter,
-    BottomRight,
+    End,
 }
 
-impl Default for Alignment {
+impl Default for CrossAlign {
     fn default() -> Self {
-        Self::TopLeft
+        Self::Start
     }
 }
 
@@ -122,13 +123,12 @@ impl Default for Overflow {
 #[derive(Default)]
 pub struct UILayout {
     position: Position,
-    size: [Sizing; 2],
-    self_align: Alignment,
+    pub sizing: [Sizing; 2],
+    self_cross_align: CrossAlign,
     padding: Padding,
     overflow: Overflow,
     content_flow: ContentFlow,
     flow_align: FlowAlign,
-    cross_flow_align: FlowAlign,
 }
 
 impl UILayout {
@@ -150,22 +150,45 @@ impl UILayout {
         }
     }
 
+    pub fn with_width(mut self, width: Sizing) -> Self {
+        self.sizing[0] = width;
+        self
+    }
+
+    pub fn with_height(mut self, height: Sizing) -> Self {
+        self.sizing[1] = height;
+        self
+    }
+
     pub fn position(&self) -> &Position {
         &self.position
     }
 
-    pub fn sizing(&self) -> &[Sizing; 2] {
-        &self.size
+    pub fn padding(&self) -> &Padding {
+        &self.padding
+    }
+
+    pub fn self_cross_align(&self) -> CrossAlign {
+        self.self_cross_align
+    }
+
+    pub fn overflow(&self) -> Overflow {
+        self.overflow
     }
 
     pub fn content_flow(&self) -> ContentFlow {
         self.content_flow
     }
+
+    pub fn flow_align(&self) -> FlowAlign {
+        self.flow_align
+    }
 }
 
 #[derive(Default)]
 pub struct UILayoutCache {
-    pub(crate) intrinsic_min_size: DVec2,
-    // pub(crate) max_size_allowed_by_parent: DVec2,
-    pub(crate) final_size: DVec2,
+    pub(crate) intrinsic_min_size: Vec2,
+    pub(crate) final_size: Vec2,
+    pub(crate) relative_position: Vec2,
+    pub(crate) global_position: Vec2,
 }

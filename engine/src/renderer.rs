@@ -19,17 +19,18 @@
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
-use crate::ecs::component::internal::{GlobalTransform, Relation};
+use crate::ecs::component::internal::GlobalTransform;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::{component, system};
 use crate::renderer::camera::OrthoCamera;
 pub use crate::renderer::dirty_components::DirtyComponents;
 use crate::renderer::material::MatComponent;
 use crate::renderer::module::RendererModule;
+use base::scene;
+use base::scene::relation::Relation;
+use base::utils::HashMap;
 use basis_universal::TranscoderTextureFormat;
 use camera::{Frustum, PerspectiveCamera};
-use core::scene;
-use core::utils::HashMap;
 use entity_data::{Archetype, Component, EntityId, EntityStorage, StaticArchetype, System, SystemAccess};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
@@ -516,7 +517,7 @@ fn calc_group_count(thread_count: u32) -> u32 {
 }
 
 pub trait SceneObject: StaticArchetype {
-    fn on_added(_renderer: &mut Renderer, _entity: EntityId) {}
+    fn on_added(_renderer: &mut Renderer, _entity: &EntityId) {}
 }
 
 #[derive(Archetype)]
@@ -1125,7 +1126,7 @@ impl Renderer {
         let parent = parent.unwrap_or(self.root_entity);
         Self::add_children(&self.storage.access(), parent, &[entity]);
 
-        O::on_added(self, entity);
+        O::on_added(self, &entity);
 
         entity
     }
@@ -1158,7 +1159,7 @@ impl Renderer {
         }
     }
 
-    // TODO CORE: move to core
+    // TODO CORE: move to base
     pub fn add_children(access: &SystemAccess, parent: EntityId, children: &[EntityId]) {
         let mut relation_comps = access.component_mut::<Relation>();
 
@@ -1180,7 +1181,7 @@ impl Renderer {
         parent_relation.children.extend(children);
     }
 
-    // TODO CORE: move to core
+    // TODO CORE: move to base
     /// Removes object and its children
     pub fn remove_object(&mut self, id: &EntityId) {
         let mut entities_to_remove = Vec::with_capacity(256);
@@ -2201,8 +2202,8 @@ impl Renderer {
                     // Note: prev_power_of_two makes sure all reductions are at most by 2x2
                     // which makes sure they are conservative
                     (
-                        core::utils::prev_power_of_two(new_size.0),
-                        core::utils::prev_power_of_two(new_size.1),
+                        base::utils::prev_power_of_two(new_size.0),
+                        base::utils::prev_power_of_two(new_size.1),
                     ),
                     "depth_pyramid",
                 )
@@ -2394,6 +2395,10 @@ impl Renderer {
                     ),
                 ],
             );
+        }
+
+        for (_, module) in &mut self.modules {
+            module.on_resize(new_size);
         }
     }
 

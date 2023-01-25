@@ -5,8 +5,9 @@ use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::renderer::{Internals, SceneObject};
 use crate::{HashSet, Renderer};
-use core::utils::unsafe_slice::UnsafeSlice;
-use core::utils::HashMap;
+use base::scene::relation::Relation;
+use base::utils::unsafe_slice::UnsafeSlice;
+use base::utils::HashMap;
 use entity_data::{Archetype, EntityId};
 use fixedbitset::FixedBitSet;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
@@ -269,7 +270,7 @@ uniform_struct_impl!(ObjectUniformInfo, model);
 
 #[derive(Archetype)]
 pub struct TextObject {
-    relation: component::internal::Relation,
+    relation: Relation,
     global_transform: component::internal::GlobalTransform,
     transform: component::Transform,
     renderer: component::MeshRenderConfig,

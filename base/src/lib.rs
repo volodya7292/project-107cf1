@@ -19,6 +19,8 @@ use std::collections::hash_map;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub static mut COUNTER: usize = 0;
+
 pub mod main_registry;
 pub mod overworld;
 // pub mod overworld_orchestrator;

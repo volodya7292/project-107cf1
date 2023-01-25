@@ -12,7 +12,7 @@ where
 
     for i in (0..indices.len()).step_by(3) {
         let ind = &indices[i..(i + 3)];
-        let normal = core::utils::calc_triangle_normal(
+        let normal = base::utils::calc_triangle_normal(
             &vertices[ind[0] as usize].position(),
             &vertices[ind[1] as usize].position(),
             &vertices[ind[2] as usize].position(),

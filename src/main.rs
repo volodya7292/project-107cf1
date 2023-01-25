@@ -53,7 +53,7 @@ fn init_threads() {
 
     let default_threads = available_threads;
 
-    core::execution::init(default_threads, coroutine_threads);
+    base::execution::init(default_threads, coroutine_threads);
     engine::execution::init(render_threads);
 }
 
@@ -69,7 +69,7 @@ fn main() {
     let game = Box::new(Game::init());
     let engine = Engine::init(PROGRAM_NAME, 4, game);
 
-    core::execution::spawn_coroutine(async {
+    base::execution::spawn_coroutine(async {
         println!("coroutine test!");
     });
 

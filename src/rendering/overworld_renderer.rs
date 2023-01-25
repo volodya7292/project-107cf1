@@ -1,11 +1,11 @@
 use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
 use crate::default_resources::DefaultResourceMapping;
 use crate::resource_mapping::ResourceMapping;
-use core::overworld::orchestrator::get_side_clusters;
-use core::overworld::orchestrator::OverworldUpdateResult;
-use core::overworld::position::ClusterPos;
-use core::overworld::LoadedClusters;
-use core::utils::{HashMap, HashSet};
+use base::overworld::orchestrator::get_side_clusters;
+use base::overworld::orchestrator::OverworldUpdateResult;
+use base::overworld::position::ClusterPos;
+use base::overworld::LoadedClusters;
+use base::utils::{HashMap, HashSet};
 use engine::ecs::component;
 use engine::renderer::{Renderer, VertexMeshObject};
 use entity_data::EntityId;

@@ -1,12 +1,13 @@
 use crate::rendering::textured_block_model::{PackedVertex, TexturedBlockModel, Vertex};
 use crate::resource_mapping::ResourceMapping;
-use core::overworld::facing::Facing;
-use core::overworld::light_state::LightState;
-use core::overworld::liquid_state::LiquidState;
-use core::overworld::position::ClusterBlockPos;
-use core::overworld::raw_cluster::BlockDataImpl;
-use core::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
-use core::registry::Registry;
+use base::overworld::facing::Facing;
+use base::overworld::light_state::LightState;
+use base::overworld::liquid_state::LiquidState;
+use base::overworld::position::ClusterBlockPos;
+use base::overworld::raw_cluster::BlockDataImpl;
+use base::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
+use base::registry::Registry;
+use base::utils::Bool;
 use engine::attributes_impl;
 use engine::renderer::vertex_mesh::{VAttributes, VertexMeshCreate, VertexPositionImpl};
 use engine::renderer::VertexMesh;
@@ -296,7 +297,7 @@ fn calc_liquid_height(
         }
 
         // if there is no liquid above all four corners, lower current level slightly
-        let top_factor = 1.0 - (level_bias_allowed as u32 as f32) * 0.1;
+        let top_factor = 1.0 - level_bias_allowed.into_f32() * 0.1;
         let factor = height_sum as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
 
         top_factor * factor
@@ -368,7 +369,7 @@ fn construct_liquid_quad(
                 Vec3::new(1.0, liquid_heights[2], 0.0),
             ];
             normal =
-                core::utils::calc_triangle_normal(&quad_vertices[0], &quad_vertices[1], &quad_vertices[2]);
+                base::utils::calc_triangle_normal(&quad_vertices[0], &quad_vertices[1], &quad_vertices[2]);
         }
         Facing::NegativeX => {
             quad_vertices = [
@@ -467,7 +468,7 @@ fn gen_block_vertices(
 
         for mut quad in model.get_inner_quads() {
             let mut quad_vertices = quad.vertices;
-            let normal = core::utils::calc_triangle_normal(
+            let normal = base::utils::calc_triangle_normal(
                 &quad_vertices[0].position,
                 &quad_vertices[1].position,
                 &quad_vertices[2].position,
@@ -552,7 +553,7 @@ fn gen_block_vertices(
         for quad in model.get_quads_by_facing(facing) {
             let mut quad_vertices = quad.vertices;
 
-            let normal = core::utils::calc_triangle_normal(
+            let normal = base::utils::calc_triangle_normal(
                 &quad_vertices[0].position,
                 &quad_vertices[1].position,
                 &quad_vertices[2].position,

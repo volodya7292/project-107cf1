@@ -1,5 +1,5 @@
-use core::once_cell::sync::OnceCell;
-use core::utils::threading::{SafeThreadPool, TaskPriority};
+use base::once_cell::sync::OnceCell;
+use base::utils::threading::{SafeThreadPool, TaskPriority};
 
 static REALTIME_THREAD_POOL: OnceCell<SafeThreadPool> = OnceCell::new();
 

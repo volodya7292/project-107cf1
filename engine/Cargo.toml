@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 vk-wrapper = { path = "vk-wrapper" }
-core = { path = "../core" }
+base = { path = "../base" }
 msdfgen = { path = "msdfgen" }
 nalgebra = "0.32"
 nalgebra-glm = "0.18"

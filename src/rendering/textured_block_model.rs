@@ -5,13 +5,13 @@ use nalgebra_glm as glm;
 use nalgebra_glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
 use smallvec::{smallvec, SmallVec};
 
-use core::overworld::block_model;
-use core::overworld::block_model::{BlockModel, ContentType, Quad};
-use core::overworld::facing::Facing;
-use core::overworld::occluder::Occluder;
-use core::overworld::raw_cluster::RawCluster;
-use core::physics::aabb::AABB;
-use core::registry::Registry;
+use base::overworld::block_model;
+use base::overworld::block_model::{BlockModel, ContentType, Quad};
+use base::overworld::facing::Facing;
+use base::overworld::occluder::Occluder;
+use base::overworld::raw_cluster::RawCluster;
+use base::physics::aabb::AABB;
+use base::registry::Registry;
 use engine::attributes_impl;
 use engine::renderer::vertex_mesh::VertexPositionImpl;
 
@@ -258,7 +258,7 @@ impl TexturedBlockModel {
             .map(|(quad, q_mat)| {
                 let material_id = q_mat.material_id as u32;
                 let vertices = quad.vertices();
-                let normal = core::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
+                let normal = base::utils::calc_triangle_normal(&vertices[0], &vertices[1], &vertices[2]);
 
                 let tex_vertices: SmallVec<[_; 4]> = vertices
                     .iter()

@@ -1,4 +1,4 @@
-use core::utils::resource_file::ResourceFile;
+use base::utils::resource_file::ResourceFile;
 use engine::renderer::Renderer;
 use engine::uniform_struct_impl;
 use nalgebra as na;

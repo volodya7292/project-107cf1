@@ -1,15 +1,9 @@
 use crate::ecs::component::Transform;
-use core::utils::IndexSet;
+use base::utils::IndexSet;
 use entity_data::EntityId;
 use nalgebra::Rotation3;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, Mat4, Vec3};
-
-#[derive(Default)]
-pub struct Relation {
-    pub parent: EntityId,
-    pub children: IndexSet<EntityId>,
-}
 
 #[derive(Copy, Clone)]
 pub struct GlobalTransform {

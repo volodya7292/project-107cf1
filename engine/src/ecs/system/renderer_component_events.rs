@@ -7,8 +7,8 @@ use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
 use smallvec::{smallvec, SmallVec};
 
-use core::unwrap_option;
-use core::utils::{HashMap, HashSet};
+use base::unwrap_option;
+use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};

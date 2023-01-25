@@ -5,37 +5,39 @@ use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
-use core::execution::default_queue;
-use core::main_registry::{MainRegistry, StatelessBlock};
-use core::overworld::accessor::ClustersAccessorCache;
-use core::overworld::accessor::ReadOnlyOverworldAccessor;
-use core::overworld::accessor::ReadOnlyOverworldAccessorImpl;
-use core::overworld::actions_storage::OverworldActionsStorage;
-use core::overworld::actions_storage::StateChangeInfo;
-use core::overworld::block::{AnyBlockState, Block, BlockState};
-use core::overworld::facing::Facing;
-use core::overworld::light_state::LightState;
-use core::overworld::liquid_state::LiquidState;
-use core::overworld::orchestrator::OverworldOrchestrator;
-use core::overworld::position::{BlockPos, ClusterPos};
-use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
-use core::overworld::Overworld;
-use core::overworld::ReadOnlyOverworld;
-use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
-use core::physics::aabb::{AABBRayIntersection, AABB};
-use core::physics::MOTION_EPSILON;
-use core::registry::Registry;
-use core::utils::resource_file::ResourceFile;
-use core::utils::threading::SafeThreadPool;
-use core::utils::timer::IntervalTimer;
-use core::utils::{HashMap, HashSet, MO_RELAXED};
+use base::execution::default_queue;
+use base::main_registry::{MainRegistry, StatelessBlock};
+use base::overworld::accessor::ClustersAccessorCache;
+use base::overworld::accessor::ReadOnlyOverworldAccessor;
+use base::overworld::accessor::ReadOnlyOverworldAccessorImpl;
+use base::overworld::actions_storage::OverworldActionsStorage;
+use base::overworld::actions_storage::StateChangeInfo;
+use base::overworld::block::{AnyBlockState, Block, BlockState};
+use base::overworld::facing::Facing;
+use base::overworld::light_state::LightState;
+use base::overworld::liquid_state::LiquidState;
+use base::overworld::orchestrator::OverworldOrchestrator;
+use base::overworld::position::{BlockPos, ClusterPos};
+use base::overworld::raw_cluster::{BlockDataImpl, RawCluster};
+use base::overworld::Overworld;
+use base::overworld::ReadOnlyOverworld;
+use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
+use base::physics::aabb::{AABBRayIntersection, AABB};
+use base::physics::MOTION_EPSILON;
+use base::registry::Registry;
+use base::utils::resource_file::ResourceFile;
+use base::utils::threading::SafeThreadPool;
+use base::utils::timer::IntervalTimer;
+use base::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
+use engine::ecs::component::ui::{Sizing, UILayout};
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
+use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
 use engine::renderer::{Renderer, VertexMeshObject};
 use engine::{renderer, Application, Input};
-use entity_data::AnyState;
+use entity_data::{AnyState, EntityId};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
 use parking_lot::{Mutex, RwLock};
@@ -49,6 +51,7 @@ use std::sync::{atomic, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 use vk_wrapper::Adapter;
+use winit::dpi::LogicalSize;
 use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
@@ -149,10 +152,7 @@ impl Application for Game {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window {
         let window = WindowBuilder::new()
             .with_title(PROGRAM_NAME)
-            .with_inner_size(winit::dpi::PhysicalSize::new(
-                DEF_WINDOW_SIZE.0,
-                DEF_WINDOW_SIZE.1,
-            ))
+            .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
             .with_resizable(true)
             .build(event_loop)
             .unwrap();
@@ -248,18 +248,34 @@ impl Application for Game {
             ),
         );
 
+        // let panel = renderer.add_object(
+        //     None,
+        //     VertexMeshObject::new(
+        //         component::Transform::new()
+        //             .with_position(DVec3::new(0.0, 0.0, 1.0))
+        //             .with_scale(Vec3::new(0.5, 0.5, 1.0))
+        //             .with_use_parent_transform(false),
+        //         component::MeshRenderConfig::new(mat_pipelines.panel(), false)
+        //             .with_stage(RenderStage::OVERLAY),
+        //         component::VertexMesh::without_data(4, 1),
+        //     ),
+        // );
+
+        let ui_renderer = renderer.module_mut::<UIRenderer>().unwrap();
+        let root_ui_entity = *ui_renderer.root_ui_entity();
         let panel = renderer.add_object(
-            None,
-            VertexMeshObject::new(
-                component::Transform::new()
-                    .with_position(DVec3::new(0.0, 0.0, 1.0))
-                    .with_scale(Vec3::new(0.5, 0.5, 1.0))
-                    .with_use_parent_transform(false),
+            Some(root_ui_entity),
+            UIObject::new(
+                UILayout::new()
+                    .with_width(Sizing::Exact(300.0))
+                    .with_height(Sizing::Exact(150.0)),
                 component::MeshRenderConfig::new(mat_pipelines.panel(), false)
                     .with_stage(RenderStage::OVERLAY),
                 component::VertexMesh::without_data(4, 1),
+                (),
             ),
         );
+        println!("{:?}", panel);
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -313,7 +329,7 @@ impl Application for Game {
                 .is_some()
             {
                 // Free fall
-                motion_delta.y -= (core::physics::G_ACCEL * curr_state.fall_time) * delta_time;
+                motion_delta.y -= (base::physics::G_ACCEL * curr_state.fall_time) * delta_time;
 
                 // Jump force
                 motion_delta.y += curr_state.curr_jump_force * delta_time;
@@ -521,7 +537,7 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
 
     player_on_update(&main_state, &mut new_actions);
 
-    let update_res = core::on_tick(
+    let update_res = base::on_tick(
         curr_tick,
         &curr_state.overworld.main_registry().registry(),
         &mut curr_state.overworld_orchestrator.lock(),

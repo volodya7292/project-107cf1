@@ -6,11 +6,11 @@
       <sourceFolder url="file://$MODULE_DIR$/engine/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/common/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/msdfgen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/vk-wrapper/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/engine/vk-wrapper/vma/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/core/macos/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/base/macos/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/base/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

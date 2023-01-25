@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 
-use core::utils::{HashMap, HashSet};
+use base::utils::{HashMap, HashSet};
 
 use crate::ecs::component;
 use crate::renderer::vertex_mesh::RawVertexMesh;

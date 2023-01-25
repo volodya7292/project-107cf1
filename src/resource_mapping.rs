@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use core::overworld::block_model::BlockModel;
-use core::registry::Registry;
-use core::utils::resource_file::ResourceRef;
+use base::overworld::block_model::BlockModel;
+use base::registry::Registry;
+use base::utils::resource_file::ResourceRef;
 use engine::renderer::material::MatComponent;
 use engine::renderer::TextureAtlasType;
 

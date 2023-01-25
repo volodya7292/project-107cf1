@@ -15,6 +15,7 @@ pub trait RendererModule {
     fn on_update(&mut self, _internals: renderer::Internals) -> Option<Arc<Mutex<CmdList>>> {
         None
     }
+    fn on_resize(&mut self, _new_size: (u32, u32)) {}
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }

@@ -5,9 +5,9 @@ use crate::renderer::{
     PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY, PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
+use base::utils::resource_file::ResourceRef;
+use base::utils::UInt;
 use basis_universal::TranscodeParameters;
-use core::utils::resource_file::ResourceRef;
-use core::utils::UInt;
 use smallvec::SmallVec;
 use std::mem;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ impl Renderer {
         let width = img_info.m_width;
         let height = img_info.m_height;
 
-        if !core::utils::is_pow_of_2(width as u64)
+        if !base::utils::is_pow_of_2(width as u64)
             || width != height
             || width < (self.settings.texture_quality as u32)
         {

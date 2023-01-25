@@ -8,18 +8,18 @@ edition = "2021"
 members = [
     "engine/vk-wrapper",
     "engine/vk-wrapper/vma",
-    "core/macos",
+    "base/macos",
     "engine/msdfgen",
     "engine",
     "common",
-    "core",
+    "base",
     "client",
 ]
 
 [dependencies]
 engine = { path = "engine" }
 vk-wrapper = { path = "engine/vk-wrapper" }
-core = { path = "core" }
+base = { path = "base" }
 log = "0.4"
 simple_logger = "4.0"
 nalgebra = "0.32"
@@ -27,7 +27,6 @@ nalgebra-glm = "0.18"
 image = { version = "0.24", default-features = false, features = ["png"] }
 rayon = "1.6"
 crossbeam-channel = "0.5"
-futures = "0.3"
 noise = { version = "0.8", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"

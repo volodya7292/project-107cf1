@@ -41,6 +41,23 @@ pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
+pub trait Bool {
+    /// Converts `false` into `0.0` and `true` into `1.0`.
+    fn into_f32(self) -> f32;
+    /// Converts `false` into `0.0` and `true` into `1.0`.
+    fn into_f64(self) -> f64;
+}
+
+impl Bool for bool {
+    fn into_f32(self) -> f32 {
+        self as u32 as f32
+    }
+
+    fn into_f64(self) -> f64 {
+        self as u64 as f64
+    }
+}
+
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {

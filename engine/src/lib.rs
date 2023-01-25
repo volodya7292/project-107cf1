@@ -4,17 +4,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lazy_static::lazy_static;
+use nalgebra_glm::Vec2;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
 
-use core::utils::{HashSet, MO_RELAXED};
+use base::utils::{HashSet, MO_RELAXED};
 use vk_wrapper as vkw;
 
 use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
 use crate::renderer::module::text_renderer::TextRenderer;
+use crate::renderer::module::ui_renderer::UIRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 
 pub mod ecs;
@@ -120,7 +122,10 @@ impl Engine {
         );
 
         let text_renderer = TextRenderer::new(&mut renderer);
+        let ui_renderer = UIRenderer::new(&mut renderer);
+
         renderer.register_module(text_renderer);
+        renderer.register_module(ui_renderer);
 
         app.on_engine_initialized(&mut renderer);
 
@@ -186,6 +191,12 @@ impl Engine {
                             self.renderer.on_resize((size.width, size.height));
                         }
                     }
+                    WindowEvent::ScaleFactorChanged {
+                        scale_factor: _scale_factor,
+                        new_inner_size: size,
+                    } => {
+                        self.renderer.on_resize((size.width, size.height));
+                    }
                     _ => {}
                 },
                 Event::MainEventsCleared => {
@@ -215,7 +226,7 @@ impl Engine {
                     if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
                         expected_dt = 1.0 / (limit as f64);
                         let to_wait = (expected_dt - self.delta_time).max(0.0);
-                        core::utils::high_precision_sleep(
+                        base::utils::high_precision_sleep(
                             Duration::from_secs_f64(to_wait),
                             Duration::from_micros(50),
                         );

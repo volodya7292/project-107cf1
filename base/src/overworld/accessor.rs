@@ -5,7 +5,7 @@ use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
 use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
 use crate::registry::Registry;
-use crate::utils::{HashMap, MO_RELAXED};
+use crate::utils::{Bool, HashMap, MO_RELAXED};
 use entity_data::EntityStorage;
 use lazy_static::lazy_static;
 use nalgebra_glm as glm;
@@ -186,7 +186,7 @@ impl ReadOnlyOverworldAccessorImpl for OverworldAccessor {
         let curr_origin = *ray_origin;
         let mut curr_block_pos = glm::floor(ray_origin);
         let mut dt = curr_block_pos.zip_zip_map(&curr_origin, ray_dir, |pos, origin, dir| {
-            (pos + (dir > 0.0) as i64 as f64 - origin) / dir
+            (pos + (dir > 0.0).into_f64() - origin) / dir
         });
         let mut t = 0.0;
 

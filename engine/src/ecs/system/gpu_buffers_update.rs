@@ -4,7 +4,7 @@ use std::time::Instant;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use parking_lot::Mutex;
 
-use core::utils::{HashMap, HashSet};
+use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 use vk_wrapper::WaitSemaphore;
 

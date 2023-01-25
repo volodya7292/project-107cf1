@@ -1,7 +1,7 @@
 use std::collections::hash_map;
 use std::sync::Arc;
 
-use core::utils::HashMap;
+use base::utils::HashMap;
 use vk_wrapper as vkw;
 use vk_wrapper::{AttachmentColorBlend, PrimitiveTopology};
 

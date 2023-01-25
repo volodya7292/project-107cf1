@@ -1,6 +1,7 @@
 use crate::ecs::component;
-use crate::ecs::component::internal::{GlobalTransform, Relation};
-use core::utils::HashSet;
+use crate::ecs::component::internal::GlobalTransform;
+use base::scene::relation::Relation;
+use base::utils::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::time::Instant;
 
@@ -47,13 +48,16 @@ impl SystemHandler for HierarchyPropagation<'_> {
             let global_transform_changed =
                 parent_transform_changed || self.dirty_transform_comps.contains(&entity);
 
-            let global_transform = global_transform_comps.get_mut(&entity).unwrap();
-
-            if global_transform_changed {
-                let model_transform = transform_comps.get(&entity).unwrap();
-                *global_transform = parent_global_transform.combine(model_transform);
-                self.changed_global_transforms.push(entity);
-            }
+            let global_transform = if let Some(global_transform) = global_transform_comps.get_mut(&entity) {
+                if global_transform_changed {
+                    let model_transform = transform_comps.get(&entity).unwrap();
+                    *global_transform = parent_global_transform.combine(model_transform);
+                    self.changed_global_transforms.push(entity);
+                }
+                *global_transform
+            } else {
+                Default::default()
+            };
 
             if let Some(relation) = relation_comps.get(&entity) {
                 // Because we're popping from the stack, insert in reverse order
@@ -61,7 +65,7 @@ impl SystemHandler for HierarchyPropagation<'_> {
                 stack.extend(relation.children.iter().rev().map(|e| StackEntry {
                     entity: *e,
                     parent_global_transform_changed: global_transform_changed,
-                    parent_global_transform: *global_transform,
+                    parent_global_transform: global_transform,
                 }));
             }
         }
