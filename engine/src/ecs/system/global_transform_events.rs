@@ -33,7 +33,9 @@ impl SystemHandler for GlobalTransformEvents<'_> {
             let global_transform = unwrap_option!(global_transform_comps.get(entity), continue);
             let render_config = unwrap_option!(renderer_comps.get(entity), continue);
 
-            let pipe = &self.material_pipelines[render_config.mat_pipeline as usize];
+            let Some(pipe) = self.material_pipelines.get(render_config.mat_pipeline as usize) else {
+                continue;
+            };
 
             let matrix = global_transform.matrix_f32();
             let matrix_bytes =

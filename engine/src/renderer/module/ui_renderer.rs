@@ -34,38 +34,6 @@ pub trait UIElement: Send + Sync + 'static {
 impl UIElement for () {}
 
 #[derive(Archetype)]
-pub struct InvisibleUIObject<E>
-where
-    E: UIElement,
-{
-    relation: Relation,
-
-    layout_cache: UILayoutCache,
-    layout: UILayout,
-    element: E,
-}
-
-impl<E: UIElement> InvisibleUIObject<E> {
-    pub fn new(layout: UILayout, element: E) -> Self {
-        Self {
-            relation: Default::default(),
-            layout_cache: Default::default(),
-            layout,
-            element,
-        }
-    }
-
-    pub(crate) fn with_layout_cache(mut self, layout_cache: UILayoutCache) -> Self {
-        self.layout_cache = layout_cache;
-        self
-    }
-}
-
-impl<E: UIElement> SceneObject for UIObject<E> {
-    fn on_added(renderer: &mut Renderer, entity: &EntityId) {}
-}
-
-#[derive(Archetype)]
 pub struct UIObject<E>
 where
     E: UIElement,
@@ -83,26 +51,36 @@ where
 }
 
 impl<E: UIElement> UIObject<E> {
-    pub fn new(
-        layout: UILayout,
-        renderer: component::MeshRenderConfig,
-        mesh: component::VertexMesh,
-        element: E,
-    ) -> Self {
+    pub fn new(layout: UILayout, element: E) -> Self {
         Self {
             relation: Default::default(),
             global_transform: Default::default(),
-            transform: Default::default(),
-            renderer,
-            mesh,
+            transform: component::Transform::new().with_use_parent_transform(false),
+            renderer: Default::default(),
+            mesh: Default::default(),
             layout_cache: Default::default(),
             layout,
             element,
         }
     }
+
+    pub fn with_renderer(mut self, renderer: component::MeshRenderConfig) -> Self {
+        self.renderer = renderer;
+        self
+    }
+
+    pub fn with_mesh(mut self, mesh: component::VertexMesh) -> Self {
+        self.mesh = mesh;
+        self
+    }
+
+    pub(crate) fn with_layout_cache(mut self, layout_cache: UILayoutCache) -> Self {
+        self.layout_cache = layout_cache;
+        self
+    }
 }
 
-impl<E: UIElement> SceneObject for InvisibleUIObject<E> {}
+impl<E: UIElement> SceneObject for UIObject<E> {}
 
 struct ChildSizingInfo {
     entity: EntityId,
@@ -210,7 +188,7 @@ impl UIRenderer {
     pub fn new(renderer: &mut Renderer) -> Self {
         let root_ui_entity = renderer.add_object(
             None,
-            InvisibleUIObject::new(UILayout::new(), ()).with_layout_cache(UILayoutCache {
+            UIObject::new(UILayout::new(), ()).with_layout_cache(UILayoutCache {
                 intrinsic_min_size: Default::default(),
                 final_size: Default::default(),
                 relative_position: Default::default(),
@@ -245,6 +223,8 @@ impl UIRenderer {
         let mut linear_tree = Vec::with_capacity(layout_comps.count_entities());
         linear_tree.push(self.root_ui_entity);
         base::scene::collect_children_recursively(&data, &self.root_ui_entity, &mut linear_tree);
+
+        // TODO: account for window.scale_factor()
 
         // Calculate minimum sizes starting from children (bottom of the tree)
         for node in linear_tree.iter().rev() {
@@ -369,9 +349,7 @@ impl UIRenderer {
             )
         }
 
-        let mut i = 0.0;
-
-        for node in &linear_tree {
+        for (i, node) in linear_tree.iter().enumerate() {
             let Some(transform) = transform_comps.get_mut(node) else {
                 continue;
             };
@@ -381,9 +359,11 @@ impl UIRenderer {
             let norm_size = cache.final_size.component_div(&self.base_resolution);
 
             transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
-            transform.position =
-                DVec3::new(norm_pos.x as f64, 1.0 - norm_size.y as f64 - norm_pos.y as f64, i);
-            i += 1.0;
+            transform.position = DVec3::new(
+                norm_pos.x as f64,
+                1.0 - norm_size.y as f64 - norm_pos.y as f64,
+                i as f64,
+            );
 
             internals.dirty_comps.add::<component::Transform>(node);
         }

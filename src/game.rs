@@ -269,11 +269,13 @@ impl Application for Game {
                 UILayout::new()
                     .with_width(Sizing::Exact(300.0))
                     .with_height(Sizing::Exact(150.0)),
+                (),
+            )
+            .with_renderer(
                 component::MeshRenderConfig::new(mat_pipelines.panel(), false)
                     .with_stage(RenderStage::OVERLAY),
-                component::VertexMesh::without_data(4, 1),
-                (),
-            ),
+            )
+            .with_mesh(component::VertexMesh::without_data(4, 1)),
         );
         println!("{:?}", panel);
     }
