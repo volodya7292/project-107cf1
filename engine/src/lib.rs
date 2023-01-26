@@ -1,24 +1,3 @@
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use lazy_static::lazy_static;
-use nalgebra_glm::Vec2;
-use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::Window;
-
-use base::utils::{HashSet, MO_RELAXED};
-use vk_wrapper as vkw;
-
-use crate::execution::realtime_queue;
-use crate::input::{Keyboard, Mouse};
-use crate::renderer::module::text_renderer::TextRenderer;
-use crate::renderer::module::ui_renderer::UIRenderer;
-use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-
 pub mod ecs;
 pub mod execution;
 pub mod input;
@@ -27,6 +6,26 @@ pub mod renderer;
 #[cfg(test)]
 mod tests;
 pub mod utils;
+
+use crate::execution::realtime_queue;
+use crate::input::{Keyboard, Mouse};
+use crate::platform::{Platform, PlatformImpl};
+use crate::renderer::module::text_renderer::TextRenderer;
+use crate::renderer::module::ui_renderer::UIRenderer;
+use crate::renderer::{FPSLimit, Renderer, RendererTimings};
+use base::utils::{HashSet, MO_RELAXED};
+use lazy_static::lazy_static;
+use nalgebra_glm::Vec2;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use vk_wrapper as vkw;
+use winit::event::WindowEvent;
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::monitor::VideoMode;
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::Window;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -95,6 +94,17 @@ pub trait Application {
     );
 }
 
+/// Calculates scale factor relative to `video_mode`.
+/// On macOS display size may be differ from current video mode size.
+fn calc_real_scale_factor(curr_window: &Window) -> f64 {
+    let curr_monitor = curr_window.current_monitor().unwrap();
+    let mode = utils::find_best_video_mode(&curr_monitor);
+    let display_width = curr_monitor.size();
+    let scale_factor = curr_window.scale_factor();
+
+    mode.size().width as f64 / display_width.width as f64 * scale_factor
+}
+
 impl Engine {
     pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
@@ -131,6 +141,9 @@ impl Engine {
 
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
+
+        let dpi = Platform::get_monitor_dpi(&curr_monitor).unwrap();
+        println!("{}", dpi);
 
         Engine {
             renderer,
@@ -188,14 +201,19 @@ impl Engine {
                     }
                     WindowEvent::Resized(size) => {
                         if size.width != 0 && size.height != 0 {
-                            self.renderer.on_resize((size.width, size.height));
+                            let real_scale_factor = calc_real_scale_factor(&self.main_window);
+                            self.renderer
+                                .on_resize((size.width, size.height), real_scale_factor);
                         }
                     }
                     WindowEvent::ScaleFactorChanged {
-                        scale_factor: _scale_factor,
+                        scale_factor: _,
                         new_inner_size: size,
                     } => {
-                        self.renderer.on_resize((size.width, size.height));
+                        let real_scale_factor = calc_real_scale_factor(&self.main_window);
+                        println!("scaling changed {}", real_scale_factor);
+                        self.renderer
+                            .on_resize((size.width, size.height), real_scale_factor);
                     }
                     _ => {}
                 },

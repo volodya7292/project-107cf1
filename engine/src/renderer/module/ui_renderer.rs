@@ -19,8 +19,9 @@ use vk_wrapper::{CmdList, Device};
 pub struct UIRenderer {
     device: Arc<Device>,
     root_ui_entity: EntityId,
-    base_resolution: Vec2,
-    base_resolution_dirty: bool,
+    root_element_size: Vec2,
+    root_element_size_dirty: bool,
+    scale_factor: f32,
 }
 
 pub struct DefaultStyling {}
@@ -199,8 +200,9 @@ impl UIRenderer {
         Self {
             device: Arc::clone(&renderer.device),
             root_ui_entity,
-            base_resolution: Default::default(),
-            base_resolution_dirty: false,
+            root_element_size: Default::default(),
+            root_element_size_dirty: false,
+            scale_factor: 1.0,
         }
     }
 
@@ -208,9 +210,14 @@ impl UIRenderer {
         &self.root_ui_entity
     }
 
-    fn set_base_resolution(&mut self, resolution: Vec2) {
-        self.base_resolution = resolution;
-        self.base_resolution_dirty = true;
+    fn set_root_element_size(&mut self, logical_size: Vec2) {
+        self.root_element_size = logical_size;
+        self.root_element_size_dirty = true;
+    }
+
+    fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
+        self.root_element_size_dirty = true;
     }
 
     fn update_hierarchy(&mut self, internals: &mut Internals) {
@@ -355,8 +362,8 @@ impl UIRenderer {
             };
             let cache = layout_cache_comps.get(node).unwrap();
 
-            let norm_pos = cache.global_position.component_div(&self.base_resolution);
-            let norm_size = cache.final_size.component_div(&self.base_resolution);
+            let norm_pos = cache.global_position.component_div(&self.root_element_size);
+            let norm_size = cache.final_size.component_div(&self.root_element_size);
 
             transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
             transform.position = DVec3::new(
@@ -378,18 +385,18 @@ impl RendererModule for UIRenderer {
     fn on_update(&mut self, mut internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
         let layout_changes = internals.dirty_comps.take_changes::<UILayout>();
 
-        if self.base_resolution_dirty {
+        if self.root_element_size_dirty {
             let layout = internals
                 .storage
                 .get_mut::<UILayout>(&self.root_ui_entity)
                 .unwrap();
             layout.sizing = [
-                Sizing::Exact(self.base_resolution.x),
-                Sizing::Exact(self.base_resolution.y),
+                Sizing::Exact(self.root_element_size.x),
+                Sizing::Exact(self.root_element_size.y),
             ];
             internals.dirty_comps.add::<UILayout>(&self.root_ui_entity);
 
-            self.base_resolution_dirty = false;
+            self.root_element_size_dirty = false;
         }
 
         if layout_changes.is_empty() {
@@ -401,8 +408,10 @@ impl RendererModule for UIRenderer {
         None
     }
 
-    fn on_resize(&mut self, size: (u32, u32)) {
-        self.set_base_resolution(Vec2::new(size.0 as f32, size.1 as f32));
+    fn on_resize(&mut self, physical_size: (u32, u32), scale_factor: f64) {
+        let scale_factor = scale_factor as f32;
+        self.set_scale_factor(scale_factor);
+        self.set_root_element_size(Vec2::new(physical_size.0 as f32, physical_size.1 as f32) / scale_factor);
     }
 
     fn as_any(&self) -> &dyn Any {

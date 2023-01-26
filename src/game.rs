@@ -277,7 +277,6 @@ impl Application for Game {
             )
             .with_mesh(component::VertexMesh::without_data(4, 1)),
         );
-        println!("{:?}", panel);
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -437,7 +436,7 @@ impl Application for Game {
                                 if let Some(_) = main_window.fullscreen() {
                                     main_window.set_fullscreen(None);
                                 } else {
-                                    let mode = utils::find_largest_video_mode(
+                                    let mode = engine::utils::find_best_video_mode(
                                         &main_window.current_monitor().unwrap(),
                                     );
                                     main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))

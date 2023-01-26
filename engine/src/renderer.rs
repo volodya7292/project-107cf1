@@ -1089,7 +1089,7 @@ impl Renderer {
             vertex_meshes_to_destroy: Vec::with_capacity(1024),
             renderables_to_destroy: Vec::with_capacity(1024),
         };
-        renderer.on_resize(size);
+        renderer.on_resize(size, 1.0);
 
         renderer
     }
@@ -2173,7 +2173,7 @@ impl Renderer {
         timings
     }
 
-    pub fn on_resize(&mut self, new_size: (u32, u32)) {
+    pub fn on_resize(&mut self, new_size: (u32, u32), scale_factor: f64) {
         self.surface_size = new_size;
         self.surface_changed = true;
 
@@ -2398,7 +2398,7 @@ impl Renderer {
         }
 
         for (_, module) in &mut self.modules {
-            module.on_resize(new_size);
+            module.on_resize(new_size, scale_factor);
         }
     }
 
