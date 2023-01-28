@@ -61,10 +61,6 @@ impl Bool for bool {
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {
-    // TODO: remove when std log2 is stable
-    fn log2(self) -> Self;
-    // TODO: remove when std log is stable
-    fn log(self, base: Self) -> Self;
     // TODO: remove when std div_ceil is stable
     fn div_ceil(self, other: Self) -> Self;
     // TODO: remove when std next_multiple_of is stable
@@ -76,28 +72,6 @@ pub trait Int {}
 macro_rules! uint_impl {
     ($($t: ty)*) => ($(
         impl UInt for $t {
-            fn log2(self) -> Self {
-                <$t>::BITS as $t - self.leading_zeros() as $t - 1
-            }
-
-            fn log(self, base: Self) -> Self {
-                let mut n = 0;
-                let mut r = self;
-
-                // Optimization for 128 bit wide integers.
-                if Self::BITS == 128 {
-                    let b = Self::log2(self) / (Self::log2(base) + 1);
-                    n += b;
-                    r /= base.pow(b as u32);
-                }
-
-                while r >= base {
-                    r /= base;
-                    n += 1;
-                }
-                n
-            }
-
             fn div_ceil(self, other: Self) -> Self {
                 (self + other - 1) / other
             }

@@ -55,8 +55,8 @@ impl Renderer {
 
         t.end_transcoding();
 
-        let first_level = UInt::log2(width / (self.settings.texture_quality as u32));
-        let last_level = UInt::log2(width / 4); // BC block size = 4x4
+        let first_level = (width / (self.settings.texture_quality as u32)).ilog2();
+        let last_level = (width / 4).ilog2(); // BC block size = 4x4
 
         self.texture_atlases[atlas_type as usize]
             .set_texture(
