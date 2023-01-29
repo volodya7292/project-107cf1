@@ -743,6 +743,7 @@ dependencies = [
  "fixedbitset",
  "index-pool",
  "lazy_static",
+ "log",
  "msdfgen",
  "nalgebra",
  "nalgebra-glm",

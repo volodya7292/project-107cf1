@@ -365,10 +365,10 @@ impl UIRenderer {
             let norm_pos = cache.global_position.component_div(&self.root_element_size);
             let norm_size = cache.final_size.component_div(&self.root_element_size);
 
-            transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
+            transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0) * self.scale_factor;
             transform.position = DVec3::new(
-                norm_pos.x as f64,
-                1.0 - norm_size.y as f64 - norm_pos.y as f64,
+                (norm_pos.x * self.scale_factor) as f64,
+                (1.0 - (norm_size.y - norm_pos.y) * self.scale_factor) as f64,
                 i as f64,
             );
 
@@ -410,6 +410,7 @@ impl RendererModule for UIRenderer {
 
     fn on_resize(&mut self, physical_size: (u32, u32), scale_factor: f64) {
         let scale_factor = scale_factor as f32;
+
         self.set_scale_factor(scale_factor);
         self.set_root_element_size(Vec2::new(physical_size.0 as f32, physical_size.1 as f32) / scale_factor);
     }

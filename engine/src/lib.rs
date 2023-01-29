@@ -9,23 +9,27 @@ pub mod utils;
 
 use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
-use crate::platform::{Platform, PlatformImpl};
+use crate::platform::{EngineMonitorExt, PlatformImpl};
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::module::ui_renderer::UIRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 use base::utils::{HashSet, MO_RELAXED};
 use lazy_static::lazy_static;
+use log::info;
 use nalgebra_glm::Vec2;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use vk_wrapper as vkw;
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::monitor::VideoMode;
+use winit::monitor::{MonitorHandle, VideoMode};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
+
+pub use platform::Platform;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -94,15 +98,34 @@ pub trait Application {
     );
 }
 
-/// Calculates scale factor relative to `video_mode`.
-/// On macOS display size may be differ from current video mode size.
-fn calc_real_scale_factor(curr_window: &Window) -> f64 {
-    let curr_monitor = curr_window.current_monitor().unwrap();
-    let mode = utils::find_best_video_mode(&curr_monitor);
-    let display_width = curr_monitor.size();
-    let scale_factor = curr_window.scale_factor();
+/// `monitor_scale_factor()` for monitor with this DPI is equal to 1.
+pub const DEFAULT_DPI: u32 = 109;
 
-    mode.size().width as f64 / display_width.width as f64 * scale_factor
+/// Calculates best UI scale factor for the specified window depending on corresponding monitor's DPI.
+fn real_scale_factor(window: &Window) -> f64 {
+    let monitor = window.current_monitor().unwrap();
+    let native_mode = utils::find_best_video_mode(&monitor);
+
+    let dpi = monitor.dpi().unwrap_or_else(|| {
+        log::warn!("Failed to get monitor DPI!");
+        DEFAULT_DPI
+    });
+
+    dpi as f64 / DEFAULT_DPI as f64
+}
+
+/// Calculates best UI scale factor relative `window` size depending on corresponding monitor's DPI.
+fn real_window_size(window: &Window) -> PhysicalSize<u32> {
+    let monitor = window.current_monitor().unwrap();
+    let native_mode = utils::find_best_video_mode(&monitor);
+    let native_size = native_mode.size();
+    let logical_size = monitor.size(); // On macOS this may be larger than native width
+
+    let window_size = window.inner_size();
+    let real_window_width = window_size.width * native_size.width / logical_size.width;
+    let real_window_height = window_size.height * native_size.height / logical_size.height;
+
+    PhysicalSize::new(real_window_width, real_window_height)
 }
 
 impl Engine {
@@ -199,21 +222,22 @@ impl Engine {
                             self.input.mouse.pressed_buttons.remove(button);
                         }
                     }
-                    WindowEvent::Resized(size) => {
+                    WindowEvent::Resized(_) => {
+                        let size = real_window_size(&self.main_window);
                         if size.width != 0 && size.height != 0 {
-                            let real_scale_factor = calc_real_scale_factor(&self.main_window);
-                            self.renderer
-                                .on_resize((size.width, size.height), real_scale_factor);
+                            let scale_factor = real_scale_factor(&self.main_window);
+                            let new_size = (size.width, size.height);
+                            self.renderer.on_resize(new_size, scale_factor);
                         }
                     }
                     WindowEvent::ScaleFactorChanged {
                         scale_factor: _,
-                        new_inner_size: size,
+                        new_inner_size: _,
                     } => {
-                        let real_scale_factor = calc_real_scale_factor(&self.main_window);
-                        println!("scaling changed {}", real_scale_factor);
-                        self.renderer
-                            .on_resize((size.width, size.height), real_scale_factor);
+                        let scale_factor = real_scale_factor(&self.main_window);
+                        let size = real_window_size(&self.main_window);
+                        self.renderer.on_resize((size.width, size.height), scale_factor);
+                        info!("Scaling changed to {}", scale_factor);
                     }
                     _ => {}
                 },
