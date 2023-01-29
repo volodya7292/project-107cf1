@@ -114,6 +114,9 @@ fn flow_calculate_children_sizes(
         }
     }
 
+    max_space_for_preferred = max_space_for_preferred.min(sum_preferred);
+    sum_grow_factor = sum_grow_factor.max(1.0);
+
     let max_space_for_grow = (parent_size - (sum_exact + max_space_for_preferred)).max(0.0);
     let mut preferred_space_left = max_space_for_preferred;
     let mut grow_space_left = max_space_for_grow;
@@ -231,8 +234,6 @@ impl UIRenderer {
         linear_tree.push(self.root_ui_entity);
         base::scene::collect_children_recursively(&data, &self.root_ui_entity, &mut linear_tree);
 
-        // TODO: account for window.scale_factor()
-
         // Calculate minimum sizes starting from children (bottom of the tree)
         for node in linear_tree.iter().rev() {
             let layout = layout_comps.get(node).unwrap();
@@ -274,6 +275,13 @@ impl UIRenderer {
 
             let cache = layout_cache_comps.get_mut(node).unwrap();
             cache.intrinsic_min_size = min_size;
+        }
+
+        // Determine final size for the root element
+        {
+            let root = linear_tree[0];
+            let root_cache = layout_cache_comps.get_mut(&root).unwrap();
+            root_cache.final_size = root_cache.intrinsic_min_size;
         }
 
         // Expand sizes to maximum allowed sizes (starting from the top of the tree)
@@ -365,10 +373,10 @@ impl UIRenderer {
             let norm_pos = cache.global_position.component_div(&self.root_element_size);
             let norm_size = cache.final_size.component_div(&self.root_element_size);
 
-            transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0) * self.scale_factor;
+            transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
             transform.position = DVec3::new(
-                (norm_pos.x * self.scale_factor) as f64,
-                (1.0 - (norm_size.y - norm_pos.y) * self.scale_factor) as f64,
+                norm_pos.x as f64,
+                1.0 - (norm_size.y - norm_pos.y) as f64,
                 i as f64,
             );
 

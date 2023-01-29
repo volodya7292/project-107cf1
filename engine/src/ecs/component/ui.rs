@@ -15,7 +15,7 @@ impl Default for Position {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Sizing {
     Exact(f32),
     Preferred(f32),
