@@ -267,7 +267,7 @@ impl Application for Game {
             Some(root_ui_entity),
             UIObject::new(
                 UILayout::new()
-                    .with_width(Sizing::Exact(300.0))
+                    .with_width(Sizing::Preferred(300.0))
                     .with_height(Sizing::Grow(0.5)),
                 (),
             )

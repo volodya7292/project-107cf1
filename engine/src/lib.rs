@@ -165,9 +165,6 @@ impl Engine {
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
-        let dpi = Platform::get_monitor_dpi(&curr_monitor).unwrap();
-        println!("{}", dpi);
-
         Engine {
             renderer,
             frame_start_time: Instant::now(),
@@ -237,7 +234,6 @@ impl Engine {
                         let scale_factor = real_scale_factor(&self.main_window);
                         let size = real_window_size(&self.main_window);
                         self.renderer.on_resize((size.width, size.height), scale_factor);
-                        info!("Scaling changed to {}", scale_factor);
                     }
                     _ => {}
                 },

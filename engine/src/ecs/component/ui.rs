@@ -1,5 +1,4 @@
 use nalgebra_glm::Vec2;
-use std::sync::atomic::AtomicUsize;
 
 pub type Factor = f32;
 
@@ -17,9 +16,12 @@ impl Default for Position {
 
 #[derive(Debug, Copy, Clone)]
 pub enum Sizing {
-    Exact(f32),
+    /// Uses size as close size as possible to the specified one.
+    /// Elements of size [Self::Preferred] are expanded before [Self::Grow].
     Preferred(f32),
+    /// The size is proportional to all siblings. Expanded after [Self::Preferred].
     Grow(Factor),
+    /// Minimum possible size.
     FitContent,
 }
 
@@ -29,12 +31,41 @@ impl Default for Sizing {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Constraint {
+    pub min: f32,
+    pub max: f32,
+}
+
+impl Constraint {
+    pub fn new(min: f32, max: f32) -> Self {
+        Self { min, max }
+    }
+
+    pub fn exact(exact: f32) -> Self {
+        Self::new(exact, exact)
+    }
+
+    pub fn clamp(&self, v: f32) -> f32 {
+        v.clamp(self.min, self.max)
+    }
+}
+
+impl Default for Constraint {
+    fn default() -> Self {
+        Self {
+            min: 0.0,
+            max: f32::INFINITY,
+        }
+    }
+}
+
 #[derive(Default, Copy, Clone)]
 pub struct Padding {
-    left: f32,
-    right: f32,
-    top: f32,
-    bottom: f32,
+    pub left: f32,
+    pub right: f32,
+    pub top: f32,
+    pub bottom: f32,
 }
 
 impl Padding {
@@ -75,7 +106,6 @@ pub enum FlowAlign {
     Start,
     Center,
     End,
-    // SpaceBetween,
 }
 
 impl Default for FlowAlign {
@@ -83,15 +113,6 @@ impl Default for FlowAlign {
         Self::Start
     }
 }
-
-// #[repr(u8)]
-// #[derive(Copy, Clone, Eq, PartialEq)]
-// pub enum CrossFlowAlign {
-//     Start,
-//     Center,
-//     End,
-//     SpaceBetween,
-// }
 
 #[repr(u8)]
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -122,13 +143,14 @@ impl Default for Overflow {
 
 #[derive(Default)]
 pub struct UILayout {
-    position: Position,
+    pub position: Position,
     pub sizing: [Sizing; 2],
-    self_cross_align: CrossAlign,
-    padding: Padding,
-    overflow: Overflow,
-    content_flow: ContentFlow,
-    flow_align: FlowAlign,
+    pub constraints: [Constraint; 2],
+    pub self_cross_align: CrossAlign,
+    pub padding: Padding,
+    pub overflow: Overflow,
+    pub content_flow: ContentFlow,
+    pub flow_align: FlowAlign,
 }
 
 impl UILayout {
@@ -160,34 +182,30 @@ impl UILayout {
         self
     }
 
-    pub fn position(&self) -> &Position {
-        &self.position
+    pub fn with_min_width(mut self, min_width: f32) -> Self {
+        self.constraints[0].min = min_width;
+        self
     }
 
-    pub fn padding(&self) -> &Padding {
-        &self.padding
+    pub fn with_min_height(mut self, min_height: f32) -> Self {
+        self.constraints[1].min = min_height;
+        self
     }
 
-    pub fn self_cross_align(&self) -> CrossAlign {
-        self.self_cross_align
+    pub fn with_max_width(mut self, max_width: f32) -> Self {
+        self.constraints[0].max = max_width;
+        self
     }
 
-    pub fn overflow(&self) -> Overflow {
-        self.overflow
-    }
-
-    pub fn content_flow(&self) -> ContentFlow {
-        self.content_flow
-    }
-
-    pub fn flow_align(&self) -> FlowAlign {
-        self.flow_align
+    pub fn with_max_height(mut self, max_height: f32) -> Self {
+        self.constraints[1].max = max_height;
+        self
     }
 }
 
 #[derive(Default)]
 pub struct UILayoutCache {
-    pub(crate) intrinsic_min_size: Vec2,
+    pub(crate) final_min_size: Vec2,
     pub(crate) final_size: Vec2,
     pub(crate) relative_position: Vec2,
     pub(crate) global_position: Vec2,
