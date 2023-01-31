@@ -7,6 +7,7 @@ use base::overworld::position::ClusterPos;
 use base::overworld::LoadedClusters;
 use base::utils::{HashMap, HashSet};
 use engine::ecs::component;
+use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
 use engine::renderer::{Renderer, VertexMeshObject};
 use entity_data::EntityId;
 use nalgebra_glm as glm;
@@ -159,10 +160,9 @@ impl OverworldRenderer {
             let entities = self.entities.entry(*pos).or_insert_with(|| {
                 assert_eq!(self.to_add.remove(pos), true);
 
-                let transform_comp = component::Transform::new().with_position(glm::convert(*pos.get()));
-                let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
-                let render_config_translucent =
-                    component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
+                let transform_comp = TransformC::new().with_position(glm::convert(*pos.get()));
+                let render_config_solid = MeshRenderConfigC::new(self.cluster_mat_pipeline, false);
+                let render_config_translucent = MeshRenderConfigC::new(self.cluster_mat_pipeline, true);
 
                 let entity_solid = renderer.add_object(
                     None,
@@ -180,14 +180,14 @@ impl OverworldRenderer {
             });
 
             *renderer
-                .access_object(entities.solid)
-                .get_mut::<component::VertexMesh>()
-                .unwrap() = component::VertexMesh::new(&meshes.solid.raw());
+                .access_object(&entities.solid)
+                .get_mut::<VertexMeshC>()
+                .unwrap() = VertexMeshC::new(&meshes.solid.raw());
 
             *renderer
-                .access_object(entities.translucent)
-                .get_mut::<component::VertexMesh>()
-                .unwrap() = component::VertexMesh::new(&meshes.transparent.raw());
+                .access_object(&entities.translucent)
+                .get_mut::<VertexMeshC>()
+                .unwrap() = VertexMeshC::new(&meshes.transparent.raw());
 
             false
         });

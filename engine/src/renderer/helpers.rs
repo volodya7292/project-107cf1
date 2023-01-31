@@ -6,7 +6,6 @@ use crate::renderer::{
 };
 use crate::Renderer;
 use base::utils::resource_file::ResourceRef;
-use base::utils::UInt;
 use basis_universal::TranscodeParameters;
 use smallvec::SmallVec;
 use std::mem;

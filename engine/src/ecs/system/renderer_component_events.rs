@@ -1,23 +1,21 @@
-use std::mem;
-use std::ops::Range;
-use std::sync::Arc;
-use std::time::Instant;
-
-use entity_data::{EntityId, SystemAccess, SystemHandler};
-use index_pool::IndexPool;
-use smallvec::{smallvec, SmallVec};
-
-use base::unwrap_option;
-use base::utils::{HashMap, HashSet};
-use vk_wrapper as vkw;
-use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};
-
 use crate::ecs::component;
+use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{
     BufferUpdate, BufferUpdate1, Renderable, CUSTOM_OBJECT_DESCRIPTOR_IDX, MAX_BASIC_UNIFORM_BLOCK_SIZE,
 };
+use base::unwrap_option;
+use base::utils::{HashMap, HashSet};
+use entity_data::{EntityId, SystemAccess, SystemHandler};
+use index_pool::IndexPool;
+use smallvec::{smallvec, SmallVec};
+use std::mem;
+use std::ops::Range;
+use std::sync::Arc;
+use std::time::Instant;
+use vk_wrapper as vkw;
+use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};
 
 pub(crate) struct RendererComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -36,7 +34,7 @@ impl RendererComponentEvents<'_> {
     }
 
     fn renderer_comp_modified(
-        config: &mut component::MeshRenderConfig,
+        config: &mut MeshRenderConfigC,
         renderable: &mut Renderable,
         buffer_updates: &mut Vec<BufferUpdate>,
         binding_updates: &mut Vec<vkw::Binding>,
@@ -95,7 +93,7 @@ impl SystemHandler for RendererComponentEvents<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
 
-        let mut renderer_comps = data.component_mut::<component::MeshRenderConfig>();
+        let mut renderer_comps = data.component_mut::<MeshRenderConfigC>();
 
         let mut binding_updates = Vec::<vkw::Binding>::with_capacity(self.dirty_components.len());
         let mut desc_updates =

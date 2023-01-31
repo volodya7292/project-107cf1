@@ -142,7 +142,7 @@ impl Default for Overflow {
 }
 
 #[derive(Default)]
-pub struct UILayout {
+pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
@@ -153,7 +153,7 @@ pub struct UILayout {
     pub flow_align: FlowAlign,
 }
 
-impl UILayout {
+impl UILayoutC {
     pub fn new() -> Self {
         Default::default()
     }
@@ -204,7 +204,7 @@ impl UILayout {
 }
 
 #[derive(Default)]
-pub struct UILayoutCache {
+pub struct UILayoutCacheC {
     pub(crate) final_min_size: Vec2,
     pub(crate) final_size: Vec2,
     pub(crate) relative_position: Vec2,

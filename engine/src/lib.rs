@@ -9,14 +9,12 @@ pub mod utils;
 
 use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
-use crate::platform::{EngineMonitorExt, PlatformImpl};
+use crate::platform::EngineMonitorExt;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::module::ui_renderer::UIRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
 use base::utils::{HashSet, MO_RELAXED};
 use lazy_static::lazy_static;
-use log::info;
-use nalgebra_glm::Vec2;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -25,7 +23,6 @@ use vk_wrapper as vkw;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::monitor::{MonitorHandle, VideoMode};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
 

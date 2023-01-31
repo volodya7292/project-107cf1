@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use parking_lot::Mutex;
-
-use base::utils::UInt;
+use std::sync::Arc;
 use vk_wrapper as vkw;
 
 #[derive(Debug)]

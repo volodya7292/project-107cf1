@@ -1,6 +1,7 @@
 use crate::ecs::component;
-use crate::ecs::component::simple_text::{FontStyle, TextHAlign, TextStyle};
-use crate::ecs::component::SimpleText;
+use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
+use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::renderer::{Internals, SceneObject};
@@ -122,9 +123,13 @@ impl<'a> Iterator for WordSplitter<'a> {
 
         for g in self.glyphs {
             if g.glyph_id() != self.space_id {
+                // `g` is a word-character
                 word_found = true;
-            } else if word_found {
-                break;
+            } else {
+                // `g` is a space
+                if word_found {
+                    break;
+                }
             }
             len += 1;
         }
@@ -146,18 +151,13 @@ pub struct GlyphAllocator {
 }
 
 impl GlyphAllocator {
-    pub fn alloc(
-        &mut self,
-        font_id: u16,
-        style: FontStyle,
-        chars: impl Iterator<Item = char>,
-    ) -> Vec<GlyphUID> {
+    fn alloc(&mut self, font_id: u16, style: FontStyle, chars: impl Iterator<Item = char>) -> Vec<GlyphUID> {
         let chars = chars.nfc();
         let size_hint = chars.size_hint();
         let mut glyphs = Vec::with_capacity(size_hint.1.unwrap_or(size_hint.0));
+        let font = self.fonts[font_id as usize].best_for_style(style);
 
         for c in chars {
-            let font = self.fonts[font_id as usize].best_for_style(style);
             let mut g_uid = GlyphUID::new(font.glyph(c).id(), font_id, style);
 
             if g_uid.glyph_id().0 == 0 {
@@ -208,6 +208,17 @@ impl GlyphAllocator {
 
         glyphs
     }
+
+    fn alloc_for(&mut self, string: &StyledString) -> StyledGlyphSequence {
+        let style = string.style();
+        let glyphs = self.alloc(style.font_id(), style.font_style(), string.data().chars());
+
+        StyledGlyphSequence {
+            glyphs,
+            style: *style,
+        }
+    }
+
     fn free(&mut self, chars: &[GlyphUID]) {
         for c in chars {
             if let hash_map::Entry::Occupied(mut v) = self.char_locations.entry(*c) {
@@ -225,6 +236,186 @@ impl GlyphAllocator {
             }
         }
     }
+}
+
+fn calculate_string_width(string: &str, font: &Font) -> f32 {
+    let scale = rusttype::Scale::uniform(1.0);
+    let mut prev_glyph = None::<GlyphId>;
+    let mut curr_word_width = 0.0;
+
+    // Layout single word
+    for ch in string.chars() {
+        let glyph = font.glyph(ch).scaled(scale);
+        let h_metrics = glyph.h_metrics();
+        let g_id = glyph.id();
+
+        let kerning = prev_glyph
+            .map(|prev| font.pair_kerning(scale, prev, g_id))
+            .unwrap_or(0.0);
+
+        let glyph_width = kerning + h_metrics.advance_width;
+
+        curr_word_width += glyph_width;
+        prev_glyph = Some(g_id);
+    }
+    curr_word_width
+}
+
+fn layout_glyphs(
+    allocator: &GlyphAllocator,
+    seq: &StyledGlyphSequence,
+    h_align: TextHAlign,
+    max_width: f32,
+    max_height: f32,
+) -> Vec<GlyphInstance> {
+    let mut glyph_instances = Vec::with_capacity(seq.glyphs.len());
+    let mut line_widths = Vec::with_capacity(32);
+
+    let scale = rusttype::Scale::uniform(1.0);
+    let style = &seq.style;
+    let font = allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
+    let space_id = font.glyph(' ').id();
+    let v_metrics = font.v_metrics(scale);
+
+    // The origin (0,0) is at top-left corner
+    let mut curr_offset = Vec2::new(0.0, v_metrics.ascent);
+    let mut prev_glyph = None::<GlyphUID>;
+
+    let mut curr_word = Vec::<GlyphInstance>::with_capacity(32);
+    let mut curr_word_glyph_widths = Vec::<f32>::with_capacity(32);
+
+    // A segment is a word or blank space(s)
+    let segments = WordSplitter {
+        glyphs: &seq.glyphs,
+        space_id,
+    };
+
+    for segment in segments {
+        let mut curr_word_width = 0.0;
+        curr_word.clear();
+        curr_word_glyph_widths.clear();
+
+        // Layout single word
+        for g in segment {
+            let g_id = g.glyph_id();
+            let glyph_index = allocator.char_locations[g].index;
+            let glyph = font.glyph(g_id).scaled(scale);
+            let h_metrics = glyph.h_metrics();
+            let kerning = prev_glyph
+                .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
+                .unwrap_or(0.0);
+
+            let glyph_width = kerning + h_metrics.advance_width;
+            let glyph_size = if let Some(size) = msdfgen::glyph_size(&glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
+                Vec2::new(size.0, size.1)
+            } else {
+                Vec2::default()
+            };
+
+            curr_offset.x += kerning;
+
+            curr_word.push(GlyphInstance {
+                glyph_index,
+                glyph_size,
+                color: style.color(),
+                offset: curr_offset,
+                scale: 1.0,
+            });
+            curr_word_glyph_widths.push(glyph_width);
+            curr_word_width += glyph_width;
+
+            curr_offset.x += h_metrics.advance_width;
+            prev_glyph = Some(*g);
+        }
+        if curr_word.is_empty() {
+            continue;
+        }
+        let start_x = curr_word[0].offset.x;
+
+        // Put the word inside the global layout
+        if start_x + curr_word_width >= max_width {
+            // Width of the word exceeds the maximum line width => break it into two parts.
+
+            if curr_offset.x > 0.0 {
+                line_widths.push(curr_offset.x - curr_word_width);
+                curr_offset.x = 0.0;
+                curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
+            }
+
+            for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
+                .drain(..)
+                .zip(curr_word.drain(..))
+                .enumerate()
+            {
+                if allocator
+                    .char_locations_rev
+                    .get(&instance.glyph_index)
+                    .map_or(true, |v| v.glyph_id() == space_id)
+                {
+                    continue;
+                }
+                if i > 0 && (curr_offset.x + glyph_width) > max_width {
+                    line_widths.push(curr_offset.x);
+                    curr_offset.x = 0.0;
+                    curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
+                }
+
+                instance.offset = curr_offset;
+                glyph_instances.push(instance);
+
+                curr_offset.x += glyph_width;
+            }
+        } else {
+            glyph_instances.extend(curr_word.drain(..));
+        }
+    }
+
+    line_widths.push(curr_offset.x);
+
+    if !glyph_instances.is_empty() {
+        let mut curr_y = f32::NAN;
+        let mut curr_line = 0;
+        let mut curr_diff = 0.0;
+
+        for inst in &mut glyph_instances {
+            if curr_y != inst.offset.y {
+                match h_align {
+                    TextHAlign::LEFT => { /* The text is already in this state */ }
+                    TextHAlign::CENTER => {
+                        curr_diff = (max_width - line_widths[curr_line]) / 2.0;
+                    }
+                    TextHAlign::RIGHT => {
+                        curr_diff = max_width - line_widths[curr_line];
+                    }
+                }
+
+                curr_line += 1;
+                curr_y = inst.offset.y;
+            }
+
+            inst.offset.x += curr_diff;
+        }
+
+        glyph_instances = glyph_instances
+            .into_iter()
+            .filter(|v| v.glyph_index != u32::MAX)
+            .collect();
+
+        for inst in &mut glyph_instances {
+            let g_uid = allocator.char_locations_rev[&inst.glyph_index];
+            let glyph = font.glyph(g_uid.glyph_id());
+
+            if let Some(trans) = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
+                inst.scale *= trans.scale;
+                inst.offset.x += trans.offset_x;
+                inst.offset.y -= trans.offset_y;
+            }
+        }
+    }
+
+    // TODO: use max_height too if necessary
+
+    glyph_instances
 }
 
 pub struct TextRenderer {
@@ -271,15 +462,15 @@ uniform_struct_impl!(ObjectUniformInfo, model);
 #[derive(Archetype)]
 pub struct TextObject {
     relation: Relation,
-    global_transform: component::internal::GlobalTransform,
-    transform: component::Transform,
-    renderer: component::MeshRenderConfig,
-    mesh: component::VertexMesh,
-    text: SimpleText,
+    global_transform: GlobalTransformC,
+    transform: TransformC,
+    renderer: MeshRenderConfigC,
+    mesh: VertexMeshC,
+    text: SimpleTextC,
 }
 
 impl TextObject {
-    pub fn new(transform: component::Transform, text: SimpleText) -> Self {
+    pub fn new(transform: TransformC, text: SimpleTextC) -> Self {
         Self {
             relation: Default::default(),
             global_transform: Default::default(),
@@ -522,163 +713,16 @@ impl TextRenderer {
         self.glyph_array_initialized = true;
     }
 
-    fn layout_glyphs(
-        &self,
-        seq: &StyledGlyphSequence,
-        h_align: TextHAlign,
-        max_width: f32,
-        max_height: f32,
-    ) -> Vec<GlyphInstance> {
-        let mut glyph_instances = Vec::with_capacity(seq.glyphs.len());
-        let mut line_widths = Vec::with_capacity(32);
-
-        let scale = rusttype::Scale::uniform(1.0);
-        let style = &seq.style;
+    /// Calculates minimum text width considering wrapping only at spaces.
+    pub fn calculate_minimum_text_width(&self, seq: &StyledString) -> f32 {
+        let style = seq.style();
         let font = self.allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
-        let space_id = font.glyph(' ').id();
-        let v_metrics = font.v_metrics(scale);
 
-        // The origin (0,0) is at top-left corner
-        let mut curr_offset = Vec2::new(0.0, v_metrics.ascent);
-        let mut prev_glyph = None::<GlyphUID>;
-
-        let mut curr_word = Vec::<GlyphInstance>::with_capacity(32);
-        let mut curr_word_glyph_widths = Vec::<f32>::with_capacity(32);
-
-        // A segment is a word or blank space(s)
-        let segments = WordSplitter {
-            glyphs: &seq.glyphs,
-            space_id,
-        };
-
-        for segment in segments {
-            let mut curr_word_width = 0.0;
-            curr_word.clear();
-            curr_word_glyph_widths.clear();
-
-            // Layout single word
-            for g in segment {
-                let g_id = g.glyph_id();
-                let glyph_index = self.allocator.char_locations[g].index;
-                let glyph = font.glyph(g_id).scaled(scale);
-                let h_metrics = glyph.h_metrics();
-                let kerning = prev_glyph
-                    .map(|prev| font.pair_kerning(scale, prev.glyph_id(), g_id))
-                    .unwrap_or(0.0);
-
-                let glyph_width = kerning + h_metrics.advance_width;
-                let glyph_size = if let Some(size) = msdfgen::glyph_size(&glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
-                    Vec2::new(size.0, size.1)
-                } else {
-                    Vec2::default()
-                };
-
-                curr_offset.x += kerning;
-
-                curr_word.push(GlyphInstance {
-                    glyph_index,
-                    glyph_size,
-                    color: style.color(),
-                    offset: curr_offset,
-                    scale: 1.0,
-                });
-                curr_word_glyph_widths.push(glyph_width);
-                curr_word_width += glyph_width;
-
-                curr_offset.x += h_metrics.advance_width;
-                prev_glyph = Some(*g);
-            }
-
-            if curr_word.is_empty() {
-                continue;
-            }
-            let start_x = curr_word[0].offset.x;
-
-            // Put the word inside the global layout
-            if start_x + curr_word_width >= max_width {
-                // Width of the word exceeds the maximum line width => break it into two parts.
-
-                if curr_offset.x > 0.0 {
-                    line_widths.push(curr_offset.x - curr_word_width);
-                    curr_offset.x = 0.0;
-                    curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
-                }
-
-                for (i, (glyph_width, mut instance)) in curr_word_glyph_widths
-                    .drain(..)
-                    .zip(curr_word.drain(..))
-                    .enumerate()
-                {
-                    if self
-                        .allocator
-                        .char_locations_rev
-                        .get(&instance.glyph_index)
-                        .map_or(true, |v| v.glyph_id() == space_id)
-                    {
-                        continue;
-                    }
-                    if i > 0 && (curr_offset.x + glyph_width) > max_width {
-                        line_widths.push(curr_offset.x);
-                        curr_offset.x = 0.0;
-                        curr_offset.y += v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
-                    }
-
-                    instance.offset = curr_offset;
-                    glyph_instances.push(instance);
-
-                    curr_offset.x += glyph_width;
-                }
-            } else {
-                glyph_instances.extend(curr_word.drain(..));
-            }
-        }
-
-        line_widths.push(curr_offset.x);
-
-        if !glyph_instances.is_empty() {
-            let mut curr_y = f32::NAN;
-            let mut curr_line = 0;
-            let mut curr_diff = 0.0;
-
-            for inst in &mut glyph_instances {
-                if curr_y != inst.offset.y {
-                    match h_align {
-                        TextHAlign::LEFT => { /* The text is already in this state */ }
-                        TextHAlign::CENTER => {
-                            curr_diff = (max_width - line_widths[curr_line]) / 2.0;
-                        }
-                        TextHAlign::RIGHT => {
-                            curr_diff = max_width - line_widths[curr_line];
-                        }
-                    }
-
-                    curr_line += 1;
-                    curr_y = inst.offset.y;
-                }
-
-                inst.offset.x += curr_diff;
-            }
-
-            glyph_instances = glyph_instances
-                .into_iter()
-                .filter(|v| v.glyph_index != u32::MAX)
-                .collect();
-
-            for inst in &mut glyph_instances {
-                let g_uid = self.allocator.char_locations_rev[&inst.glyph_index];
-                let glyph = font.glyph(g_uid.glyph_id());
-
-                if let Some(trans) = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
-                    inst.scale *= trans.scale;
-                    inst.offset.x += trans.offset_x;
-                    inst.offset.y -= trans.offset_y;
-                }
-            }
-        }
-
-        // TODO: use max_height too if necessary
-
-        glyph_instances
+        seq.data()
+            .split_whitespace()
+            .map(|word| calculate_string_width(word, font))
+            .min_by(|a, b| a.total_cmp(b))
+            .unwrap_or(0.0)
     }
 }
 
@@ -690,7 +734,7 @@ impl RendererModule for TextRenderer {
     }
 
     fn on_update(&mut self, internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
-        let dirty_texts = internals.dirty_comps.take_changes::<SimpleText>();
+        let dirty_texts = internals.dirty_comps.take_changes::<SimpleTextC>();
 
         for seq in self.sequences_to_destroy.drain(..) {
             self.allocator.free(&seq.glyphs);
@@ -702,18 +746,12 @@ impl RendererModule for TextRenderer {
             }
 
             let mut entry = internals.storage.entry_mut(entity).unwrap();
-            let simple_text = entry.get::<SimpleText>().unwrap();
-            let style = *simple_text.string().style();
+            let simple_text = entry.get::<SimpleTextC>().unwrap();
 
-            let glyphs = self.allocator.alloc(
-                style.font_id(),
-                style.font_style(),
-                simple_text.string().data().chars(),
-            );
+            let seq = self.allocator.alloc_for(simple_text.string());
 
-            let seq = StyledGlyphSequence { glyphs, style };
-
-            let instances = self.layout_glyphs(
+            let instances = layout_glyphs(
+                &self.allocator,
                 &seq,
                 simple_text.h_align(),
                 simple_text.max_width(),
@@ -730,9 +768,8 @@ impl RendererModule for TextRenderer {
                 )
                 .unwrap();
 
-            *entry.get_mut::<component::VertexMesh>().unwrap() = component::VertexMesh::new(&mesh.raw());
-            *entry.get_mut::<component::MeshRenderConfig>().unwrap() =
-                component::MeshRenderConfig::new(self.mat_pipeline, true)
+            *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&mesh.raw());
+            *entry.get_mut::<MeshRenderConfigC>().unwrap() = MeshRenderConfigC::new(self.mat_pipeline, true)
         }
 
         let staging_cl = Arc::clone(&self.staging_cl);

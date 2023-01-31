@@ -32,7 +32,8 @@ use base::utils::{HashMap, HashSet, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{Sizing, UILayout};
+use engine::ecs::component::ui::{Sizing, UILayoutC};
+use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
 use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
 use engine::renderer::{Renderer, VertexMeshObject};
@@ -234,12 +235,8 @@ impl Application for Game {
         let text = renderer.add_object(
             None,
             TextObject::new(
-                component::Transform::new().with_position(DVec3::new(
-                    player_pos.x,
-                    player_pos.y + 60.0,
-                    player_pos.z,
-                )),
-                component::SimpleText::new(StyledString::new(
+                TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
+                SimpleTextC::new(StyledString::new(
                     "Govno, my is Gmine".to_owned(),
                     TextStyle::new().with_font(font_id).with_font_size(0.5),
                 ))
@@ -265,17 +262,16 @@ impl Application for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         let panel = renderer.add_object(
             Some(root_ui_entity),
-            UIObject::new(
-                UILayout::new()
+            UIObject::new_raw(
+                UILayoutC::new()
                     .with_width(Sizing::Preferred(300.0))
                     .with_height(Sizing::Grow(0.5)),
                 (),
             )
             .with_renderer(
-                component::MeshRenderConfig::new(mat_pipelines.panel(), false)
-                    .with_stage(RenderStage::OVERLAY),
+                MeshRenderConfigC::new(mat_pipelines.panel(), false).with_stage(RenderStage::OVERLAY),
             )
-            .with_mesh(component::VertexMesh::without_data(4, 1)),
+            .with_mesh(VertexMeshC::without_data(4, 1)),
         );
     }
 

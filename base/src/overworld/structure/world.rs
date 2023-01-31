@@ -1,23 +1,4 @@
-use std::any::Any;
-use std::collections::VecDeque;
-use std::mem;
-use std::num::Wrapping;
-use std::ops::RangeInclusive;
-use std::sync::Arc;
-
-use bit_vec::BitVec;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
-use noise;
-use noise::{NoiseFn, Seedable};
-use once_cell::sync::OnceCell;
-use rand::Rng;
-use rand_distr::num_traits::Zero;
-use rstar::{Envelope, Point, RTree};
-use smallvec::SmallVec;
-
-pub use biome::Biome;
-use overworld::raw_cluster;
+pub mod biome;
 
 use crate::overworld;
 use crate::overworld::facing::Facing;
@@ -32,8 +13,23 @@ use crate::utils::noise::{HybridNoise, ParamNoise};
 use crate::utils::voronoi_noise::VoronoiNoise2D;
 use crate::utils::white_noise::WhiteNoise;
 use crate::utils::{ConcurrentCache, ConcurrentCacheImpl};
-
-pub mod biome;
+pub use biome::Biome;
+use bit_vec::BitVec;
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
+use noise;
+use noise::{NoiseFn, Seedable};
+use once_cell::sync::OnceCell;
+use overworld::raw_cluster;
+use rand::Rng;
+use rand_distr::num_traits::Zero;
+use rstar::{Envelope, Point, RTree};
+use smallvec::SmallVec;
+use std::any::Any;
+use std::collections::VecDeque;
+use std::mem;
+use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 pub const MIN_RADIUS: u64 = 2_048;
 pub const MAX_RADIUS: u64 = 100_000;

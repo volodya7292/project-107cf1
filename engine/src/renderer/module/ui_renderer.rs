@@ -1,8 +1,10 @@
-use crate::ecs::component;
-use crate::ecs::component::internal::GlobalTransform;
+pub mod element;
+
+use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Sizing, UILayout, UILayoutCache,
+    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Sizing, UILayoutC, UILayoutCacheC,
 };
+use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
 use crate::renderer::module::RendererModule;
 use crate::renderer::{DirtyComponents, Internals, Renderer, SceneObject};
 use base::scene::relation::Relation;
@@ -25,11 +27,7 @@ pub struct UIRenderer {
 
 pub struct DefaultStyling {}
 
-pub trait UIElement: Send + Sync + 'static {
-    fn min_size() -> Vec2 {
-        Vec2::default()
-    }
-}
+pub trait UIElement: Send + Sync + 'static {}
 
 impl UIElement for () {}
 
@@ -39,42 +37,50 @@ where
     E: UIElement,
 {
     relation: Relation,
-    global_transform: GlobalTransform,
+    global_transform: GlobalTransformC,
 
-    transform: component::Transform,
-    renderer: component::MeshRenderConfig,
-    mesh: component::VertexMesh,
+    transform: TransformC,
+    renderer: MeshRenderConfigC,
+    mesh: VertexMeshC,
 
-    layout_cache: UILayoutCache,
-    layout: UILayout,
+    event_handler: EventHandlerC,
+    layout_cache: UILayoutCacheC,
+    layout: UILayoutC,
+
     element: E,
 }
 
 impl<E: UIElement> UIObject<E> {
-    pub fn new(layout: UILayout, element: E) -> Self {
+    pub fn new_raw(layout: UILayoutC, element: E) -> Self {
         Self {
             relation: Default::default(),
             global_transform: Default::default(),
-            transform: component::Transform::new().with_use_parent_transform(false),
+            transform: TransformC::new().with_use_parent_transform(false),
             renderer: Default::default(),
             mesh: Default::default(),
+            event_handler: Default::default(),
             layout_cache: Default::default(),
             layout,
             element,
         }
     }
 
-    pub fn with_renderer(mut self, renderer: component::MeshRenderConfig) -> Self {
+    pub fn with_renderer(mut self, renderer: MeshRenderConfigC) -> Self {
         self.renderer = renderer;
         self
     }
 
-    pub fn with_mesh(mut self, mesh: component::VertexMesh) -> Self {
+    pub fn with_mesh(mut self, mesh: VertexMeshC) -> Self {
         self.mesh = mesh;
         self
     }
 
-    pub(crate) fn with_layout_cache(mut self, layout_cache: UILayoutCache) -> Self {
+    pub fn with_event_handler(mut self, handler: EventHandlerC) -> Self {
+        self.event_handler = handler;
+        self
+    }
+
+    pub(crate) fn with_layout_cache(mut self, layout_cache: UILayoutCacheC) -> Self {
         self.layout_cache = layout_cache;
         self
     }
@@ -191,15 +197,17 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 
 impl UIRenderer {
     pub fn new(renderer: &mut Renderer) -> Self {
-        let root_ui_entity = renderer.add_object(
-            None,
-            UIObject::new(UILayout::new(), ()).with_layout_cache(UILayoutCache {
-                final_min_size: Default::default(),
-                final_size: Default::default(),
-                relative_position: Default::default(),
-                global_position: Default::default(),
-            }),
-        );
+        let root_ui_entity = renderer
+            .add_object(
+                None,
+                UIObject::new_raw(UILayoutC::new(), ()).with_layout_cache(UILayoutCacheC {
+                    final_min_size: Default::default(),
+                    final_size: Default::default(),
+                    relative_position: Default::default(),
+                    global_position: Default::default(),
+                }),
+            )
+            .unwrap();
 
         Self {
             device: Arc::clone(&renderer.device),
@@ -227,8 +235,8 @@ impl UIRenderer {
     /// Calculates minimum sizes for each element starting from children (bottom of the tree).
     fn calculate_final_minimum_sizes(linear_tree: &[EntityId], access: &SystemAccess) {
         let relation_comps = access.component::<Relation>();
-        let layout_comps = access.component::<UILayout>();
-        let mut layout_cache_comps = access.component_mut::<UILayoutCache>();
+        let layout_comps = access.component::<UILayoutC>();
+        let mut layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
         for node in linear_tree.iter().rev() {
             let relation = relation_comps.get(node).unwrap();
@@ -269,8 +277,8 @@ impl UIRenderer {
     /// For each element calculates expanded size and its position (starting from the top of the tree).
     fn expand_sizes_and_set_positions(linear_tree: &[EntityId], access: &SystemAccess) {
         let relation_comps = access.component::<Relation>();
-        let layout_comps = access.component::<UILayout>();
-        let mut layout_cache_comps = access.component_mut::<UILayoutCache>();
+        let layout_comps = access.component::<UILayoutC>();
+        let mut layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
         // Set final size for the root element
         {
@@ -366,8 +374,8 @@ impl UIRenderer {
         dirty_comps: &mut DirtyComponents,
         root_size: &Vec2,
     ) {
-        let mut transform_comps = access.component_mut::<component::Transform>();
-        let layout_cache_comps = access.component_mut::<UILayoutCache>();
+        let mut transform_comps = access.component_mut::<TransformC>();
+        let layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
         let root_size_inv = Vec2::from_element(1.0).component_div(root_size);
 
@@ -387,7 +395,7 @@ impl UIRenderer {
                 i as f64,
             );
 
-            dirty_comps.add::<component::Transform>(node);
+            dirty_comps.add::<TransformC>(node);
         }
     }
 
@@ -395,7 +403,7 @@ impl UIRenderer {
         let access = internals.storage.access();
 
         let linear_tree = {
-            let layout_comps = access.component::<UILayout>();
+            let layout_comps = access.component::<UILayoutC>();
             let mut linear_tree = Vec::with_capacity(layout_comps.count_entities());
             linear_tree.push(self.root_ui_entity);
             base::scene::collect_children_recursively(&access, &self.root_ui_entity, &mut linear_tree);
@@ -421,17 +429,17 @@ impl RendererModule for UIRenderer {
     }
 
     fn on_update(&mut self, mut internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
-        let layout_changes = internals.dirty_comps.take_changes::<UILayout>();
+        let layout_changes = internals.dirty_comps.take_changes::<UILayoutC>();
 
         if self.root_element_size_dirty {
             let layout = internals
                 .storage
-                .get_mut::<UILayout>(&self.root_ui_entity)
+                .get_mut::<UILayoutC>(&self.root_ui_entity)
                 .unwrap();
             layout.constraints[0] = Constraint::exact(self.root_element_size.x);
             layout.constraints[1] = Constraint::exact(self.root_element_size.y);
 
-            internals.dirty_comps.add::<UILayout>(&self.root_ui_entity);
+            internals.dirty_comps.add::<UILayoutC>(&self.root_ui_entity);
 
             self.root_element_size_dirty = false;
         }

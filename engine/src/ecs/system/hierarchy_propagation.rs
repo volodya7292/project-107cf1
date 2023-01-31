@@ -1,5 +1,5 @@
-use crate::ecs::component;
-use crate::ecs::component::internal::GlobalTransform;
+use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::TransformC;
 use base::scene::relation::Relation;
 use base::utils::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
@@ -17,15 +17,15 @@ pub(crate) struct HierarchyPropagation<'a> {
 struct StackEntry {
     entity: EntityId,
     parent_global_transform_changed: bool,
-    parent_global_transform: GlobalTransform,
+    parent_global_transform: GlobalTransformC,
 }
 
 impl SystemHandler for HierarchyPropagation<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
         let relation_comps = data.component::<Relation>();
-        let transform_comps = data.component::<component::Transform>();
-        let mut global_transform_comps = data.component_mut::<GlobalTransform>();
+        let transform_comps = data.component::<TransformC>();
+        let mut global_transform_comps = data.component_mut::<GlobalTransformC>();
         let mut stack = Vec::<StackEntry>::with_capacity(transform_comps.count_entities());
 
         stack.push(StackEntry {

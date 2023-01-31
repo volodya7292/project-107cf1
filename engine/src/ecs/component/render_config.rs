@@ -61,7 +61,7 @@ pub enum RenderStage {
     OVERLAY,
 }
 
-pub struct MeshRenderConfig {
+pub struct MeshRenderConfigC {
     pub(crate) stage: RenderStage,
     pub(crate) mat_pipeline: u32,
     /// binding id -> Resource
@@ -70,7 +70,7 @@ pub struct MeshRenderConfig {
     pub(crate) visible: bool,
 }
 
-impl Default for MeshRenderConfig {
+impl Default for MeshRenderConfigC {
     fn default() -> Self {
         Self {
             stage: RenderStage::MAIN,
@@ -82,9 +82,9 @@ impl Default for MeshRenderConfig {
     }
 }
 
-impl MeshRenderConfig {
-    pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
-        MeshRenderConfig {
+impl MeshRenderConfigC {
+    pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfigC {
+        MeshRenderConfigC {
             stage: RenderStage::MAIN,
             mat_pipeline,
             resources: Default::default(),

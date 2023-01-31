@@ -1,7 +1,7 @@
 use nalgebra_glm::{DVec3, Vec3};
 
 #[derive(Copy, Clone)]
-pub struct Transform {
+pub struct TransformC {
     // Note: use DVec3 to support large distances
     pub position: DVec3,
     pub rotation: Vec3,
@@ -9,7 +9,7 @@ pub struct Transform {
     pub use_parent_transform: bool,
 }
 
-impl Default for Transform {
+impl Default for TransformC {
     fn default() -> Self {
         Self {
             position: Default::default(),
@@ -20,8 +20,8 @@ impl Default for Transform {
     }
 }
 
-impl Transform {
-    pub fn new() -> Transform {
+impl TransformC {
+    pub fn new() -> TransformC {
         Default::default()
     }
 

@@ -1,12 +1,9 @@
+use crate::ecs::component::VertexMeshC;
+use crate::renderer::vertex_mesh::RawVertexMesh;
+use base::utils::{HashMap, HashSet};
+use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::sync::Arc;
 use std::time::Instant;
-
-use entity_data::{EntityId, SystemAccess, SystemHandler};
-
-use base::utils::{HashMap, HashSet};
-
-use crate::ecs::component;
-use crate::renderer::vertex_mesh::RawVertexMesh;
 
 pub(crate) struct VertexMeshCompEvents<'a> {
     pub dirty_components: HashSet<EntityId>,
@@ -17,7 +14,7 @@ pub(crate) struct VertexMeshCompEvents<'a> {
 impl SystemHandler for VertexMeshCompEvents<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
-        let vertex_mesh_comps = data.component_mut::<component::VertexMesh>();
+        let vertex_mesh_comps = data.component_mut::<VertexMeshC>();
 
         // Update device buffers of vertex meshes
         for entity in &self.dirty_components {

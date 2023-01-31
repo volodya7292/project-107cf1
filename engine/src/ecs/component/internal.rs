@@ -1,18 +1,16 @@
-use crate::ecs::component::Transform;
-use base::utils::IndexSet;
-use entity_data::EntityId;
+use crate::ecs::component::TransformC;
 use nalgebra::Rotation3;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, Mat4, Vec3};
 
 #[derive(Copy, Clone)]
-pub struct GlobalTransform {
+pub struct GlobalTransformC {
     pub(crate) position: DVec3,
     pub(crate) rotation: Vec3,
     pub(crate) scale: Vec3,
 }
 
-impl Default for GlobalTransform {
+impl Default for GlobalTransformC {
     fn default() -> Self {
         Self {
             position: Default::default(),
@@ -22,17 +20,17 @@ impl Default for GlobalTransform {
     }
 }
 
-impl GlobalTransform {
+impl GlobalTransformC {
     /// Applies `self` transformation to `transform` and returns the result.
-    pub fn combine(&self, transform: &Transform) -> GlobalTransform {
+    pub fn combine(&self, transform: &TransformC) -> GlobalTransformC {
         if transform.use_parent_transform {
-            GlobalTransform {
+            GlobalTransformC {
                 position: self.position + transform.position,
                 rotation: (self.rotation + transform.rotation).map(|v| v % (std::f32::consts::PI * 2.0)),
                 scale: self.scale.component_mul(&transform.scale),
             }
         } else {
-            GlobalTransform {
+            GlobalTransformC {
                 position: transform.position,
                 rotation: transform.rotation,
                 scale: transform.scale,

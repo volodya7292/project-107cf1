@@ -19,9 +19,10 @@
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
-use crate::ecs::component::internal::GlobalTransform;
+use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
-use crate::ecs::{component, system};
+use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
+use crate::ecs::system;
 use crate::renderer::camera::OrthoCamera;
 pub use crate::renderer::dirty_components::DirtyComponents;
 use crate::renderer::material::MatComponent;
@@ -216,7 +217,7 @@ pub struct Renderer {
     renderables_to_destroy: Vec<Renderable>,
     vertex_meshes_to_destroy: Vec<Arc<RawVertexMesh>>,
 
-    modules: HashMap<TypeId, Box<dyn RendererModule + Send + Sync>>,
+    modules: HashMap<TypeId, Box<dyn RendererModule>>,
 }
 
 pub struct Internals<'a> {
@@ -521,19 +522,15 @@ pub trait SceneObject: StaticArchetype {}
 
 #[derive(Archetype)]
 pub struct VertexMeshObject {
-    global_transform: GlobalTransform,
+    global_transform: GlobalTransformC,
     relation: Relation,
-    transform: component::Transform,
-    render_config: component::MeshRenderConfig,
-    mesh: component::VertexMesh,
+    transform: TransformC,
+    render_config: MeshRenderConfigC,
+    mesh: VertexMeshC,
 }
 
 impl VertexMeshObject {
-    pub fn new(
-        transform: component::Transform,
-        render_config: component::MeshRenderConfig,
-        mesh: component::VertexMesh,
-    ) -> Self {
+    pub fn new(transform: TransformC, render_config: MeshRenderConfigC, mesh: VertexMeshC) -> Self {
         Self {
             global_transform: Default::default(),
             relation: Default::default(),
@@ -548,13 +545,13 @@ impl SceneObject for VertexMeshObject {}
 
 #[derive(Archetype)]
 pub struct SimpleObject {
-    global_transform: GlobalTransform,
+    global_transform: GlobalTransformC,
     relation: Relation,
-    transform: component::Transform,
+    transform: TransformC,
 }
 
 impl SimpleObject {
-    pub fn new(transform: component::Transform) -> Self {
+    pub fn new(transform: TransformC) -> Self {
         Self {
             global_transform: Default::default(),
             relation: Default::default(),
@@ -572,6 +569,10 @@ pub struct RenderObjectAccess<'a> {
 }
 
 impl RenderObjectAccess<'_> {
+    pub fn get<C: Component>(&mut self) -> Option<&C> {
+        self.storage.get(&self.entity_id)
+    }
+
     pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
         self.dirty_comps.add::<C>(&self.entity_id);
         self.storage.get_mut(&self.entity_id)
@@ -1135,6 +1136,12 @@ impl Renderer {
 
         self.object_count += 1;
 
+        if let Some(events) = self.storage.get::<EventHandlerC>(&entity) {
+            if let Some(on_added) = events.on_added {
+                on_added(&entity, self);
+            }
+        }
+
         Some(entity)
     }
 
@@ -1212,9 +1219,9 @@ impl Renderer {
         }
     }
 
-    pub fn access_object(&mut self, id: EntityId) -> RenderObjectAccess {
+    pub fn access_object(&mut self, id: &EntityId) -> RenderObjectAccess {
         RenderObjectAccess {
-            entity_id: id,
+            entity_id: *id,
             storage: &mut self.storage,
             dirty_comps: &mut self.dirty_comps,
         }
@@ -1230,13 +1237,10 @@ impl Renderer {
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
         if curr_rel_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
-            let global_transform = self
-                .storage
-                .get_mut::<component::Transform>(&self.root_entity)
-                .unwrap();
+            let global_transform = self.storage.get_mut::<TransformC>(&self.root_entity).unwrap();
             global_transform.position -= curr_rel_camera_pos;
 
-            self.dirty_comps.add::<component::Transform>(&self.root_entity);
+            self.dirty_comps.add::<TransformC>(&self.root_entity);
 
             self.relative_camera_pos = Vec3::default();
             self.camera_pos_pivot = *camera.position();
@@ -1295,7 +1299,7 @@ impl Renderer {
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
             renderables: &mut self.renderables,
-            dirty_components: self.dirty_comps.take_changes::<component::MeshRenderConfig>(),
+            dirty_components: self.dirty_comps.take_changes::<MeshRenderConfigC>(),
             buffer_updates: &mut buffer_updates,
             material_pipelines: &mut self.material_pipelines,
             uniform_buffer_basic: &self.uniform_buffer_basic,
@@ -1303,25 +1307,25 @@ impl Renderer {
             run_time: 0.0,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
-            dirty_components: self.dirty_comps.take_changes::<component::VertexMesh>(),
+            dirty_components: self.dirty_comps.take_changes::<VertexMeshC>(),
             buffer_updates: &mut self.vertex_mesh_updates,
             run_time: 0.0,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             root_entity: self.root_entity,
-            dirty_transform_comps: self.dirty_comps.take_changes::<component::Transform>(),
+            dirty_transform_comps: self.dirty_comps.take_changes::<TransformC>(),
             ordered_entities: &mut self.ordered_entities,
             changed_global_transforms: Vec::with_capacity(4096),
             run_time: 0.0,
         };
 
         self.storage.dispatch_par([
-            System::new(&mut renderer_events_system).with_mut::<component::MeshRenderConfig>(),
-            System::new(&mut vertex_mesh_system).with_mut::<component::VertexMesh>(),
+            System::new(&mut renderer_events_system).with_mut::<MeshRenderConfigC>(),
+            System::new(&mut vertex_mesh_system).with_mut::<VertexMeshC>(),
             System::new(&mut hierarchy_propagation_system)
                 .with::<Relation>()
-                .with::<component::Transform>()
-                .with_mut::<GlobalTransform>(),
+                .with::<TransformC>()
+                .with_mut::<GlobalTransformC>(),
         ]);
 
         timings.batch0_render_events = renderer_events_system.run_time;
@@ -1329,7 +1333,7 @@ impl Renderer {
         timings.batch0_hierarchy_propag = hierarchy_propagation_system.run_time;
 
         for entity in &hierarchy_propagation_system.changed_global_transforms {
-            self.dirty_comps.add::<GlobalTransform>(entity);
+            self.dirty_comps.add::<GlobalTransformC>(entity);
         }
 
         let t11 = Instant::now();
@@ -1354,7 +1358,7 @@ impl Renderer {
         let mut sorted_buffer_updates_entities: Vec<_> = {
             // let transforms = self.scene.storage_read::<GlobalTransform>();
             let access = self.storage.access();
-            let transforms = access.component::<GlobalTransform>();
+            let transforms = access.component::<GlobalTransformC>();
             self.vertex_mesh_updates
                 .keys()
                 .map(|v| {
@@ -1374,7 +1378,7 @@ impl Renderer {
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
             uniform_buffer_updates: &mut uniform_buffer_updates,
-            dirty_components: self.dirty_comps.take_changes::<GlobalTransform>(),
+            dirty_components: self.dirty_comps.take_changes::<GlobalTransformC>(),
             material_pipelines: &self.material_pipelines,
             renderables: &self.renderables,
             run_time: 0.0,
@@ -1396,10 +1400,10 @@ impl Renderer {
 
         self.storage.dispatch_par([
             System::new(&mut global_transform_events_system)
-                .with::<GlobalTransform>()
-                .with::<component::MeshRenderConfig>(),
+                .with::<GlobalTransformC>()
+                .with::<MeshRenderConfigC>(),
             System::new(&mut buffer_update_system),
-            System::new(&mut commit_buffer_updates_system).with::<component::VertexMesh>(),
+            System::new(&mut commit_buffer_updates_system).with::<VertexMeshC>(),
         ]);
 
         timings.batch1_global_transforms = global_transform_events_system.run_time;
@@ -1555,7 +1559,7 @@ impl Renderer {
                     let entry = self.storage.entry(&renderable_id).unwrap();
 
                     let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransform>(), entry.get::<component::MeshRenderConfig>(), self.vertex_meshes.get(&renderable_id)) else {
+                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), self.vertex_meshes.get(&renderable_id)) else {
                         continue;
                     };
 
@@ -1642,7 +1646,7 @@ impl Renderer {
                     }
 
                     let renderable_id = self.ordered_entities[entity_index];
-                    let Some(render_config) = self.storage.get::<component::MeshRenderConfig>(&renderable_id) else {
+                    let Some(render_config) = self.storage.get::<MeshRenderConfigC>(&renderable_id) else {
                         continue;
                     };
                     if render_config.stage != RenderStage::MAIN {
@@ -1677,8 +1681,14 @@ impl Renderer {
                     let mut descriptors = [DescriptorSet::default(); 3];
                     descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.g_per_frame_in;
                     descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
-                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] = renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
-                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32]);
+                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] =
+                        renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+                    cl.bind_graphics_inputs(
+                        signature,
+                        0,
+                        &descriptors,
+                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
+                    );
                     cl.push_constants(signature, &consts);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
@@ -1697,7 +1707,7 @@ impl Renderer {
             .unwrap();
 
         for renderable_id in &self.ordered_entities {
-            let Some(render_config) = self.storage.get::<component::MeshRenderConfig>(renderable_id) else {
+            let Some(render_config) = self.storage.get::<MeshRenderConfigC>(renderable_id) else {
                 continue;
             };
             if render_config.stage != RenderStage::OVERLAY {

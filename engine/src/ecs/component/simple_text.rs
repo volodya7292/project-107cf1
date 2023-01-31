@@ -108,14 +108,14 @@ pub enum TextHAlign {
 }
 
 #[derive(Clone)]
-pub struct SimpleText {
+pub struct SimpleTextC {
     text: StyledString,
     h_align: TextHAlign,
     max_width: f32,
     max_height: f32,
 }
 
-impl SimpleText {
+impl SimpleTextC {
     pub fn new(text: StyledString) -> Self {
         Self {
             text,

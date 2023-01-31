@@ -8,7 +8,7 @@ use vk_wrapper::CmdList;
 pub mod text_renderer;
 pub mod ui_renderer;
 
-pub trait RendererModule {
+pub trait RendererModule: Send + Sync {
     /// Note: entity rendering resources (e.g. vertex mesh) may be in use, destroy it only in `Self::on_update`.
     fn on_object_remove(&mut self, _id: &EntityId, _scene: renderer::Internals) {}
     /// The returned CmdList will be queued after this method.

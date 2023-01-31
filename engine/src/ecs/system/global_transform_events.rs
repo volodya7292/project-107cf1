@@ -9,7 +9,8 @@ use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 
 use crate::ecs::component;
-use crate::ecs::component::internal::GlobalTransform;
+use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::{BufferUpdate2, Renderable};
@@ -26,8 +27,8 @@ pub(crate) struct GlobalTransformEvents<'a> {
 impl SystemHandler for GlobalTransformEvents<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
-        let global_transform_comps = data.component::<GlobalTransform>();
-        let renderer_comps = data.component::<component::MeshRenderConfig>();
+        let global_transform_comps = data.component::<GlobalTransformC>();
+        let renderer_comps = data.component::<MeshRenderConfigC>();
 
         for entity in &self.dirty_components {
             let global_transform = unwrap_option!(global_transform_comps.get(entity), continue);
