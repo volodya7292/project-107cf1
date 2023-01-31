@@ -447,7 +447,6 @@ impl OverworldOrchestrator {
 
     /// Generates new clusters and their content. Updates and optimizes overworld cluster layout.
     pub fn update(&mut self, max_processing_time: Duration) -> OverworldUpdateResult {
-        let t_start = Instant::now();
         let mut res = OverworldUpdateResult {
             processed_dirty_clusters: Default::default(),
             updated_auxiliary_parts: Default::default(),
@@ -628,6 +627,7 @@ impl OverworldOrchestrator {
         let mut clusters_generating = 0;
         let mut reloaded_clusters = Vec::with_capacity(1024);
         let registry = self.overworld_generator.main_registry().registry();
+        let t_start = Instant::now();
 
         // 9. Load(generate) clusters which are !ready or (not present in o_clusters and !RCluster::occluded)
         for chunk in clusters_diff.sorted_layout.chunks(rayon::current_num_threads()) {

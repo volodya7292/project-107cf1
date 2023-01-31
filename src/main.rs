@@ -45,13 +45,13 @@ fn parking_lot_deadlock_detection() {
 fn init_threads() {
     let mut available_threads = thread::available_parallelism().unwrap().get();
 
-    let render_threads = (available_threads / 2).min(3);
+    let render_threads = (available_threads / 2).min(2);
     available_threads = available_threads.saturating_sub(render_threads).max(1);
 
-    let coroutine_threads = 1;
-    available_threads = available_threads.saturating_sub(coroutine_threads).max(1);
-
     let default_threads = available_threads;
+
+    let coroutine_threads = 1;
+    // available_threads = available_threads.saturating_sub(coroutine_threads).max(1);
 
     base::execution::init(default_threads, coroutine_threads);
     engine::execution::init(render_threads);

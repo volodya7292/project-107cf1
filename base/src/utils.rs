@@ -8,6 +8,7 @@ use nalgebra_glm::Vec3;
 
 pub use slice_split::SliceSplitImpl;
 
+pub mod instant_meter;
 pub mod noise;
 mod qef;
 pub mod resource_file;
