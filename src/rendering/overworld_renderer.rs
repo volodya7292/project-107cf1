@@ -147,40 +147,37 @@ impl OverworldRenderer {
             to_update_mesh.remove(&pos);
         }
 
-        // Add new objects
-        for pos in self.to_add.drain() {
-            let transform_comp = component::Transform::new().with_position(glm::convert(*pos.get()));
-            let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
-            let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
-
-            let entity_solid = renderer.add_object(
-                None,
-                VertexMeshObject::new(transform_comp, render_config_solid, Default::default()),
-            );
-            let entity_translucent = renderer.add_object(
-                None,
-                VertexMeshObject::new(transform_comp, render_config_translucent, Default::default()),
-            );
-
-            self.entities.insert(
-                pos,
-                ClusterEntities {
-                    solid: entity_solid,
-                    translucent: entity_translucent,
-                },
-            );
-        }
-
         // Update meshes for scene objects
         to_update_mesh.retain(|pos, meshes| {
-            let entities = self.entities.get(&pos).unwrap();
-
             for neighbour in get_side_clusters(&pos) {
                 if self.dirty_clusters.contains(&neighbour) {
                     // Retain, do mesh update later when neighbours are ready
                     return true;
                 }
             }
+
+            let entities = self.entities.entry(*pos).or_insert_with(|| {
+                assert_eq!(self.to_add.remove(pos), true);
+
+                let transform_comp = component::Transform::new().with_position(glm::convert(*pos.get()));
+                let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
+                let render_config_translucent =
+                    component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
+
+                let entity_solid = renderer.add_object(
+                    None,
+                    VertexMeshObject::new(transform_comp, render_config_solid, Default::default()),
+                );
+                let entity_translucent = renderer.add_object(
+                    None,
+                    VertexMeshObject::new(transform_comp, render_config_translucent, Default::default()),
+                );
+
+                ClusterEntities {
+                    solid: entity_solid.unwrap(),
+                    translucent: entity_translucent.unwrap(),
+                }
+            });
 
             *renderer
                 .access_object(entities.solid)

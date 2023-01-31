@@ -247,7 +247,7 @@ impl Renderer {
                             &self.staging_buffer,
                             used_size,
                             &update.buffer,
-                            update.offset,
+                            update.dst_offset,
                             copy_size,
                         );
                     }

@@ -63,7 +63,7 @@ impl RendererComponentEvents<'_> {
 
                     buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
                         buffer: buf_res.device_buffer.handle(),
-                        offset: 0,
+                        dst_offset: 0,
                         data: data.into(),
                     }));
                     buf_res.changed = false;

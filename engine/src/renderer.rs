@@ -124,6 +124,7 @@ pub struct Renderer {
     storage: EntityStorage,
     dirty_comps: DirtyComponents,
     root_entity: EntityId,
+    object_count: u32,
 
     active_camera: PerspectiveCamera,
     overlay_camera: OrthoCamera,
@@ -380,7 +381,7 @@ pub(crate) struct Renderable {
 
 pub(crate) struct BufferUpdate1 {
     pub buffer: BufferHandle,
-    pub offset: u64,
+    pub dst_offset: u64,
     pub data: SmallVec<[u8; 256]>,
 }
 
@@ -516,9 +517,7 @@ fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
 }
 
-pub trait SceneObject: StaticArchetype {
-    fn on_added(_renderer: &mut Renderer, _entity: &EntityId) {}
-}
+pub trait SceneObject: StaticArchetype {}
 
 #[derive(Archetype)]
 pub struct VertexMeshObject {
@@ -1019,6 +1018,7 @@ impl Renderer {
         let mut renderer = Renderer {
             storage,
             root_entity,
+            object_count: 0,
             dirty_comps: Default::default(),
             active_camera,
             overlay_camera,
@@ -1115,7 +1115,14 @@ impl Renderer {
         self.settings = settings;
     }
 
-    pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> EntityId {
+    pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> Option<EntityId> {
+        if self.object_count >= N_MAX_OBJECTS {
+            if self.object_count > N_MAX_OBJECTS {
+                unreachable!()
+            }
+            return None;
+        }
+
         let comp_ids = object.component_ids();
         let entity = self.storage.add(object);
 
@@ -1126,9 +1133,9 @@ impl Renderer {
         let parent = parent.unwrap_or(self.root_entity);
         Self::add_children(&self.storage.access(), parent, &[entity]);
 
-        O::on_added(self, &entity);
+        self.object_count += 1;
 
-        entity
+        Some(entity)
     }
 
     fn on_object_remove(&mut self, id: &EntityId) {
@@ -1201,6 +1208,7 @@ impl Renderer {
 
             self.on_object_remove(&entity);
             self.storage.remove(&entity);
+            self.object_count -= 1;
         }
     }
 
@@ -1450,7 +1458,7 @@ impl Renderer {
             };
             buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
                 buffer: self.per_frame_ub.handle(),
-                offset: 0,
+                dst_offset: 0,
                 data,
             }));
         }
@@ -1720,6 +1728,9 @@ impl Renderer {
             let consts = GPassConsts {
                 is_translucent_pass: 1,
             };
+
+            // TODO: FIXME on release target (push constants blocks are stripped when optimizations are on):
+            // 2023-01-31T11:44:18.418Z ERROR [vulkan] [VAL] "Validation Error: [ VUID-vkCmdPushConstants-offset-01795 ] Object 0: handle = 0x142658008, name = overlay_secondary, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x27bc88c6 | vkCmdPushConstants(): VK_SHADER_STAGE_ALL, VkPushConstantRange in VkPipelineLayout 0x3307610000000114[] overlapping offset = 0 and size = 4, do not contain VK_SHADER_STAGE_ALL. The Vulkan spec states: For each byte in the range specified by offset and size and for each shader stage in stageFlags, there must be a push constant range in layout that includes that byte and that stage (https://vulkan.lunarg.com/doc/view/1.3.239.0/mac/1.3-extensions/vkspec.html#VUID-vkCmdPushConstants-offset-01795)"
             cl.push_constants(signature, &consts);
 
             cl.bind_and_draw_vertex_mesh(vertex_mesh);
