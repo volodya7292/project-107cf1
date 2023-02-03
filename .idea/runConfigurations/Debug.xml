@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+  <configuration default="false" name="Debug" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="command" value="run" />
-    <option name="workingDirectory" value="file://$PROJECT_DIR$/work_dir" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="false" />
     <option name="allFeatures" value="false" />
@@ -14,6 +14,8 @@
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />
-    <method v="2" />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+    </method>
   </configuration>
 </component>

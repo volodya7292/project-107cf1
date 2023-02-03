@@ -146,11 +146,12 @@ pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
-    pub self_cross_align: CrossAlign,
+    pub align: CrossAlign,
     pub padding: Padding,
     pub overflow: Overflow,
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
+    pub shader_inverted_y: bool,
 }
 
 impl UILayoutC {
@@ -170,6 +171,11 @@ impl UILayoutC {
             content_flow: ContentFlow::Vertical,
             ..Default::default()
         }
+    }
+
+    pub fn with_align(mut self, align: CrossAlign) -> Self {
+        self.align = align;
+        self
     }
 
     pub fn with_width(mut self, width: Sizing) -> Self {
@@ -199,6 +205,11 @@ impl UILayoutC {
 
     pub fn with_max_height(mut self, max_height: f32) -> Self {
         self.constraints[1].max = max_height;
+        self
+    }
+
+    pub fn with_shader_inverted_y(mut self, enabled: bool) -> Self {
+        self.shader_inverted_y = enabled;
         self
     }
 }

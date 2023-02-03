@@ -1,3 +1,4 @@
+use crate::ecs::component::render_config::RenderStage;
 use nalgebra_glm::U8Vec4;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -81,8 +82,11 @@ pub struct StyledString {
 }
 
 impl StyledString {
-    pub fn new(data: String, text_style: TextStyle) -> Self {
-        Self { data, text_style }
+    pub fn new(data: impl Into<String>, text_style: TextStyle) -> Self {
+        Self {
+            data: data.into(),
+            text_style,
+        }
     }
 
     pub fn data(&self) -> &str {
@@ -111,8 +115,10 @@ pub enum TextHAlign {
 pub struct SimpleTextC {
     text: StyledString,
     h_align: TextHAlign,
+    long_word_breaking: bool,
     max_width: f32,
     max_height: f32,
+    stage: RenderStage,
 }
 
 impl SimpleTextC {
@@ -120,13 +126,25 @@ impl SimpleTextC {
         Self {
             text,
             h_align: TextHAlign::LEFT,
+            long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
+            stage: RenderStage::MAIN,
         }
+    }
+
+    pub fn with_stage(mut self, stage: RenderStage) -> Self {
+        self.stage = stage;
+        self
     }
 
     pub fn with_h_align(mut self, align: TextHAlign) -> Self {
         self.h_align = align;
+        self
+    }
+
+    pub fn with_long_word_breaking(mut self, do_break: bool) -> Self {
+        self.long_word_breaking = do_break;
         self
     }
 
@@ -140,12 +158,20 @@ impl SimpleTextC {
         self
     }
 
+    pub fn stage(&self) -> RenderStage {
+        self.stage
+    }
+
     pub fn string(&self) -> &StyledString {
         &self.text
     }
 
     pub fn h_align(&self) -> TextHAlign {
         self.h_align
+    }
+
+    pub fn long_word_breaking(&self) -> bool {
+        self.long_word_breaking
     }
 
     pub fn max_width(&self) -> f32 {

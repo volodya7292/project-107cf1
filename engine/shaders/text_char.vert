@@ -6,7 +6,7 @@ layout(location = 0) in uint inGlyphIndex;
 layout(location = 1) in vec2 inGlyphSize;
 layout(location = 2) in vec4 inColor;
 layout(location = 3) in vec2 inOffset;
-layout(location = 4) in float inScale;
+layout(location = 4) in vec2 inScale;
 
 layout(location = 0) out Output {
     vec2 texCoord;

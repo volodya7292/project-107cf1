@@ -1,4 +1,5 @@
 pub mod element;
+pub mod state;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
@@ -13,6 +14,7 @@ use entity_data::{Archetype, EntityId, SystemAccess};
 use nalgebra_glm::{DVec3, Vec2, Vec3};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
+pub use state::UIState;
 use std::any::Any;
 use std::sync::Arc;
 use vk_wrapper::{CmdList, Device};
@@ -27,14 +29,10 @@ pub struct UIRenderer {
 
 pub struct DefaultStyling {}
 
-pub trait UIElement: Send + Sync + 'static {}
-
-impl UIElement for () {}
-
 #[derive(Archetype)]
-pub struct UIObject<E>
+pub struct UIObject<S>
 where
-    E: UIElement,
+    S: UIState,
 {
     relation: Relation,
     global_transform: GlobalTransformC,
@@ -47,10 +45,10 @@ where
     layout_cache: UILayoutCacheC,
     layout: UILayoutC,
 
-    element: E,
+    element: S,
 }
 
-impl<E: UIElement> UIObject<E> {
+impl<E: UIState> UIObject<E> {
     pub fn new_raw(layout: UILayoutC, element: E) -> Self {
         Self {
             relation: Default::default(),
@@ -86,7 +84,7 @@ impl<E: UIElement> UIObject<E> {
     }
 }
 
-impl<E: UIElement> SceneObject for UIObject<E> {}
+impl<E: UIState> SceneObject for UIObject<E> {}
 
 struct ChildFlowSizingInfo {
     entity: EntityId,
@@ -238,6 +236,7 @@ impl UIRenderer {
         let layout_comps = access.component::<UILayoutC>();
         let mut layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
+        // Start from children (bottom of the tree)
         for node in linear_tree.iter().rev() {
             let relation = relation_comps.get(node).unwrap();
             let layout = layout_comps.get(node).unwrap();
@@ -287,6 +286,7 @@ impl UIRenderer {
             root_cache.final_size = root_cache.final_min_size;
         }
 
+        // Start from top of the tree
         for node in linear_tree {
             let parent_layout = layout_comps.get(node).unwrap();
             let parent_cache = layout_cache_comps.get_mut(node).unwrap();
@@ -346,7 +346,7 @@ impl UIRenderer {
                 // Collect info for position calculation
                 children_positioning_infos.push(ChildPositioningInfo {
                     entity: child,
-                    cross_align: child_layout.self_cross_align,
+                    cross_align: child_layout.align,
                     size: child_cache.final_size,
                 });
             }
@@ -375,6 +375,7 @@ impl UIRenderer {
         root_size: &Vec2,
     ) {
         let mut transform_comps = access.component_mut::<TransformC>();
+        let layout_comps = access.component::<UILayoutC>();
         let layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
         let root_size_inv = Vec2::from_element(1.0).component_div(root_size);
@@ -383,15 +384,21 @@ impl UIRenderer {
             let Some(transform) = transform_comps.get_mut(node) else {
                 continue;
             };
+            let layout = layout_comps.get(node).unwrap();
             let cache = layout_cache_comps.get(node).unwrap();
 
             let norm_pos = cache.global_position.component_mul(&root_size_inv);
             let norm_size = cache.final_size.component_mul(&root_size_inv);
 
             transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
+
             transform.position = DVec3::new(
                 norm_pos.x as f64,
-                1.0 - (norm_size.y - norm_pos.y) as f64,
+                1.0 - if layout.shader_inverted_y {
+                    norm_pos.y
+                } else {
+                    norm_size.y - norm_pos.y
+                } as f64,
                 i as f64,
             );
 

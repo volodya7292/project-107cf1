@@ -19,5 +19,5 @@ void main() {
 
     vs_out.texCoord = vec2(pos2d.x, pos2d.y);
 
-    gl_Position = info.overlay_camera.proj_view * worldPos;
+    gl_Position = info.camera.proj_view * worldPos;
 }

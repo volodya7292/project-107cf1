@@ -84,8 +84,13 @@ impl RendererComponentEvents<'_> {
         }
     }
 
-    fn renderer_comp_removed(renderable: &Renderable, object_desc_pool: &mut vkw::DescriptorPool) {
+    pub fn renderer_comp_removed(
+        renderable: &Renderable,
+        object_desc_pool: &mut vkw::DescriptorPool,
+        uniform_buffer_offsets: &mut IndexPool,
+    ) {
         object_desc_pool.free(renderable.descriptor_sets[0]);
+        let _ = uniform_buffer_offsets.return_id(renderable.uniform_buf_index);
     }
 }
 
@@ -110,7 +115,7 @@ impl SystemHandler for RendererComponentEvents<'_> {
                 &mut self.material_pipelines[config.mat_pipeline as usize].per_object_desc_pool;
 
             let mut renderable = if let Some(mut renderable) = self.renderables.remove(&entity) {
-                Self::renderer_comp_removed(&renderable, object_desc_pool);
+                Self::renderer_comp_removed(&renderable, object_desc_pool, self.uniform_buffer_offsets);
 
                 renderable.buffers = smallvec![];
                 renderable.mat_pipeline = config.mat_pipeline;

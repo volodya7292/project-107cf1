@@ -277,9 +277,9 @@ impl TextureAtlasType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C)]
-struct PerspectiveCameraInfo {
+struct CameraInfo {
     pos: Vector4<f32>,
     dir: Vector4<f32>,
     proj: Matrix4<f32>,
@@ -289,19 +289,10 @@ struct PerspectiveCameraInfo {
     fovy: f32,
 }
 
-#[derive(Debug)]
-#[repr(C)]
-struct OrthoCameraInfo {
-    proj: Matrix4<f32>,
-    view: Matrix4<f32>,
-    proj_view: Matrix4<f32>,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C)]
 struct FrameInfoUniforms {
-    camera: PerspectiveCameraInfo,
-    overlay_camera: OrthoCameraInfo,
+    camera: CameraInfo,
     atlas_info: U32Vec4,
     frame_size: UVec2,
 }
@@ -435,7 +426,7 @@ lazy_static! {
             BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 0),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::PIXEL,
-                binding_type: BindingType::UNIFORM_BUFFER,
+                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
             },
         ),
@@ -607,11 +598,11 @@ impl Renderer {
         let staging_buffer = device
             .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
             .unwrap();
-        let per_frame_uniform_buffer = device
+        let per_frame_ub = device
             .create_device_buffer(
                 BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
                 mem::size_of::<FrameInfoUniforms>() as u64,
-                1,
+                2, // For two different RenderStages
             )
             .unwrap();
         let uniform_buffer_basic = device
@@ -951,7 +942,10 @@ impl Renderer {
                     g_per_frame_pool.create_binding(
                         0,
                         0,
-                        BindingRes::Buffer(per_frame_uniform_buffer.handle()),
+                        BindingRes::BufferRange(
+                            per_frame_ub.handle(),
+                            0..mem::size_of::<FrameInfoUniforms>() as u64,
+                        ),
                     ),
                     g_per_frame_pool.create_binding(1, 0, BindingRes::Buffer(material_buffer.handle())),
                     g_per_frame_pool.create_binding(
@@ -1068,7 +1062,7 @@ impl Renderer {
             translucency_depths_pixel_shader,
             translucency_depths_image: None,
             translucency_colors_image: None,
-            per_frame_ub: per_frame_uniform_buffer,
+            per_frame_ub,
             visibility_host_buffer,
             sw_render_pass: None,
             compose_pipeline: None,
@@ -1272,11 +1266,11 @@ impl Renderer {
             let object_desc_pool =
                 &mut self.material_pipelines[renderable.mat_pipeline as usize].per_object_desc_pool;
 
-            object_desc_pool.free(renderable.descriptor_sets[0]);
-
-            self.uniform_buffer_offsets
-                .return_id(renderable.uniform_buf_index)
-                .unwrap();
+            system::RendererComponentEvents::renderer_comp_removed(
+                &renderable,
+                object_desc_pool,
+                &mut self.uniform_buffer_offsets,
+            );
         }
 
         // --------------------------------------------------------------------
@@ -1418,52 +1412,80 @@ impl Renderer {
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
-            let per_frame_info = {
+            let mut per_frame_infos: [FrameInfoUniforms; 2] = Default::default();
+
+            per_frame_infos[RenderStage::MAIN as usize] = {
                 let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
                 let cam_dir = camera.direction();
-                let main_proj = camera.projection();
-                let main_view: Mat4 = glm::convert(camera::create_view_matrix(
+                let proj = camera.projection();
+                let view: Mat4 = glm::convert(camera::create_view_matrix(
                     &glm::convert(cam_pos),
                     &camera.rotation(),
                 ));
 
-                let overlay_proj = self.overlay_camera.projection();
-                let overlay_view = camera::create_view_matrix(
+                FrameInfoUniforms {
+                    camera: CameraInfo {
+                        pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                        dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                        proj,
+                        view,
+                        proj_view: proj * view,
+                        z_near: camera.z_near(),
+                        fovy: camera.fovy(),
+                    },
+
+                    atlas_info: U32Vec4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
+                    frame_size: UVec2::new(self.surface_size.0, self.surface_size.1),
+                }
+            };
+            per_frame_infos[RenderStage::OVERLAY as usize] = {
+                let cam_dir = self.overlay_camera.direction();
+                let proj = self.overlay_camera.projection();
+                let view = camera::create_view_matrix(
                     &glm::convert(*self.overlay_camera.position()),
                     self.overlay_camera.rotation(),
                 );
 
                 FrameInfoUniforms {
-                    camera: PerspectiveCameraInfo {
-                        pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                    camera: CameraInfo {
+                        pos: Vec4::new(0.0, 0.0, 0.0, 0.0),
                         dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
-                        proj: main_proj,
-                        view: main_view,
-                        proj_view: main_proj * main_view,
+                        proj,
+                        view,
+                        proj_view: proj * view,
                         z_near: camera.z_near(),
                         fovy: camera.fovy(),
                     },
-                    overlay_camera: OrthoCameraInfo {
-                        proj: overlay_proj,
-                        view: overlay_view,
-                        proj_view: overlay_proj * overlay_view,
-                    },
-                    atlas_info: U32Vec4::new(self.texture_atlases[0].tile_width(), 0, 0, 0),
-                    frame_size: UVec2::new(self.surface_size.0, self.surface_size.1),
+                    ..per_frame_infos[RenderStage::MAIN as usize]
                 }
             };
 
             let data = unsafe {
-                slice::from_raw_parts(
-                    &per_frame_info as *const FrameInfoUniforms as *const u8,
-                    mem::size_of_val(&per_frame_info),
-                )
-                .to_smallvec()
+                let mut data = Vec::with_capacity(mem::size_of::<FrameInfoUniforms>() * 2);
+
+                for info in &per_frame_infos {
+                    data.extend(
+                        slice::from_raw_parts(
+                            info as *const FrameInfoUniforms as *const u8,
+                            mem::size_of_val(info),
+                        )
+                        .into_iter()
+                        .cloned(),
+                    );
+                }
+
+                data
             };
-            buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
-                buffer: self.per_frame_ub.handle(),
-                dst_offset: 0,
-                data,
+
+            buffer_updates.extend(per_frame_infos.iter().enumerate().map(|(idx, info)| {
+                BufferUpdate::WithOffset(BufferUpdate1 {
+                    buffer: self.per_frame_ub.handle(),
+                    dst_offset: idx as u64 * self.per_frame_ub.aligned_element_size(),
+                    data: unsafe {
+                        slice::from_raw_parts(info as *const _ as *const u8, mem::size_of_val(info))
+                            .to_smallvec()
+                    },
+                })
             }));
         }
 
@@ -1602,7 +1624,10 @@ impl Renderer {
                     descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.g_per_frame_in;
                     descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
                     descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] = renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
-                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32]);
+                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[
+                        render_config.stage as u32 * self.per_frame_ub.aligned_element_size() as u32,
+                        renderable.uniform_buf_index as u32 * self.uniform_buffer_basic.aligned_element_size() as u32
+                    ]);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
@@ -1687,7 +1712,10 @@ impl Renderer {
                         signature,
                         0,
                         &descriptors,
-                        &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
+                        &[
+                            render_config.stage as u32 * self.per_frame_ub.aligned_element_size() as u32,
+                            renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32,
+                        ],
                     );
                     cl.push_constants(signature, &consts);
 
@@ -1733,10 +1761,15 @@ impl Renderer {
                 signature,
                 0,
                 &descriptors,
-                &[renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32],
+                &[
+                    render_config.stage as u32 * self.per_frame_ub.aligned_element_size() as u32,
+                    renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32,
+                ],
             );
             let consts = GPassConsts {
-                is_translucent_pass: 1,
+                // Overlay is by default translucent and doesn't have translucency pass.
+                // Set this to 0 to prevent shaders writing to translucency texture.
+                is_translucent_pass: 0,
             };
 
             // TODO: FIXME on release target (push constants blocks are stripped when optimizations are on):

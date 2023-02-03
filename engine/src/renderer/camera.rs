@@ -19,6 +19,17 @@ pub fn create_view_matrix(position: &Vec3, rotation: &Vec3) -> Mat4 {
     mat
 }
 
+pub fn rotation_to_direction(rotation: &Vec3) -> Vec3 {
+    let mut rot_mat = Mat4::identity();
+    rot_mat *= Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x);
+    rot_mat *= Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y);
+    rot_mat *= Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z);
+
+    let d: Vec3 = rot_mat.row(2).transpose().fixed_rows::<3>(0).into();
+
+    -d
+}
+
 impl PerspectiveCamera {
     pub fn new(aspect: f32, fovy: f32, near: f32) -> Self {
         Self {
@@ -63,14 +74,7 @@ impl PerspectiveCamera {
     }
 
     pub fn direction(&self) -> Vec3 {
-        let mut rot_mat = Mat4::identity();
-        rot_mat *= Mat4::from_axis_angle(&Vec3::x_axis(), self.rotation.x);
-        rot_mat *= Mat4::from_axis_angle(&Vec3::y_axis(), self.rotation.y);
-        rot_mat *= Mat4::from_axis_angle(&Vec3::z_axis(), self.rotation.z);
-
-        let d: Vec3 = rot_mat.row(2).transpose().fixed_rows::<3>(0).into();
-
-        -d
+        rotation_to_direction(&self.rotation)
     }
 
     pub fn fovy(&self) -> f32 {
@@ -116,6 +120,10 @@ impl OrthoCamera {
 
     pub fn rotation(&self) -> &Vec3 {
         &self.rotation
+    }
+
+    pub fn direction(&self) -> Vec3 {
+        rotation_to_direction(&self.rotation)
     }
 
     pub fn set_rotation(&mut self, rotation: Vec3) {

@@ -43,7 +43,7 @@ struct Vertex {
     vec3 tangent;
 };
 
-struct PerspectiveCamera {
+struct Camera {
     vec4 pos;
     vec4 dir;
     mat4 proj;
@@ -53,15 +53,8 @@ struct PerspectiveCamera {
     float fovy;
 };
 
-struct OrthoCamera {
-    mat4 proj;
-    mat4 view;
-    mat4 proj_view;
-};
-
 struct FrameInfo {
-    PerspectiveCamera camera;
-    OrthoCamera overlay_camera;
+    Camera camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
     uvec2 frame_size;
     float frame_aspect;

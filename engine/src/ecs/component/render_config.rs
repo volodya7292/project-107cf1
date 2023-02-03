@@ -52,13 +52,13 @@ impl Resource {
     }
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum RenderStage {
     /// Renders regular 3D objects.
-    MAIN,
+    MAIN = 0,
     /// Renders objects after the `MAIN` stage.
-    OVERLAY,
+    OVERLAY = 1,
 }
 
 pub struct MeshRenderConfigC {
