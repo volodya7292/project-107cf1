@@ -1,4 +1,4 @@
-se crate::ecs::component::event_handler::EventHandlerI;
+use crate::ecs::component::event_handler::EventHandlerI;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::StyledString;
 use crate::ecs::component::ui::{Sizing, UILayoutC};

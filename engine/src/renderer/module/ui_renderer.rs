@@ -9,7 +9,7 @@ use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, Vertex
 use crate::renderer::module::RendererModule;
 use crate::renderer::{DirtyComponents, Internals, Renderer, SceneObject};
 use base::scene::relation::Relation;
-use base::utils::Bool;
+use base::utils::{Bool, HashSet};
 use entity_data::{Archetype, EntityId, SystemAccess};
 use nalgebra_glm::{DVec3, Vec2, Vec3};
 use parking_lot::Mutex;
@@ -231,18 +231,28 @@ impl UIRenderer {
     }
 
     /// Calculates minimum sizes for each element starting from children (bottom of the tree).
-    fn calculate_final_minimum_sizes(linear_tree: &[EntityId], access: &SystemAccess) {
+    fn calculate_final_minimum_sizes(
+        linear_tree: &[EntityId],
+        access: &SystemAccess,
+        dirty_elements: &mut HashSet<EntityId>,
+    ) {
         let relation_comps = access.component::<Relation>();
         let layout_comps = access.component::<UILayoutC>();
         let mut layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
+        const ROOT_IDX: usize = 0;
+
         // Start from children (bottom of the tree)
-        for node in linear_tree.iter().rev() {
+        for (i, node) in linear_tree.iter().enumerate().rev() {
+            if !dirty_elements.contains(node) {
+                return;
+            }
+
             let relation = relation_comps.get(node).unwrap();
             let layout = layout_comps.get(node).unwrap();
             let flow_axis = layout.content_flow.axis();
             let cross_flow_axis = layout.content_flow.cross_axis();
-            let mut min_size = Vec2::from_element(0.0);
+            let mut new_min_size = Vec2::from_element(0.0);
 
             // Calculate self min size using children min sizes
             for child in &relation.children {
@@ -254,27 +264,40 @@ impl UIRenderer {
                 }
                 let child_cache = layout_cache_comps.get(child).unwrap();
 
-                let flow_size = &mut min_size[flow_axis];
+                let flow_size = &mut new_min_size[flow_axis];
                 *flow_size += child_cache.final_min_size[flow_axis];
 
-                let min_cross_size = &mut min_size[cross_flow_axis];
+                let min_cross_size = &mut new_min_size[cross_flow_axis];
                 *min_cross_size = min_cross_size.max(child_cache.final_min_size[cross_flow_axis]);
             }
 
-            min_size += layout.padding.size();
+            new_min_size += layout.padding.size();
 
             // Apply constraints to minimum size
-            for (min_size, constraint) in min_size.iter_mut().zip(layout.constraints.iter()) {
+            for (min_size, constraint) in new_min_size.iter_mut().zip(layout.constraints.iter()) {
                 *min_size = constraint.clamp(*min_size);
             }
 
             let cache = layout_cache_comps.get_mut(node).unwrap();
-            cache.final_min_size = min_size;
+
+            if cache.final_min_size == new_min_size {
+                continue;
+            }
+            cache.final_min_size = new_min_size;
+
+            if i != ROOT_IDX {
+                // Make parent dirty
+                dirty_elements.insert(relation.parent);
+            }
         }
     }
 
     /// For each element calculates expanded size and its position (starting from the top of the tree).
-    fn expand_sizes_and_set_positions(linear_tree: &[EntityId], access: &SystemAccess) {
+    fn expand_sizes_and_set_positions(
+        linear_tree: &[EntityId],
+        access: &SystemAccess,
+        dirty_elements: &mut HashSet<EntityId>,
+    ) {
         let relation_comps = access.component::<Relation>();
         let layout_comps = access.component::<UILayoutC>();
         let mut layout_cache_comps = access.component_mut::<UILayoutCacheC>();
@@ -288,15 +311,24 @@ impl UIRenderer {
 
         // Start from top of the tree
         for node in linear_tree {
+            let Some(relation) = relation_comps.get(node) else {
+                continue;
+            };
+
+            let contains_dirty_children = relation
+                .children
+                .iter()
+                .any(|child| dirty_elements.contains(child));
+
+            if !dirty_elements.contains(node) || !contains_dirty_children {
+                continue;
+            }
+
             let parent_layout = layout_comps.get(node).unwrap();
             let parent_cache = layout_cache_comps.get_mut(node).unwrap();
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
             let parent_size = parent_cache.final_size;
-
-            let Some(relation) = relation_comps.get(node) else {
-                continue;
-            };
 
             let mut children_flow_sizings: SmallVec<[ChildFlowSizingInfo; 128]> =
                 SmallVec::with_capacity(relation.children.len());
@@ -308,7 +340,7 @@ impl UIRenderer {
                 let child_cache = layout_cache_comps.get_mut(child).unwrap();
 
                 // Calculate cross-flow-size for `child`
-                let child_final_cross_size = child_layout.constraints[cross_flow_axis].clamp(
+                let child_new_cross_size = child_layout.constraints[cross_flow_axis].clamp(
                     match child_layout.sizing[cross_flow_axis] {
                         Sizing::Preferred(size) => size.clamp(
                             child_cache.final_min_size[cross_flow_axis],
@@ -318,7 +350,12 @@ impl UIRenderer {
                         Sizing::Grow(factor) => parent_size[cross_flow_axis] * factor.min(1.0),
                     },
                 );
-                child_cache.final_size[cross_flow_axis] = child_final_cross_size;
+                let child_curr_cross_size = &mut child_cache.final_size[cross_flow_axis];
+
+                if child_new_cross_size != *child_curr_cross_size {
+                    *child_curr_cross_size = child_new_cross_size;
+                    dirty_elements.insert(*child);
+                }
 
                 // Collect info for final size calculation
                 children_flow_sizings.push(ChildFlowSizingInfo {
@@ -337,11 +374,15 @@ impl UIRenderer {
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());
 
-            for (child, final_size) in calculated_children_sizes {
+            for (child, child_new_flow_size) in calculated_children_sizes {
                 let child_layout = layout_comps.get(&child).unwrap();
                 let child_cache = layout_cache_comps.get_mut(&child).unwrap();
+                let child_curr_flow_size = &mut child_cache.final_size[flow_axis];
 
-                child_cache.final_size[flow_axis] = final_size;
+                if child_new_flow_size != *child_curr_flow_size {
+                    *child_curr_flow_size = child_new_flow_size;
+                    dirty_elements.insert(child);
+                }
 
                 // Collect info for position calculation
                 children_positioning_infos.push(ChildPositioningInfo {
@@ -359,10 +400,14 @@ impl UIRenderer {
                 &children_positioning_infos,
                 |child, position| {
                     let child_cache = layout_cache_comps.get_mut(&child).unwrap();
+                    let new_global_pos = parent_cache.global_position + position;
+
+                    if child_cache.global_position != new_global_pos {
+                        child_cache.global_position = new_global_pos;
+                        dirty_elements.insert(child);
+                    }
 
                     child_cache.relative_position = position;
-                    child_cache.global_position =
-                        parent_cache.global_position + child_cache.relative_position;
                 },
             )
         }
@@ -371,16 +416,22 @@ impl UIRenderer {
     fn calculate_transforms(
         linear_tree: &[EntityId],
         access: &SystemAccess,
-        dirty_comps: &mut DirtyComponents,
         root_size: &Vec2,
+        dirty_comps: &mut DirtyComponents,
+        dirty_elements: &mut HashSet<EntityId>,
     ) {
         let mut transform_comps = access.component_mut::<TransformC>();
+        let relation_comps = access.component::<Relation>();
         let layout_comps = access.component::<UILayoutC>();
         let layout_cache_comps = access.component_mut::<UILayoutCacheC>();
 
         let root_size_inv = Vec2::from_element(1.0).component_div(root_size);
 
         for (i, node) in linear_tree.iter().enumerate() {
+            if !dirty_elements.contains(node) {
+                continue;
+            }
+
             let Some(transform) = transform_comps.get_mut(node) else {
                 continue;
             };
@@ -390,9 +441,8 @@ impl UIRenderer {
             let norm_pos = cache.global_position.component_mul(&root_size_inv);
             let norm_size = cache.final_size.component_mul(&root_size_inv);
 
-            transform.scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
-
-            transform.position = DVec3::new(
+            let new_scale = Vec3::new(norm_size.x, norm_size.y, 1.0);
+            let new_position = DVec3::new(
                 norm_pos.x as f64,
                 1.0 - if layout.shader_inverted_y {
                     norm_pos.y
@@ -402,12 +452,28 @@ impl UIRenderer {
                 i as f64,
             );
 
+            if new_scale != transform.scale || new_position != transform.position {
+                transform.scale = new_scale;
+                transform.position = new_position;
+
+                // if parent transform changed, then all children transforms must be recalculated
+                let relation = relation_comps.get(node).unwrap();
+                for child in &relation.children {
+                    dirty_elements.insert(*child);
+                }
+            }
+
             dirty_comps.add::<TransformC>(node);
         }
     }
 
     fn update_hierarchy(&mut self, internals: &mut Internals) {
         let access = internals.storage.access();
+
+        let mut dirty_elements = internals.dirty_comps.take_changes::<UILayoutC>();
+        if dirty_elements.is_empty() {
+            return;
+        }
 
         let linear_tree = {
             let layout_comps = access.component::<UILayoutC>();
@@ -417,15 +483,16 @@ impl UIRenderer {
             linear_tree
         };
 
-        Self::calculate_final_minimum_sizes(&linear_tree, &access);
+        Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
 
-        Self::expand_sizes_and_set_positions(&linear_tree, &access);
+        Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
 
         Self::calculate_transforms(
             &linear_tree,
             &access,
-            internals.dirty_comps,
             &self.root_element_size,
+            internals.dirty_comps,
+            &mut dirty_elements,
         );
     }
 }
@@ -436,8 +503,6 @@ impl RendererModule for UIRenderer {
     }
 
     fn on_update(&mut self, mut internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
-        let layout_changes = internals.dirty_comps.take_changes::<UILayoutC>();
-
         if self.root_element_size_dirty {
             let layout = internals
                 .storage
@@ -447,12 +512,7 @@ impl RendererModule for UIRenderer {
             layout.constraints[1] = Constraint::exact(self.root_element_size.y);
 
             internals.dirty_comps.add::<UILayoutC>(&self.root_ui_entity);
-
             self.root_element_size_dirty = false;
-        }
-
-        if layout_changes.is_empty() {
-            return None;
         }
 
         self.update_hierarchy(&mut internals);
