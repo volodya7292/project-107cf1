@@ -1,9 +1,8 @@
 use crate::ecs::component;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::{
-    BufferUpdate, BufferUpdate1, Renderable, CUSTOM_OBJECT_DESCRIPTOR_IDX, MAX_BASIC_UNIFORM_BLOCK_SIZE,
-};
+use crate::renderer::resources::{Renderable, CUSTOM_OBJECT_DESCRIPTOR_IDX};
+use crate::renderer::{BufferUpdate, BufferUpdate1, MAX_BASIC_UNIFORM_BLOCK_SIZE};
 use base::unwrap_option;
 use base::utils::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};

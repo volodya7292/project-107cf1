@@ -179,15 +179,19 @@ impl OverworldRenderer {
                 }
             });
 
-            *renderer
-                .access_object(&entities.solid)
-                .get_mut::<VertexMeshC>()
-                .unwrap() = VertexMeshC::new(&meshes.solid.raw());
+            let mesh_solid = VertexMeshC::new(&meshes.solid.raw());
+            let transparent = VertexMeshC::new(&meshes.transparent.raw());
 
-            *renderer
-                .access_object(&entities.translucent)
-                .get_mut::<VertexMeshC>()
-                .unwrap() = VertexMeshC::new(&meshes.transparent.raw());
+            let access = renderer.access();
+            access.object_raw(&entities.solid).unwrap().modify(|mut entry| {
+                *entry.get_mut::<VertexMeshC>() = mesh_solid;
+            });
+            access
+                .object_raw(&entities.translucent)
+                .unwrap()
+                .modify(|mut entry| {
+                    *entry.get_mut::<VertexMeshC>() = transparent;
+                });
 
             false
         });

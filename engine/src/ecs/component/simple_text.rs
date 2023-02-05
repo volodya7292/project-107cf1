@@ -30,12 +30,7 @@ pub struct TextStyle {
 
 impl TextStyle {
     pub fn new() -> Self {
-        Self {
-            font_id: 0,
-            font_size: 1.0,
-            font_style: FontStyle::Normal,
-            color: U8Vec4::from_element(255),
-        }
+        Self::default()
     }
 
     pub fn with_font(mut self, font_id: u16) -> Self {
@@ -75,7 +70,18 @@ impl TextStyle {
     }
 }
 
-#[derive(Clone)]
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            font_id: 0,
+            font_size: 1.0,
+            font_style: FontStyle::Normal,
+            color: U8Vec4::from_element(255),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct StyledString {
     data: String,
     text_style: TextStyle,
@@ -113,24 +119,29 @@ pub enum TextHAlign {
 
 #[derive(Clone)]
 pub struct SimpleTextC {
-    text: StyledString,
-    h_align: TextHAlign,
-    long_word_breaking: bool,
-    max_width: f32,
-    max_height: f32,
-    stage: RenderStage,
+    pub text: StyledString,
+    pub h_align: TextHAlign,
+    pub long_word_breaking: bool,
+    pub max_width: f32,
+    pub max_height: f32,
+    pub stage: RenderStage,
 }
 
 impl SimpleTextC {
-    pub fn new(text: StyledString) -> Self {
+    pub fn new() -> Self {
         Self {
-            text,
+            text: Default::default(),
             h_align: TextHAlign::LEFT,
             long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
             stage: RenderStage::MAIN,
         }
+    }
+
+    pub fn with_text(mut self, text: StyledString) -> Self {
+        self.text = text;
+        self
     }
 
     pub fn with_stage(mut self, stage: RenderStage) -> Self {
@@ -156,29 +167,5 @@ impl SimpleTextC {
     pub fn with_max_height(mut self, max_height: f32) -> Self {
         self.max_height = max_height;
         self
-    }
-
-    pub fn stage(&self) -> RenderStage {
-        self.stage
-    }
-
-    pub fn string(&self) -> &StyledString {
-        &self.text
-    }
-
-    pub fn h_align(&self) -> TextHAlign {
-        self.h_align
-    }
-
-    pub fn long_word_breaking(&self) -> bool {
-        self.long_word_breaking
-    }
-
-    pub fn max_width(&self) -> f32 {
-        self.max_width
-    }
-
-    pub fn max_height(&self) -> f32 {
-        self.max_height
     }
 }

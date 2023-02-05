@@ -35,9 +35,9 @@ use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::renderer::module::ui_renderer::element::UIText;
+use engine::renderer::module::ui_renderer::element::{TextState, UIText};
 use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
-use engine::renderer::{Renderer, VertexMeshObject};
+use engine::renderer::{Renderer, RendererContextI, VertexMeshObject};
 use engine::{renderer, Application, Input};
 use entity_data::{AnyState, EntityId};
 use nalgebra_glm as glm;
@@ -237,12 +237,13 @@ impl Application for Game {
             None,
             TextObject::new(
                 TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
-                SimpleTextC::new(StyledString::new(
-                    "Govno, my is Gmine",
-                    TextStyle::new().with_font(font_id).with_font_size(0.5),
-                ))
-                .with_max_width(3.0)
-                .with_h_align(TextHAlign::LEFT),
+                SimpleTextC::new()
+                    .with_text(StyledString::new(
+                        "Govno, my is Gmine",
+                        TextStyle::new().with_font(font_id).with_font_size(0.5),
+                    ))
+                    .with_max_width(3.0)
+                    .with_h_align(TextHAlign::LEFT),
             ),
         );
 
@@ -276,13 +277,14 @@ impl Application for Game {
             .with_mesh(VertexMeshC::without_data(4, 1)),
         );
 
-        let text = renderer.add_object(
-            Some(root_ui_entity),
-            UIText::new(StyledString::new(
-                "Lorem ipsum",
-                TextStyle::new().with_font(font_id).with_font_size(100.5),
-            )),
-        );
+        let text = renderer.add_object(Some(root_ui_entity), UIText::new());
+
+        let access = renderer.access();
+        let mut obj = access.object::<UIText>(&text.unwrap()).unwrap();
+        obj.set_text(StyledString::new(
+            "Lorem ipsum",
+            TextStyle::new().with_font(font_id).with_font_size(100.5),
+        ));
 
         // let panel2 = renderer.add_object(
         //     panel,

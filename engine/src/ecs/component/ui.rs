@@ -214,7 +214,7 @@ impl UILayoutC {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct UILayoutCacheC {
     pub(crate) final_min_size: Vec2,
     pub(crate) final_size: Vec2,

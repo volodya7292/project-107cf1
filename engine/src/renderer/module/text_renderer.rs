@@ -1,11 +1,11 @@
-use crate::ecs::component;
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
-use crate::renderer::{Internals, SceneObject};
+use crate::renderer::SceneObject;
 use crate::{HashSet, Renderer};
 use base::scene::relation::Relation;
 use base::utils::unsafe_slice::UnsafeSlice;
@@ -308,7 +308,7 @@ fn layout_glyphs(
     };
 
     for segment in segments {
-        let mut curr_word_offset_x = curr_offset.x;
+        let curr_word_offset_x = curr_offset.x;
         let mut curr_word_width = 0.0;
         curr_word.clear();
         curr_word_glyph_widths.clear();
@@ -377,15 +377,13 @@ fn layout_glyphs(
         }
     }
 
-    if !glyph_positions.is_empty() {
-        final_size.y = curr_offset.y - v_metrics.descent;
-    }
-
     line_widths.push(curr_offset.x);
 
     if glyph_positions.is_empty() {
         return (glyph_positions, final_size);
     }
+
+    final_size.y = curr_offset.y - v_metrics.descent;
 
     let mut curr_y = f32::NAN;
     let mut curr_line = 0;
@@ -715,21 +713,21 @@ impl TextRenderer {
     }
 
     pub fn calculate_minimum_text_size(&self, seq: &StyledString) -> BlockSize {
-        let (_, mut size) = layout_glyphs(&self.allocator, seq, TextHAlign::LEFT, false, 0.0, 0.0, false);
+        let (_, size) = layout_glyphs(&self.allocator, seq, TextHAlign::LEFT, false, 0.0, 0.0, false);
         size * seq.style().font_size()
     }
 }
 
 impl RendererModule for TextRenderer {
-    fn on_object_remove(&mut self, id: &EntityId, _scene: Internals) {
+    fn on_object_remove(&mut self, id: &EntityId, _scene: SceneAccess<()>) {
         if let Some(seq) = self.allocated_sequences.remove(id) {
             self.sequences_to_destroy.push(seq);
         }
     }
 
-    fn on_update(&mut self, internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
+    fn on_update(&mut self, mut scene: SceneAccess<()>) -> Option<Arc<Mutex<CmdList>>> {
         let unit_scale = rusttype::Scale::uniform(1.0);
-        let dirty_texts = internals.dirty_comps.take_changes::<SimpleTextC>();
+        let dirty_texts = scene.dirty_components.borrow_mut().take_changes::<SimpleTextC>();
 
         for seq in self.sequences_to_destroy.drain(..) {
             self.allocator.free(&seq.glyphs);
@@ -740,20 +738,20 @@ impl RendererModule for TextRenderer {
                 self.allocator.free(&seq.glyphs);
             }
 
-            let mut entry = internals.storage.entry_mut(entity).unwrap();
-            let simple_text = entry.get::<SimpleTextC>().unwrap();
-            let stage = simple_text.stage();
+            let mut entry = scene.entry_mut(entity).unwrap();
+            let simple_text = entry.get::<SimpleTextC>();
+            let stage = simple_text.stage;
             let normalize_transforms = stage == RenderStage::OVERLAY;
 
-            let seq = self.allocator.alloc_for(simple_text.string());
+            let seq = self.allocator.alloc_for(&simple_text.text);
 
             let (positions, _) = layout_glyphs(
                 &self.allocator,
-                simple_text.string(),
-                simple_text.h_align(),
-                simple_text.long_word_breaking(),
-                simple_text.max_width(),
-                simple_text.max_height(),
+                &simple_text.text,
+                simple_text.h_align,
+                simple_text.long_word_breaking,
+                simple_text.max_width,
+                simple_text.max_height,
                 normalize_transforms,
             );
             let instances: Vec<_> = positions
@@ -801,8 +799,8 @@ impl RendererModule for TextRenderer {
                 )
                 .unwrap();
 
-            *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&mesh.raw());
-            *entry.get_mut::<MeshRenderConfigC>().unwrap() =
+            *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw());
+            *entry.get_mut::<MeshRenderConfigC>() =
                 MeshRenderConfigC::new(self.mat_pipeline, true).with_stage(stage)
         }
 

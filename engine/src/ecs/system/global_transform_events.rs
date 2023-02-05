@@ -8,12 +8,12 @@ use base::unwrap_option;
 use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 
-use crate::ecs::component;
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::{BufferUpdate2, Renderable};
+use crate::renderer::resources::Renderable;
+use crate::renderer::BufferUpdate2;
 
 // Updates global transform uniform buffers
 pub(crate) struct GlobalTransformEvents<'a> {

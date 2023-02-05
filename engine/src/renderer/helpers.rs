@@ -57,7 +57,7 @@ impl Renderer {
         let first_level = (width / (self.settings.texture_quality as u32)).ilog2();
         let last_level = (width / 4).ilog2(); // BC block size = 4x4
 
-        self.texture_atlases[atlas_type as usize]
+        self.res.texture_atlases[atlas_type as usize]
             .set_texture(
                 texture_index,
                 &mipmaps[(first_level as usize)..(last_level as usize + 1)],
@@ -97,7 +97,7 @@ impl Renderer {
             .create_pipeline_signature(
                 &[
                     Arc::clone(&vertex_shader),
-                    Arc::clone(&self.translucency_depths_pixel_shader),
+                    Arc::clone(&self.res.translucency_depths_pixel_shader),
                 ],
                 &combined_bindings,
             )
@@ -126,7 +126,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_DEPTH_WRITE,
             &PipelineConfig {
-                render_pass: &self.depth_render_pass,
+                render_pass: &self.res.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -138,7 +138,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_TRANSLUCENCY_DEPTHS,
             &PipelineConfig {
-                render_pass: &self.depth_render_pass,
+                render_pass: &self.res.depth_render_pass,
                 signature: &translucency_depth_signature,
                 subpass_index: 1,
                 cull_back_faces,
@@ -150,7 +150,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_COLOR,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
+                render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -162,7 +162,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_COLOR_WITH_BLENDING,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
+                render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -174,7 +174,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_OVERLAY,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
+                render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 1,
                 cull_back_faces,
@@ -184,16 +184,16 @@ impl Renderer {
             },
         );
 
-        self.material_pipelines.push(pipeline_set);
-        (self.material_pipelines.len() - 1) as u32
+        self.res.material_pipelines.push(pipeline_set);
+        (self.res.material_pipelines.len() - 1) as u32
     }
 
     pub fn get_material_pipeline(&self, id: u32) -> Option<&MaterialPipelineSet> {
-        self.material_pipelines.get(id as usize)
+        self.res.material_pipelines.get(id as usize)
     }
 
     pub fn get_material_pipeline_mut(&mut self, id: u32) -> Option<&mut MaterialPipelineSet> {
-        self.material_pipelines.get_mut(id as usize)
+        self.res.material_pipelines.get_mut(id as usize)
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {

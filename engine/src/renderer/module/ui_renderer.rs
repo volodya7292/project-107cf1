@@ -1,20 +1,21 @@
 pub mod element;
-pub mod state;
+pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
     Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Sizing, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
+use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
-use crate::renderer::{DirtyComponents, Internals, Renderer, SceneObject};
+use crate::renderer::{DirtyComponents, Renderer, RendererContext, SceneObject};
 use base::scene::relation::Relation;
 use base::utils::{Bool, HashSet};
 use entity_data::{Archetype, EntityId, SystemAccess};
+pub use management::UIState;
 use nalgebra_glm::{DVec3, Vec2, Vec3};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-pub use state::UIState;
 use std::any::Any;
 use std::sync::Arc;
 use vk_wrapper::{CmdList, Device};
@@ -325,7 +326,7 @@ impl UIRenderer {
             }
 
             let parent_layout = layout_comps.get(node).unwrap();
-            let parent_cache = layout_cache_comps.get_mut(node).unwrap();
+            let parent_cache = *layout_cache_comps.get(node).unwrap();
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
             let parent_size = parent_cache.final_size;
@@ -415,11 +416,13 @@ impl UIRenderer {
 
     fn calculate_transforms(
         linear_tree: &[EntityId],
-        access: &SystemAccess,
+        scene: &mut SceneAccess<()>,
         root_size: &Vec2,
-        dirty_comps: &mut DirtyComponents,
         dirty_elements: &mut HashSet<EntityId>,
     ) {
+        let access = scene.storage.access();
+        let mut dirty_comps = scene.dirty_components.borrow_mut();
+
         let mut transform_comps = access.component_mut::<TransformC>();
         let relation_comps = access.component::<Relation>();
         let layout_comps = access.component::<UILayoutC>();
@@ -467,13 +470,13 @@ impl UIRenderer {
         }
     }
 
-    fn update_hierarchy(&mut self, internals: &mut Internals) {
-        let access = internals.storage.access();
-
-        let mut dirty_elements = internals.dirty_comps.take_changes::<UILayoutC>();
+    fn update_hierarchy(&mut self, scene: &mut SceneAccess<()>) {
+        let mut dirty_elements = scene.dirty_components.borrow_mut().take_changes::<UILayoutC>();
         if dirty_elements.is_empty() {
             return;
         }
+
+        let access = scene.storage.access();
 
         let linear_tree = {
             let layout_comps = access.component::<UILayoutC>();
@@ -487,35 +490,23 @@ impl UIRenderer {
 
         Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
 
-        Self::calculate_transforms(
-            &linear_tree,
-            &access,
-            &self.root_element_size,
-            internals.dirty_comps,
-            &mut dirty_elements,
-        );
+        Self::calculate_transforms(&linear_tree, scene, &self.root_element_size, &mut dirty_elements);
     }
 }
 
 impl RendererModule for UIRenderer {
-    fn on_object_remove(&mut self, _id: &EntityId, _scene: Internals) {
-        // todo!()
-    }
-
-    fn on_update(&mut self, mut internals: Internals) -> Option<Arc<Mutex<CmdList>>> {
+    fn on_update(&mut self, mut scene: SceneAccess<()>) -> Option<Arc<Mutex<CmdList>>> {
         if self.root_element_size_dirty {
-            let layout = internals
-                .storage
-                .get_mut::<UILayoutC>(&self.root_ui_entity)
-                .unwrap();
+            let mut root = scene.entry_mut(&self.root_ui_entity).unwrap();
+            let layout = root.get_mut::<UILayoutC>();
+
             layout.constraints[0] = Constraint::exact(self.root_element_size.x);
             layout.constraints[1] = Constraint::exact(self.root_element_size.y);
 
-            internals.dirty_comps.add::<UILayoutC>(&self.root_ui_entity);
             self.root_element_size_dirty = false;
         }
 
-        self.update_hierarchy(&mut internals);
+        self.update_hierarchy(&mut scene);
 
         None
     }
