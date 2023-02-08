@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 
-use crate::format::BUFFER_FORMATS;
+use crate::format::{FormatFeatureFlags, BUFFER_FORMATS};
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::{BindingLoc, ShaderStage, VInputRate};
 use crate::PipelineSignature;
@@ -742,6 +742,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         vertex_inputs: &HashMap<&str, (Format, VInputRate)>,
+        name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
         let code_words = unsafe {
@@ -833,7 +834,7 @@ impl Device {
 
         if stage == ShaderStage::VERTEX {
             for (f, _) in vertex_inputs.values() {
-                if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+                if !BUFFER_FORMATS[f].contains(FormatFeatureFlags::VERTEX_BUFFER) {
                     panic!("Unsupported vertex format is used: {:?}", f);
                 }
             }
@@ -884,10 +885,16 @@ impl Device {
         }
 
         let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
+        let native = unsafe { self.wrapper.native.create_shader_module(&create_info, None)? };
+
+        unsafe {
+            self.wrapper
+                .debug_set_object_name(vk::ObjectType::SHADER_MODULE, native.as_raw(), name)?;
+        }
 
         Ok(Arc::new(Shader {
             device: Arc::clone(self),
-            native: unsafe { self.wrapper.native.create_shader_module(&create_info, None)? },
+            native,
             stage,
             vertex_location_inputs: vertex_loc_inputs,
             named_bindings,
@@ -900,6 +907,7 @@ impl Device {
         self: &Arc<Self>,
         code: &[u8],
         input_formats: &[(&str, Format, VInputRate)],
+        name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
         self.create_shader(
             code,
@@ -908,15 +916,24 @@ impl Device {
                 .cloned()
                 .map(|(name, format, rate)| (name, (format, rate)))
                 .collect(),
+            name,
         )
     }
 
-    pub fn create_pixel_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new())
+    pub fn create_pixel_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        name: &str,
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), name)
     }
 
-    pub fn create_compute_shader(self: &Arc<Self>, code: &[u8]) -> Result<Arc<Shader>, DeviceError> {
-        self.create_shader(code, &HashMap::new())
+    pub fn create_compute_shader(
+        self: &Arc<Self>,
+        code: &[u8],
+        name: &str,
+    ) -> Result<Arc<Shader>, DeviceError> {
+        self.create_shader(code, &HashMap::new(), name)
     }
 
     pub fn create_render_pass(
@@ -1168,19 +1185,15 @@ impl Device {
 
         let mut native_descriptor_sets = [vk::DescriptorSetLayout::default(); 4];
 
-        for (i, bindings) in native_bindings.iter().enumerate() {
-            if bindings.is_empty() {
-                continue;
-            }
-
-            let mut binding_flags_info =
-                vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&binding_flags[i]);
+        for (set_idx, bindings) in native_bindings.iter().enumerate() {
+            let mut binding_flags_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder()
+                .binding_flags(&binding_flags[set_idx]);
 
             let create_info = vk::DescriptorSetLayoutCreateInfo::builder()
                 .bindings(bindings)
                 .push_next(&mut binding_flags_info);
 
-            native_descriptor_sets[i] = unsafe {
+            native_descriptor_sets[set_idx] = unsafe {
                 self.wrapper
                     .native
                     .create_descriptor_set_layout(&create_info, None)?
@@ -1200,7 +1213,6 @@ impl Device {
                 size: push_constants_size,
             };
 
-            // Layout
             let set_layouts: Vec<vk::DescriptorSetLayout> = native_descriptor_sets
                 .iter()
                 .cloned()
@@ -1279,7 +1291,7 @@ impl Device {
         for (location, (format, rate)) in &vertex_shader.vertex_location_inputs {
             let buffer_index = *location;
 
-            if !BUFFER_FORMATS[&format].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+            if !BUFFER_FORMATS[&format].contains(FormatFeatureFlags::VERTEX_BUFFER) {
                 panic!("Unsupported vertex format is used: {:?}", format);
             }
 
@@ -1400,11 +1412,9 @@ impl Device {
 
         let pipeline_cache = self.pipeline_cache.lock();
         let native_pipeline = unsafe {
-            self.wrapper.native.create_graphics_pipelines(
-                *pipeline_cache,
-                slice::from_ref(&create_info),
-                None,
-            )
+            self.wrapper
+                .native
+                .create_graphics_pipelines(*pipeline_cache, &[create_info.build()], None)
         };
         if let Err((_, err)) = native_pipeline {
             return Err(err.into());

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use nalgebra_glm::Vec4;
 
-use core::main_registry::MainRegistry;
-use core::utils::resource_file::ResourceFile;
+use base::main_registry::MainRegistry;
+use base::utils::resource_file::ResourceFile;
 use engine::renderer::material::MatComponent;
 use engine::renderer::TextureAtlasType;
 

@@ -1,23 +1,3 @@
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use lazy_static::lazy_static;
-use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
-use winit::window::Window;
-
-use core::utils::threading::{SafeThreadPool, TaskPriority};
-use core::utils::{HashSet, MO_RELAXED};
-use vk_wrapper as vkw;
-
-use crate::execution::realtime_queue;
-use crate::input::{Keyboard, Mouse};
-use crate::renderer::module::text_renderer::TextRenderer;
-use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-
 pub mod ecs;
 pub mod execution;
 pub mod input;
@@ -26,6 +6,27 @@ pub mod renderer;
 #[cfg(test)]
 mod tests;
 pub mod utils;
+
+use crate::execution::realtime_queue;
+use crate::input::{Keyboard, Mouse};
+use crate::platform::EngineMonitorExt;
+use crate::renderer::module::text_renderer::TextRenderer;
+use crate::renderer::module::ui_renderer::UIRenderer;
+use crate::renderer::{FPSLimit, Renderer, RendererTimings};
+use base::utils::{HashSet, MO_RELAXED};
+use lazy_static::lazy_static;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use vk_wrapper as vkw;
+use winit::dpi::PhysicalSize;
+use winit::event::WindowEvent;
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::window::Window;
+
+pub use platform::Platform;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -94,6 +95,36 @@ pub trait Application {
     );
 }
 
+/// `monitor_scale_factor()` for monitor with this DPI is equal to 1.
+pub const DEFAULT_DPI: u32 = 109;
+
+/// Calculates best UI scale factor for the specified window depending on corresponding monitor's DPI.
+fn real_scale_factor(window: &Window) -> f64 {
+    let monitor = window.current_monitor().unwrap();
+    let native_mode = utils::find_best_video_mode(&monitor);
+
+    let dpi = monitor.dpi().unwrap_or_else(|| {
+        log::warn!("Failed to get monitor DPI!");
+        DEFAULT_DPI
+    });
+
+    dpi as f64 / DEFAULT_DPI as f64
+}
+
+/// Calculates best UI scale factor relative `window` size depending on corresponding monitor's DPI.
+fn real_window_size(window: &Window) -> PhysicalSize<u32> {
+    let monitor = window.current_monitor().unwrap();
+    let native_mode = utils::find_best_video_mode(&monitor);
+    let native_size = native_mode.size();
+    let logical_size = monitor.size(); // On macOS this may be larger than native width
+
+    let window_size = window.inner_size();
+    let real_window_width = window_size.width * native_size.width / logical_size.width;
+    let real_window_height = window_size.height * native_size.height / logical_size.height;
+
+    PhysicalSize::new(real_window_width, real_window_height)
+}
+
 impl Engine {
     pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
@@ -121,7 +152,10 @@ impl Engine {
         );
 
         let text_renderer = TextRenderer::new(&mut renderer);
+        let ui_renderer = UIRenderer::new(&mut renderer);
+
         renderer.register_module(text_renderer);
+        renderer.register_module(ui_renderer);
 
         app.on_engine_initialized(&mut renderer);
 
@@ -182,10 +216,21 @@ impl Engine {
                             self.input.mouse.pressed_buttons.remove(button);
                         }
                     }
-                    WindowEvent::Resized(size) => {
+                    WindowEvent::Resized(_) => {
+                        let size = real_window_size(&self.main_window);
                         if size.width != 0 && size.height != 0 {
-                            self.renderer.on_resize((size.width, size.height));
+                            let scale_factor = real_scale_factor(&self.main_window);
+                            let new_size = (size.width, size.height);
+                            self.renderer.on_resize(new_size, scale_factor);
                         }
+                    }
+                    WindowEvent::ScaleFactorChanged {
+                        scale_factor: _,
+                        new_inner_size: _,
+                    } => {
+                        let scale_factor = real_scale_factor(&self.main_window);
+                        let size = real_window_size(&self.main_window);
+                        self.renderer.on_resize((size.width, size.height), scale_factor);
                     }
                     _ => {}
                 },
@@ -216,7 +261,7 @@ impl Engine {
                     if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
                         expected_dt = 1.0 / (limit as f64);
                         let to_wait = (expected_dt - self.delta_time).max(0.0);
-                        core::utils::high_precision_sleep(
+                        base::utils::high_precision_sleep(
                             Duration::from_secs_f64(to_wait),
                             Duration::from_micros(50),
                         );

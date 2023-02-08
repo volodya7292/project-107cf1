@@ -28,7 +28,7 @@ impl VInputRate {
     pub const INSTANCE: Self = Self(vk::VertexInputRate::INSTANCE);
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct BindingType(pub(crate) vk::DescriptorType);
 
 impl BindingType {
@@ -63,8 +63,8 @@ pub struct Shader {
     pub(crate) device: Arc<Device>,
     pub(crate) native: vk::ShaderModule,
     pub(crate) stage: ShaderStage,
-    pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
     // [location, format]
+    pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
     pub(crate) named_bindings: HashMap<String, (BindingLoc, ShaderBinding)>,
     pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,
@@ -73,6 +73,14 @@ pub struct Shader {
 impl Shader {
     pub fn stage(&self) -> ShaderStage {
         self.stage
+    }
+
+    pub fn vertex_location_inputs(&self) -> &HashMap<u32, (Format, VInputRate)> {
+        &self.vertex_location_inputs
+    }
+
+    pub fn named_bindings(&self) -> &HashMap<String, (BindingLoc, ShaderBinding)> {
+        &self.named_bindings
     }
 }
 

@@ -4,7 +4,7 @@ use bitvec::vec::BitVec;
 use entity_data::entity::{ArchEntityId, ArchetypeId};
 use entity_data::{Component, EntityId};
 
-use core::utils::{HashMap, HashSet};
+use base::utils::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct DirtyComponents {

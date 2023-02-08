@@ -1,8 +1,8 @@
 use nalgebra_glm as glm;
-use nalgebra_glm::{DMat4, DVec3, Mat4, Vec3, Vec4};
+use nalgebra_glm::{DVec3, Mat4, Vec3, Vec4};
 
 #[derive(Copy, Clone)]
-pub struct Camera {
+pub struct PerspectiveCamera {
     position: DVec3,
     rotation: Vec3,
     aspect: f32,
@@ -10,7 +10,7 @@ pub struct Camera {
     z_near: f32,
 }
 
-pub fn create_view_matrix(position: Vec3, rotation: Vec3) -> Mat4 {
+pub fn create_view_matrix(position: &Vec3, rotation: &Vec3) -> Mat4 {
     let mut mat = Mat4::identity();
     mat *= Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x);
     mat *= Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y);
@@ -19,9 +19,20 @@ pub fn create_view_matrix(position: Vec3, rotation: Vec3) -> Mat4 {
     mat
 }
 
-impl Camera {
-    pub fn new(aspect: f32, fovy: f32, near: f32) -> Camera {
-        Camera {
+pub fn rotation_to_direction(rotation: &Vec3) -> Vec3 {
+    let mut rot_mat = Mat4::identity();
+    rot_mat *= Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x);
+    rot_mat *= Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y);
+    rot_mat *= Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z);
+
+    let d: Vec3 = rot_mat.row(2).transpose().fixed_rows::<3>(0).into();
+
+    -d
+}
+
+impl PerspectiveCamera {
+    pub fn new(aspect: f32, fovy: f32, near: f32) -> Self {
+        Self {
             position: DVec3::default(),
             rotation: Vec3::new(0.0, 0.0, 0.0),
             aspect,
@@ -32,15 +43,6 @@ impl Camera {
 
     pub fn projection(&self) -> Mat4 {
         glm::infinite_perspective_rh_zo(self.aspect, self.fovy, self.z_near)
-    }
-
-    pub fn view(&self) -> DMat4 {
-        let mut mat = DMat4::identity();
-        mat *= DMat4::from_axis_angle(&DVec3::x_axis(), self.rotation.x as f64);
-        mat *= DMat4::from_axis_angle(&DVec3::y_axis(), self.rotation.y as f64);
-        mat *= DMat4::from_axis_angle(&DVec3::z_axis(), self.rotation.z as f64);
-        mat *= DMat4::new_translation(&(-self.position));
-        mat
     }
 
     pub fn z_near(&self) -> f32 {
@@ -55,16 +57,16 @@ impl Camera {
         self.aspect = width as f32 / height as f32;
     }
 
-    pub fn position(&self) -> DVec3 {
-        self.position
+    pub fn position(&self) -> &DVec3 {
+        &self.position
     }
 
     pub fn set_position(&mut self, position: DVec3) {
         self.position = position;
     }
 
-    pub fn rotation(&self) -> Vec3 {
-        self.rotation
+    pub fn rotation(&self) -> &Vec3 {
+        &self.rotation
     }
 
     pub fn set_rotation(&mut self, rotation: Vec3) {
@@ -72,9 +74,7 @@ impl Camera {
     }
 
     pub fn direction(&self) -> Vec3 {
-        let view = self.view();
-        let d: Vec3 = glm::convert(DVec3::from(view.row(2).transpose().fixed_rows::<3>(0)));
-        -d
+        rotation_to_direction(&self.rotation)
     }
 
     pub fn fovy(&self) -> f32 {
@@ -89,6 +89,45 @@ impl Camera {
         );
         self.position -= d * (front_back as f64);
         self.position -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * (left_right) as f64;
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct OrthoCamera {
+    position: DVec3,
+    rotation: Vec3,
+}
+
+impl OrthoCamera {
+    pub fn new() -> Self {
+        Self {
+            position: Default::default(),
+            rotation: Default::default(),
+        }
+    }
+
+    pub fn projection(&self) -> Mat4 {
+        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, 0.0, 1024.0)
+    }
+
+    pub fn position(&self) -> &DVec3 {
+        &self.position
+    }
+
+    pub fn set_position(&mut self, position: DVec3) {
+        self.position = position;
+    }
+
+    pub fn rotation(&self) -> &Vec3 {
+        &self.rotation
+    }
+
+    pub fn direction(&self) -> Vec3 {
+        rotation_to_direction(&self.rotation)
+    }
+
+    pub fn set_rotation(&mut self, rotation: Vec3) {
+        self.rotation = rotation.map(|x| x % (std::f32::consts::PI * 2.0));
     }
 }
 
@@ -132,6 +171,7 @@ impl Frustum {
     }
 }
 
+/// Calculates movement delta according to camera orientation.
 pub fn move_xz(rotation: Vec3, front_back: f64, left_right: f64) -> DVec3 {
     let d = DVec3::new((-rotation.y).sin() as f64, 0.0, (-rotation.y).cos() as f64);
     let mut motion_delta = -d * (front_back as f64);

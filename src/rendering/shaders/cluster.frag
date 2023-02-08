@@ -112,7 +112,7 @@ void main() {
     //         diffuse_s[i] += samples[i][j].diffuse.rgb / 1.0;
     //     }
     // }
-    
+
     // vec3 diffuse = (diffuse_s[0] * vs_in.barycentrics[0]
     //     + diffuse_s[1] * vs_in.barycentrics[1]
     //     + diffuse_s[2] * vs_in.barycentrics[2]).rgb;

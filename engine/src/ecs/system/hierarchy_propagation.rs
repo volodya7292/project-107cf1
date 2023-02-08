@@ -1,11 +1,9 @@
-use std::time::Instant;
-
+use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::TransformC;
+use base::scene::relation::Relation;
+use base::utils::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
-
-use core::utils::HashSet;
-
-use crate::ecs::component;
-use crate::ecs::component::internal::{GlobalTransform, Relation};
+use std::time::Instant;
 
 // Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {
@@ -19,15 +17,15 @@ pub(crate) struct HierarchyPropagation<'a> {
 struct StackEntry {
     entity: EntityId,
     parent_global_transform_changed: bool,
-    parent_global_transform: GlobalTransform,
+    parent_global_transform: GlobalTransformC,
 }
 
 impl SystemHandler for HierarchyPropagation<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
         let relation_comps = data.component::<Relation>();
-        let transform_comps = data.component::<component::Transform>();
-        let mut global_transform_comps = data.component_mut::<GlobalTransform>();
+        let transform_comps = data.component::<TransformC>();
+        let mut global_transform_comps = data.component_mut::<GlobalTransformC>();
         let mut stack = Vec::<StackEntry>::with_capacity(transform_comps.count_entities());
 
         stack.push(StackEntry {
@@ -50,25 +48,24 @@ impl SystemHandler for HierarchyPropagation<'_> {
             let global_transform_changed =
                 parent_transform_changed || self.dirty_transform_comps.contains(&entity);
 
-            let global_transform = global_transform_comps.get_mut(&entity).unwrap();
+            let global_transform = if let Some(global_transform) = global_transform_comps.get_mut(&entity) {
+                if global_transform_changed {
+                    let model_transform = transform_comps.get(&entity).unwrap();
+                    *global_transform = parent_global_transform.combine(model_transform);
+                    self.changed_global_transforms.push(entity);
+                }
+                *global_transform
+            } else {
+                Default::default()
+            };
 
-            if global_transform_changed {
-                let model_transform = transform_comps.get(&entity).unwrap();
-
-                let new_global_transform: GlobalTransform =
-                    parent_global_transform.combine(model_transform).into();
-
-                *global_transform = new_global_transform;
-                self.changed_global_transforms.push(entity);
-            }
-
-            if let Some(children) = relation_comps.get(&entity).map(|v| &v.children) {
+            if let Some(relation) = relation_comps.get(&entity) {
                 // Because we're popping from the stack, insert in reverse order
                 // to preserve the right order of insertion to `ordered_entities`
-                stack.extend(children.iter().rev().map(|e| StackEntry {
+                stack.extend(relation.children.iter().rev().map(|e| StackEntry {
                     entity: *e,
                     parent_global_transform_changed: global_transform_changed,
-                    parent_global_transform: *global_transform,
+                    parent_global_transform: global_transform,
                 }));
             }
         }

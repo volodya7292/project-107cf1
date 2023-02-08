@@ -5,30 +5,33 @@ edition = "2021"
 
 [dependencies]
 vk-wrapper = { path = "vk-wrapper" }
-core = { path = "../core" }
+base = { path = "../base" }
 msdfgen = { path = "msdfgen" }
-nalgebra = "0.31"
-nalgebra-glm = "0.17"
+shader_ids = { path = "shader_ids" }
+nalgebra = "0.32"
+nalgebra-glm = "0.18"
 basis-universal = "0.2"
-rayon = "1.5"
+rayon = "1.6"
 crossbeam-channel = "0.5"
-noise = "0.8"
 fixedbitset = "0.4"
 index-pool = "1.0"
+entity_data = { version = "1.9", features = ["rayon"] }
 #entity_data = { path = "../../entity_data", features = ["rayon"] }
-entity_data = { version = "1.7.0-rc2", features = ["rayon"] }
 smallvec = { version = "1.9", features = ["const_generics"] }
 lazy_static = "1.4"
-rand = "0.8"
-rand_distr = "0.4"
-rand_xoshiro = "0.6"
 parking_lot = "0.12"
-winit = "0.27"
+winit = "0.28"
 rusttype = "0.9"
 unicode-normalization = "0.1"
 bitvec = "1.0"
-
+log = "0.4"
+bumpalo = "3.12"
 
 [build-dependencies]
 common = { path = "../common" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.22"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.45", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }

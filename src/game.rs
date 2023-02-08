@@ -1,59 +1,62 @@
+use crate::client::utils;
+use crate::default_resources::DefaultResourceMapping;
+use crate::rendering::material_pipelines;
+use crate::rendering::overworld_renderer::OverworldRenderer;
+use crate::resource_mapping::ResourceMapping;
+use crate::{default_resources, PROGRAM_NAME};
+use approx::AbsDiffEq;
+use base::execution::default_queue;
+use base::main_registry::{MainRegistry, StatelessBlock};
+use base::overworld::accessor::ClustersAccessorCache;
+use base::overworld::accessor::ReadOnlyOverworldAccessor;
+use base::overworld::accessor::ReadOnlyOverworldAccessorImpl;
+use base::overworld::actions_storage::OverworldActionsStorage;
+use base::overworld::actions_storage::StateChangeInfo;
+use base::overworld::block::{AnyBlockState, Block, BlockState};
+use base::overworld::facing::Facing;
+use base::overworld::light_state::LightState;
+use base::overworld::liquid_state::LiquidState;
+use base::overworld::orchestrator::OverworldOrchestrator;
+use base::overworld::position::{BlockPos, ClusterPos};
+use base::overworld::raw_cluster::{BlockDataImpl, RawCluster};
+use base::overworld::Overworld;
+use base::overworld::ReadOnlyOverworld;
+use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
+use base::physics::aabb::{AABBRayIntersection, AABB};
+use base::physics::MOTION_EPSILON;
+use base::registry::Registry;
+use base::utils::resource_file::ResourceFile;
+use base::utils::threading::SafeThreadPool;
+use base::utils::timer::IntervalTimer;
+use base::utils::{HashMap, HashSet, MO_RELAXED};
+use engine::ecs::component;
+use engine::ecs::component::render_config::RenderStage;
+use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
+use engine::ecs::component::ui::{Sizing, UILayoutC};
+use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
+use engine::renderer::module::ui_renderer::element::{TextState, UIText};
+use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
+use engine::renderer::{Renderer, RendererContextI, VertexMeshObject};
+use engine::{renderer, Application, Input};
+use entity_data::{AnyState, EntityId};
+use nalgebra_glm as glm;
+use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
+use parking_lot::{Mutex, RwLock};
+use rayon::prelude::*;
+use rayon::ThreadPool;
+use renderer::camera;
 use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{atomic, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use approx::AbsDiffEq;
-use entity_data::AnyState;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
-use parking_lot::{Mutex, RwLock};
-use rayon::prelude::*;
-use rayon::ThreadPool;
+use vk_wrapper::Adapter;
+use winit::dpi::LogicalSize;
 use winit::event::{MouseButton, VirtualKeyCode};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
-
-use core::execution::default_queue;
-use core::main_registry::{MainRegistry, StatelessBlock};
-use core::overworld::accessor::ClustersAccessorCache;
-use core::overworld::accessor::ReadOnlyOverworldAccessor;
-use core::overworld::accessor::ReadOnlyOverworldAccessorImpl;
-use core::overworld::actions_storage::OverworldActionsStorage;
-use core::overworld::actions_storage::StateChangeInfo;
-use core::overworld::block::{AnyBlockState, Block, BlockState};
-use core::overworld::facing::Facing;
-use core::overworld::light_state::LightState;
-use core::overworld::liquid_state::LiquidState;
-use core::overworld::orchestrator::OverworldOrchestrator;
-use core::overworld::position::{BlockPos, ClusterPos};
-use core::overworld::raw_cluster::{BlockDataImpl, RawCluster};
-use core::overworld::Overworld;
-use core::overworld::ReadOnlyOverworld;
-use core::overworld::{block, block_component, raw_cluster, LoadedClusters};
-use core::physics::aabb::{AABBRayIntersection, AABB};
-use core::physics::MOTION_EPSILON;
-use core::registry::Registry;
-use core::utils::resource_file::ResourceFile;
-use core::utils::threading::SafeThreadPool;
-use core::utils::timer::IntervalTimer;
-use core::utils::{HashMap, HashSet, MO_RELAXED};
-use engine::ecs::component;
-use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::renderer::Renderer;
-use engine::{renderer, Application, Input};
-use renderer::camera;
-use vk_wrapper::Adapter;
-
-use crate::{default_resources, PROGRAM_NAME};
-// use crate::client::overworld::overworld_streamer::OverworldStreamer;
-use crate::client::{material_pipelines, utils};
-use crate::default_resources::DefaultResourceMapping;
-use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::resource_mapping::ResourceMapping;
 
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
@@ -93,7 +96,7 @@ impl Game {
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
         overworld_orchestrator.set_xz_render_distance(256);
-        // overworld_streamer.set_xz_render_distance(1024);
+        // overworld_orchestrator.set_xz_render_distance(1024);
         overworld_orchestrator.set_y_render_distance(256);
         overworld_orchestrator.set_stream_pos(player_pos);
 
@@ -151,10 +154,7 @@ impl Application for Game {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window {
         let window = WindowBuilder::new()
             .with_title(PROGRAM_NAME)
-            .with_inner_size(winit::dpi::PhysicalSize::new(
-                DEF_WINDOW_SIZE.0,
-                DEF_WINDOW_SIZE.1,
-            ))
+            .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
             .with_resizable(true)
             .build(event_loop)
             .unwrap();
@@ -233,19 +233,72 @@ impl Application for Game {
             .unwrap(),
         );
         let player_pos = self.main_state.lock().player_pos;
-        let text = renderer.add_object(TextObject::new(
-            component::Transform::new(
-                DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z),
-                Vec3::default(),
-                Vec3::from_element(1.0),
+        let text = renderer.add_object(
+            None,
+            TextObject::new(
+                TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
+                SimpleTextC::new()
+                    .with_text(StyledString::new(
+                        "Govno, my is Gmine",
+                        TextStyle::new().with_font(font_id).with_font_size(0.5),
+                    ))
+                    .with_max_width(3.0)
+                    .with_h_align(TextHAlign::LEFT),
             ),
-            component::SimpleText::new(StyledString::new(
-                "Govno, my is Gmine".to_owned(),
-                TextStyle::new().with_font(font_id).with_font_size(0.5),
-            ))
-            .with_max_width(3.0)
-            .with_h_align(TextHAlign::LEFT),
+        );
+
+        // let panel = renderer.add_object(
+        //     None,
+        //     VertexMeshObject::new(
+        //         component::Transform::new()
+        //             .with_position(DVec3::new(0.0, 0.0, 1.0))
+        //             .with_scale(Vec3::new(0.5, 0.5, 1.0))
+        //             .with_use_parent_transform(false),
+        //         component::MeshRenderConfig::new(mat_pipelines.panel(), false)
+        //             .with_stage(RenderStage::OVERLAY),
+        //         component::VertexMesh::without_data(4, 1),
+        //     ),
+        // );
+
+        let ui_renderer = renderer.module_mut::<UIRenderer>().unwrap();
+        let root_ui_entity = *ui_renderer.root_ui_entity();
+
+        let panel = renderer.add_object(
+            Some(root_ui_entity),
+            UIObject::new_raw(
+                UILayoutC::new()
+                    .with_width(Sizing::Preferred(300.0))
+                    .with_height(Sizing::Grow(0.5)),
+                (),
+            )
+            .with_renderer(
+                MeshRenderConfigC::new(mat_pipelines.panel(), true).with_stage(RenderStage::OVERLAY),
+            )
+            .with_mesh(VertexMeshC::without_data(4, 1)),
+        );
+
+        let text = renderer.add_object(Some(root_ui_entity), UIText::new());
+
+        let access = renderer.access();
+        let mut obj = access.object::<UIText>(&text.unwrap()).unwrap();
+        obj.set_text(StyledString::new(
+            "Loremipsumdsadsf dorer",
+            TextStyle::new().with_font(font_id).with_font_size(100.5),
         ));
+
+        // let panel2 = renderer.add_object(
+        //     panel,
+        //     UIObject::new_raw(
+        //         UILayoutC::new()
+        //             .with_min_width(500.0)
+        //             .with_height(Sizing::Preferred(100.0)),
+        //         (),
+        //     )
+        //     .with_renderer(
+        //         MeshRenderConfigC::new(mat_pipelines.panel(), false).with_stage(RenderStage::OVERLAY),
+        //     )
+        //     .with_mesh(VertexMeshC::without_data(4, 1)),
+        // );
     }
 
     fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
@@ -299,7 +352,7 @@ impl Application for Game {
                 .is_some()
             {
                 // Free fall
-                motion_delta.y -= (core::physics::G_ACCEL * curr_state.fall_time) * delta_time;
+                motion_delta.y -= (base::physics::G_ACCEL * curr_state.fall_time) * delta_time;
 
                 // Jump force
                 motion_delta.y += curr_state.curr_jump_force * delta_time;
@@ -331,7 +384,7 @@ impl Application for Game {
             let cursor_offset = Vec2::new(self.cursor_rel.0 as f32, self.cursor_rel.1 as f32)
                 * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
 
-            let mut rotation = camera.rotation();
+            let mut rotation = *camera.rotation();
             rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
             rotation.y += cursor_offset.x;
             // rotation.y += delta_time as f32;
@@ -405,7 +458,7 @@ impl Application for Game {
                                 if let Some(_) = main_window.fullscreen() {
                                     main_window.set_fullscreen(None);
                                 } else {
-                                    let mode = utils::find_largest_video_mode(
+                                    let mode = engine::utils::find_best_video_mode(
                                         &main_window.current_monitor().unwrap(),
                                     );
                                     main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
@@ -507,12 +560,12 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
 
     player_on_update(&main_state, &mut new_actions);
 
-    let update_res = core::on_tick(
+    let update_res = base::on_tick(
         curr_tick,
         &curr_state.overworld.main_registry().registry(),
         &mut curr_state.overworld_orchestrator.lock(),
         &new_actions,
-        Duration::from_millis(5),
+        Duration::from_millis(10),
     );
 
     let mut overworld_renderer = overworld_renderer.lock();

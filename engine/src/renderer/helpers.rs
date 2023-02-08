@@ -1,20 +1,17 @@
-use std::mem;
-use std::sync::Arc;
-
-use basis_universal::TranscodeParameters;
-use smallvec::SmallVec;
-
-use core::utils::resource_file::ResourceRef;
-use core::utils::UInt;
-use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
-
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_OBJECT,
-    MAX_BASIC_UNIFORM_BLOCK_SIZE, MAX_MATERIAL_COUNT, PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING,
-    PIPELINE_DEPTH_WRITE, PIPELINE_TRANSLUCENCY_DEPTHS,
+    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, N_MAX_MATERIALS,
+    PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY,
+    PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
+use base::utils::resource_file::ResourceRef;
+use basis_universal::TranscodeParameters;
+use smallvec::SmallVec;
+use std::mem;
+use std::sync::Arc;
+use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
 
 impl Renderer {
     pub fn load_texture_into_atlas(
@@ -32,7 +29,7 @@ impl Renderer {
         let width = img_info.m_width;
         let height = img_info.m_height;
 
-        if !core::utils::is_pow_of_2(width as u64)
+        if !base::utils::is_pow_of_2(width as u64)
             || width != height
             || width < (self.settings.texture_quality as u32)
         {
@@ -58,10 +55,10 @@ impl Renderer {
 
         t.end_transcoding();
 
-        let first_level = UInt::log2(width / (self.settings.texture_quality as u32));
-        let last_level = UInt::log2(width / 4); // BC block size = 4x4
+        let first_level = (width / (self.settings.texture_quality as u32)).ilog2();
+        let last_level = (width / 4).ilog2(); // BC block size = 4x4
 
-        self.texture_atlases[atlas_type as usize]
+        self.res.texture_atlases[atlas_type as usize]
             .set_texture(
                 texture_index,
                 &mipmaps[(first_level as usize)..(last_level as usize + 1)],
@@ -76,7 +73,7 @@ impl Renderer {
         topology: PrimitiveTopology,
         cull_back_faces: bool,
     ) -> u32 {
-        assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
+        assert!(mem::size_of::<T>() <= BASIC_UNIFORM_BLOCK_MAX_SIZE as usize);
 
         let main_signature = self
             .device
@@ -101,16 +98,19 @@ impl Renderer {
             .create_pipeline_signature(
                 &[
                     Arc::clone(&vertex_shader),
-                    Arc::clone(&self.translucency_depths_pixel_shader),
+                    Arc::clone(&self.res.translucency_depths_pixel_shader),
                 ],
                 &combined_bindings,
             )
             .unwrap();
 
-        let per_object_desc_pool = main_signature
-            .create_pool(DESC_SET_CUSTOM_PER_OBJECT, 16)
+        let mut per_frame_desc_pool = main_signature
+            .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1)
             .unwrap();
-
+        let per_frame_desc = per_frame_desc_pool.alloc().unwrap();
+        let per_object_desc_pool = main_signature
+            .create_pool(shader_ids::SET_PER_OBJECT, 16)
+            .unwrap();
         let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
             main_signature: Arc::clone(&main_signature),
@@ -119,7 +119,8 @@ impl Renderer {
             uniform_buffer_size: mem::size_of::<T>() as u32,
             uniform_buffer_model_offset: T::model_offset(),
             per_object_desc_pool,
-            custom_per_frame_uniform_desc: None,
+            per_frame_desc_pool,
+            per_frame_desc,
         };
 
         let albedo_attachment_id = 0;
@@ -127,7 +128,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_DEPTH_WRITE,
             &PipelineConfig {
-                render_pass: &self.depth_render_pass,
+                render_pass: &self.res.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -139,7 +140,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_TRANSLUCENCY_DEPTHS,
             &PipelineConfig {
-                render_pass: &self.depth_render_pass,
+                render_pass: &self.res.depth_render_pass,
                 signature: &translucency_depth_signature,
                 subpass_index: 1,
                 cull_back_faces,
@@ -151,7 +152,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_COLOR,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
+                render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -163,7 +164,7 @@ impl Renderer {
         pipeline_set.prepare_pipeline(
             PIPELINE_COLOR_WITH_BLENDING,
             &PipelineConfig {
-                render_pass: &self.g_render_pass,
+                render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
                 subpass_index: 0,
                 cull_back_faces,
@@ -172,32 +173,35 @@ impl Renderer {
                 depth_write: false,
             },
         );
+        pipeline_set.prepare_pipeline(
+            PIPELINE_OVERLAY,
+            &PipelineConfig {
+                render_pass: &self.res.g_render_pass,
+                signature: &main_signature,
+                subpass_index: 1,
+                cull_back_faces,
+                blend_attachments: &[albedo_attachment_id],
+                depth_test: true,
+                depth_write: true,
+            },
+        );
 
-        self.material_pipelines.push(pipeline_set);
-        (self.material_pipelines.len() - 1) as u32
+        self.res.material_pipelines.push(pipeline_set);
+        (self.res.material_pipelines.len() - 1) as u32
     }
 
     pub fn get_material_pipeline(&self, id: u32) -> Option<&MaterialPipelineSet> {
-        self.material_pipelines.get(id as usize)
+        self.res.material_pipelines.get(id as usize)
     }
 
     pub fn get_material_pipeline_mut(&mut self, id: u32) -> Option<&mut MaterialPipelineSet> {
-        self.material_pipelines.get_mut(id as usize)
+        self.res.material_pipelines.get_mut(id as usize)
     }
 
     pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
-        assert!(id < MAX_MATERIAL_COUNT);
+        assert!(id < N_MAX_MATERIALS);
         self.material_updates.insert(id, info);
     }
-
-    /// Returns true if vertex mesh of `entity` is being updated (i.e. uploaded to the GPU).
-    // pub fn is_vertex_mesh_updating(&self, entity: Entity) -> bool {
-    //     self.vertex_mesh_updates.contains_key(&entity)
-    //         || self
-    //             .vertex_mesh_pending_updates
-    //             .iter()
-    //             .any(|v| v.entity == entity)
-    // }
 
     /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
     pub(crate) unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
@@ -220,12 +224,12 @@ impl Renderer {
                 let update = &updates[i];
 
                 let (copy_size, new_used_size) = match update {
-                    BufferUpdate::Type1(update) => {
+                    BufferUpdate::WithOffset(update) => {
                         let copy_size = update.data.len() as u64;
                         assert!(copy_size <= staging_size);
                         (copy_size, used_size + copy_size)
                     }
-                    BufferUpdate::Type2(update) => {
+                    BufferUpdate::Regions(update) => {
                         let copy_size = update.data.len() as u64;
                         assert!(copy_size <= staging_size);
                         (copy_size, used_size + copy_size)
@@ -238,17 +242,17 @@ impl Renderer {
                 }
 
                 match update {
-                    BufferUpdate::Type1(update) => {
+                    BufferUpdate::WithOffset(update) => {
                         self.staging_buffer.write(used_size as u64, &update.data);
                         cl.copy_buffer_to_device(
                             &self.staging_buffer,
                             used_size,
                             &update.buffer,
-                            update.offset,
+                            update.dst_offset,
                             copy_size,
                         );
                     }
-                    BufferUpdate::Type2(update) => {
+                    BufferUpdate::Regions(update) => {
                         self.staging_buffer.write(used_size as u64, &update.data);
 
                         let regions: SmallVec<[CopyRegion; 64]> = update

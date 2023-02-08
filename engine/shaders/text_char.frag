@@ -3,11 +3,10 @@
 
 layout(early_fragment_tests) in;
 
-#define FN_TEXTURE_ATLAS
 #define ENGINE_PIXEL_SHADER
 #include "../../engine/shaders/common.glsl"
 
-layout(set = 2, binding = 1) uniform sampler2DArray msdfArray;
+layout(set = SET_CUSTOM_PER_FRAME, binding = 1) uniform sampler2DArray msdfArray;
 
 layout(location = 0) in Input {
     vec2 texCoord;

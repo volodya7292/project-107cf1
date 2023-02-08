@@ -19,7 +19,7 @@ use crate::overworld::structure::world::WorldState;
 use crate::overworld::structure::{Structure, StructuresIter};
 use crate::utils::noise::HybridNoise;
 use crate::utils::white_noise::WhiteNoise;
-use crate::utils::{ConcurrentCache, ConcurrentCacheImpl, HashMap, UInt};
+use crate::utils::{ConcurrentCache, ConcurrentCacheImpl, UInt};
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 

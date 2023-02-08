@@ -6,14 +6,14 @@ use nalgebra_glm::{DVec2, DVec3, DVec4, I64Vec2, I64Vec3, Vec3};
 use noise::Seedable;
 use rand::Rng;
 
-use core::overworld::generator::OverworldGenerator;
-use core::overworld::position::BlockPos;
-use core::overworld::structure::world::biome::MeanTemperature;
-use core::overworld::structure::world::WorldState;
-use core::registry::Registry;
-use core::utils::noise::HybridNoise;
-use core::utils::voronoi_noise::VoronoiNoise2D;
-use core::utils::white_noise::WhiteNoise;
+use base::overworld::generator::OverworldGenerator;
+use base::overworld::position::BlockPos;
+use base::overworld::structure::world::biome::MeanTemperature;
+use base::overworld::structure::world::WorldState;
+use base::registry::Registry;
+use base::utils::noise::HybridNoise;
+use base::utils::voronoi_noise::VoronoiNoise2D;
+use base::utils::white_noise::WhiteNoise;
 
 pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];

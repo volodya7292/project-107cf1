@@ -12,7 +12,7 @@ static DEFAULT_THREAD_POOL: OnceCell<SafeThreadPool> = OnceCell::new();
 static COROUTINE_EXECUTOR: OnceCell<Arc<async_executor::Executor<'static>>> = OnceCell::new();
 
 pub fn init(n_default_threads: usize, n_coroutine_threads: usize) {
-    let thread_pool = SafeThreadPool::new(n_default_threads, TaskPriority::Default).unwrap();
+    let default_thread_pool = SafeThreadPool::new(n_default_threads, TaskPriority::Default).unwrap();
     let coroutine_executor = Arc::new(async_executor::Executor::new());
 
     for _ in 0..n_coroutine_threads {
@@ -25,7 +25,7 @@ pub fn init(n_default_threads: usize, n_coroutine_threads: usize) {
         );
     }
 
-    DEFAULT_THREAD_POOL.set(thread_pool).unwrap();
+    DEFAULT_THREAD_POOL.set(default_thread_pool).unwrap();
     COROUTINE_EXECUTOR.set(coroutine_executor).unwrap();
 }
 

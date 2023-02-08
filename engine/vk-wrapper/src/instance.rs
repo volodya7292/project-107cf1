@@ -309,7 +309,7 @@ impl Instance {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)
                 };
-                if !props.buffer_features.intersects(*feature_bits) {
+                if !props.buffer_features.intersects(feature_bits.0) {
                     continue 'g;
                 }
             }
@@ -327,7 +327,7 @@ impl Instance {
                     self.native
                         .get_physical_device_format_properties(p_device, format.0)
                 };
-                if !props.optimal_tiling_features.contains(*feature_bits) {
+                if !props.optimal_tiling_features.contains(feature_bits.0) {
                     continue 'g;
                 }
             }

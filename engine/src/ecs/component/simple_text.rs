@@ -1,3 +1,4 @@
+use crate::ecs::component::render_config::RenderStage;
 use nalgebra_glm::U8Vec4;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -29,12 +30,7 @@ pub struct TextStyle {
 
 impl TextStyle {
     pub fn new() -> Self {
-        Self {
-            font_id: 0,
-            font_size: 1.0,
-            font_style: FontStyle::Normal,
-            color: U8Vec4::from_element(255),
-        }
+        Self::default()
     }
 
     pub fn with_font(mut self, font_id: u16) -> Self {
@@ -74,15 +70,29 @@ impl TextStyle {
     }
 }
 
-#[derive(Clone)]
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            font_id: 0,
+            font_size: 1.0,
+            font_style: FontStyle::Normal,
+            color: U8Vec4::from_element(255),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct StyledString {
     data: String,
     text_style: TextStyle,
 }
 
 impl StyledString {
-    pub fn new(data: String, text_style: TextStyle) -> Self {
-        Self { data, text_style }
+    pub fn new(data: impl Into<String>, text_style: TextStyle) -> Self {
+        Self {
+            data: data.into(),
+            text_style,
+        }
     }
 
     pub fn data(&self) -> &str {
@@ -108,25 +118,44 @@ pub enum TextHAlign {
 }
 
 #[derive(Clone)]
-pub struct SimpleText {
-    text: StyledString,
-    h_align: TextHAlign,
-    max_width: f32,
-    max_height: f32,
+pub struct SimpleTextC {
+    pub text: StyledString,
+    pub h_align: TextHAlign,
+    pub long_word_breaking: bool,
+    pub max_width: f32,
+    pub max_height: f32,
+    pub stage: RenderStage,
 }
 
-impl SimpleText {
-    pub fn new(text: StyledString) -> Self {
+impl SimpleTextC {
+    pub fn new() -> Self {
         Self {
-            text,
+            text: Default::default(),
             h_align: TextHAlign::LEFT,
+            long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
+            stage: RenderStage::MAIN,
         }
+    }
+
+    pub fn with_text(mut self, text: StyledString) -> Self {
+        self.text = text;
+        self
+    }
+
+    pub fn with_stage(mut self, stage: RenderStage) -> Self {
+        self.stage = stage;
+        self
     }
 
     pub fn with_h_align(mut self, align: TextHAlign) -> Self {
         self.h_align = align;
+        self
+    }
+
+    pub fn with_long_word_breaking(mut self, do_break: bool) -> Self {
+        self.long_word_breaking = do_break;
         self
     }
 
@@ -138,21 +167,5 @@ impl SimpleText {
     pub fn with_max_height(mut self, max_height: f32) -> Self {
         self.max_height = max_height;
         self
-    }
-
-    pub fn string(&self) -> &StyledString {
-        &self.text
-    }
-
-    pub fn h_align(&self) -> TextHAlign {
-        self.h_align
-    }
-
-    pub fn max_width(&self) -> f32 {
-        self.max_width
-    }
-
-    pub fn max_height(&self) -> f32 {
-        self.max_height
     }
 }

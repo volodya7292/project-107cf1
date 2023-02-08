@@ -12,7 +12,7 @@ where
 
     for i in (0..indices.len()).step_by(3) {
         let ind = &indices[i..(i + 3)];
-        let normal = core::utils::calc_triangle_normal(
+        let normal = base::utils::calc_triangle_normal(
             &vertices[ind[0] as usize].position(),
             &vertices[ind[1] as usize].position(),
             &vertices[ind[2] as usize].position(),
@@ -44,4 +44,20 @@ where
     for (i, v) in vertices.iter_mut().enumerate() {
         v.set_normal((v.normal() / vertex_triangle_counts[i] as f32).normalize());
     }
+}
+
+pub fn find_best_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::monitor::VideoMode {
+    let curr_refresh_rate = monitor.refresh_rate_millihertz().unwrap();
+
+    monitor
+        .video_modes()
+        .max_by(|a, b| {
+            let a_width = a.size().width;
+            let b_width = b.size().width;
+            let a_fps_diff = a.refresh_rate_millihertz().abs_diff(curr_refresh_rate);
+            let b_fsp_diff = b.refresh_rate_millihertz().abs_diff(curr_refresh_rate);
+
+            a_width.cmp(&b_width).then(a_fps_diff.cmp(&b_fsp_diff).reverse())
+        })
+        .unwrap()
 }

@@ -2,6 +2,8 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 #extension GL_EXT_scalar_block_layout : require
 
+#include "engine_ids.h"
+
 #define ALPHA_BIAS 4.0 / 255.0
 #define OIT_N_CLOSEST_LAYERS 4
 #define THREAD_GROUP_WIDTH 8
@@ -10,7 +12,6 @@
 
 #define M_PI 3.1415927f
 #define SQRT_2 1.4142136f
-
 #define FLT_MAX 3.402823466e+38f
 
 struct Material {
@@ -50,7 +51,8 @@ struct Camera {
 struct FrameInfo {
     Camera camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
-    uvec2 frameSize;
+    uvec2 frame_size;
+    float frame_aspect;
 };
 
 
@@ -60,20 +62,20 @@ layout(location = 1) out vec4 outSpecular;
 layout(location = 2) out vec4 outEmission;
 layout(location = 3) out vec4 outNormal;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 0, binding = 1, scalar) readonly buffer Materials {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_MATERIAL_BUFFER, scalar) readonly buffer Materials {
     Material materials[];
 };
-layout(set = 0, binding = 2) uniform sampler2D albedoAtlas;
-layout(set = 0, binding = 3) uniform sampler2D specularAtlas;
-layout(set = 0, binding = 4) uniform sampler2D normalAtlas;
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_ALBEDO_ATLAS) uniform sampler2D albedoAtlas;
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_SPECULAR_ATLAS) uniform sampler2D specularAtlas;
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_NORMAL_ATLAS) uniform sampler2D normalAtlas;
 
-layout(set = 0, binding = 5, std430) coherent buffer TranslucentDepthsArray {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std430) coherent buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
-layout(set = 0, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_COLORS, rgba8) uniform image2DArray translucencyColorsArray;
 
 layout(push_constant) uniform PushConstants {
     uint isTranslucentPass;
@@ -115,8 +117,8 @@ void writeOutputAlbedo(vec4 albedo) {
 
     uint currDepth = floatBitsToUint(gl_FragCoord.z);
     ivec2 coord = ivec2(gl_FragCoord.xy);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;
 
     if (currDepth > depthsArray[coordIdx + lastLayerIdx * sliceSize]) {

@@ -1,24 +1,22 @@
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
+use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
+use crate::default_resources::DefaultResourceMapping;
+use crate::resource_mapping::ResourceMapping;
+use base::overworld::orchestrator::get_side_clusters;
+use base::overworld::orchestrator::OverworldUpdateResult;
+use base::overworld::position::ClusterPos;
+use base::overworld::LoadedClusters;
+use base::utils::{HashMap, HashSet};
+use engine::ecs::component;
+use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
+use engine::renderer::{Renderer, VertexMeshObject};
 use entity_data::EntityId;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec3};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-
-use core::overworld::orchestrator::get_side_clusters;
-use core::overworld::orchestrator::OverworldUpdateResult;
-use core::overworld::position::ClusterPos;
-use core::overworld::LoadedClusters;
-use core::utils::{HashMap, HashSet};
-use engine::ecs::component;
-use engine::renderer::{Renderer, VertexMeshObject};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use vk_wrapper as vkw;
-
-use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
-use crate::default_resources::DefaultResourceMapping;
-use crate::resource_mapping::ResourceMapping;
 
 pub struct OverworldRenderer {
     device: Arc<vkw::Device>,
@@ -149,42 +147,10 @@ impl OverworldRenderer {
             to_update_mesh.remove(&pos);
         }
 
-        // Add new objects
-        for pos in self.to_add.drain() {
-            let transform_comp = component::Transform::new(
-                glm::convert(*pos.get()),
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 1.0, 1.0),
-            );
-            let render_config_solid = component::MeshRenderConfig::new(self.cluster_mat_pipeline, false);
-            let render_config_translucent = component::MeshRenderConfig::new(self.cluster_mat_pipeline, true);
-
-            let entity_solid = renderer.add_object(VertexMeshObject::new(
-                transform_comp,
-                render_config_solid,
-                Default::default(),
-            ));
-            let entity_translucent = renderer.add_object(VertexMeshObject::new(
-                transform_comp,
-                render_config_translucent,
-                Default::default(),
-            ));
-
-            self.entities.insert(
-                pos,
-                ClusterEntities {
-                    solid: entity_solid,
-                    translucent: entity_translucent,
-                },
-            );
-        }
-
         let to_build = self.to_build_mesh.lock();
 
         // Update meshes for scene objects
         to_update_mesh.retain(|pos, meshes| {
-            let entities = self.entities.get(&pos).unwrap();
-
             for neighbour in get_side_clusters(&pos) {
                 if to_build.contains(&neighbour) {
                     // Retain, do mesh update later when neighbours are ready
@@ -192,15 +158,41 @@ impl OverworldRenderer {
                 }
             }
 
-            *renderer
-                .access_object(entities.solid)
-                .get_mut::<component::VertexMesh>()
-                .unwrap() = component::VertexMesh::new(&meshes.solid.raw());
+            let entities = self.entities.entry(*pos).or_insert_with(|| {
+                assert_eq!(self.to_add.remove(pos), true);
 
-            *renderer
-                .access_object(entities.translucent)
-                .get_mut::<component::VertexMesh>()
-                .unwrap() = component::VertexMesh::new(&meshes.transparent.raw());
+                let transform_comp = TransformC::new().with_position(glm::convert(*pos.get()));
+                let render_config_solid = MeshRenderConfigC::new(self.cluster_mat_pipeline, false);
+                let render_config_translucent = MeshRenderConfigC::new(self.cluster_mat_pipeline, true);
+
+                let entity_solid = renderer.add_object(
+                    None,
+                    VertexMeshObject::new(transform_comp, render_config_solid, Default::default()),
+                );
+                let entity_translucent = renderer.add_object(
+                    None,
+                    VertexMeshObject::new(transform_comp, render_config_translucent, Default::default()),
+                );
+
+                ClusterEntities {
+                    solid: entity_solid.unwrap(),
+                    translucent: entity_translucent.unwrap(),
+                }
+            });
+
+            let mesh_solid = VertexMeshC::new(&meshes.solid.raw());
+            let transparent = VertexMeshC::new(&meshes.transparent.raw());
+
+            let access = renderer.access();
+            access.object_raw(&entities.solid).unwrap().modify(|mut entry| {
+                *entry.get_mut::<VertexMeshC>() = mesh_solid;
+            });
+            access
+                .object_raw(&entities.translucent)
+                .unwrap()
+                .modify(|mut entry| {
+                    *entry.get_mut::<VertexMeshC>() = transparent;
+                });
 
             false
         });

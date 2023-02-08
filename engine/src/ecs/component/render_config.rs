@@ -1,8 +1,6 @@
+use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
-
-use smallvec::SmallVec;
-
 use vk_wrapper as vkw;
 
 pub struct BufferResource {
@@ -54,40 +52,49 @@ impl Resource {
     }
 }
 
-pub struct MeshRenderConfig {
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+pub enum RenderStage {
+    /// Renders regular 3D objects.
+    MAIN = 0,
+    /// Renders objects after the `MAIN` stage.
+    OVERLAY = 1,
+}
+
+pub struct MeshRenderConfigC {
+    pub(crate) stage: RenderStage,
     pub(crate) mat_pipeline: u32,
     /// binding id -> Resource
     pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
     pub(crate) translucent: bool,
     pub(crate) visible: bool,
-    pub(crate) fake_vertex_count: u32,
 }
 
-impl Default for MeshRenderConfig {
+impl Default for MeshRenderConfigC {
     fn default() -> Self {
         Self {
+            stage: RenderStage::MAIN,
             mat_pipeline: u32::MAX,
             resources: Default::default(),
             translucent: false,
             visible: false,
-            fake_vertex_count: 0,
         }
     }
 }
 
-impl MeshRenderConfig {
-    pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfig {
-        MeshRenderConfig {
+impl MeshRenderConfigC {
+    pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfigC {
+        MeshRenderConfigC {
+            stage: RenderStage::MAIN,
             mat_pipeline,
             resources: Default::default(),
             translucent,
             visible: true,
-            fake_vertex_count: 0,
         }
     }
 
-    pub fn with_fake_vertex_count(mut self, vertex_count: u32) -> Self {
-        self.fake_vertex_count = vertex_count;
+    pub fn with_stage(mut self, stage: RenderStage) -> Self {
+        self.stage = stage;
         self
     }
 

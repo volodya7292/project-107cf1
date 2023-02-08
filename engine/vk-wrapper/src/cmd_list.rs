@@ -1,11 +1,3 @@
-use std::num::NonZeroU64;
-use std::sync::Arc;
-use std::{mem, ptr, slice};
-
-use ash::vk;
-use parking_lot::Mutex;
-use smallvec::SmallVec;
-
 use crate::buffer::BufferHandleImpl;
 use crate::render_pass::vk_clear_value;
 use crate::{
@@ -14,6 +6,12 @@ use crate::{
 };
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
+use ash::vk;
+use parking_lot::Mutex;
+use smallvec::SmallVec;
+use std::num::NonZeroU64;
+use std::sync::Arc;
+use std::{mem, ptr, slice};
 
 pub struct CmdList {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
@@ -244,54 +242,55 @@ impl CmdList {
         false
     }
 
-    fn bind_pipeline_input(
+    fn bind_pipeline_inputs(
         &mut self,
         signature: &Arc<PipelineSignature>,
         bind_point: vk::PipelineBindPoint,
-        set_id: u32,
-        descriptor_set: DescriptorSet,
+        first_set_id: u32,
+        descriptor_sets: &[DescriptorSet],
         dynamic_offsets: &[u32],
     ) {
+        let natives: SmallVec<[vk::DescriptorSet; 4]> = descriptor_sets.iter().map(|v| v.native).collect();
         unsafe {
             self.device_wrapper.native.cmd_bind_descriptor_sets(
                 self.native,
                 bind_point,
                 signature.pipeline_layout,
-                set_id,
-                &[descriptor_set.native],
+                first_set_id,
+                &natives,
                 dynamic_offsets,
             );
         };
     }
 
-    pub fn bind_graphics_input(
+    pub fn bind_graphics_inputs(
         &mut self,
         signature: &Arc<PipelineSignature>,
-        set_id: u32,
-        descriptor_set: DescriptorSet,
+        first_set_id: u32,
+        descriptor_set: &[DescriptorSet],
         dynamic_offsets: &[u32],
     ) {
-        self.bind_pipeline_input(
+        self.bind_pipeline_inputs(
             signature,
             vk::PipelineBindPoint::GRAPHICS,
-            set_id,
+            first_set_id,
             descriptor_set,
             dynamic_offsets,
         );
     }
 
-    pub fn bind_compute_input(
+    pub fn bind_compute_inputs(
         &mut self,
         signature: &Arc<PipelineSignature>,
-        set_id: u32,
-        descriptor_set: DescriptorSet,
+        first_set_id: u32,
+        descriptor_sets: &[DescriptorSet],
         dynamic_offsets: &[u32],
     ) {
-        self.bind_pipeline_input(
+        self.bind_pipeline_inputs(
             signature,
             vk::PipelineBindPoint::COMPUTE,
-            set_id,
-            descriptor_set,
+            first_set_id,
+            descriptor_sets,
             dynamic_offsets,
         );
     }
@@ -300,6 +299,10 @@ impl CmdList {
     pub fn bind_vertex_buffers(&mut self, first_binding: u32, buffers: &[(BufferHandle, u64)]) {
         let mut native_buffers = [vk::Buffer::default(); 16];
         let mut offsets = [0u64; 16];
+
+        if buffers.is_empty() {
+            return;
+        }
 
         for (i, (buffer, offset)) in buffers.iter().enumerate() {
             native_buffers[i] = buffer.0;

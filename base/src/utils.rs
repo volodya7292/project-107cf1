@@ -8,6 +8,7 @@ use nalgebra_glm::Vec3;
 
 pub use slice_split::SliceSplitImpl;
 
+pub mod instant_meter;
 pub mod noise;
 mod qef;
 pub mod resource_file;
@@ -22,7 +23,7 @@ pub type HashSet<T> = ahash::AHashSet<T>;
 pub type HashMap<K, V> = ahash::AHashMap<K, V>;
 pub type ConcurrentCache<K, V> = moka::sync::Cache<K, V, ahash::RandomState>;
 pub type IndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
-pub type IndexMap<T> = indexmap::IndexMap<T, ahash::RandomState>;
+pub type IndexMap<T, V> = indexmap::IndexMap<T, V, ahash::RandomState>;
 
 pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
@@ -41,13 +42,26 @@ pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n - (n >> 1)
 }
 
+pub trait Bool {
+    /// Converts `false` into `0.0` and `true` into `1.0`.
+    fn into_f32(self) -> f32;
+    /// Converts `false` into `0.0` and `true` into `1.0`.
+    fn into_f64(self) -> f64;
+}
+
+impl Bool for bool {
+    fn into_f32(self) -> f32 {
+        self as u32 as f32
+    }
+
+    fn into_f64(self) -> f64 {
+        self as u64 as f64
+    }
+}
+
 /// log2(8) = 3  
 /// log2(5) = 2
 pub trait UInt {
-    // TODO: remove when std log2 is stable
-    fn log2(self) -> Self;
-    // TODO: remove when std log is stable
-    fn log(self, base: Self) -> Self;
     // TODO: remove when std div_ceil is stable
     fn div_ceil(self, other: Self) -> Self;
     // TODO: remove when std next_multiple_of is stable
@@ -59,28 +73,6 @@ pub trait Int {}
 macro_rules! uint_impl {
     ($($t: ty)*) => ($(
         impl UInt for $t {
-            fn log2(self) -> Self {
-                <$t>::BITS as $t - self.leading_zeros() as $t - 1
-            }
-
-            fn log(self, base: Self) -> Self {
-                let mut n = 0;
-                let mut r = self;
-
-                // Optimization for 128 bit wide integers.
-                if Self::BITS == 128 {
-                    let b = Self::log2(self) / (Self::log2(base) + 1);
-                    n += b;
-                    r /= base.pow(b as u32);
-                }
-
-                while r >= base {
-                    r /= base;
-                    n += 1;
-                }
-                n
-            }
-
             fn div_ceil(self, other: Self) -> Self {
                 (self + other - 1) / other
             }

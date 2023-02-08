@@ -6,7 +6,7 @@ layout(location = 0) in uint inGlyphIndex;
 layout(location = 1) in vec2 inGlyphSize;
 layout(location = 2) in vec4 inColor;
 layout(location = 3) in vec2 inOffset;
-layout(location = 4) in float inScale;
+layout(location = 4) in vec2 inScale;
 
 layout(location = 0) out Output {
     vec2 texCoord;
@@ -15,14 +15,14 @@ layout(location = 0) out Output {
     float pxRange;
 } vs_out;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 1, binding = 0) uniform ObjectData {
-    mat4 model;
-};
-layout(set = 2, binding = 0) uniform TextFrameData {
+layout(set = SET_CUSTOM_PER_FRAME, binding = 0) uniform TextFrameData {
     float pxRange;
+};
+layout(set = SET_PER_OBJECT, binding = BINDING_GENERAL_OBJECT_INFO) uniform ObjectData {
+    mat4 model;
 };
 
 void main() {

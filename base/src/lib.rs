@@ -1,20 +1,7 @@
-use std::collections::hash_map;
-use std::sync::Arc;
-use std::time::Duration;
-
-use nalgebra_glm as glm;
-pub use once_cell;
-use parking_lot::Mutex;
-use rayon::prelude::*;
-
-pub use macos;
-use overworld::actions_storage::{OverworldActionsBuilder, OverworldActionsStorage, StateChangeInfo};
-
 use crate::overworld::accessor::{
     OverworldAccessor, ReadOnlyOverworldAccessor, ReadOnlyOverworldAccessorImpl,
 };
 use crate::overworld::facing::Facing;
-use crate::overworld::light_state::LightState;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
@@ -22,6 +9,17 @@ use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
 use crate::overworld::LoadedClusters;
 use crate::registry::Registry;
 use crate::utils::{HashMap, MO_RELAXED};
+pub use macos;
+use nalgebra_glm as glm;
+pub use once_cell;
+use overworld::actions_storage::{OverworldActionsBuilder, OverworldActionsStorage, StateChangeInfo};
+use parking_lot::Mutex;
+use rayon::prelude::*;
+use std::collections::hash_map;
+use std::sync::Arc;
+use std::time::Duration;
+
+pub static mut COUNTER: usize = 0;
 
 pub mod main_registry;
 pub mod overworld;
@@ -326,7 +324,7 @@ fn apply_overworld_actions(
     let all_affected_positions = Mutex::new(Vec::with_capacity(after_actions_by_cluster.len()));
 
     // Apply all the actions
-    after_actions_by_cluster.par_iter().for_each(|(pos, changes)| {
+    after_actions_by_cluster.par_iter().for_each(|(_, changes)| {
         let mut access = OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters));
         let affected_positions: Vec<_> = changes.params.iter().map(|v| v.pos).collect();
 

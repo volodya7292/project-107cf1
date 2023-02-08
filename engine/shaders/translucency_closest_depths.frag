@@ -4,12 +4,12 @@
 
 layout(early_fragment_tests) in;
 
-layout (input_attachment_index = 0, set = 0, binding = 7) uniform subpassInput inputSolidDepth;
+layout (input_attachment_index = 0, set = SET_GENERAL_PER_FRAME, binding = BINDING_SOLID_DEPTHS) uniform subpassInput inputSolidDepth;
 
-layout(set = 0, binding = 0, scalar) uniform FrameData {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = 0, binding = 5, std430) coherent buffer DepthsArray {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std430) coherent buffer DepthsArray {
     uint transparencyDepthsArray[];
 };
 
@@ -30,8 +30,8 @@ void main() {
 
     ivec2 coord = ivec2(gl_FragCoord.xy);
     uint currDepth = floatBitsToUint(gl_FragCoord.z);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
 
     // Early transparency depth test (check farthest layer)
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;

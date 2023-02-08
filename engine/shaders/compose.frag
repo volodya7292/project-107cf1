@@ -6,21 +6,21 @@ layout(location = 0) in vec2 inUV;
 
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform sampler2D albedo;
+layout(set = SET_GENERAL_PER_FRAME, binding = 0) uniform sampler2D albedo;
 
-layout(set = 0, binding = 1, scalar) uniform FrameData {
+layout(set = SET_GENERAL_PER_FRAME, binding = 1, scalar) uniform FrameData {
     FrameInfo info;
 };
 
-layout(set = 0, binding = 5, std430) coherent buffer TranslucentDepthsArray {
+layout(set = SET_GENERAL_PER_FRAME, binding = 5, std430) coherent buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
-layout(set = 0, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
+layout(set = SET_GENERAL_PER_FRAME, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
  
 void main() {
     ivec2 coord = ivec2(gl_FragCoord.xy);
-    uint coordIdx = info.frameSize.x * coord.y + coord.x;
-    uint sliceSize = info.frameSize.x * info.frameSize.y;
+    uint coordIdx = info.frame_size.x * coord.y + coord.x;
+    uint sliceSize = info.frame_size.x * info.frame_size.y;
 
     vec4 currColor = vec4(0);
 
