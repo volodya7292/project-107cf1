@@ -24,9 +24,9 @@ pub struct OverworldRenderer {
     resource_mapping: Arc<ResourceMapping>,
     loaded_clusters: LoadedClusters,
 
-    dirty_clusters: HashSet<ClusterPos>,
     to_add: HashSet<ClusterPos>,
     to_remove: HashSet<ClusterPos>,
+    to_build_mesh: Mutex<HashSet<ClusterPos>>,
     to_update_mesh: Mutex<HashMap<ClusterPos, ClusterMeshes>>,
 
     entities: HashMap<ClusterPos, ClusterEntities>,
@@ -56,33 +56,28 @@ impl OverworldRenderer {
             cluster_mat_pipeline,
             resource_mapping,
             loaded_clusters,
-            dirty_clusters: HashSet::with_capacity(8192),
             to_add: HashSet::with_capacity(8192),
             to_remove: HashSet::with_capacity(8192),
+            to_build_mesh: Mutex::new(HashSet::with_capacity(8192)),
             to_update_mesh: Mutex::new(HashMap::with_capacity(1024)),
             entities: HashMap::with_capacity(8192),
         }
     }
 
     pub fn manage_changes(&mut self, overworld_update: &OverworldUpdateResult) {
-        self.dirty_clusters
-            .extend(overworld_update.processed_dirty_clusters.iter().map(|v| v.0));
+        let mut to_build_mesh = self.to_build_mesh.lock();
 
-        self.dirty_clusters
-            .extend(overworld_update.updated_auxiliary_parts.iter().map(|v| v.0));
+        to_build_mesh.extend(overworld_update.processed_dirty_clusters.iter().map(|v| v.0));
+        to_build_mesh.extend(overworld_update.updated_auxiliary_parts.iter().map(|v| v.0));
 
+        // Handle new clusters
         for pos in &overworld_update.new_clusters {
             self.to_add.insert(*pos);
             self.to_remove.remove(pos);
+            to_build_mesh.insert(*pos);
         }
 
-        for gov in &overworld_update.processed_dirty_clusters {
-            assert!(!self.to_remove.contains(&gov.0));
-        }
-        for gov in &overworld_update.updated_auxiliary_parts {
-            assert!(!self.to_remove.contains(&gov.0));
-        }
-
+        // Handle removed clusters
         for pos in overworld_update
             .removed_clusters
             .iter()
@@ -90,7 +85,7 @@ impl OverworldRenderer {
         {
             self.to_remove.insert(*pos);
             self.to_add.remove(pos);
-            self.dirty_clusters.remove(pos);
+            to_build_mesh.remove(pos);
         }
     }
 
@@ -108,26 +103,30 @@ impl OverworldRenderer {
         let o_clusters = self.loaded_clusters.read();
 
         // Sort dirty clusters by distance from observer
-        let mut dirty_clusters_sorted: Vec<_> = self.dirty_clusters.iter().cloned().collect();
-        dirty_clusters_sorted.par_sort_by_cached_key(|pos| {
+        let mut to_build_sorted: Vec<_> = self.to_build_mesh.lock().iter().cloned().collect();
+        to_build_sorted.par_sort_by_cached_key(|pos| {
             let diff = pos.get() - stream_pos_i;
             diff.dot(&diff)
         });
 
         // Build new meshes for dirty clusters
-        for chunk in dirty_clusters_sorted.chunks(rayon::current_num_threads()) {
+        for chunk in to_build_sorted.chunks(rayon::current_num_threads()) {
             chunk.par_iter().for_each(|pos| {
                 let o_cluster = o_clusters.get(pos).unwrap();
+                if !o_cluster.state().is_loaded() {
+                    return;
+                }
                 let t_cluster_guard = o_cluster.cluster.read();
-                let t_cluster = t_cluster_guard.as_ref().unwrap();
+                let Some(t_cluster) = t_cluster_guard.as_ref() else {
+                    // Cluster is not accessible because it must be offloaded
+                    assert!(o_cluster.state().is_offloaded());
+                    return;
+                };
 
                 let meshes = t_cluster.raw().build_mesh(&self.device, &self.resource_mapping);
                 self.to_update_mesh.lock().insert(*pos, meshes);
+                self.to_build_mesh.lock().remove(pos);
             });
-
-            for pos in chunk {
-                self.dirty_clusters.remove(pos);
-            }
 
             let t1 = Instant::now();
             if t1.duration_since(t_start) >= max_execution_time {
@@ -151,7 +150,7 @@ impl OverworldRenderer {
         // Update meshes for scene objects
         to_update_mesh.retain(|pos, meshes| {
             for neighbour in get_side_clusters(&pos) {
-                if self.dirty_clusters.contains(&neighbour) {
+                if to_build.contains(&neighbour) {
                     // Retain, do mesh update later when neighbours are ready
                     return true;
                 }
