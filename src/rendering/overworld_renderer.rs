@@ -147,6 +147,8 @@ impl OverworldRenderer {
             to_update_mesh.remove(&pos);
         }
 
+        let to_build = self.to_build_mesh.lock();
+
         // Update meshes for scene objects
         to_update_mesh.retain(|pos, meshes| {
             for neighbour in get_side_clusters(&pos) {
