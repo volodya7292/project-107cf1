@@ -6,13 +6,14 @@ edition = "2021"
 
 [workspace]
 members = [
-    "engine/vk-wrapper",
-    "engine/vk-wrapper/vma",
-    "base/macos",
-    "engine/msdfgen",
-    "engine",
     "common",
     "base",
+    "base/macos",
+    "engine",
+    "engine/vk-wrapper",
+    "engine/vk-wrapper/vma",
+    "engine/msdfgen",
+    "engine/shader_ids",
     "client",
 ]
 
@@ -37,12 +38,9 @@ entity_data = "1.9"
 smallvec = "1.6"
 bit-vec = "0.6"
 fixedbitset = "0.4"
-replace_with = "0.1"
 lazy_static = "1.4"
 parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision", "deadlock_detection"] }
 once_cell = "1.13"
-rstar = "0.9"
-bumpalo = "3.11"
 
 [build-dependencies]
 common = { path = "common" }

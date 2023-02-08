@@ -282,7 +282,7 @@ impl Application for Game {
         let access = renderer.access();
         let mut obj = access.object::<UIText>(&text.unwrap()).unwrap();
         obj.set_text(StyledString::new(
-            "Lorem ipsum",
+            "Loremipsumdsadsf dorer",
             TextStyle::new().with_font(font_id).with_font_size(100.5),
         ));
 

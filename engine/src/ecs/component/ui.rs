@@ -146,9 +146,9 @@ pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
+    pub overflow: [Overflow; 2],
     pub align: CrossAlign,
     pub padding: Padding,
-    pub overflow: Overflow,
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
@@ -214,10 +214,34 @@ impl UILayoutC {
     }
 }
 
+#[derive(Default, Copy, Clone, PartialEq)]
+pub struct Rect {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+
+impl Rect {
+    pub fn intersection(&self, other: &Self) -> Self {
+        Self {
+            min: self.min.sup(&other.min),
+            max: self.max.inf(&other.max),
+        }
+    }
+
+    pub fn size_by_axis(&self, axis: usize) -> f32 {
+        self.max[axis] - self.min[axis]
+    }
+
+    pub fn set_axis_size(&mut self, axis: usize, size: f32) {
+        self.max[axis] = self.min[axis] + size;
+    }
+}
+
 #[derive(Default, Copy, Clone)]
 pub struct UILayoutCacheC {
     pub(crate) final_min_size: Vec2,
     pub(crate) final_size: Vec2,
     pub(crate) relative_position: Vec2,
     pub(crate) global_position: Vec2,
+    pub(crate) clip_rect: Rect,
 }

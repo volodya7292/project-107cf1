@@ -1,4 +1,5 @@
 use base::utils::resource_file::ResourceFile;
+use engine::renderer::material_pipeline::UniformStruct;
 use engine::renderer::Renderer;
 use engine::uniform_struct_impl;
 use nalgebra as na;
@@ -103,6 +104,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut Renderer) -> Materia
 }
 
 #[derive(Default)]
+#[repr(C)]
 pub struct BasicUniformInfo {
     model: na::Matrix4<f32>,
 }

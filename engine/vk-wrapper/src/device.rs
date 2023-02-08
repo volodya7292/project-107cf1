@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 
-use crate::format::BUFFER_FORMATS;
+use crate::format::{FormatFeatureFlags, BUFFER_FORMATS};
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::{BindingLoc, ShaderStage, VInputRate};
 use crate::PipelineSignature;
@@ -834,7 +834,7 @@ impl Device {
 
         if stage == ShaderStage::VERTEX {
             for (f, _) in vertex_inputs.values() {
-                if !BUFFER_FORMATS[f].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+                if !BUFFER_FORMATS[f].contains(FormatFeatureFlags::VERTEX_BUFFER) {
                     panic!("Unsupported vertex format is used: {:?}", f);
                 }
             }
@@ -1291,7 +1291,7 @@ impl Device {
         for (location, (format, rate)) in &vertex_shader.vertex_location_inputs {
             let buffer_index = *location;
 
-            if !BUFFER_FORMATS[&format].contains(vk::FormatFeatureFlags::VERTEX_BUFFER) {
+            if !BUFFER_FORMATS[&format].contains(FormatFeatureFlags::VERTEX_BUFFER) {
                 panic!("Unsupported vertex format is used: {:?}", format);
             }
 

@@ -9,6 +9,7 @@ use base::utils::{HashMap, HashSet};
 use vk_wrapper as vkw;
 
 use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
@@ -48,7 +49,7 @@ impl SystemHandler for GlobalTransformEvents<'_> {
 
             self.uniform_buffer_updates.regions.push(vkw::CopyRegion::new(
                 src_offset as u64,
-                renderable.uniform_buf_index as u64 * renderer::MAX_BASIC_UNIFORM_BLOCK_SIZE
+                (renderable.uniform_buf_index * BASIC_UNIFORM_BLOCK_MAX_SIZE) as u64
                     + pipe.uniform_buffer_offset_model() as u64,
                 (matrix_bytes.len() as u64).try_into().unwrap(),
             ));

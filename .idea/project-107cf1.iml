@@ -11,6 +11,7 @@
       <sourceFolder url="file://$MODULE_DIR$/client/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/base/macos/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/base/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/engine/shader_ids/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

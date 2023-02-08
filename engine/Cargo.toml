@@ -7,6 +7,7 @@ edition = "2021"
 vk-wrapper = { path = "vk-wrapper" }
 base = { path = "../base" }
 msdfgen = { path = "msdfgen" }
+shader_ids = { path = "shader_ids" }
 nalgebra = "0.32"
 nalgebra-glm = "0.18"
 basis-universal = "0.2"

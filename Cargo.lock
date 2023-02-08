@@ -197,7 +197,6 @@ dependencies = [
  "fixedbitset",
  "futures-lite",
  "image",
- "index-pool",
  "indexmap",
  "lazy_static",
  "log",
@@ -214,7 +213,6 @@ dependencies = [
  "rayon",
  "replace_with",
  "rstar",
- "simple_logger",
  "smallvec",
 ]
 
@@ -262,6 +260,28 @@ name = "bindgen"
 version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36d860121800b2a9a94f9b5604b332d5cffb234ce17609ea479d723dbc9d3885"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "log",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn",
+ "which",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.64.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -717,6 +737,7 @@ dependencies = [
  "parking_lot",
  "rayon",
  "rusttype",
+ "shader_ids",
  "smallvec",
  "unicode-normalization",
  "vk-wrapper",
@@ -1073,7 +1094,7 @@ dependencies = [
 name = "macos"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.63.0",
 ]
 
 [[package]]
@@ -1594,7 +1615,6 @@ dependencies = [
  "approx",
  "base",
  "bit-vec",
- "bumpalo",
  "common",
  "crossbeam-channel",
  "engine",
@@ -1611,8 +1631,6 @@ dependencies = [
  "rand 0.8.5",
  "rand_distr",
  "rayon",
- "replace_with",
- "rstar",
  "simple_logger",
  "smallvec",
  "vk-wrapper",
@@ -1868,9 +1886,9 @@ checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
 
 [[package]]
 name = "rstar"
-version = "0.9.3"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b40f1bfe5acdab44bc63e6699c28b74f75ec43afb59f3eda01e145aff86a25fa"
+checksum = "1f39465655a1e3d8ae79c6d9e007f4953bfc5d55297602df9dc38f9ae9f1359a"
 dependencies = [
  "heapless",
  "num-traits",
@@ -2023,6 +2041,13 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "shader_ids"
+version = "0.1.0"
+dependencies = [
+ "bindgen 0.64.0",
 ]
 
 [[package]]
@@ -2418,7 +2443,7 @@ dependencies = [
 name = "vma"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.63.0",
  "cc",
 ]
 

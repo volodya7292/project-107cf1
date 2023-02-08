@@ -3,7 +3,8 @@ pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Sizing, UILayoutC, UILayoutCacheC,
+    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UILayoutC,
+    UILayoutCacheC,
 };
 use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
 use crate::ecs::SceneAccess;
@@ -78,11 +79,6 @@ impl<E: UIState> UIObject<E> {
         self.event_handler = handler;
         self
     }
-
-    pub(crate) fn with_layout_cache(mut self, layout_cache: UILayoutCacheC) -> Self {
-        self.layout_cache = layout_cache;
-        self
-    }
 }
 
 impl<E: UIState> SceneObject for UIObject<E> {}
@@ -99,7 +95,7 @@ struct ChildFlowSizingInfo {
 fn flow_calculate_children_sizes(
     parent_size: f32,
     children_sizings: &[ChildFlowSizingInfo],
-) -> impl Iterator<Item = (EntityId, f32)> + '_ {
+) -> SmallVec<[(EntityId, f32); 128]> {
     let mut sum_preferred = 0.0;
     let mut sum_grow_factor = 0.0;
     let mut max_space_for_preferred = parent_size;
@@ -124,33 +120,36 @@ fn flow_calculate_children_sizes(
     let mut preferred_space_left = max_space_for_preferred;
     let mut grow_space_left = max_space_for_grow;
 
-    children_sizings.iter().map(move |child| {
-        let final_size = match child.sizing {
-            Sizing::Preferred(size) => {
-                let min = child.min * (child.overflow == Overflow::Visible).into_f32();
-                let proportion = size / sum_preferred;
+    children_sizings
+        .iter()
+        .map(move |child| {
+            let final_size = match child.sizing {
+                Sizing::Preferred(size) => {
+                    let min = child.min * (child.overflow == Overflow::Visible).into_f32();
+                    let proportion = size / sum_preferred;
 
-                let allocated =
-                    (max_space_for_preferred * proportion).clamp(min, preferred_space_left.max(min));
-                let allocated_constrained = child.constraint.clamp(allocated);
+                    let allocated =
+                        (max_space_for_preferred * proportion).clamp(min, preferred_space_left.max(min));
+                    let allocated_constrained = child.constraint.clamp(allocated);
 
-                preferred_space_left -= allocated_constrained.min(preferred_space_left);
-                allocated_constrained
-            }
-            Sizing::Grow(factor) => {
-                let min = child.min * (child.overflow == Overflow::Visible).into_f32();
-                let proportion = factor / sum_grow_factor;
+                    preferred_space_left -= allocated_constrained.min(preferred_space_left);
+                    allocated_constrained
+                }
+                Sizing::Grow(factor) => {
+                    let min = child.min * (child.overflow == Overflow::Visible).into_f32();
+                    let proportion = factor / sum_grow_factor;
 
-                let allocated = (max_space_for_grow * proportion).clamp(min, grow_space_left.max(min));
-                let allocated_constrained = child.constraint.clamp(allocated);
+                    let allocated = (max_space_for_grow * proportion).clamp(min, grow_space_left.max(min));
+                    let allocated_constrained = child.constraint.clamp(allocated);
 
-                grow_space_left -= allocated_constrained.min(grow_space_left);
-                allocated_constrained
-            }
-            Sizing::FitContent => child.min,
-        };
-        (child.entity, final_size)
-    })
+                    grow_space_left -= allocated_constrained.min(grow_space_left);
+                    allocated_constrained
+                }
+                Sizing::FitContent => child.min,
+            };
+            (child.entity, final_size)
+        })
+        .collect()
 }
 
 struct ChildPositioningInfo {
@@ -197,15 +196,7 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 impl UIRenderer {
     pub fn new(renderer: &mut Renderer) -> Self {
         let root_ui_entity = renderer
-            .add_object(
-                None,
-                UIObject::new_raw(UILayoutC::new(), ()).with_layout_cache(UILayoutCacheC {
-                    final_min_size: Default::default(),
-                    final_size: Default::default(),
-                    relative_position: Default::default(),
-                    global_position: Default::default(),
-                }),
-            )
+            .add_object(None, UIObject::new_raw(UILayoutC::new(), ()))
             .unwrap();
 
         Self {
@@ -308,6 +299,10 @@ impl UIRenderer {
             let root = linear_tree[0];
             let root_cache = layout_cache_comps.get_mut(&root).unwrap();
             root_cache.final_size = root_cache.final_min_size;
+            root_cache.clip_rect = Rect {
+                min: Vec2::from_element(0.0),
+                max: root_cache.final_size,
+            }
         }
 
         // Start from top of the tree
@@ -330,6 +325,7 @@ impl UIRenderer {
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
             let parent_size = parent_cache.final_size;
+            let parent_clip = &parent_cache.clip_rect;
 
             let mut children_flow_sizings: SmallVec<[ChildFlowSizingInfo; 128]> =
                 SmallVec::with_capacity(relation.children.len());
@@ -351,10 +347,14 @@ impl UIRenderer {
                         Sizing::Grow(factor) => parent_size[cross_flow_axis] * factor.min(1.0),
                     },
                 );
-                let child_curr_cross_size = &mut child_cache.final_size[cross_flow_axis];
 
-                if child_new_cross_size != *child_curr_cross_size {
-                    *child_curr_cross_size = child_new_cross_size;
+                // Set new cross-flow size
+                if child_new_cross_size != child_cache.final_size[cross_flow_axis] {
+                    child_cache.final_size[cross_flow_axis] = child_new_cross_size;
+                    child_cache
+                        .clip_rect
+                        .set_axis_size(cross_flow_axis, parent_clip.size_by_axis(cross_flow_axis));
+
                     dirty_elements.insert(*child);
                 }
 
@@ -364,7 +364,7 @@ impl UIRenderer {
                     min: child_cache.final_min_size[flow_axis],
                     sizing: child_layout.sizing[flow_axis],
                     constraint: child_layout.constraints[flow_axis],
-                    overflow: child_layout.overflow,
+                    overflow: child_layout.overflow[flow_axis],
                 });
             }
 
@@ -375,19 +375,23 @@ impl UIRenderer {
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());
 
-            for (child, child_new_flow_size) in calculated_children_sizes {
-                let child_layout = layout_comps.get(&child).unwrap();
-                let child_cache = layout_cache_comps.get_mut(&child).unwrap();
-                let child_curr_flow_size = &mut child_cache.final_size[flow_axis];
+            // Set children flow sizes
+            for (child, child_new_flow_size) in &calculated_children_sizes {
+                let child_layout = layout_comps.get(child).unwrap();
+                let child_cache = layout_cache_comps.get_mut(child).unwrap();
 
-                if child_new_flow_size != *child_curr_flow_size {
-                    *child_curr_flow_size = child_new_flow_size;
-                    dirty_elements.insert(child);
+                if *child_new_flow_size != child_cache.final_size[flow_axis] {
+                    child_cache.final_size[flow_axis] = *child_new_flow_size;
+                    child_cache
+                        .clip_rect
+                        .set_axis_size(flow_axis, child_cache.final_size[flow_axis]);
+
+                    dirty_elements.insert(*child);
                 }
 
                 // Collect info for position calculation
                 children_positioning_infos.push(ChildPositioningInfo {
-                    entity: child,
+                    entity: *child,
                     cross_align: child_layout.align,
                     size: child_cache.final_size,
                 });
@@ -410,7 +414,30 @@ impl UIRenderer {
 
                     child_cache.relative_position = position;
                 },
-            )
+            );
+
+            // Calculate clipping regions
+            for (child, child_final_size) in &calculated_children_sizes {
+                let child_cache = layout_cache_comps.get_mut(child).unwrap();
+
+                let mut local_clip_rect = Rect::default();
+                local_clip_rect.min = child_cache.relative_position;
+                local_clip_rect.max = local_clip_rect.min;
+                local_clip_rect.max[cross_flow_axis] += parent_size[cross_flow_axis];
+                local_clip_rect.max[flow_axis] += child_final_size;
+
+                let global_clip_rect = Rect {
+                    min: parent_cache.global_position + local_clip_rect.min,
+                    max: parent_cache.global_position + local_clip_rect.max,
+                };
+
+                let new_clip_rect = parent_clip.intersection(&global_clip_rect);
+
+                if child_cache.clip_rect != new_clip_rect {
+                    child_cache.clip_rect = new_clip_rect;
+                    dirty_elements.insert(*child);
+                }
+            }
         }
     }
 

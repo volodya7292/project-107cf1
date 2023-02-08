@@ -33,6 +33,7 @@ pub(crate) mod resources;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
 pub use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::{system, SceneAccess};
@@ -40,7 +41,7 @@ use crate::renderer::camera::OrthoCamera;
 use crate::renderer::material::MatComponent;
 use crate::renderer::module::RendererModule;
 pub(crate) use crate::renderer::resources::RendererResources;
-use crate::renderer::resources::{CullObject, CUSTOM_OBJECT_DESCRIPTOR_IDX};
+use crate::renderer::resources::{CullObject, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use base::scene;
 use base::scene::relation::Relation;
 use base::utils::HashMap;
@@ -350,16 +351,6 @@ pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 pub const N_MAX_OBJECTS: u32 = 65535;
 pub const N_MAX_MATERIALS: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
-pub const MAX_BASIC_UNIFORM_BLOCK_SIZE: u64 = 256;
-
-// Note: by Pipeline Layout Compatibility, the least frequently changing descriptors are placed first.
-// https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#descriptorsets-compatibility
-/// General descriptor set for engine-related resources
-pub const DESC_SET_GENERAL_PER_FRAME: u32 = 0;
-/// Specific to material pipeline descriptor set for its per-frame resources
-pub const DESC_SET_CUSTOM_PER_FRAME: u32 = 1;
-/// Descriptor set for custom per-object data (model matrix is mandatory)
-pub const DESC_SET_CUSTOM_PER_OBJECT: u32 = 2;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
@@ -377,28 +368,19 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 9] = [
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 10] = [
         // Per frame info
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 0),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_FRAME_INFO),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::PIXEL,
                 binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
             },
         ),
-        // Per object info
-        (
-            BindingLoc::new(DESC_SET_CUSTOM_PER_OBJECT, 0),
-            ShaderBinding {
-                stage_flags: ShaderStageFlags::VERTEX,
-                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
-                count: 1,
-            },
-        ),
         // Material buffer
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 1),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_MATERIAL_BUFFER),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_BUFFER,
@@ -407,7 +389,7 @@ lazy_static! {
         ),
         // Albedo atlas
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 2),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_ALBEDO_ATLAS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
@@ -416,7 +398,7 @@ lazy_static! {
         ),
         // Specular atlas
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 3),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_SPECULAR_ATLAS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
@@ -425,7 +407,7 @@ lazy_static! {
         ),
         // Normal atlas
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 4),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_NORMAL_ATLAS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
@@ -434,7 +416,7 @@ lazy_static! {
         ),
         // Translucency depths (only used in translucency passes)
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 5),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_TRANSPARENCY_DEPTHS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_BUFFER,
@@ -443,7 +425,7 @@ lazy_static! {
         ),
         // Translucency colors (only used in translucency passes)
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 6),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_TRANSPARENCY_COLORS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_IMAGE,
@@ -452,10 +434,28 @@ lazy_static! {
         ),
         // Solid depths attachment (only used in translucency depths pass)
         (
-            BindingLoc::new(DESC_SET_GENERAL_PER_FRAME, 7),
+            BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_SOLID_DEPTHS),
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::INPUT_ATTACHMENT,
+                count: 1,
+            },
+        ),
+        // General per object info (engine-specific, eg. only model matrix)
+        (
+            BindingLoc::new(shader_ids::SET_PER_OBJECT, shader_ids::BINDING_GENERAL_OBJECT_INFO),
+            ShaderBinding {
+                stage_flags: ShaderStageFlags::VERTEX,
+                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
+                count: 1,
+            },
+        ),
+        // Per object info
+        (
+            BindingLoc::new(shader_ids::SET_PER_OBJECT, shader_ids::BINDING_OBJECT_INFO),
+            ShaderBinding {
+                stage_flags: ShaderStageFlags::VERTEX,
+                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
             },
         ),
@@ -464,6 +464,18 @@ lazy_static! {
 
 fn calc_group_count(thread_count: u32) -> u32 {
     (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
+}
+
+fn compose_descriptor_sets(
+    per_frame_general: DescriptorSet,
+    per_frame_custom: DescriptorSet,
+    per_object_general: DescriptorSet,
+) -> [DescriptorSet; 3] {
+    let mut v = [DescriptorSet::default(); 3];
+    v[shader_ids::SET_GENERAL_PER_FRAME as usize] = per_frame_general;
+    v[shader_ids::SET_CUSTOM_PER_FRAME as usize] = per_frame_custom;
+    v[shader_ids::SET_PER_OBJECT as usize] = per_object_general;
+    v
 }
 
 pub trait SceneObject: StaticArchetype {}
@@ -548,14 +560,14 @@ impl Renderer {
         let uniform_buffer_basic = device
             .create_device_buffer(
                 BufferUsageFlags::UNIFORM | BufferUsageFlags::TRANSFER_DST,
-                MAX_BASIC_UNIFORM_BLOCK_SIZE,
+                BASIC_UNIFORM_BLOCK_MAX_SIZE as u64,
                 N_MAX_OBJECTS as u64,
             )
             .unwrap();
         // TODO: allow different alignments
         assert_eq!(
             uniform_buffer_basic.aligned_element_size(),
-            MAX_BASIC_UNIFORM_BLOCK_SIZE
+            BASIC_UNIFORM_BLOCK_MAX_SIZE as u64
         );
         // let uniform_buffer1 = device
         //     .create_device_buffer(
@@ -790,7 +802,9 @@ impl Renderer {
         let g_signature = device
             .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
-        let mut g_per_frame_pool = g_signature.create_pool(DESC_SET_GENERAL_PER_FRAME, 1).unwrap();
+        let mut g_per_frame_pool = g_signature
+            .create_pool(shader_ids::SET_GENERAL_PER_FRAME, 1)
+            .unwrap();
         let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
 
         let depth_secondary_cls = iter::repeat_with(|| {
@@ -880,16 +894,20 @@ impl Renderer {
                 g_per_frame_in,
                 &[
                     g_per_frame_pool.create_binding(
-                        0,
+                        shader_ids::BINDING_FRAME_INFO,
                         0,
                         BindingRes::BufferRange(
                             per_frame_ub.handle(),
                             0..mem::size_of::<FrameInfoUniforms>() as u64,
                         ),
                     ),
-                    g_per_frame_pool.create_binding(1, 0, BindingRes::Buffer(material_buffer.handle())),
                     g_per_frame_pool.create_binding(
-                        2,
+                        shader_ids::BINDING_MATERIAL_BUFFER,
+                        0,
+                        BindingRes::Buffer(material_buffer.handle()),
+                    ),
+                    g_per_frame_pool.create_binding(
+                        shader_ids::BINDING_ALBEDO_ATLAS,
                         0,
                         BindingRes::Image(
                             Arc::clone(&texture_atlases[0].image()),
@@ -898,7 +916,7 @@ impl Renderer {
                         ),
                     ),
                     g_per_frame_pool.create_binding(
-                        3,
+                        shader_ids::BINDING_SPECULAR_ATLAS,
                         0,
                         BindingRes::Image(
                             Arc::clone(&texture_atlases[1].image()),
@@ -907,7 +925,7 @@ impl Renderer {
                         ),
                     ),
                     g_per_frame_pool.create_binding(
-                        4,
+                        shader_ids::BINDING_NORMAL_ATLAS,
                         0,
                         BindingRes::Image(
                             Arc::clone(&texture_atlases[3].image()),
@@ -1200,12 +1218,9 @@ impl Renderer {
 
         // Destroy unused renderables
         for renderable in self.res.renderables_to_destroy.drain(..) {
-            let object_desc_pool =
-                &mut self.res.material_pipelines[renderable.mat_pipeline as usize].per_object_desc_pool;
-
             system::RendererComponentEvents::renderer_comp_removed(
                 &renderable,
-                object_desc_pool,
+                &mut self.res.material_pipelines,
                 &mut self.res.uniform_buffer_offsets,
             );
         }
@@ -1540,12 +1555,15 @@ impl Renderer {
                     let signature = pipeline.signature();
                     cl.bind_pipeline(pipeline);
 
-                    let mut descriptors = [DescriptorSet::default(); 3];
-                    descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.res.g_per_frame_in;
-                    descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
-                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] = renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+                    let descriptors = compose_descriptor_sets(
+                        self.res.g_per_frame_in,
+                        mat_pipeline.per_frame_desc,
+                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+                    );
+
                     cl.bind_graphics_inputs(signature, 0, &descriptors, &[
                         render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
+                        renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32 + mat_pipeline.uniform_buffer_model_offset,
                         renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32
                     ]);
 
@@ -1627,18 +1645,22 @@ impl Renderer {
 
                     cl.bind_pipeline(pipeline);
 
-                    let mut descriptors = [DescriptorSet::default(); 3];
-                    descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = res.g_per_frame_in;
-                    descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
-                    descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] =
-                        renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+                    let descriptors = compose_descriptor_sets(
+                        res.g_per_frame_in,
+                        mat_pipeline.per_frame_desc,
+                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+                    );
+
                     cl.bind_graphics_inputs(
                         signature,
                         0,
                         &descriptors,
                         &[
                             render_config.stage as u32 * res.per_frame_ub.aligned_element_size() as u32,
-                            renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32,
+                            renderable.uniform_buf_index as u32
+                                * res.uniform_buffer_basic.aligned_element_size() as u32
+                                + mat_pipeline.uniform_buffer_model_offset,
+                            renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
                     cl.push_constants(signature, &consts);
@@ -1676,18 +1698,22 @@ impl Renderer {
             let signature = pipeline.signature();
             cl.bind_pipeline(pipeline);
 
-            let mut descriptors = [DescriptorSet::default(); 3];
-            descriptors[DESC_SET_GENERAL_PER_FRAME as usize] = self.res.g_per_frame_in;
-            descriptors[DESC_SET_CUSTOM_PER_FRAME as usize] = mat_pipeline.per_frame_desc;
-            descriptors[DESC_SET_CUSTOM_PER_OBJECT as usize] =
-                renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX];
+            let descriptors = compose_descriptor_sets(
+                self.res.g_per_frame_in,
+                mat_pipeline.per_frame_desc,
+                renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+            );
+
             cl.bind_graphics_inputs(
                 signature,
                 0,
                 &descriptors,
                 &[
                     render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
-                    renderable.uniform_buf_index as u32 * MAX_BASIC_UNIFORM_BLOCK_SIZE as u32,
+                    renderable.uniform_buf_index as u32
+                        * self.res.uniform_buffer_basic.aligned_element_size() as u32
+                        + mat_pipeline.uniform_buffer_model_offset,
+                    renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );
             let consts = GPassConsts {
@@ -2340,12 +2366,12 @@ impl Renderer {
                 self.res.g_per_frame_in,
                 &[
                     self.res.g_per_frame_pool.create_binding(
-                        5,
+                        shader_ids::BINDING_TRANSPARENCY_DEPTHS,
                         0,
                         BindingRes::Buffer(self.res.translucency_depths_image.as_ref().unwrap().handle()),
                     ),
                     self.res.g_per_frame_pool.create_binding(
-                        6,
+                        shader_ids::BINDING_TRANSPARENCY_COLORS,
                         0,
                         BindingRes::Image(
                             Arc::clone(self.res.translucency_colors_image.as_ref().unwrap()),
@@ -2354,7 +2380,7 @@ impl Renderer {
                         ),
                     ),
                     self.res.g_per_frame_pool.create_binding(
-                        7,
+                        shader_ids::BINDING_SOLID_DEPTHS,
                         0,
                         BindingRes::Image(Arc::clone(&depth_image), None, ImageLayout::DEPTH_STENCIL_READ),
                     ),

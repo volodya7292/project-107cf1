@@ -15,7 +15,7 @@ use vk_wrapper::{
 };
 
 pub(crate) const N_CUSTOM_DESCRIPTORS: usize = 1;
-pub(crate) const CUSTOM_OBJECT_DESCRIPTOR_IDX: usize = 0;
+pub(crate) const GENERAL_OBJECT_DESCRIPTOR_IDX: usize = 0;
 
 pub struct RendererResources {
     pub texture_atlases: [TextureAtlas; 4],

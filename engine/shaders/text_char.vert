@@ -15,13 +15,13 @@ layout(location = 0) out Output {
     float pxRange;
 } vs_out;
 
-layout(set = DESC_SET_GENERAL_PER_FRAME, binding = 0, scalar) uniform FrameData {
+layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = DESC_SET_CUSTOM_PER_FRAME, binding = 0) uniform TextFrameData {
+layout(set = SET_CUSTOM_PER_FRAME, binding = 0) uniform TextFrameData {
     float pxRange;
 };
-layout(set = DESC_SET_CUSTOM_PER_OBJECT, binding = 0) uniform ObjectData {
+layout(set = SET_PER_OBJECT, binding = BINDING_GENERAL_OBJECT_INFO) uniform ObjectData {
     mat4 model;
 };
 

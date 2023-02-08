@@ -1,8 +1,9 @@
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
 use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, DESC_SET_CUSTOM_PER_FRAME,
-    DESC_SET_CUSTOM_PER_OBJECT, MAX_BASIC_UNIFORM_BLOCK_SIZE, N_MAX_MATERIALS, PIPELINE_COLOR,
-    PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY, PIPELINE_TRANSLUCENCY_DEPTHS,
+    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, N_MAX_MATERIALS,
+    PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY,
+    PIPELINE_TRANSLUCENCY_DEPTHS,
 };
 use crate::Renderer;
 use base::utils::resource_file::ResourceRef;
@@ -72,7 +73,7 @@ impl Renderer {
         topology: PrimitiveTopology,
         cull_back_faces: bool,
     ) -> u32 {
-        assert!(mem::size_of::<T>() <= MAX_BASIC_UNIFORM_BLOCK_SIZE as usize);
+        assert!(mem::size_of::<T>() <= BASIC_UNIFORM_BLOCK_MAX_SIZE as usize);
 
         let main_signature = self
             .device
@@ -103,12 +104,13 @@ impl Renderer {
             )
             .unwrap();
 
-        let mut per_frame_desc_pool = main_signature.create_pool(DESC_SET_CUSTOM_PER_FRAME, 1).unwrap();
+        let mut per_frame_desc_pool = main_signature
+            .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1)
+            .unwrap();
         let per_frame_desc = per_frame_desc_pool.alloc().unwrap();
         let per_object_desc_pool = main_signature
-            .create_pool(DESC_SET_CUSTOM_PER_OBJECT, 16)
+            .create_pool(shader_ids::SET_PER_OBJECT, 16)
             .unwrap();
-
         let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
             main_signature: Arc::clone(&main_signature),

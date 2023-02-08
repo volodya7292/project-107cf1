@@ -1,8 +1,9 @@
 use crate::ecs::component;
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::resources::{Renderable, CUSTOM_OBJECT_DESCRIPTOR_IDX};
-use crate::renderer::{BufferUpdate, BufferUpdate1, MAX_BASIC_UNIFORM_BLOCK_SIZE};
+use crate::renderer::resources::{Renderable, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::renderer::{BufferUpdate, BufferUpdate1};
 use base::unwrap_option;
 use base::utils::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
@@ -28,8 +29,11 @@ pub(crate) struct RendererComponentEvents<'a> {
 }
 
 impl RendererComponentEvents<'_> {
-    fn renderer_comp_created(renderable: &mut Renderable, object_desc_pool: &mut vkw::DescriptorPool) {
-        renderable.descriptor_sets[CUSTOM_OBJECT_DESCRIPTOR_IDX] = object_desc_pool.alloc().unwrap();
+    fn renderer_comp_created(renderable: &mut Renderable, mat_pipelines: &mut [MaterialPipelineSet]) {
+        let mat_pipe = &mut mat_pipelines[renderable.mat_pipeline as usize];
+
+        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX] =
+            mat_pipe.per_object_desc_pool.alloc().unwrap();
     }
 
     fn renderer_comp_modified(
@@ -37,10 +41,13 @@ impl RendererComponentEvents<'_> {
         renderable: &mut Renderable,
         buffer_updates: &mut Vec<BufferUpdate>,
         binding_updates: &mut Vec<vkw::Binding>,
-        object_desc_pool: &mut vkw::DescriptorPool,
+        material_pipelines: &mut [MaterialPipelineSet],
         desc_updates: &mut Vec<(DescriptorSet, Range<usize>)>,
         uniform_buffer_basic: &DeviceBuffer,
     ) {
+        let mat_pipe = &mut material_pipelines[renderable.mat_pipeline as usize];
+        let object_desc_pool = &mat_pipe.per_object_desc_pool;
+
         // Update pipeline inputs
         // ------------------------------------------------------------------------------------------
         let inputs = &mut renderable.descriptor_sets;
@@ -48,9 +55,20 @@ impl RendererComponentEvents<'_> {
 
         // Add default uniform buffer binding
         new_binding_updates.push(object_desc_pool.create_binding(
+            shader_ids::BINDING_GENERAL_OBJECT_INFO,
             0,
+            BindingRes::BufferRange(
+                uniform_buffer_basic.handle(),
+                0..BASIC_UNIFORM_BLOCK_MAX_SIZE as u64,
+            ),
+        ));
+        new_binding_updates.push(object_desc_pool.create_binding(
+            shader_ids::BINDING_OBJECT_INFO,
             0,
-            BindingRes::BufferRange(uniform_buffer_basic.handle(), 0..MAX_BASIC_UNIFORM_BLOCK_SIZE),
+            BindingRes::BufferRange(
+                uniform_buffer_basic.handle(),
+                0..BASIC_UNIFORM_BLOCK_MAX_SIZE as u64,
+            ),
         ));
 
         for (binding_id, res) in &mut config.resources {
@@ -79,16 +97,21 @@ impl RendererComponentEvents<'_> {
             binding_updates.extend(new_binding_updates);
             let bindings_range = s0..binding_updates.len();
 
-            desc_updates.push((inputs[CUSTOM_OBJECT_DESCRIPTOR_IDX], bindings_range));
+            desc_updates.push((inputs[GENERAL_OBJECT_DESCRIPTOR_IDX], bindings_range));
         }
     }
 
     pub fn renderer_comp_removed(
         renderable: &Renderable,
-        object_desc_pool: &mut vkw::DescriptorPool,
+        mat_pipelines: &mut [MaterialPipelineSet],
         uniform_buffer_offsets: &mut IndexPool,
     ) {
-        object_desc_pool.free(renderable.descriptor_sets[0]);
+        let mat_pipe = &mut mat_pipelines[renderable.mat_pipeline as usize];
+
+        mat_pipe
+            .per_object_desc_pool
+            .free(renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX]);
+
         let _ = uniform_buffer_offsets.return_id(renderable.uniform_buf_index);
     }
 }
@@ -110,11 +133,12 @@ impl SystemHandler for RendererComponentEvents<'_> {
                 continue;
             }
 
-            let object_desc_pool =
-                &mut self.material_pipelines[config.mat_pipeline as usize].per_object_desc_pool;
-
             let mut renderable = if let Some(mut renderable) = self.renderables.remove(&entity) {
-                Self::renderer_comp_removed(&renderable, object_desc_pool, self.uniform_buffer_offsets);
+                Self::renderer_comp_removed(
+                    &renderable,
+                    self.material_pipelines,
+                    self.uniform_buffer_offsets,
+                );
 
                 renderable.buffers = smallvec![];
                 renderable.mat_pipeline = config.mat_pipeline;
@@ -130,13 +154,13 @@ impl SystemHandler for RendererComponentEvents<'_> {
                 }
             };
 
-            Self::renderer_comp_created(&mut renderable, object_desc_pool);
+            Self::renderer_comp_created(&mut renderable, self.material_pipelines);
             Self::renderer_comp_modified(
                 config,
                 &mut renderable,
                 self.buffer_updates,
                 &mut binding_updates,
-                object_desc_pool,
+                self.material_pipelines,
                 &mut desc_updates,
                 self.uniform_buffer_basic,
             );
