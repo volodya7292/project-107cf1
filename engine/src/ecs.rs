@@ -148,12 +148,12 @@ pub struct DirectEntryAccess<'a> {
 }
 
 impl DirectEntryAccess<'_> {
-    pub fn get<C: Component>(&self) -> &C {
-        self.entry.get().unwrap()
+    pub fn get<C: Component>(&self) -> Option<&C> {
+        self.entry.get()
     }
 
-    pub fn get_mut<C: Component>(&mut self) -> &mut C {
+    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
         self.dirty_components.add::<C>(self.entry.entity());
-        self.entry.get_mut().unwrap()
+        self.entry.get_mut()
     }
 }

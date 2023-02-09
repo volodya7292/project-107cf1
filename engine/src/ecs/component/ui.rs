@@ -152,6 +152,7 @@ pub struct UILayoutC {
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
+    pub uniform_crop_rect_offset: u32,
 }
 
 impl UILayoutC {
@@ -210,6 +211,11 @@ impl UILayoutC {
 
     pub fn with_shader_inverted_y(mut self, enabled: bool) -> Self {
         self.shader_inverted_y = enabled;
+        self
+    }
+
+    pub fn with_uniform_crop_rect_offset(mut self, uniform_crop_rect_offset: u32) -> Self {
+        self.uniform_crop_rect_offset = uniform_crop_rect_offset;
         self
     }
 }

@@ -4,6 +4,7 @@ use crate::ecs::component::simple_text::StyledString;
 use crate::ecs::component::ui::UILayoutC;
 use crate::ecs::component::{EventHandlerC, SimpleTextC};
 use crate::ecs::EntityAccess;
+use crate::renderer::module::text_renderer;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::module::ui_renderer::{UIObject, UIState};
 use crate::renderer::{RendererContext, RendererContextI};
@@ -13,7 +14,9 @@ pub type UIText = UIObject<SimpleTextC>;
 impl UIText {
     pub fn new() -> Self {
         Self::new_raw(
-            UILayoutC::new().with_shader_inverted_y(true),
+            UILayoutC::new()
+                .with_shader_inverted_y(true)
+                .with_uniform_crop_rect_offset(text_renderer::ObjectUniformData::clip_rect_offset()),
             SimpleTextC::new()
                 .with_max_width(0.0)
                 .with_stage(RenderStage::OVERLAY),
@@ -42,9 +45,9 @@ impl<'a> TextState for EntityAccess<'a, RendererContext<'_>, UIText> {
         let size = text_renderer.calculate_minimum_text_size(&text);
 
         self.modify(move |mut access| {
-            access.get_mut::<SimpleTextC>().text = text;
+            access.get_mut::<SimpleTextC>().unwrap().text = text;
 
-            let layout = access.get_mut::<UILayoutC>();
+            let layout = access.get_mut::<UILayoutC>().unwrap();
             layout.constraints[0].min = size.x;
             layout.constraints[1].min = size.y;
         });

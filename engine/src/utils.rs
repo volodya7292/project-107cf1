@@ -1,4 +1,5 @@
 use nalgebra_glm::Vec3;
+use std::mem;
 
 use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 
@@ -60,4 +61,16 @@ pub fn find_best_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::m
             a_width.cmp(&b_width).then(a_fps_diff.cmp(&b_fsp_diff).reverse())
         })
         .unwrap()
+}
+
+pub trait U8SliceHelper {
+    fn raw_copy_from<T: Copy>(&mut self, value: T);
+}
+
+impl U8SliceHelper for [u8] {
+    fn raw_copy_from<T: Copy>(&mut self, value: T) {
+        let size = mem::size_of_val(&value);
+        let raw_data = unsafe { std::slice::from_raw_parts(&value as *const _ as *const u8, size) };
+        self.copy_from_slice(raw_data);
+    }
 }

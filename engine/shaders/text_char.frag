@@ -15,6 +15,16 @@ layout(location = 0) in Input {
     float pxRange;
 } vs_in;
 
+struct Rect {
+    vec2 min;
+    vec2 max;
+};
+
+layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
+    mat4 model;
+    Rect clip_rect;
+};
+
 float median(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
@@ -31,6 +41,10 @@ void main() {
     float screenPxDistance = screenPxRange() * (sd - 0.5);
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
 
+    vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
+    if (any(lessThan(normScreenCoord, clip_rect.min)) || any(greaterThan(normScreenCoord, clip_rect.max))) {
+        discard;
+    }
+
     writeOutputAlbedo(vec4(vs_in.color.rgb, vs_in.color.a * opacity));
-//    outColor = vec4(msd, 1.0);
 }

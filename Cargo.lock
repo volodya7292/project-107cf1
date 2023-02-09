@@ -731,6 +731,7 @@ dependencies = [
  "index-pool",
  "lazy_static",
  "log",
+ "memoffset 0.8.0",
  "msdfgen",
  "nalgebra",
  "nalgebra-glm",

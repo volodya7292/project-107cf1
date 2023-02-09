@@ -277,7 +277,7 @@ impl Application for Game {
             .with_mesh(VertexMeshC::without_data(4, 1)),
         );
 
-        let text = renderer.add_object(Some(root_ui_entity), UIText::new());
+        let text = renderer.add_object(panel, UIText::new());
 
         let access = renderer.access();
         let mut obj = access.object::<UIText>(&text.unwrap()).unwrap();

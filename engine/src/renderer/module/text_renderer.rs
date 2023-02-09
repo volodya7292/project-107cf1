@@ -3,6 +3,7 @@ use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::SceneAccess;
+use crate::renderer::module::ui_renderer::RectUniformData;
 use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::renderer::SceneObject;
@@ -12,6 +13,7 @@ use base::utils::unsafe_slice::UnsafeSlice;
 use base::utils::HashMap;
 use entity_data::{Archetype, EntityId};
 use fixedbitset::FixedBitSet;
+use memoffset::offset_of;
 use nalgebra_glm::{Mat4, U8Vec4, Vec2};
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -441,7 +443,7 @@ pub struct TextRenderer {
     glyph_array_initialized: bool,
     uniform_buffer: DeviceBuffer,
     staging_buffer: HostBuffer<u8>,
-    staging_uniform_buffer: HostBuffer<UniformData>,
+    staging_uniform_buffer: HostBuffer<FrameUniformData>,
 
     allocator: GlyphAllocator,
 
@@ -461,16 +463,24 @@ struct GlyphInstance {
 attributes_impl!(GlyphInstance, glyph_index, glyph_size, color, offset, scale);
 
 #[repr(C)]
-struct UniformData {
+struct FrameUniformData {
     px_range: f32,
 }
 
 #[derive(Default)]
-pub struct ObjectUniformInfo {
+#[repr(C)]
+pub struct ObjectUniformData {
     model: Mat4,
+    clip_rect: RectUniformData,
 }
 
-uniform_struct_impl!(ObjectUniformInfo, model);
+impl ObjectUniformData {
+    pub fn clip_rect_offset() -> u32 {
+        offset_of!(Self, clip_rect) as u32
+    }
+}
+
+uniform_struct_impl!(ObjectUniformData, model);
 
 #[derive(Archetype)]
 pub struct TextObject {
@@ -522,7 +532,7 @@ impl TextRenderer {
             )
             .unwrap();
 
-        let mat_pipeline = renderer.register_material_pipeline::<ObjectUniformInfo>(
+        let mat_pipeline = renderer.register_material_pipeline::<ObjectUniformData>(
             &[vertex_shader, pixel_shader],
             PrimitiveTopology::TRIANGLE_STRIP,
             true,
@@ -550,13 +560,13 @@ impl TextRenderer {
         let uniform_buffer = device
             .create_device_buffer_named(
                 BufferUsageFlags::UNIFORM | BufferUsageFlags::TRANSFER_DST,
-                mem::size_of::<UniformData>() as u64,
+                mem::size_of::<FrameUniformData>() as u64,
                 1,
                 "text_renderer_uniform",
             )
             .unwrap();
         let staging_uniform_buffer = device
-            .create_host_buffer_named::<UniformData>(
+            .create_host_buffer_named::<FrameUniformData>(
                 BufferUsageFlags::TRANSFER_SRC,
                 1,
                 "text_renderer_uniform-staging",
@@ -741,7 +751,7 @@ impl RendererModule for TextRenderer {
             }
 
             let mut entry = scene.entry_mut(entity).unwrap();
-            let simple_text = entry.get::<SimpleTextC>();
+            let simple_text = entry.get::<SimpleTextC>().unwrap();
             let stage = simple_text.stage;
             let normalize_transforms = stage == RenderStage::OVERLAY;
 
@@ -801,8 +811,8 @@ impl RendererModule for TextRenderer {
                 )
                 .unwrap();
 
-            *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw());
-            *entry.get_mut::<MeshRenderConfigC>() =
+            *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&mesh.raw());
+            *entry.get_mut::<MeshRenderConfigC>().unwrap() =
                 MeshRenderConfigC::new(self.mat_pipeline, true).with_stage(stage)
         }
 
@@ -811,7 +821,7 @@ impl RendererModule for TextRenderer {
         cl.begin(true).unwrap();
 
         // Copy uniforms to the GPU
-        let uniform_data = UniformData {
+        let uniform_data = FrameUniformData {
             px_range: MSDF_PX_RANGE as f32,
         };
         self.staging_uniform_buffer.write(0, &[uniform_data]);

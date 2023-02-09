@@ -185,13 +185,13 @@ impl OverworldRenderer {
 
             let access = renderer.access();
             access.object_raw(&entities.solid).unwrap().modify(|mut entry| {
-                *entry.get_mut::<VertexMeshC>() = mesh_solid;
+                *entry.get_mut::<VertexMeshC>().unwrap() = mesh_solid;
             });
             access
                 .object_raw(&entities.translucent)
                 .unwrap()
                 .modify(|mut entry| {
-                    *entry.get_mut::<VertexMeshC>() = transparent;
+                    *entry.get_mut::<VertexMeshC>().unwrap() = transparent;
                 });
 
             false

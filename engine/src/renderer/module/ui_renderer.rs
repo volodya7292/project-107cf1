@@ -10,6 +10,7 @@ use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, Unifor
 use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
 use crate::renderer::{DirtyComponents, Renderer, RendererContext, SceneObject};
+use crate::utils::U8SliceHelper;
 use base::scene::relation::Relation;
 use base::utils::{Bool, HashSet};
 use entity_data::{Archetype, EntityId, SystemAccess};
@@ -18,6 +19,7 @@ use nalgebra_glm::{DVec3, Vec2, Vec3};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::any::Any;
+use std::mem;
 use std::sync::Arc;
 use vk_wrapper::{CmdList, Device};
 
@@ -29,7 +31,12 @@ pub struct UIRenderer {
     scale_factor: f32,
 }
 
-pub struct DefaultStyling {}
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+pub(crate) struct RectUniformData {
+    pub min: Vec2,
+    pub max: Vec2,
+}
 
 #[derive(Archetype)]
 pub struct UIObject<S>
@@ -449,14 +456,6 @@ impl UIRenderer {
         root_size: &Vec2,
         dirty_elements: &mut HashSet<EntityId>,
     ) {
-        let access = scene.storage.access();
-        let mut dirty_comps = scene.dirty_components.borrow_mut();
-
-        let mut transform_comps = access.component_mut::<TransformC>();
-        let relation_comps = access.component::<Relation>();
-        let layout_comps = access.component::<UILayoutC>();
-        let layout_cache_comps = access.component_mut::<UILayoutCacheC>();
-
         let root_size_inv = Vec2::from_element(1.0).component_div(root_size);
 
         for (i, node) in linear_tree.iter().enumerate() {
@@ -464,11 +463,13 @@ impl UIRenderer {
                 continue;
             }
 
-            let Some(transform) = transform_comps.get_mut(node) else {
+            let mut entry = scene.entry_mut(node).unwrap();
+
+            let Some(transform) = entry.get::<TransformC>() else {
                 continue;
             };
-            let layout = layout_comps.get(node).unwrap();
-            let cache = layout_cache_comps.get(node).unwrap();
+            let layout = entry.get::<UILayoutC>().unwrap();
+            let cache = entry.get::<UILayoutCacheC>().unwrap();
 
             let norm_pos = cache.global_position.component_mul(&root_size_inv);
             let norm_size = cache.final_size.component_mul(&root_size_inv);
@@ -481,21 +482,32 @@ impl UIRenderer {
                 } else {
                     norm_size.y - norm_pos.y
                 } as f64,
-                i as f64,
+                1000.0 - (i as f64),
             );
 
             if new_scale != transform.scale || new_position != transform.position {
+                let uniform_crop_rect_offset = layout.uniform_crop_rect_offset as usize;
+                let rect = cache.clip_rect;
+
+                let transform = entry.get_mut::<TransformC>().unwrap();
                 transform.scale = new_scale;
                 transform.position = new_position;
 
+                let rect_data = RectUniformData {
+                    min: rect.min.component_mul(&root_size_inv),
+                    max: rect.max.component_mul(&root_size_inv),
+                };
+                let uniform_data = entry.get_mut::<UniformDataC>().unwrap();
+                let raw_rect = &mut uniform_data.0
+                    [uniform_crop_rect_offset..uniform_crop_rect_offset + mem::size_of_val(&rect_data)];
+                raw_rect.raw_copy_from(rect_data);
+
                 // if parent transform changed, then all children transforms must be recalculated
-                let relation = relation_comps.get(node).unwrap();
+                let relation = entry.get_mut::<Relation>().unwrap();
                 for child in &relation.children {
                     dirty_elements.insert(*child);
                 }
             }
-
-            dirty_comps.add::<TransformC>(node);
         }
     }
 
@@ -527,7 +539,7 @@ impl RendererModule for UIRenderer {
     fn on_update(&mut self, mut scene: SceneAccess<()>) -> Option<Arc<Mutex<CmdList>>> {
         if self.root_element_size_dirty {
             let mut root = scene.entry_mut(&self.root_ui_entity).unwrap();
-            let layout = root.get_mut::<UILayoutC>();
+            let layout = root.get_mut::<UILayoutC>().unwrap();
 
             layout.constraints[0] = Constraint::exact(self.root_element_size.x);
             layout.constraints[1] = Constraint::exact(self.root_element_size.y);
