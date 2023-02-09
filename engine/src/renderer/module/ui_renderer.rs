@@ -6,7 +6,7 @@ use crate::ecs::component::ui::{
     Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UILayoutC,
     UILayoutCacheC,
 };
-use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
+use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
 use crate::renderer::{DirtyComponents, Renderer, RendererContext, SceneObject};
@@ -41,6 +41,7 @@ where
 
     transform: TransformC,
     renderer: MeshRenderConfigC,
+    uniforms: UniformDataC,
     mesh: VertexMeshC,
 
     event_handler: EventHandlerC,
@@ -57,6 +58,7 @@ impl<E: UIState> UIObject<E> {
             global_transform: Default::default(),
             transform: TransformC::new().with_use_parent_transform(false),
             renderer: Default::default(),
+            uniforms: Default::default(),
             mesh: Default::default(),
             event_handler: Default::default(),
             layout_cache: Default::default(),

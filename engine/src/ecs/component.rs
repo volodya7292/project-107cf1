@@ -11,5 +11,5 @@ pub use event_handler::EventHandlerC;
 pub use render_config::MeshRenderConfigC;
 pub use simple_text::SimpleTextC;
 pub use transform::TransformC;
-pub use uniform_data::UniformData;
+pub use uniform_data::UniformDataC;
 pub use vertex_mesh::VertexMeshC;
