@@ -1,7 +1,7 @@
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
-use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
 use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
@@ -477,6 +477,7 @@ pub struct TextObject {
     relation: Relation,
     global_transform: GlobalTransformC,
     transform: TransformC,
+    uniforms: UniformDataC,
     renderer: MeshRenderConfigC,
     mesh: VertexMeshC,
     text: SimpleTextC,
@@ -488,6 +489,7 @@ impl TextObject {
             relation: Default::default(),
             global_transform: Default::default(),
             transform,
+            uniforms: Default::default(),
             renderer: Default::default(),
             mesh: Default::default(),
             text,

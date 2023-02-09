@@ -34,7 +34,7 @@ pub(crate) mod resources;
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, VertexMeshC};
+use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 pub use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::{system, SceneAccess};
 use crate::renderer::camera::OrthoCamera;
@@ -47,7 +47,7 @@ use base::scene::relation::Relation;
 use base::utils::HashMap;
 use basis_universal::TranscoderTextureFormat;
 use camera::{Frustum, PerspectiveCamera};
-use entity_data::{Archetype, EntityId, EntityStorage, StaticArchetype, System, SystemAccess};
+use entity_data::{Archetype, EntityId, EntityStorage, StaticArchetype, System, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 pub use module::text_renderer::FontSet;
@@ -485,6 +485,7 @@ pub struct VertexMeshObject {
     global_transform: GlobalTransformC,
     relation: Relation,
     transform: TransformC,
+    uniforms: UniformDataC,
     render_config: MeshRenderConfigC,
     mesh: VertexMeshC,
 }
@@ -495,6 +496,7 @@ impl VertexMeshObject {
             global_transform: Default::default(),
             relation: Default::default(),
             transform,
+            uniforms: Default::default(),
             render_config,
             mesh,
         }
@@ -1322,10 +1324,26 @@ impl Renderer {
         };
         sorted_buffer_updates_entities.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
 
+        // --------------------------------------------------------------------------------------------------
+
         let mut global_transform_events_system = system::GlobalTransformEvents {
-            uniform_buffer_updates: &mut uniform_buffer_updates,
             dirty_components: self.dirty_comps.get_mut().take_changes::<GlobalTransformC>(),
+            changed_uniforms: Default::default(),
             material_pipelines: &self.res.material_pipelines,
+            renderables: &self.res.renderables,
+            run_time: 0.0,
+        };
+        global_transform_events_system.run(self.storage.access());
+
+        for entity in &global_transform_events_system.changed_uniforms {
+            self.dirty_comps.get_mut().add::<UniformDataC>(entity);
+        }
+
+        // --------------------------------------------------------------------------------------------------
+
+        let mut uniform_data_events_system = system::UniformDataCompEvents {
+            uniform_buffer_updates: &mut uniform_buffer_updates,
+            dirty_components: self.dirty_comps.get_mut().take_changes::<UniformDataC>(),
             renderables: &self.res.renderables,
             run_time: 0.0,
         };
@@ -1345,9 +1363,7 @@ impl Renderer {
         };
 
         self.storage.dispatch_par([
-            System::new(&mut global_transform_events_system)
-                .with::<GlobalTransformC>()
-                .with::<MeshRenderConfigC>(),
+            System::new(&mut uniform_data_events_system).with::<UniformDataC>(),
             System::new(&mut buffer_update_system),
             System::new(&mut commit_buffer_updates_system).with::<VertexMeshC>(),
         ]);
@@ -1355,8 +1371,6 @@ impl Renderer {
         timings.batch1_global_transforms = global_transform_events_system.run_time;
         timings.batch1_buffer_updates = buffer_update_system.run_time;
         timings.batch1_updates_commit = commit_buffer_updates_system.run_time;
-
-        // FIXME: VMA: parallel invocations (when creating Cluster meshes) of `vkAllocateMemory` causes huge stutters
 
         let t11 = Instant::now();
         timings.systems_batch1 = (t11 - t00).as_secs_f64();

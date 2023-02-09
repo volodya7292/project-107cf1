@@ -1,25 +1,21 @@
-use std::time::Instant;
-use std::{mem, slice};
-
-use entity_data::{EntityId, SystemAccess, SystemHandler};
-use nalgebra_glm::Mat4;
-
-use base::unwrap_option;
-use base::utils::{HashMap, HashSet};
-use vk_wrapper as vkw;
-
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::MeshRenderConfigC;
+use crate::ecs::component::{MeshRenderConfigC, UniformDataC};
 use crate::renderer;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::resources::Renderable;
 use crate::renderer::BufferUpdate2;
+use base::utils::{HashMap, HashSet};
+use entity_data::{EntityId, SystemAccess, SystemHandler};
+use nalgebra_glm::Mat4;
+use std::time::Instant;
+use std::{mem, slice};
+use vk_wrapper as vkw;
 
 // Updates global transform uniform buffers
 pub(crate) struct GlobalTransformEvents<'a> {
-    pub uniform_buffer_updates: &'a mut BufferUpdate2,
     pub dirty_components: HashSet<EntityId>,
+    pub changed_uniforms: HashSet<EntityId>,
     pub material_pipelines: &'a [MaterialPipelineSet],
     pub renderables: &'a HashMap<EntityId, Renderable>,
     pub run_time: f64,
@@ -30,11 +26,16 @@ impl SystemHandler for GlobalTransformEvents<'_> {
         let t0 = Instant::now();
         let global_transform_comps = data.component::<GlobalTransformC>();
         let renderer_comps = data.component::<MeshRenderConfigC>();
+        let mut uniform_data_comps = data.component_mut::<UniformDataC>();
+
+        self.changed_uniforms.reserve(self.dirty_components.len());
 
         for entity in &self.dirty_components {
-            let global_transform = unwrap_option!(global_transform_comps.get(entity), continue);
-            let render_config = unwrap_option!(renderer_comps.get(entity), continue);
-
+            let global_transform = global_transform_comps.get(entity).unwrap();
+            let (Some(render_config), Some(uniform_data)) =
+                    (renderer_comps.get(entity), uniform_data_comps.get_mut(entity)) else {
+                continue;
+            };
             let Some(pipe) = self.material_pipelines.get(render_config.mat_pipeline as usize) else {
                 continue;
             };
@@ -42,17 +43,11 @@ impl SystemHandler for GlobalTransformEvents<'_> {
             let matrix = global_transform.matrix_f32();
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
-            let renderable = &self.renderables[&entity];
-            let src_offset = self.uniform_buffer_updates.data.len();
 
-            self.uniform_buffer_updates.data.extend_from_slice(matrix_bytes);
+            let offset = pipe.uniform_buffer_offset_model() as usize;
+            uniform_data.0[offset..(offset + matrix_bytes.len())].copy_from_slice(matrix_bytes);
 
-            self.uniform_buffer_updates.regions.push(vkw::CopyRegion::new(
-                src_offset as u64,
-                (renderable.uniform_buf_index * BASIC_UNIFORM_BLOCK_MAX_SIZE) as u64
-                    + pipe.uniform_buffer_offset_model() as u64,
-                (matrix_bytes.len() as u64).try_into().unwrap(),
-            ));
+            self.changed_uniforms.insert(*entity);
         }
 
         let t1 = Instant::now();

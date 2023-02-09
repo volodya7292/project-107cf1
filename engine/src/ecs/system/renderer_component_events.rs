@@ -4,7 +4,6 @@ use crate::ecs::component::MeshRenderConfigC;
 use crate::renderer::material_pipeline::MaterialPipelineSet;
 use crate::renderer::resources::{Renderable, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::renderer::{BufferUpdate, BufferUpdate1};
-use base::unwrap_option;
 use base::utils::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
@@ -127,7 +126,7 @@ impl SystemHandler for RendererComponentEvents<'_> {
             Vec::<(DescriptorSet, Range<usize>)>::with_capacity(self.dirty_components.len());
 
         for entity in &self.dirty_components {
-            let config = unwrap_option!(renderer_comps.get_mut(entity), continue);
+            let config = renderer_comps.get_mut(entity).unwrap();
 
             if config.mat_pipeline == u32::MAX {
                 continue;

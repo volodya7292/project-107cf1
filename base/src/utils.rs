@@ -180,14 +180,3 @@ where
             .build_with_hasher(ahash::RandomState::new())
     }
 }
-
-#[macro_export]
-macro_rules! unwrap_option {
-    ($to_unwrap: expr, $on_else: expr) => {
-        if let Some(v) = $to_unwrap {
-            v
-        } else {
-            $on_else
-        }
-    };
-}
