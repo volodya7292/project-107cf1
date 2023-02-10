@@ -1,20 +1,18 @@
-pub mod element;
-pub mod management;
-
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UILayoutC,
-    UILayoutCacheC,
+    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UIEventHandlerC,
+    UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::SceneAccess;
 use crate::renderer::module::RendererModule;
+pub use crate::renderer::ui::management::UIState;
 use crate::renderer::{DirtyComponents, Renderer, RendererContext, SceneObject};
+use crate::utils::wsi::WSISize;
 use crate::utils::U8SliceHelper;
 use base::scene::relation::Relation;
 use base::utils::{Bool, HashSet};
 use entity_data::{Archetype, EntityId, SystemAccess};
-pub use management::UIState;
 use nalgebra_glm::{DVec3, Vec2, Vec3};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
@@ -54,6 +52,7 @@ where
     event_handler: EventHandlerC,
     layout_cache: UILayoutCacheC,
     layout: UILayoutC,
+    ui_event_handler: UIEventHandlerC,
 
     element: S,
 }
@@ -70,6 +69,7 @@ impl<E: UIState> UIObject<E> {
             event_handler: Default::default(),
             layout_cache: Default::default(),
             layout,
+            ui_event_handler: Default::default(),
             element,
         }
     }
@@ -84,8 +84,8 @@ impl<E: UIState> UIObject<E> {
         self
     }
 
-    pub fn with_event_handler(mut self, handler: EventHandlerC) -> Self {
-        self.event_handler = handler;
+    pub fn with_event_handler(mut self, handler: UIEventHandlerC) -> Self {
+        self.ui_event_handler = handler;
         self
     }
 }
@@ -518,20 +518,29 @@ impl UIRenderer {
         }
 
         let access = scene.storage.access();
-
-        let linear_tree = {
-            let layout_comps = access.component::<UILayoutC>();
-            let mut linear_tree = Vec::with_capacity(layout_comps.count_entities());
-            linear_tree.push(self.root_ui_entity);
-            base::scene::collect_children_recursively(&access, &self.root_ui_entity, &mut linear_tree);
-            linear_tree
-        };
+        let linear_tree = base::scene::collect_relation_tree(&access, &self.root_ui_entity);
 
         Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
 
         Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
 
         Self::calculate_transforms(&linear_tree, scene, &self.root_element_size, &mut dirty_elements);
+    }
+
+    pub fn find_element_at_point<C>(&self, point: &Vec2, scene: &mut SceneAccess<C>) -> Option<EntityId> {
+        let linear_tree = base::scene::collect_relation_tree(&scene.storage.access(), &self.root_ui_entity);
+
+        // Iterate starting from children
+        for node in linear_tree.iter().rev() {
+            let entry = scene.entry_mut(node).unwrap();
+            let cache = entry.get::<UILayoutCacheC>().unwrap();
+
+            if cache.clip_rect.contains_point(point) {
+                return Some(*node);
+            }
+        }
+
+        None
     }
 }
 
@@ -552,11 +561,9 @@ impl RendererModule for UIRenderer {
         None
     }
 
-    fn on_resize(&mut self, physical_size: (u32, u32), scale_factor: f64) {
-        let scale_factor = scale_factor as f32;
-
-        self.set_scale_factor(scale_factor);
-        self.set_root_element_size(Vec2::new(physical_size.0 as f32, physical_size.1 as f32) / scale_factor);
+    fn on_resize(&mut self, new_size: WSISize<u32>) {
+        self.set_scale_factor(new_size.scale_factor());
+        self.set_root_element_size(new_size.logical());
     }
 
     fn as_any(&self) -> &dyn Any {

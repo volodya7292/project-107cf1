@@ -5,6 +5,7 @@ use std::any::TypeId;
 use std::cell::{RefCell, RefMut};
 use std::marker::PhantomData;
 use std::ptr;
+use std::rc::Rc;
 
 pub mod component;
 pub mod dirty_components;
@@ -37,8 +38,8 @@ struct Modifications {
 pub struct SceneAccess<'a, Context> {
     pub storage: &'a mut EntityStorage,
     pub dirty_components: &'a RefCell<DirtyComponents>,
+    pub context: Rc<RefCell<Context>>,
     modifications: RefCell<Modifications>,
-    context: RefCell<Context>,
 }
 
 impl<'a, Ctx> SceneAccess<'a, Ctx> {
@@ -54,7 +55,7 @@ impl<'a, Ctx> SceneAccess<'a, Ctx> {
                 heap: Default::default(),
                 infos: Vec::with_capacity(256),
             }),
-            context: RefCell::new(context),
+            context: Rc::new(RefCell::new(context)),
         }
     }
 

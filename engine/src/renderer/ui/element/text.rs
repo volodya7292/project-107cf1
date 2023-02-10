@@ -1,13 +1,14 @@
 use crate::ecs::component::event_handler::EventHandlerI;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::StyledString;
-use crate::ecs::component::ui::UILayoutC;
+use crate::ecs::component::ui::{UIEventHandlerC, UIEventHandlerI, UILayoutC};
 use crate::ecs::component::{EventHandlerC, SimpleTextC};
-use crate::ecs::EntityAccess;
+use crate::ecs::{EntityAccess, SceneAccess};
 use crate::renderer::module::text_renderer;
 use crate::renderer::module::text_renderer::TextRenderer;
 use crate::renderer::module::ui_renderer::{UIObject, UIState};
 use crate::renderer::{RendererContext, RendererContextI};
+use entity_data::EntityId;
 
 pub type UIText = UIObject<SimpleTextC>;
 
@@ -21,11 +22,19 @@ impl UIText {
                 .with_max_width(0.0)
                 .with_stage(RenderStage::OVERLAY),
         )
-        .with_event_handler(EventHandlerC::new::<Self>())
+        .with_event_handler(UIEventHandlerC::new::<Self>())
     }
 }
 
-impl EventHandlerI for UIText {}
+impl UIEventHandlerI for UIText {
+    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess<RendererContext>) {
+        println!("HOVER ENTER");
+    }
+
+    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess<RendererContext>) {
+        println!("HOVER EXIT");
+    }
+}
 
 impl UIState for SimpleTextC {}
 

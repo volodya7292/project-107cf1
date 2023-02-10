@@ -35,9 +35,10 @@ use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::renderer::module::ui_renderer::element::{TextState, UIText};
 use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
+use engine::renderer::ui::element::{TextState, UIText};
 use engine::renderer::{Renderer, RendererContextI, VertexMeshObject};
+use engine::utils::wsi::find_best_video_mode;
 use engine::{renderer, Application, Input};
 use entity_data::{AnyState, EntityId};
 use nalgebra_glm as glm;
@@ -224,7 +225,7 @@ impl Application for Game {
 
         // -------------------------------------------------------
 
-        let text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
+        let mut text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
         let font_id = text_renderer.register_font(
             FontSet::from_bytes(
                 include_bytes!("../res/fonts/Romanesco-Regular.ttf").to_vec(),
@@ -232,6 +233,8 @@ impl Application for Game {
             )
             .unwrap(),
         );
+        drop(text_renderer);
+
         let player_pos = self.main_state.lock().player_pos;
         let text = renderer.add_object(
             None,
@@ -262,6 +265,7 @@ impl Application for Game {
 
         let ui_renderer = renderer.module_mut::<UIRenderer>().unwrap();
         let root_ui_entity = *ui_renderer.root_ui_entity();
+        drop(ui_renderer);
 
         let panel = renderer.add_object(
             Some(root_ui_entity),
@@ -458,9 +462,7 @@ impl Application for Game {
                                 if let Some(_) = main_window.fullscreen() {
                                     main_window.set_fullscreen(None);
                                 } else {
-                                    let mode = engine::utils::find_best_video_mode(
-                                        &main_window.current_monitor().unwrap(),
-                                    );
+                                    let mode = find_best_video_mode(&main_window.current_monitor().unwrap());
                                     main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
                                 }
                             }

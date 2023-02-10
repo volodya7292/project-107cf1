@@ -1,3 +1,6 @@
+use crate::ecs::SceneAccess;
+use crate::renderer::RendererContext;
+use entity_data::EntityId;
 use nalgebra_glm::Vec2;
 
 pub type Factor = f32;
@@ -241,6 +244,10 @@ impl Rect {
     pub fn set_axis_size(&mut self, axis: usize, size: f32) {
         self.max[axis] = self.min[axis] + size;
     }
+
+    pub fn contains_point(&self, point: &Vec2) -> bool {
+        point >= &self.min && point < &self.max
+    }
 }
 
 #[derive(Default, Copy, Clone)]
@@ -250,4 +257,34 @@ pub struct UILayoutCacheC {
     pub(crate) relative_position: Vec2,
     pub(crate) global_position: Vec2,
     pub(crate) clip_rect: Rect,
+}
+
+type BasicEventCallback = fn(entity: &EntityId, scene: &mut SceneAccess<RendererContext>);
+
+#[derive(Copy, Clone)]
+pub struct UIEventHandlerC {
+    pub on_hover_enter: BasicEventCallback,
+    pub on_hover_exit: BasicEventCallback,
+}
+
+pub trait UIEventHandlerI {
+    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess<RendererContext>) {}
+    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess<RendererContext>) {}
+}
+
+impl UIEventHandlerI for () {}
+
+impl UIEventHandlerC {
+    pub fn new<I: UIEventHandlerI>() -> Self {
+        Self {
+            on_hover_enter: I::on_hover_enter,
+            on_hover_exit: I::on_hover_exit,
+        }
+    }
+}
+
+impl Default for UIEventHandlerC {
+    fn default() -> Self {
+        Self::new::<()>()
+    }
 }

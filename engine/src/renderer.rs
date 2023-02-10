@@ -19,6 +19,7 @@ mod helpers;
 pub mod material;
 pub mod module;
 pub(crate) mod resources;
+pub mod ui;
 
 // Notes
 // --------------------------------------------
@@ -37,11 +38,13 @@ use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 pub use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::{system, SceneAccess};
+use crate::event::Event;
 use crate::renderer::camera::OrthoCamera;
 use crate::renderer::material::MatComponent;
 use crate::renderer::module::RendererModule;
 pub(crate) use crate::renderer::resources::RendererResources;
 use crate::renderer::resources::{CullObject, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::utils::wsi::WSISize;
 use base::scene;
 use base::scene::relation::Relation;
 use base::utils::HashMap;
@@ -53,12 +56,12 @@ use lazy_static::lazy_static;
 pub use module::text_renderer::FontSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, Mat4, U32Vec4, UVec2, Vec2, Vec3, Vec4};
+use nalgebra_glm::{DVec3, I32Vec2, Mat4, U32Vec2, U32Vec4, UVec2, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Instant;
@@ -76,6 +79,7 @@ use vk_wrapper::{
     SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
     Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
+use winit::window::Window;
 
 // TODO: Defragment VK memory (every frame?).
 // TODO: Relocate memory from CPU (that was allocated there due to out of device-local memory) onto GPU.
@@ -137,7 +141,7 @@ pub struct Renderer {
     surface: Arc<Surface>,
     swapchain: Option<Swapchain>,
     surface_changed: bool,
-    surface_size: (u32, u32),
+    surface_size: U32Vec2,
     settings: Settings,
     device: Arc<Device>,
 
@@ -177,25 +181,27 @@ pub struct Renderer {
     ordered_entities: Vec<EntityId>,
 
     res: RendererResources,
-    modules: HashMap<TypeId, Box<dyn RendererModule>>,
+    modules: HashMap<TypeId, RefCell<Box<dyn RendererModule>>>,
 }
 
 pub trait RendererContextI {
-    fn modules_mut(&mut self) -> &mut HashMap<TypeId, Box<dyn RendererModule>>;
+    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>>;
 
-    fn module_mut<M: RendererModule + Send + Sync + 'static>(&mut self) -> Option<&mut M> {
-        self.modules_mut()
-            .get_mut(&TypeId::of::<M>())
-            .map(|m| m.as_any_mut().downcast_mut::<M>().unwrap())
+    fn module_mut<M: RendererModule + Send + Sync + 'static>(&self) -> Option<RefMut<M>> {
+        let module = self.modules().get(&TypeId::of::<M>())?;
+
+        Some(RefMut::map(module.borrow_mut(), |v| {
+            v.as_any_mut().downcast_mut::<M>().unwrap()
+        }))
     }
 }
 
 pub struct RendererContext<'a> {
-    modules: &'a mut HashMap<TypeId, Box<dyn RendererModule>>,
+    modules: &'a HashMap<TypeId, RefCell<Box<dyn RendererModule>>>,
 }
 
 impl RendererContextI for RendererContext<'_> {
-    fn modules_mut(&mut self) -> &mut HashMap<TypeId, Box<dyn RendererModule>> {
+    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>> {
         self.modules
     }
 }
@@ -527,7 +533,7 @@ impl SceneObject for SimpleObject {}
 impl Renderer {
     pub fn new(
         surface: &Arc<Surface>,
-        size: (u32, u32),
+        size: WSISize<u32>,
         settings: Settings,
         device: &Arc<Device>,
         max_texture_count: u32,
@@ -1019,7 +1025,7 @@ impl Renderer {
             surface: Arc::clone(surface),
             swapchain: None,
             surface_changed: false,
-            surface_size: size,
+            surface_size: glm::convert_unchecked(size.real()),
             settings,
             device: Arc::clone(device),
             staging_buffer,
@@ -1048,7 +1054,7 @@ impl Renderer {
             res: resources,
             modules: Default::default(),
         };
-        renderer.on_resize(size, 1.0);
+        renderer.on_resize(size);
 
         renderer
     }
@@ -1124,7 +1130,7 @@ impl Renderer {
 
         for module in self.modules.values_mut() {
             let scene = SceneAccess::new(&mut self.storage, &self.dirty_comps, ());
-            module.on_object_remove(id, scene);
+            module.borrow_mut().on_object_remove(id, scene);
         }
     }
 
@@ -1153,10 +1159,7 @@ impl Renderer {
     // TODO CORE: move to base
     /// Removes object and its children
     pub fn remove_object(&mut self, id: &EntityId) {
-        let mut entities_to_remove = Vec::with_capacity(256);
-        entities_to_remove.push(*id);
-
-        scene::collect_children_recursively(&self.storage.access(), id, &mut entities_to_remove);
+        let entities_to_remove = scene::collect_relation_tree(&self.storage.access(), id);
 
         for entity in entities_to_remove {
             // Remove the entity from its parent's child list
@@ -1207,7 +1210,7 @@ impl Renderer {
 
         for module in self.modules.values_mut() {
             let scene = SceneAccess::new(&mut self.storage, &self.dirty_comps, ());
-            if let Some(cl) = module.on_update(scene) {
+            if let Some(cl) = module.borrow_mut().on_update(scene) {
                 update_cls.push(cl);
             }
         }
@@ -1401,7 +1404,7 @@ impl Renderer {
                     },
 
                     atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
-                    frame_size: UVec2::new(self.surface_size.0, self.surface_size.1),
+                    frame_size: glm::convert_unchecked(self.surface_size),
                 }
             };
             per_frame_infos[RenderStage::OVERLAY as usize] = {
@@ -2122,7 +2125,7 @@ impl Renderer {
                 device
                     .create_swapchain(
                         &self.surface,
-                        self.surface_size,
+                        (self.surface_size.x as u32, self.surface_size.y as u32),
                         self.settings.fps_limit == FPSLimit::VSync,
                         if self.settings.prefer_triple_buffering {
                             3
@@ -2194,8 +2197,11 @@ impl Renderer {
         timings
     }
 
-    pub fn on_resize(&mut self, new_size: (u32, u32), scale_factor: f64) {
-        self.surface_size = new_size;
+    pub fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
+        let new_size = new_wsi_size.real();
+        let new_size = (new_size.x as u32, new_size.y as u32);
+
+        self.surface_size = glm::convert_unchecked(new_wsi_size.real());
         self.surface_changed = true;
 
         self.device.wait_idle().unwrap();
@@ -2434,7 +2440,7 @@ impl Renderer {
         }
 
         for (_, module) in &mut self.modules {
-            module.on_resize(new_size, scale_factor);
+            module.borrow_mut().on_resize(new_wsi_size);
         }
     }
 
@@ -2489,13 +2495,24 @@ impl Renderer {
     }
 
     pub fn register_module<M: RendererModule + Send + Sync + 'static>(&mut self, module: M) {
-        self.modules.insert(TypeId::of::<M>(), Box::new(module));
+        self.modules
+            .insert(TypeId::of::<M>(), RefCell::new(Box::new(module)));
+    }
+
+    pub fn on_event(&mut self, event: &Event) {
+        for module in self.modules.values() {
+            let ctx = RendererContext {
+                modules: &self.modules,
+            };
+            let access = SceneAccess::new(&mut self.storage, &self.dirty_comps, ctx);
+            module.borrow_mut().on_event(access, event);
+        }
     }
 }
 
 impl RendererContextI for Renderer {
-    fn modules_mut(&mut self) -> &mut HashMap<TypeId, Box<dyn RendererModule>> {
-        &mut self.modules
+    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>> {
+        &self.modules
     }
 }
 

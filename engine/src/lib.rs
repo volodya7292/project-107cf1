@@ -1,4 +1,5 @@
 pub mod ecs;
+pub mod event;
 pub mod execution;
 pub mod input;
 mod platform;
@@ -7,14 +8,19 @@ pub mod renderer;
 mod tests;
 pub mod utils;
 
+use crate::event::{Event, WEvent, WWindowEvent};
 use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
 use crate::platform::EngineMonitorExt;
 use crate::renderer::module::text_renderer::TextRenderer;
+use crate::renderer::module::ui_interaction_manager::UIInteractionManager;
 use crate::renderer::module::ui_renderer::UIRenderer;
 use crate::renderer::{FPSLimit, Renderer, RendererTimings};
+use crate::utils::wsi::{real_scale_factor, real_window_size, WSISize};
 use base::utils::{HashSet, MO_RELAXED};
 use lazy_static::lazy_static;
+use nalgebra_glm::{UVec2, Vec2};
+pub use platform::Platform;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -25,8 +31,6 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
-
-pub use platform::Platform;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -68,6 +72,8 @@ impl Display for EngineStatistics {
     }
 }
 
+// TODO: make `Renderer` a module for `Engine`.
+
 pub struct Engine {
     renderer: Renderer,
     frame_start_time: Instant,
@@ -95,36 +101,6 @@ pub trait Application {
     );
 }
 
-/// `monitor_scale_factor()` for monitor with this DPI is equal to 1.
-pub const DEFAULT_DPI: u32 = 109;
-
-/// Calculates best UI scale factor for the specified window depending on corresponding monitor's DPI.
-fn real_scale_factor(window: &Window) -> f64 {
-    let monitor = window.current_monitor().unwrap();
-    let native_mode = utils::find_best_video_mode(&monitor);
-
-    let dpi = monitor.dpi().unwrap_or_else(|| {
-        log::warn!("Failed to get monitor DPI!");
-        DEFAULT_DPI
-    });
-
-    dpi as f64 / DEFAULT_DPI as f64
-}
-
-/// Calculates best UI scale factor relative `window` size depending on corresponding monitor's DPI.
-fn real_window_size(window: &Window) -> PhysicalSize<u32> {
-    let monitor = window.current_monitor().unwrap();
-    let native_mode = utils::find_best_video_mode(&monitor);
-    let native_size = native_mode.size();
-    let logical_size = monitor.size(); // On macOS this may be larger than native width
-
-    let window_size = window.inner_size();
-    let real_window_width = window_size.width * native_size.width / logical_size.width;
-    let real_window_height = window_size.height * native_size.height / logical_size.height;
-
-    PhysicalSize::new(real_window_width, real_window_height)
-}
-
 impl Engine {
     pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
@@ -145,7 +121,7 @@ impl Engine {
 
         let mut renderer = Renderer::new(
             &surface,
-            (1280, 720),
+            WSISize::from_logical(Vec2::new(1280.0, 720.0), &main_window),
             Default::default(),
             &device,
             max_texture_count,
@@ -153,9 +129,11 @@ impl Engine {
 
         let text_renderer = TextRenderer::new(&mut renderer);
         let ui_renderer = UIRenderer::new(&mut renderer);
+        let ui_interaction_manager = UIInteractionManager::new();
 
         renderer.register_module(text_renderer);
         renderer.register_module(ui_renderer);
+        renderer.register_module(ui_interaction_manager);
 
         app.on_engine_initialized(&mut renderer);
 
@@ -182,20 +160,15 @@ impl Engine {
     pub fn run(mut self) {
         self.event_loop.run_return(move |event, _, control_flow| {
             use winit::event::ElementState;
-            use winit::event::Event;
 
             *control_flow = ControlFlow::Poll;
 
             match &event {
-                Event::WindowEvent {
+                WEvent::WindowEvent {
                     window_id: _window_id,
                     event,
                 } => match event {
-                    WindowEvent::KeyboardInput {
-                        device_id: _,
-                        input,
-                        is_synthetic: _,
-                    } => {
+                    WWindowEvent::KeyboardInput { input, .. } => {
                         if let Some(keycode) = input.virtual_keycode {
                             if input.state == ElementState::Pressed {
                                 self.input.keyboard.pressed_keys.insert(keycode);
@@ -204,37 +177,26 @@ impl Engine {
                             }
                         }
                     }
-                    WindowEvent::MouseInput {
-                        device_id: _,
-                        state,
-                        button,
-                        ..
-                    } => {
+                    WWindowEvent::MouseInput { state, button, .. } => {
                         if *state == ElementState::Pressed {
                             self.input.mouse.pressed_buttons.insert(*button);
                         } else {
                             self.input.mouse.pressed_buttons.remove(button);
                         }
                     }
-                    WindowEvent::Resized(_) => {
-                        let size = real_window_size(&self.main_window);
-                        if size.width != 0 && size.height != 0 {
-                            let scale_factor = real_scale_factor(&self.main_window);
-                            let new_size = (size.width, size.height);
-                            self.renderer.on_resize(new_size, scale_factor);
+                    WWindowEvent::Resized(_) | WWindowEvent::ScaleFactorChanged { .. } => {
+                        let raw_size = self.main_window.inner_size();
+                        if raw_size.width != 0 && raw_size.height != 0 {
+                            let new_wsi_size = WSISize::<u32>::from_winit(
+                                (raw_size.width, raw_size.height),
+                                &self.main_window,
+                            );
+                            self.renderer.on_resize(new_wsi_size);
                         }
-                    }
-                    WindowEvent::ScaleFactorChanged {
-                        scale_factor: _,
-                        new_inner_size: _,
-                    } => {
-                        let scale_factor = real_scale_factor(&self.main_window);
-                        let size = real_window_size(&self.main_window);
-                        self.renderer.on_resize((size.width, size.height), scale_factor);
                     }
                     _ => {}
                 },
-                Event::MainEventsCleared => {
+                WEvent::MainEventsCleared => {
                     // let t0 = Instant::now();
 
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
@@ -252,7 +214,7 @@ impl Engine {
                     // let t1 = Instant::now();
                     // self.curr_statistics.total = (t1 - t0).as_secs_f64();
                 }
-                Event::RedrawEventsCleared => {
+                WEvent::RedrawEventsCleared => {
                     let end_dt = Instant::now();
                     self.delta_time = (end_dt - self.frame_start_time).as_secs_f64().min(1.0);
 
@@ -284,6 +246,10 @@ impl Engine {
                     self.frame_start_time = self.frame_end_time;
                 }
                 _ => {}
+            }
+
+            if let Some(event) = Event::from_winit(&event, &self.main_window) {
+                self.renderer.on_event(&event);
             }
 
             self.app
