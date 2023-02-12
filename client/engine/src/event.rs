@@ -18,9 +18,12 @@ pub(crate) type WWindowEvent<'a> = winit::event::WindowEvent<'a>;
 
 impl WSIEvent {
     pub(crate) fn from_winit(winit_event: &WEvent, window: &Window) -> Option<WSIEvent> {
-        let WEvent::WindowEvent { event: win_event, ..} = winit_event else {
+        let WEvent::WindowEvent { event: win_event, window_id, ..} = winit_event else {
             return None;
         };
+        if *window_id != window.id() {
+            return None;
+        }
 
         let wsi_event = match win_event {
             WWindowEvent::Resized(_) | WWindowEvent::ScaleFactorChanged { .. } => {

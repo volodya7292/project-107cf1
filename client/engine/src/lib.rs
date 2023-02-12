@@ -266,7 +266,9 @@ impl Engine {
             }
 
             if let Some(event) = WSIEvent::from_winit(&event, &self.main_window) {
-                self.module_manager.borrow().on_wsi_event(&event);
+                self.module_manager
+                    .borrow()
+                    .on_wsi_event(&self.main_window, &event);
             }
 
             self.app

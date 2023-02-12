@@ -139,7 +139,7 @@ impl Game {
         program
     }
 
-    pub fn grab_cursor(&mut self, window: &Window, enabled: bool) {
+    pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
         self.cursor_grab = enabled;
 
         if self.cursor_grab {
@@ -150,6 +150,11 @@ impl Game {
         } else {
             window.set_cursor_grab(CursorGrabMode::None).unwrap();
         }
+
+        window.set_cursor_visible(!self.cursor_grab);
+
+        let mut ui_interactor = ctx.module_mut::<UIInteractionManager>();
+        ui_interactor.set_active(!self.cursor_grab);
     }
 }
 
@@ -171,9 +176,6 @@ impl Application for Game {
             x: (mon_size.width as i32 - win_size.width as i32) / 2,
             y: (mon_size.height as i32 - win_size.height as i32) / 2,
         });
-
-        self.grab_cursor(&window, true);
-        window.set_cursor_visible(!self.cursor_grab);
 
         window
     }
@@ -202,6 +204,10 @@ impl Application for Game {
         engine.register_module(TextRenderer::new(engine.context()));
         engine.register_module(UIRenderer::new(engine.context(), self.root_entity));
         engine.register_module(UIInteractionManager::new(engine.context()));
+
+        // ------------------------------------------------------------------------------------------------
+
+        self.grab_cursor(engine.window(), true, &ctx);
 
         // ------------------------------------------------------------------------------------------------
         let mut renderer = ctx.module_mut::<MainRenderer>();
@@ -500,8 +506,7 @@ impl Application for Game {
                                 );
                             }
                             VirtualKeyCode::T => {
-                                self.grab_cursor(main_window, !self.cursor_grab);
-                                main_window.set_cursor_visible(!self.cursor_grab);
+                                self.grab_cursor(main_window, !self.cursor_grab, &ctx);
                             }
                             VirtualKeyCode::J => {
                                 // TODO: move into on_tick

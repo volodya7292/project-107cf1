@@ -10,6 +10,7 @@ use common::types::HashMap;
 use entity_data::EntityId;
 use std::any::{Any, TypeId};
 use std::cell::{Ref, RefMut};
+use winit::window::Window;
 
 pub trait EngineModule: 'static {
     /// Called after an object has been added.
@@ -18,7 +19,7 @@ pub trait EngineModule: 'static {
     fn on_object_remove(&mut self, _: &EntityId) {}
     /// Main loop
     fn on_update(&mut self) {}
-    fn on_wsi_event(&mut self, _: &WSIEvent) {}
+    fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent) {}
 
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -72,9 +73,9 @@ impl ModuleManager {
     }
 
     #[inline]
-    pub(crate) fn on_wsi_event(&self, event: &WSIEvent) {
+    pub(crate) fn on_wsi_event(&self, window: &Window, event: &WSIEvent) {
         self.for_every(|module| {
-            module.on_wsi_event(event);
+            module.on_wsi_event(window, event);
         });
     }
 }

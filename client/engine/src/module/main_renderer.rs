@@ -2426,7 +2426,7 @@ impl EngineModule for MainRenderer {
         self.on_draw();
     }
 
-    fn on_wsi_event(&mut self, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
         match event {
             WSIEvent::Resized(new_size) => {
                 self.on_resize(*new_size);

@@ -22,6 +22,7 @@ use entity_data::{Archetype, EntityId, SystemAccess};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::mem;
+use winit::window::Window;
 
 pub struct UIRenderer {
     ctx: EngineContext,
@@ -570,7 +571,7 @@ impl EngineModule for UIRenderer {
         self.update_hierarchy();
     }
 
-    fn on_wsi_event(&mut self, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
         match event {
             WSIEvent::Resized(new_size) => {
                 self.set_scale_factor(new_size.scale_factor());

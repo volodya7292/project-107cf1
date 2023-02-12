@@ -6,12 +6,14 @@ use crate::EngineContext;
 use entity_data::EntityId;
 use std::any::Any;
 use winit::event::{ElementState, MouseButton};
+use winit::window::Window;
 
 pub struct UIInteractionManager {
     ctx: EngineContext,
     global_event_handler: UIEventHandlerC,
     curr_hover_entity: EntityId,
     mouse_button_press_entity: EntityId,
+    active: bool,
 }
 
 impl UIInteractionManager {
@@ -21,7 +23,12 @@ impl UIInteractionManager {
             global_event_handler: Default::default(),
             curr_hover_entity: EntityId::NULL,
             mouse_button_press_entity: EntityId::NULL,
+            active: true,
         }
+    }
+
+    pub fn set_active(&mut self, active: bool) {
+        self.active = active;
     }
 }
 
@@ -32,7 +39,11 @@ impl EngineModule for UIInteractionManager {
         }
     }
 
-    fn on_wsi_event(&mut self, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
+        if !self.active {
+            return;
+        }
+
         let mut scene = self.ctx.scene();
         let ui_renderer = self.ctx.module_mut::<UIRenderer>();
 
