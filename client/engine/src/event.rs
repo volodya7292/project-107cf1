@@ -1,33 +1,42 @@
-use crate::utils::wsi::WSIPosition;
+use crate::utils::wsi::{WSIPosition, WSISize};
+use winit::event::{ElementState, MouseButton};
 use winit::window::Window;
 
-pub enum Event {
-    WindowEvent { event: WindowEvent },
-}
-
-pub enum WindowEvent {
-    CursorMoved { position: WSIPosition<f32> },
+pub enum WSIEvent {
+    Resized(WSISize<u32>),
+    CursorMoved {
+        position: WSIPosition<f32>,
+    },
+    MouseInput {
+        state: ElementState,
+        button: MouseButton,
+    },
 }
 
 pub(crate) type WEvent<'a> = winit::event::Event<'a, ()>;
 pub(crate) type WWindowEvent<'a> = winit::event::WindowEvent<'a>;
 
-impl Event {
-    pub(crate) fn from_winit(winit_event: &WEvent, window: &Window) -> Option<Event> {
-        let event = match winit_event {
-            WEvent::WindowEvent { event: win_event, .. } => Event::WindowEvent {
-                event: match win_event {
-                    WWindowEvent::CursorMoved { position, .. } => WindowEvent::CursorMoved {
-                        position: WSIPosition::<f32>::from_winit(
-                            (position.x as f32, position.y as f32),
-                            window,
-                        ),
-                    },
-                    _ => return None,
-                },
+impl WSIEvent {
+    pub(crate) fn from_winit(winit_event: &WEvent, window: &Window) -> Option<WSIEvent> {
+        let WEvent::WindowEvent { event: win_event, ..} = winit_event else {
+            return None;
+        };
+
+        let wsi_event = match win_event {
+            WWindowEvent::Resized(_) | WWindowEvent::ScaleFactorChanged { .. } => {
+                let raw_size = window.inner_size();
+                if raw_size.width == 0 || raw_size.height == 0 {
+                    return None;
+                }
+                let new_wsi_size = WSISize::<u32>::from_winit((raw_size.width, raw_size.height), window);
+                WSIEvent::Resized(new_wsi_size)
+            }
+            WWindowEvent::CursorMoved { position, .. } => WSIEvent::CursorMoved {
+                position: WSIPosition::<f32>::from_winit((position.x as f32, position.y as f32), window),
             },
             _ => return None,
         };
-        Some(event)
+
+        Some(wsi_event)
     }
 }

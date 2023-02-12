@@ -1,5 +1,5 @@
 use crate::ecs::component::ui::UIEventHandlerC;
-use crate::event::{Event, WindowEvent};
+use crate::event::WSIEvent;
 use crate::module::ui_renderer::UIRenderer;
 use crate::module::EngineModule;
 use crate::EngineContext;
@@ -29,16 +29,12 @@ impl EngineModule for UIInteractionManager {
         }
     }
 
-    fn on_event(&mut self, event: &Event) {
-        let Event::WindowEvent { event: win_event, .. } = event else {
-            return;
-        };
-
+    fn on_wsi_event(&mut self, event: &WSIEvent) {
         let mut scene = self.ctx.scene();
         let ui_renderer = self.ctx.module_mut::<UIRenderer>();
 
-        match win_event {
-            WindowEvent::CursorMoved { position, .. } => {
+        match event {
+            WSIEvent::CursorMoved { position, .. } => {
                 let new_hover_entity = ui_renderer
                     .find_element_at_point(&position.logical(), &mut scene)
                     .unwrap_or(EntityId::NULL);

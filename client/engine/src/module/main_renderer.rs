@@ -38,6 +38,7 @@ use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 pub use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::{system, SceneObject, N_MAX_OBJECTS};
+use crate::event::WSIEvent;
 use crate::module::main_renderer::camera::OrthoCamera;
 use crate::module::main_renderer::material::MatComponent;
 use crate::module::main_renderer::resources::{CullObject, RendererResources, GENERAL_OBJECT_DESCRIPTOR_IDX};
@@ -2110,82 +2111,6 @@ impl MainRenderer {
         timings
     }
 
-    fn create_output_framebuffers(&mut self) {
-        let images = self.swapchain.as_ref().unwrap().images();
-
-        self.sw_render_pass = Some(
-            self.device
-                .create_render_pass(
-                    &[Attachment {
-                        format: images[0].format(),
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::PRESENT,
-                        load_store: LoadStore::FinalSave,
-                    }],
-                    &[Subpass::new().with_color(vec![AttachmentRef {
-                        index: 0,
-                        layout: ImageLayout::COLOR_ATTACHMENT,
-                    }])],
-                    &[],
-                )
-                .unwrap(),
-        );
-
-        self.sw_framebuffers.clear();
-        for img in images {
-            self.sw_framebuffers.push(
-                self.sw_render_pass
-                    .as_ref()
-                    .unwrap()
-                    .create_framebuffer(
-                        images[0].size_2d(),
-                        &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
-                    )
-                    .unwrap(),
-            );
-        }
-
-        self.compose_pipeline = Some(
-            self.device
-                .create_graphics_pipeline(
-                    self.sw_render_pass.as_ref().unwrap(),
-                    0,
-                    PrimitiveTopology::TRIANGLE_LIST,
-                    Default::default(),
-                    Default::default(),
-                    &[],
-                    &self.compose_signature,
-                )
-                .unwrap(),
-        );
-    }
-}
-
-impl EngineModule for MainRenderer {
-    fn on_object_remove(&mut self, id: &EntityId) {
-        // Free renderable resources if available
-        if let Some(renderable) = self.res.renderables.remove(id) {
-            self.res.renderables_to_destroy.push(renderable);
-        }
-
-        // Cache vertex mesh that's potentially being used in rendering
-        if let Some(mesh) = self.res.vertex_meshes.remove(id) {
-            self.res.vertex_meshes_to_destroy.push(mesh);
-        }
-
-        // Cache vertex meshes whose buffers is being transferring to the GPU
-        if let Some(pending_mesh) = self.vertex_mesh_pending_updates.remove(id) {
-            self.res.vertex_meshes_to_destroy.push(pending_mesh);
-        }
-
-        // New vertex mesh doesn't need to be uploaded to the GPU
-        self.vertex_mesh_updates.remove(id);
-    }
-
-    fn on_update(&mut self) {
-        self.on_draw();
-    }
-
     fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
         let new_size = new_wsi_size.real();
         let new_size = (new_size.x as u32, new_size.y as u32);
@@ -2423,6 +2348,91 @@ impl EngineModule for MainRenderer {
                     ),
                 ],
             );
+        }
+    }
+
+    fn create_output_framebuffers(&mut self) {
+        let images = self.swapchain.as_ref().unwrap().images();
+
+        self.sw_render_pass = Some(
+            self.device
+                .create_render_pass(
+                    &[Attachment {
+                        format: images[0].format(),
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::PRESENT,
+                        load_store: LoadStore::FinalSave,
+                    }],
+                    &[Subpass::new().with_color(vec![AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    }])],
+                    &[],
+                )
+                .unwrap(),
+        );
+
+        self.sw_framebuffers.clear();
+        for img in images {
+            self.sw_framebuffers.push(
+                self.sw_render_pass
+                    .as_ref()
+                    .unwrap()
+                    .create_framebuffer(
+                        images[0].size_2d(),
+                        &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
+                    )
+                    .unwrap(),
+            );
+        }
+
+        self.compose_pipeline = Some(
+            self.device
+                .create_graphics_pipeline(
+                    self.sw_render_pass.as_ref().unwrap(),
+                    0,
+                    PrimitiveTopology::TRIANGLE_LIST,
+                    Default::default(),
+                    Default::default(),
+                    &[],
+                    &self.compose_signature,
+                )
+                .unwrap(),
+        );
+    }
+}
+
+impl EngineModule for MainRenderer {
+    fn on_object_remove(&mut self, id: &EntityId) {
+        // Free renderable resources if available
+        if let Some(renderable) = self.res.renderables.remove(id) {
+            self.res.renderables_to_destroy.push(renderable);
+        }
+
+        // Cache vertex mesh that's potentially being used in rendering
+        if let Some(mesh) = self.res.vertex_meshes.remove(id) {
+            self.res.vertex_meshes_to_destroy.push(mesh);
+        }
+
+        // Cache vertex meshes whose buffers is being transferring to the GPU
+        if let Some(pending_mesh) = self.vertex_mesh_pending_updates.remove(id) {
+            self.res.vertex_meshes_to_destroy.push(pending_mesh);
+        }
+
+        // New vertex mesh doesn't need to be uploaded to the GPU
+        self.vertex_mesh_updates.remove(id);
+    }
+
+    fn on_update(&mut self) {
+        self.on_draw();
+    }
+
+    fn on_wsi_event(&mut self, event: &WSIEvent) {
+        match event {
+            WSIEvent::Resized(new_size) => {
+                self.on_resize(*new_size);
+            }
+            _ => {}
         }
     }
 

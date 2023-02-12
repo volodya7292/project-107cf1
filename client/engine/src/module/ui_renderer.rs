@@ -5,6 +5,7 @@ use crate::ecs::component::ui::{
 };
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::{SceneAccess, SceneObject};
+use crate::event::WSIEvent;
 use crate::module::main_renderer::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::utils::wsi::WSISize;
@@ -566,9 +567,14 @@ impl EngineModule for UIRenderer {
         self.update_hierarchy();
     }
 
-    fn on_resize(&mut self, new_size: WSISize<u32>) {
-        self.set_scale_factor(new_size.scale_factor());
-        self.set_root_element_size(new_size.logical());
+    fn on_wsi_event(&mut self, event: &WSIEvent) {
+        match event {
+            WSIEvent::Resized(new_size) => {
+                self.set_scale_factor(new_size.scale_factor());
+                self.set_root_element_size(new_size.logical());
+            }
+            _ => {}
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

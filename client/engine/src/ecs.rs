@@ -82,9 +82,8 @@ impl<'a> SceneAccess<'a> {
 
         *obj_count += 1;
 
-        for module in self.context.modules().values() {
-            module.borrow_mut().on_object_added(&entity);
-        }
+        let module_manager = self.context.module_manager.borrow();
+        module_manager.on_object_added(&entity);
 
         Some(entity)
     }
@@ -93,6 +92,7 @@ impl<'a> SceneAccess<'a> {
     /// Removes object and its children
     pub fn remove_object(&mut self, id: &EntityId) {
         let entities_to_remove = scene::collect_relation_tree(&self.storage.access(), id);
+        let module_manager = self.context.module_manager.borrow();
 
         for entity in entities_to_remove {
             // Remove the entity from its parent's child list
@@ -104,11 +104,7 @@ impl<'a> SceneAccess<'a> {
                 }
             }
 
-            for module in self.context.modules().values() {
-                // let scene = SceneAccess::new(&mut self.storage, &self.dirty_comps, ());
-                module.borrow_mut().on_object_remove(id);
-            }
-
+            module_manager.on_object_remove(id);
             self.storage.remove(&entity);
 
             let mut obj_count = self.context.object_count.borrow_mut();

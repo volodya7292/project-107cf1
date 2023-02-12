@@ -10,9 +10,9 @@ pub mod utils;
 
 use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::SceneAccess;
-use crate::event::{Event, WEvent, WWindowEvent};
+use crate::event::{WEvent, WSIEvent, WWindowEvent};
 use crate::input::{Keyboard, Mouse};
-use crate::module::EngineModule;
+use crate::module::{EngineModule, ModuleManager};
 use crate::utils::wsi::WSISize;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::types::HashMap;
@@ -76,10 +76,10 @@ pub struct Engine {
     input: Input,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
-    modules: Lrc<HashMap<TypeId, Lrc<dyn EngineModule>>>,
     storage: Lrc<EntityStorage>,
     dirty_comps: Lrc<DirtyComponents>,
     object_count: Lrc<usize>,
+    module_manager: Lrc<ModuleManager>,
     app: Lrc<dyn Application>,
 }
 
@@ -88,7 +88,7 @@ pub struct EngineContext {
     storage: Lrc<EntityStorage>,
     dirty_comps: Lrc<DirtyComponents>,
     object_count: Lrc<usize>,
-    modules: Lrc<HashMap<TypeId, Lrc<dyn EngineModule>>>,
+    module_manager: Lrc<ModuleManager>,
     app: Lrc<dyn Application>,
 }
 
@@ -97,17 +97,8 @@ impl EngineContext {
         SceneAccess::new(self)
     }
 
-    fn modules(&self) -> Ref<HashMap<TypeId, Lrc<dyn EngineModule>>> {
-        self.modules.borrow()
-    }
-
     pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
-        let modules = self.modules.borrow();
-        let module = modules.get(&TypeId::of::<M>()).unwrap().clone();
-
-        OwnedRefMut::map(module.borrow_mut_owned(), |v| {
-            v.as_any_mut().downcast_mut::<M>().unwrap()
-        })
+        self.module_manager.borrow().module_mut()
     }
 
     pub fn app<T: Application>(&self) -> OwnedRef<dyn Application, T> {
@@ -157,10 +148,10 @@ impl Engine {
             },
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
-            modules: Default::default(),
             storage: Default::default(),
             dirty_comps: Rc::new(RefCell::new(Default::default())),
             object_count: Rc::new(RefCell::new(0)),
+            module_manager: Default::default(),
             app: app.clone(),
         };
 
@@ -174,8 +165,7 @@ impl Engine {
     }
 
     pub fn register_module<M: EngineModule>(&self, module: M) {
-        let mut modules = self.modules.borrow_mut();
-        modules.insert(TypeId::of::<M>(), Lrc::wrap(module));
+        self.module_manager.borrow_mut().register_module(module);
     }
 
     pub fn context(&self) -> EngineContext {
@@ -183,7 +173,7 @@ impl Engine {
             storage: self.storage.clone(),
             dirty_comps: self.dirty_comps.clone(),
             object_count: self.object_count.clone(),
-            modules: self.modules.clone(),
+            module_manager: self.module_manager.clone(),
             app: self.app.clone(),
         }
     }
@@ -217,19 +207,6 @@ impl Engine {
                             self.input.mouse.pressed_buttons.remove(button);
                         }
                     }
-                    WWindowEvent::Resized(_) | WWindowEvent::ScaleFactorChanged { .. } => {
-                        let raw_size = self.main_window.inner_size();
-                        if raw_size.width != 0 && raw_size.height != 0 {
-                            let new_wsi_size = WSISize::<u32>::from_winit(
-                                (raw_size.width, raw_size.height),
-                                &self.main_window,
-                            );
-
-                            for module in self.modules.borrow().values() {
-                                module.borrow_mut().on_resize(new_wsi_size);
-                            }
-                        }
-                    }
                     _ => {}
                 },
                 WEvent::MainEventsCleared => {
@@ -238,16 +215,15 @@ impl Engine {
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
                     let mut app = self.app.borrow_mut();
-                    let modules = &*self.modules;
+                    let module_manger = &*self.module_manager.borrow();
                     let delta_time = self.delta_time;
                     let ctx = self.context();
 
                     let t0 = Instant::now();
-                    app.on_update(delta_time, ctx, &mut self.input);
 
-                    for module in &mut modules.borrow().values() {
-                        module.borrow_mut().on_update();
-                    }
+                    app.on_update(delta_time, ctx, &mut self.input);
+                    module_manger.on_update();
+
                     let t1 = Instant::now();
                     self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
 
@@ -289,10 +265,8 @@ impl Engine {
                 _ => {}
             }
 
-            if let Some(event) = Event::from_winit(&event, &self.main_window) {
-                for module in self.modules.borrow().values() {
-                    module.borrow_mut().on_event(&event);
-                }
+            if let Some(event) = WSIEvent::from_winit(&event, &self.main_window) {
+                self.module_manager.borrow().on_wsi_event(&event);
             }
 
             self.app
