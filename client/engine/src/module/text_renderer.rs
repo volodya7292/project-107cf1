@@ -5,7 +5,7 @@ use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformD
 use crate::ecs::SceneObject;
 use crate::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::module::main_renderer::MainRenderer;
-use crate::module::ui_renderer::RectUniformData;
+use crate::module::ui::RectUniformData;
 use crate::module::EngineModule;
 use crate::{attributes_impl, uniform_struct_impl, EngineContext};
 use common::glm::{Mat4, U8Vec4, Vec2};

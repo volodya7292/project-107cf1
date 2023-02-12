@@ -1,7 +1,7 @@
 pub mod main_renderer;
 pub mod text_renderer;
+pub mod ui;
 pub mod ui_interaction_manager;
-pub mod ui_renderer;
 
 use crate::event::WSIEvent;
 use crate::utils::wsi::WSISize;

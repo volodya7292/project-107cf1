@@ -19,7 +19,6 @@ pub mod component;
 mod helpers;
 pub mod material;
 pub(crate) mod resources;
-pub mod ui;
 
 // Notes
 // --------------------------------------------

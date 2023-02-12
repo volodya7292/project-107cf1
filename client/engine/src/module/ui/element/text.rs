@@ -3,10 +3,10 @@ use crate::ecs::component::simple_text::StyledString;
 use crate::ecs::component::ui::{UIEventHandlerC, UIEventHandlerI, UILayoutC};
 use crate::ecs::component::SimpleTextC;
 use crate::ecs::{EntityAccess, SceneAccess};
-use crate::module::main_renderer::ui::management::UIState;
 use crate::module::text_renderer;
 use crate::module::text_renderer::TextRenderer;
-use crate::module::ui_renderer::UIObject;
+use crate::module::ui::management::UIState;
+use crate::module::ui::UIObject;
 use entity_data::EntityId;
 
 pub type UIText = UIObject<SimpleTextC>;
@@ -32,6 +32,10 @@ impl UIEventHandlerI for UIText {
 
     fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {
         println!("HOVER EXIT");
+    }
+
+    fn on_click(_: &EntityId, _: &mut SceneAccess) {
+        println!("ON CLICK");
     }
 }
 

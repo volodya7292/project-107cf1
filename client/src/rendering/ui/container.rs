@@ -1,4 +1,4 @@
-use engine::module::ui_renderer::UIObject;
+use engine::module::ui::UIObject;
 
 struct State {}
 

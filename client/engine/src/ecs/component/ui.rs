@@ -262,13 +262,19 @@ type BasicEventCallback = fn(entity: &EntityId, scene: &mut SceneAccess);
 
 #[derive(Copy, Clone)]
 pub struct UIEventHandlerC {
-    pub on_hover_enter: BasicEventCallback,
-    pub on_hover_exit: BasicEventCallback,
+    pub on_cursor_enter: BasicEventCallback,
+    pub on_cursor_leave: BasicEventCallback,
+    pub on_mouse_press: BasicEventCallback,
+    pub on_mouse_release: BasicEventCallback,
+    pub on_click: BasicEventCallback,
 }
 
 pub trait UIEventHandlerI {
     fn on_hover_enter(_: &EntityId, _: &mut SceneAccess) {}
     fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {}
+    fn on_mouse_press(_: &EntityId, _: &mut SceneAccess) {}
+    fn on_mouse_release(_: &EntityId, _: &mut SceneAccess) {}
+    fn on_click(_: &EntityId, _: &mut SceneAccess) {}
 }
 
 impl UIEventHandlerI for () {}
@@ -276,8 +282,11 @@ impl UIEventHandlerI for () {}
 impl UIEventHandlerC {
     pub fn new<I: UIEventHandlerI>() -> Self {
         Self {
-            on_hover_enter: I::on_hover_enter,
-            on_hover_exit: I::on_hover_exit,
+            on_cursor_enter: I::on_hover_enter,
+            on_cursor_leave: I::on_hover_exit,
+            on_mouse_press: I::on_mouse_press,
+            on_mouse_release: I::on_mouse_release,
+            on_click: I::on_click,
         }
     }
 }

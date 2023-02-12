@@ -34,6 +34,10 @@ impl WSIEvent {
             WWindowEvent::CursorMoved { position, .. } => WSIEvent::CursorMoved {
                 position: WSIPosition::<f32>::from_winit((position.x as f32, position.y as f32), window),
             },
+            WWindowEvent::MouseInput { state, button, .. } => WSIEvent::MouseInput {
+                state: *state,
+                button: *button,
+            },
             _ => return None,
         };
 

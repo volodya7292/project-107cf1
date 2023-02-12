@@ -1,3 +1,6 @@
+pub mod element;
+pub mod management;
+
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
     Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UIEventHandlerC,
@@ -6,7 +9,7 @@ use crate::ecs::component::ui::{
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::{SceneAccess, SceneObject};
 use crate::event::WSIEvent;
-use crate::module::main_renderer::ui::management::UIState;
+use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::utils::wsi::WSISize;
 use crate::utils::U8SliceHelper;
