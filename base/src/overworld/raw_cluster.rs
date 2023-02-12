@@ -1,11 +1,3 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-
-use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
-use glm::I32Vec3;
-use nalgebra_glm as glm;
-use nalgebra_glm::TVec3;
-
 use crate::overworld::block::BlockState;
 use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::facing::Facing;
@@ -14,6 +6,12 @@ use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::position::ClusterBlockPos;
 use crate::registry::Registry;
+use common::glm;
+use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
+use glm::I32Vec3;
+use glm::TVec3;
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 pub const N_PARTS: usize = 27; // 1 (center) + 6 sides + 12 edges + 8 corners
 

@@ -1,13 +1,10 @@
-use std::ops::Range;
-
-use approx::AbsDiffEq;
-use glm::BVec3;
-use nalgebra_glm as glm;
-use nalgebra_glm::Vec3;
-
 use crate::overworld::facing::Facing;
 use crate::overworld::occluder::Occluder;
 use crate::physics::aabb::AABB;
+use approx::AbsDiffEq;
+use common::glm;
+use glm::{BVec3, Vec3};
+use std::ops::Range;
 
 const EQUITY_EPSILON: f32 = 1e-6;
 

@@ -1,7 +1,6 @@
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3};
-
 use aabb::AABB;
+use common::glm;
+use common::glm::{DVec3, I64Vec3};
 
 use crate::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use crate::overworld::position::BlockPos;

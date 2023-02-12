@@ -1,6 +1,6 @@
+use common::glm;
+use glm::{I32Vec3, Vec3};
 use std::mem;
-
-use nalgebra_glm::{I32Vec3, Vec3};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

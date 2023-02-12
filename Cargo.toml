@@ -1,49 +1,15 @@
-[package]
-name = "project-107cf1"
-version = "0.1.0"
-authors = ["a7292969 <a7292969@gmail.com>"]
-edition = "2021"
-
 [workspace]
 members = [
     "common",
     "base",
-    "base/macos",
-    "engine",
-    "engine/vk-wrapper",
-    "engine/vk-wrapper/vma",
-    "engine/msdfgen",
-    "engine/shader_ids",
+    "common/macos",
+    "client/engine",
+    "client/engine/vk-wrapper",
+    "client/engine/vk-wrapper/vma",
+    "client/engine/msdfgen",
+    "client/engine/shader_ids",
     "client",
 ]
-
-[dependencies]
-engine = { path = "engine" }
-vk-wrapper = { path = "engine/vk-wrapper" }
-base = { path = "base" }
-log = "0.4"
-simple_logger = "4.0"
-nalgebra = "0.32"
-nalgebra-glm = "0.18"
-image = { version = "0.24", default-features = false, features = ["png"] }
-rayon = "1.6"
-crossbeam-channel = "0.5"
-noise = { version = "0.8", default-features = false }
-rand = "0.8"
-rand_distr = "0.4"
-winit = "0.28"
-approx = "0.5"
-entity_data = "1.9"
-#entity_data = { path = "../entity_data"}
-smallvec = "1.6"
-bit-vec = "0.6"
-fixedbitset = "0.4"
-lazy_static = "1.4"
-parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision", "deadlock_detection"] }
-once_cell = "1.13"
-
-[build-dependencies]
-common = { path = "common" }
 
 [profile.dev.package."*"]
 opt-level = 2

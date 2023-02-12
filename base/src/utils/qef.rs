@@ -1,8 +1,7 @@
 // Quadratic error function
 
+use common::nalgebra as na;
 use std::ops::AddAssign;
-
-use nalgebra as na;
 
 const SVD_NUM_SWEEPS: u32 = 5;
 const PSEUDO_INVERSE_THRESHOLD: f32 = 0.001;

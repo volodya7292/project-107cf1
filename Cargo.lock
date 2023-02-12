@@ -185,32 +185,19 @@ dependencies = [
 name = "base"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "approx",
- "async-channel",
- "async-executor",
  "bit-vec",
  "bumpalo",
- "byteorder",
- "crossbeam-channel",
+ "common",
  "entity_data",
  "fixedbitset",
- "futures-lite",
  "image",
- "indexmap",
  "lazy_static",
- "log",
- "macos",
- "moka",
- "nalgebra",
- "nalgebra-glm",
  "noise",
  "once_cell",
- "parking_lot",
  "rand 0.8.5",
  "rand_distr",
  "rand_xoshiro",
- "rayon",
  "replace_with",
  "rstar",
  "smallvec",
@@ -458,10 +445,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "client"
-version = "0.1.0"
-
-[[package]]
 name = "cocoa"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -523,9 +506,23 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "ahash",
+ "async-channel",
+ "async-executor",
  "bincode",
  "byteorder",
+ "crossbeam-channel",
+ "entity_data",
+ "futures-lite",
  "glob",
+ "indexmap",
+ "log",
+ "macos",
+ "moka",
+ "nalgebra",
+ "nalgebra-glm",
+ "parking_lot",
+ "rayon",
  "serde",
  "serde_yaml",
 ]
@@ -719,24 +716,17 @@ checksum = "7fcaabb2fef8c910e7f4c7ce9f67a1283a1715879a7c230ca9d6d1ae31f16d91"
 name = "engine"
 version = "0.1.0"
 dependencies = [
- "base",
  "basis-universal",
  "bitvec",
  "bumpalo",
  "common",
  "core-graphics",
- "crossbeam-channel",
  "entity_data",
  "fixedbitset",
  "index-pool",
  "lazy_static",
- "log",
  "memoffset 0.8.0",
  "msdfgen",
- "nalgebra",
- "nalgebra-glm",
- "parking_lot",
- "rayon",
  "rusttype",
  "shader_ids",
  "smallvec",
@@ -1095,7 +1085,7 @@ dependencies = [
 name = "macos"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.63.0",
+ "bindgen 0.64.0",
 ]
 
 [[package]]
@@ -1187,9 +1177,9 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.9.6"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b49a05f67020456541f4f29cbaa812016a266a86ec76f96d3873d459c68fe5e"
+checksum = "2b6446f16d504e3d575df79cabb11bfbe9f24b17e9562d964a815db7b28ae3ec"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-epoch",
@@ -1617,25 +1607,17 @@ dependencies = [
  "base",
  "bit-vec",
  "common",
- "crossbeam-channel",
  "engine",
  "entity_data",
  "fixedbitset",
  "image",
  "lazy_static",
- "log",
- "nalgebra",
- "nalgebra-glm",
  "noise",
  "once_cell",
- "parking_lot",
  "rand 0.8.5",
  "rand_distr",
- "rayon",
  "simple_logger",
  "smallvec",
- "vk-wrapper",
- "winit",
 ]
 
 [[package]]
@@ -2427,12 +2409,10 @@ checksum = "7b60dcd6a64dd45abf9bd426970c9843726da7fc08f44cd6fcebf68c21220a63"
 name = "vk-wrapper"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "ash",
+ "common",
  "fixedbitset",
  "lazy_static",
- "log",
- "parking_lot",
  "raw-window-handle",
  "raw-window-metal",
  "smallvec",

@@ -4,8 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 glob = "0.3"
 byteorder = "1.4"
-bincode = { version = "2.0.0-rc.1", features = ["serde"]}
+bincode = { version = "2.0.0-rc.2", features = ["serde"] }
+entity_data = "1.9"
+indexmap = "1.9"
+moka = "0.10"
+ahash = "0.8"
+parking_lot = { version = "0.12", features = ["arc_lock", "hardware-lock-elision", "deadlock_detection"] }
+rayon = "1.6"
+nalgebra = "0.32"
+nalgebra-glm = "0.18"
+crossbeam-channel = "0.5"
+async-executor = "1.5"
+async-channel = "1.8"
+futures-lite = "1.12"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+macos = { path = "../common/macos" }

@@ -1,5 +1,5 @@
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec3, I64Vec3, TVec3};
+use common::glm;
+use glm::{DVec3, I32Vec3, I64Vec3, TVec3};
 
 use crate::overworld::raw_cluster::RawCluster;
 

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use common::glm;
 use entity_data::Archetype;
-use nalgebra_glm::{DVec3, U64Vec3, Vec3};
+use glm::{DVec3, U64Vec3, Vec3};
 
 use crate::overworld::block::{BlockBuilder, BlockState};
 use crate::overworld::block_model::BlockModel;

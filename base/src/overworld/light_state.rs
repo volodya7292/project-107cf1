@@ -1,4 +1,5 @@
-use nalgebra_glm::{U8Vec3, Vec3};
+use common::glm;
+use glm::{U8Vec3, Vec3};
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
 pub struct LightState(u16);

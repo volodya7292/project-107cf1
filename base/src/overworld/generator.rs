@@ -1,25 +1,19 @@
+use crate::main_registry::MainRegistry;
+use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::raw_cluster::RawCluster;
+use crate::overworld::structure::{Structure, StructuresIter};
+use crate::utils::white_noise::WhiteNoise;
+use bit_vec::BitVec;
+use common::glm::I64Vec3;
+use common::types::ConcurrentCache;
+use common::types::ConcurrentCacheImpl;
+use common::types::UInt;
+use once_cell::sync::OnceCell;
+use rand::Rng;
+use rand_distr::num_traits::Zero;
 use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::Arc;
-
-use bit_vec::BitVec;
-use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I64Vec3, U32Vec3};
-use noise::Seedable;
-use once_cell::sync::OnceCell;
-use parking_lot::RwLock;
-use rand::Rng;
-use rand_distr::num_traits::Zero;
-
-use crate::main_registry::MainRegistry;
-use crate::overworld::position::{BlockPos, ClusterPos};
-use crate::overworld::raw_cluster;
-use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::structure::world::WorldState;
-use crate::overworld::structure::{Structure, StructuresIter};
-use crate::utils::noise::HybridNoise;
-use crate::utils::white_noise::WhiteNoise;
-use crate::utils::{ConcurrentCache, ConcurrentCacheImpl, UInt};
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 

@@ -1,19 +1,17 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-
-use bit_vec::BitVec;
-use nalgebra_glm as glm;
-use nalgebra_glm::{I64Vec3, U64Vec3};
-use once_cell::sync::OnceCell;
+pub mod world;
 
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
 use crate::overworld::{raw_cluster, Overworld};
-use crate::utils::UInt;
-
-pub mod world;
+use bit_vec::BitVec;
+use common::glm;
+use common::glm::{I64Vec3, U64Vec3};
+use common::types::UInt;
+use once_cell::sync::OnceCell;
+use std::collections::VecDeque;
+use std::sync::Arc;
 
 /// Returns whether the structure can be generated at specified center position.
 pub type GenPosCheckFn =

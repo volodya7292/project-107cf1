@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use nalgebra::SVector;
+use common::nalgebra::SVector;
 use noise::{NoiseFn, Seedable};
 
 pub struct HybridNoise<const D: usize, const OCTAVES: usize, N: NoiseFn<f64, D>> {

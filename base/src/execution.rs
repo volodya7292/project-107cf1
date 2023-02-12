@@ -1,12 +1,9 @@
+use common::futures_lite::future;
+use common::threading::{SafeThreadPool, TaskPriority};
+use common::{async_executor, threading};
+use once_cell::sync::OnceCell;
 use std::future::Future;
 use std::sync::Arc;
-
-use futures_lite::future;
-use once_cell::sync::OnceCell;
-use rayon::ThreadPool;
-
-use crate::utils::threading;
-use crate::utils::threading::{SafeThreadPool, TaskPriority};
 
 static DEFAULT_THREAD_POOL: OnceCell<SafeThreadPool> = OnceCell::new();
 static COROUTINE_EXECUTOR: OnceCell<Arc<async_executor::Executor<'static>>> = OnceCell::new();

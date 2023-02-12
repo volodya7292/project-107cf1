@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use crate::overworld;
 use crate::overworld::block::{Block, BlockBuilder};
 use crate::overworld::block_model::BlockModel;
@@ -7,8 +5,9 @@ use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::{BlockData, CellInfo};
 use crate::overworld::structure::world::{biome, Biome};
 use crate::overworld::structure::Structure;
-use crate::utils::resource_file::ResourceRef;
-use crate::utils::HashMap;
+use common::resource_file::ResourceRef;
+use common::types::HashMap;
+use std::convert::TryInto;
 
 pub struct Registry {
     structures: Vec<Structure>,

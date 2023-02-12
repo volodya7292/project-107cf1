@@ -1,4 +1,4 @@
-use nalgebra_glm::{DVec3, I32Vec3};
+use common::glm::{DVec3, I32Vec3};
 
 use crate::overworld::facing::Facing;
 use crate::physics::MOTION_EPSILON;

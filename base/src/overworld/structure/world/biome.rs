@@ -1,7 +1,5 @@
 use std::ops::RangeInclusive;
 
-use nalgebra_glm::Vec3;
-
 /// Degrees Celsius
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum MeanTemperature {
