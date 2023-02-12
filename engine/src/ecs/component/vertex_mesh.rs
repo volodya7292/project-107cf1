@@ -1,4 +1,4 @@
-use crate::renderer::vertex_mesh::RawVertexMesh;
+use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
 use std::sync::Arc;
 
 #[derive(Default)]

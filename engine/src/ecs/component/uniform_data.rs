@@ -1,5 +1,4 @@
 use crate::utils::U8SliceHelper;
-use smallvec::SmallVec;
 use std::mem;
 
 pub const BASIC_UNIFORM_BLOCK_MAX_SIZE: usize = 256;

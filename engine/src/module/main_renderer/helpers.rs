@@ -1,11 +1,9 @@
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
-use crate::renderer::{
-    BufferUpdate, MaterialInfo, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS, N_MAX_MATERIALS,
-    PIPELINE_COLOR, PIPELINE_COLOR_WITH_BLENDING, PIPELINE_DEPTH_WRITE, PIPELINE_OVERLAY,
-    PIPELINE_TRANSLUCENCY_DEPTHS,
+use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
+use crate::module::main_renderer::{
+    BufferUpdate, MainRenderer, MaterialInfo, PipelineKind, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS,
+    N_MAX_MATERIALS,
 };
-use crate::Renderer;
 use base::utils::resource_file::ResourceRef;
 use basis_universal::TranscodeParameters;
 use smallvec::SmallVec;
@@ -13,7 +11,7 @@ use std::mem;
 use std::sync::Arc;
 use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
 
-impl Renderer {
+impl MainRenderer {
     pub fn load_texture_into_atlas(
         &mut self,
         texture_index: u32,
@@ -126,7 +124,7 @@ impl Renderer {
         let albedo_attachment_id = 0;
 
         pipeline_set.prepare_pipeline(
-            PIPELINE_DEPTH_WRITE,
+            PipelineKind::DepthWrite as u32,
             &PipelineConfig {
                 render_pass: &self.res.depth_render_pass,
                 signature: &depth_signature,
@@ -138,7 +136,7 @@ impl Renderer {
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_TRANSLUCENCY_DEPTHS,
+            PipelineKind::TranslucencyDepths as u32,
             &PipelineConfig {
                 render_pass: &self.res.depth_render_pass,
                 signature: &translucency_depth_signature,
@@ -150,7 +148,7 @@ impl Renderer {
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR,
+            PipelineKind::Color as u32,
             &PipelineConfig {
                 render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
@@ -162,7 +160,7 @@ impl Renderer {
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_COLOR_WITH_BLENDING,
+            PipelineKind::ColorWithBlending as u32,
             &PipelineConfig {
                 render_pass: &self.res.g_render_pass,
                 signature: &main_signature,
@@ -174,7 +172,7 @@ impl Renderer {
             },
         );
         pipeline_set.prepare_pipeline(
-            PIPELINE_OVERLAY,
+            PipelineKind::Overlay as u32,
             &PipelineConfig {
                 render_pass: &self.res.g_render_pass,
                 signature: &main_signature,

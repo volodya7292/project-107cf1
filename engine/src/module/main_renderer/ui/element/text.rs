@@ -1,13 +1,13 @@
-use crate::ecs::component::event_handler::EventHandlerI;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::StyledString;
 use crate::ecs::component::ui::{UIEventHandlerC, UIEventHandlerI, UILayoutC};
-use crate::ecs::component::{EventHandlerC, SimpleTextC};
+use crate::ecs::component::SimpleTextC;
 use crate::ecs::{EntityAccess, SceneAccess};
-use crate::renderer::module::text_renderer;
-use crate::renderer::module::text_renderer::TextRenderer;
-use crate::renderer::module::ui_renderer::{UIObject, UIState};
-use crate::renderer::{RendererContext, RendererContextI};
+use crate::module::main_renderer::ui::management::UIState;
+use crate::module::text_renderer;
+use crate::module::text_renderer::TextRenderer;
+use crate::module::ui_renderer::UIObject;
+use crate::EngineContext;
 use entity_data::EntityId;
 
 pub type UIText = UIObject<SimpleTextC>;
@@ -27,11 +27,11 @@ impl UIText {
 }
 
 impl UIEventHandlerI for UIText {
-    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess<RendererContext>) {
+    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess) {
         println!("HOVER ENTER");
     }
 
-    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess<RendererContext>) {
+    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {
         println!("HOVER EXIT");
     }
 }
@@ -43,14 +43,14 @@ pub trait TextState {
     fn set_text(&mut self, text: StyledString);
 }
 
-impl<'a> TextState for EntityAccess<'a, RendererContext<'_>, UIText> {
+impl<'a> TextState for EntityAccess<'a, UIText> {
     fn get_text(&self) -> &StyledString {
         &self.get::<SimpleTextC>().text
     }
 
     fn set_text(&mut self, text: StyledString) {
-        let mut ctx = self.context_mut();
-        let text_renderer = ctx.module_mut::<TextRenderer>().unwrap();
+        let ctx = self.context();
+        let text_renderer = ctx.module_mut::<TextRenderer>();
         let size = text_renderer.calculate_minimum_text_size(&text);
 
         self.modify(move |mut access| {

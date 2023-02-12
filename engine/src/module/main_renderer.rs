@@ -15,9 +15,9 @@ pub mod material_pipeline;
 #[macro_use]
 pub mod vertex_mesh;
 pub mod camera;
+pub mod component;
 mod helpers;
 pub mod material;
-pub mod module;
 pub(crate) mod resources;
 pub mod ui;
 
@@ -35,40 +35,37 @@ pub mod ui;
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
+use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 pub use crate::ecs::dirty_components::DirtyComponents;
-use crate::ecs::{system, SceneAccess};
-use crate::event::Event;
-use crate::renderer::camera::OrthoCamera;
-use crate::renderer::material::MatComponent;
-use crate::renderer::module::RendererModule;
-pub(crate) use crate::renderer::resources::RendererResources;
-use crate::renderer::resources::{CullObject, GENERAL_OBJECT_DESCRIPTOR_IDX};
-use crate::utils::wsi::WSISize;
-use base::scene;
+use crate::ecs::{system, SceneObject, N_MAX_OBJECTS};
+use crate::module::main_renderer::camera::OrthoCamera;
+use crate::module::main_renderer::material::MatComponent;
+use crate::module::main_renderer::resources::{CullObject, RendererResources, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::module::EngineModule;
+use crate::utils::wsi::{real_window_size, WSISize};
+use crate::EngineContext;
 use base::scene::relation::Relation;
 use base::utils::HashMap;
 use basis_universal::TranscoderTextureFormat;
 use camera::{Frustum, PerspectiveCamera};
-use entity_data::{Archetype, EntityId, EntityStorage, StaticArchetype, System, SystemAccess, SystemHandler};
+use entity_data::{Archetype, EntityId, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
-pub use module::text_renderer::FontSet;
 use nalgebra::{Matrix4, Vector4};
 use nalgebra_glm as glm;
-use nalgebra_glm::{DVec3, I32Vec2, Mat4, U32Vec2, U32Vec4, UVec2, Vec2, Vec3, Vec4};
+use nalgebra_glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec2, Vec3, Vec4};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::any::TypeId;
-use std::cell::{RefCell, RefMut};
+use std::any::Any;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{fs, iter, mem, slice};
 use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
 use vertex_mesh::VertexMeshCmdList;
+use vk_wrapper as vkw;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
@@ -127,11 +124,11 @@ impl Display for RendererTimings {
     }
 }
 
-pub struct Renderer {
-    storage: EntityStorage,
-    dirty_comps: RefCell<DirtyComponents>,
+pub type UpdateHandler = dyn Fn() -> Option<Arc<Mutex<CmdList>>>;
+
+pub struct MainRenderer {
+    ctx: EngineContext,
     root_entity: EntityId,
-    object_count: u32,
 
     active_camera: PerspectiveCamera,
     overlay_camera: OrthoCamera,
@@ -143,6 +140,7 @@ pub struct Renderer {
     surface_changed: bool,
     surface_size: U32Vec2,
     settings: Settings,
+    last_frame_ts: Instant,
     device: Arc<Device>,
 
     staging_buffer: HostBuffer<u8>,
@@ -181,29 +179,7 @@ pub struct Renderer {
     ordered_entities: Vec<EntityId>,
 
     res: RendererResources,
-    modules: HashMap<TypeId, RefCell<Box<dyn RendererModule>>>,
-}
-
-pub trait RendererContextI {
-    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>>;
-
-    fn module_mut<M: RendererModule + Send + Sync + 'static>(&self) -> Option<RefMut<M>> {
-        let module = self.modules().get(&TypeId::of::<M>())?;
-
-        Some(RefMut::map(module.borrow_mut(), |v| {
-            v.as_any_mut().downcast_mut::<M>().unwrap()
-        }))
-    }
-}
-
-pub struct RendererContext<'a> {
-    modules: &'a HashMap<TypeId, RefCell<Box<dyn RendererModule>>>,
-}
-
-impl RendererContextI for RendererContext<'_> {
-    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>> {
-        self.modules
-    }
+    update_handlers: Vec<Box<UpdateHandler>>,
 }
 
 #[derive(Copy, Clone)]
@@ -354,18 +330,20 @@ pub(crate) enum BufferUpdate {
 
 pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 
-pub const N_MAX_OBJECTS: u32 = 65535;
 pub const N_MAX_MATERIALS: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
-const PIPELINE_DEPTH_WRITE: u32 = 0;
-const PIPELINE_TRANSLUCENCY_DEPTHS: u32 = 1;
-const PIPELINE_COLOR: u32 = 2;
-const PIPELINE_COLOR_WITH_BLENDING: u32 = 3;
-const PIPELINE_OVERLAY: u32 = 4;
+#[repr(u32)]
+pub enum PipelineKind {
+    DepthWrite,
+    TranslucencyDepths,
+    Color,
+    ColorWithBlending,
+    Overlay,
+}
 
 lazy_static! {
     static ref PIPELINE_CACHE_FILENAME: &'static str = if cfg!(debug_assertions) {
@@ -484,8 +462,6 @@ fn compose_descriptor_sets(
     v
 }
 
-pub trait SceneObject: StaticArchetype {}
-
 #[derive(Archetype)]
 pub struct VertexMeshObject {
     global_transform: GlobalTransformC,
@@ -519,32 +495,42 @@ pub struct SimpleObject {
 }
 
 impl SimpleObject {
-    pub fn new(transform: TransformC) -> Self {
+    pub fn new() -> Self {
         Self {
             global_transform: Default::default(),
             relation: Default::default(),
-            transform,
+            transform: Default::default(),
         }
     }
 }
 
 impl SceneObject for SimpleObject {}
 
-impl Renderer {
-    pub fn new(
-        surface: &Arc<Surface>,
-        size: WSISize<u32>,
+impl MainRenderer {
+    pub fn new<F: Fn(&[Arc<vkw::Adapter>]) -> usize>(
+        name: &str,
+        window: &Window,
         settings: Settings,
-        device: &Arc<Device>,
         max_texture_count: u32,
-    ) -> Renderer {
+        adapter_selector: F,
+        ctx: EngineContext,
+        root_entity: EntityId,
+    ) -> MainRenderer {
+        let vke = vkw::Entry::new().unwrap();
+        let instance = vke.create_instance(name, window).unwrap();
+        let surface = instance.create_surface(window).unwrap();
+        let adapters = instance.enumerate_adapters(Some(&surface)).unwrap();
+
+        let adapter_idx = adapter_selector(&adapters);
+        let adapter = &adapters[adapter_idx];
+        let device = adapter.create_device().unwrap();
+
+        let curr_size = real_window_size(window);
+
         // Load pipeline cache
         if let Ok(res) = fs::read(*PIPELINE_CACHE_FILENAME) {
             device.load_pipeline_cache(&res).unwrap();
         }
-
-        let mut storage = EntityStorage::new();
-        let root_entity = storage.add(SimpleObject::new(Default::default()));
 
         let active_camera = PerspectiveCamera::new(1.0, std::f32::consts::FRAC_PI_2, 0.1);
         let overlay_camera = OrthoCamera::new();
@@ -632,7 +618,7 @@ impl Renderer {
         // -----------------------------------------------------------------------------------------------------------------
         let depth_pyramid_compute = device
             .create_compute_shader(
-                include_bytes!("../shaders/build/depth_pyramid.comp.spv"),
+                include_bytes!("../../shaders/build/depth_pyramid.comp.spv"),
                 "depth_pyramid",
             )
             .unwrap();
@@ -644,7 +630,7 @@ impl Renderer {
         // Cull pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let cull_compute = device
-            .create_compute_shader(include_bytes!("../shaders/build/cull.comp.spv"), "cull")
+            .create_compute_shader(include_bytes!("../../shaders/build/cull.comp.spv"), "cull")
             .unwrap();
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
         let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
@@ -676,7 +662,7 @@ impl Renderer {
         // -----------------------------------------------------------------------------------------------------------------
         let translucency_depths_pixel_shader = device
             .create_pixel_shader(
-                include_bytes!("../shaders/build/translucency_closest_depths.frag.spv"),
+                include_bytes!("../../shaders/build/translucency_closest_depths.frag.spv"),
                 "translucency_closest_depths",
             )
             .unwrap();
@@ -684,11 +670,15 @@ impl Renderer {
         // Compose pipeline
         // -----------------------------------------------------------------------------------------------------------------
         let quad_vert_shader = device
-            .create_vertex_shader(include_bytes!("../shaders/build/quad.vert.spv"), &[], "quad.vert")
+            .create_vertex_shader(
+                include_bytes!("../../shaders/build/quad.vert.spv"),
+                &[],
+                "quad.vert",
+            )
             .unwrap();
         let compose_pixel_shader = device
             .create_pixel_shader(
-                include_bytes!("../shaders/build/compose.frag.spv"),
+                include_bytes!("../../shaders/build/compose.frag.spv"),
                 "compose.frag",
             )
             .unwrap();
@@ -851,7 +841,7 @@ impl Renderer {
         let texture_atlases = [
             // albedo
             texture_atlas::new(
-                device,
+                &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 tile_count,
@@ -860,7 +850,7 @@ impl Renderer {
             .unwrap(),
             // specular
             texture_atlas::new(
-                device,
+                &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 tile_count,
@@ -869,7 +859,7 @@ impl Renderer {
             .unwrap(),
             // emission
             texture_atlas::new(
-                device,
+                &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
                 tile_count,
@@ -878,7 +868,7 @@ impl Renderer {
             .unwrap(),
             // normal
             texture_atlas::new(
-                device,
+                &device,
                 Format::BC5_RG_UNORM,
                 settings.textures_mipmaps,
                 tile_count,
@@ -1013,21 +1003,20 @@ impl Renderer {
             renderables_to_destroy: Vec::with_capacity(1024),
         };
 
-        let mut renderer = Renderer {
-            storage,
+        let mut renderer = MainRenderer {
+            ctx,
             root_entity,
-            object_count: 0,
-            dirty_comps: Default::default(),
             active_camera,
             overlay_camera,
             camera_pos_pivot: Default::default(),
             relative_camera_pos: Default::default(),
-            surface: Arc::clone(surface),
+            surface,
             swapchain: None,
             surface_changed: false,
-            surface_size: glm::convert_unchecked(size.real()),
+            surface_size: glm::convert_unchecked(curr_size.real()),
             settings,
-            device: Arc::clone(device),
+            last_frame_ts: Instant::now(),
+            device,
             staging_buffer,
             transfer_cl,
             transfer_submit,
@@ -1052,9 +1041,9 @@ impl Renderer {
             vertex_mesh_pending_updates: HashMap::with_capacity(1024),
             ordered_entities: Vec::with_capacity(N_MAX_OBJECTS as usize),
             res: resources,
-            modules: Default::default(),
+            update_handlers: vec![],
         };
-        renderer.on_resize(size);
+        renderer.on_resize(curr_size);
 
         renderer
     }
@@ -1080,124 +1069,28 @@ impl Renderer {
         self.settings = settings;
     }
 
-    pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> Option<EntityId> {
-        if self.object_count >= N_MAX_OBJECTS {
-            if self.object_count > N_MAX_OBJECTS {
-                unreachable!()
-            }
-            return None;
-        }
-
-        let comp_ids = object.component_ids();
-        let entity = self.storage.add(object);
-
-        for id in comp_ids {
-            self.dirty_comps.get_mut().add_with_component_id(id, &entity)
-        }
-
-        let parent = parent.unwrap_or(self.root_entity);
-        Self::add_children(&self.storage.access(), parent, &[entity]);
-
-        self.object_count += 1;
-
-        if let Some(events) = self.storage.get::<EventHandlerC>(&entity) {
-            if let Some(on_added) = events.on_added {
-                on_added(&entity, self);
-            }
-        }
-
-        Some(entity)
-    }
-
-    fn on_object_remove(&mut self, id: &EntityId) {
-        // Free renderable resources if available
-        if let Some(renderable) = self.res.renderables.remove(id) {
-            self.res.renderables_to_destroy.push(renderable);
-        }
-
-        // Cache vertex mesh that's potentially being used in rendering
-        if let Some(mesh) = self.res.vertex_meshes.remove(id) {
-            self.res.vertex_meshes_to_destroy.push(mesh);
-        }
-
-        // Cache vertex meshes whose buffers is being transferring to the GPU
-        if let Some(pending_mesh) = self.vertex_mesh_pending_updates.remove(id) {
-            self.res.vertex_meshes_to_destroy.push(pending_mesh);
-        }
-
-        // New vertex mesh doesn't need to be uploaded to the GPU
-        self.vertex_mesh_updates.remove(id);
-
-        for module in self.modules.values_mut() {
-            let scene = SceneAccess::new(&mut self.storage, &self.dirty_comps, ());
-            module.borrow_mut().on_object_remove(id, scene);
-        }
-    }
-
-    // TODO CORE: move to base
-    pub fn add_children(access: &SystemAccess, parent: EntityId, children: &[EntityId]) {
-        let mut relation_comps = access.component_mut::<Relation>();
-
-        for child in children {
-            let relation = relation_comps
-                .get_mut(child)
-                .expect("child must have a Relation component");
-
-            if relation.parent != EntityId::NULL {
-                panic!("child already has a parent assigned");
-            }
-
-            relation.parent = parent;
-        }
-
-        let parent_relation = relation_comps
-            .get_mut(&parent)
-            .expect("parent must have Relation component");
-        parent_relation.children.extend(children);
-    }
-
-    // TODO CORE: move to base
-    /// Removes object and its children
-    pub fn remove_object(&mut self, id: &EntityId) {
-        let entities_to_remove = scene::collect_relation_tree(&self.storage.access(), id);
-
-        for entity in entities_to_remove {
-            // Remove the entity from its parent's child list
-            if let Some(relation) = self.storage.get::<Relation>(&entity) {
-                let parent = relation.parent;
-
-                if let Some(parent) = self.storage.get_mut::<Relation>(&parent) {
-                    parent.children.remove(&entity);
-                }
-            }
-
-            self.on_object_remove(&entity);
-            self.storage.remove(&entity);
-            self.object_count -= 1;
-        }
-    }
-
-    pub fn access(&mut self) -> SceneAccess<RendererContext> {
-        let ctx = RendererContext {
-            modules: &mut self.modules,
-        };
-        SceneAccess::new(&mut self.storage, &self.dirty_comps, ctx)
+    pub fn register_update_handler(&mut self, handler: Box<UpdateHandler>) {
+        self.update_handlers.push(handler);
     }
 
     fn on_update(&mut self) -> UpdateTimings {
         let mut timings = UpdateTimings::default();
         let total_t0 = Instant::now();
-        let camera = *self.active_camera();
 
+        let camera = *self.active_camera();
         let curr_rel_camera_pos = camera.position() - self.camera_pos_pivot;
 
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
         if curr_rel_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
-            let global_transform = self.storage.get_mut::<TransformC>(&self.root_entity).unwrap();
-            global_transform.position -= curr_rel_camera_pos;
-
-            self.dirty_comps.get_mut().add::<TransformC>(&self.root_entity);
+            self.ctx
+                .scene()
+                .object_raw(&self.root_entity)
+                .unwrap()
+                .modify(move |mut entry| {
+                    let global_transform = entry.get_mut::<TransformC>().unwrap();
+                    global_transform.position -= curr_rel_camera_pos;
+                });
 
             self.relative_camera_pos = Vec3::default();
             self.camera_pos_pivot = *camera.position();
@@ -1206,11 +1099,13 @@ impl Renderer {
         }
 
         // --------------------------------------------------------------------
+
         let mut update_cls = vec![];
 
-        for module in self.modules.values_mut() {
-            let scene = SceneAccess::new(&mut self.storage, &self.dirty_comps, ());
-            if let Some(cl) = module.borrow_mut().on_update(scene) {
+        // Call registered update handlers
+        for handler in &self.update_handlers {
+            let cl = handler();
+            if let Some(cl) = cl {
                 update_cls.push(cl);
             }
         }
@@ -1232,6 +1127,9 @@ impl Renderer {
 
         // --------------------------------------------------------------------
 
+        let mut storage = self.ctx.storage.borrow_mut();
+        let mut dirty_comps = self.ctx.dirty_comps.borrow_mut();
+
         let mut uniform_buffer_updates = BufferUpdate2 {
             buffer: self.res.uniform_buffer_basic.handle(),
             data: smallvec![],
@@ -1250,7 +1148,7 @@ impl Renderer {
         let mut renderer_events_system = system::RendererComponentEvents {
             device: &self.device,
             renderables: &mut self.res.renderables,
-            dirty_components: self.dirty_comps.get_mut().take_changes::<MeshRenderConfigC>(),
+            dirty_components: dirty_comps.take_changes::<MeshRenderConfigC>(),
             buffer_updates: &mut buffer_updates,
             material_pipelines: &mut self.res.material_pipelines,
             uniform_buffer_basic: &self.res.uniform_buffer_basic,
@@ -1258,19 +1156,19 @@ impl Renderer {
             run_time: 0.0,
         };
         let mut vertex_mesh_system = system::VertexMeshCompEvents {
-            dirty_components: self.dirty_comps.get_mut().take_changes::<VertexMeshC>(),
+            dirty_components: dirty_comps.take_changes::<VertexMeshC>(),
             buffer_updates: &mut self.vertex_mesh_updates,
             run_time: 0.0,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             root_entity: self.root_entity,
-            dirty_transform_comps: self.dirty_comps.get_mut().take_changes::<TransformC>(),
+            dirty_transform_comps: dirty_comps.take_changes::<TransformC>(),
             ordered_entities: &mut self.ordered_entities,
             changed_global_transforms: Vec::with_capacity(4096),
             run_time: 0.0,
         };
 
-        self.storage.dispatch_par([
+        storage.dispatch_par([
             System::new(&mut renderer_events_system).with_mut::<MeshRenderConfigC>(),
             System::new(&mut vertex_mesh_system).with_mut::<VertexMeshC>(),
             System::new(&mut hierarchy_propagation_system)
@@ -1284,7 +1182,7 @@ impl Renderer {
         timings.batch0_hierarchy_propag = hierarchy_propagation_system.run_time;
 
         for entity in &hierarchy_propagation_system.changed_global_transforms {
-            self.dirty_comps.get_mut().add::<GlobalTransformC>(entity);
+            dirty_comps.add::<GlobalTransformC>(entity);
         }
 
         let t11 = Instant::now();
@@ -1308,7 +1206,7 @@ impl Renderer {
         // Sort by distance to perform updates of the nearest vertex meshes first
         let mut sorted_buffer_updates_entities: Vec<_> = {
             // let transforms = self.scene.storage_read::<GlobalTransform>();
-            let access = self.storage.access();
+            let access = storage.access();
             let transforms = access.component::<GlobalTransformC>();
             self.vertex_mesh_updates
                 .keys()
@@ -1330,23 +1228,22 @@ impl Renderer {
         // --------------------------------------------------------------------------------------------------
 
         let mut global_transform_events_system = system::GlobalTransformEvents {
-            dirty_components: self.dirty_comps.get_mut().take_changes::<GlobalTransformC>(),
+            dirty_components: dirty_comps.take_changes::<GlobalTransformC>(),
             changed_uniforms: Default::default(),
             material_pipelines: &self.res.material_pipelines,
-            renderables: &self.res.renderables,
             run_time: 0.0,
         };
-        global_transform_events_system.run(self.storage.access());
+        global_transform_events_system.run(storage.access());
 
         for entity in &global_transform_events_system.changed_uniforms {
-            self.dirty_comps.get_mut().add::<UniformDataC>(entity);
+            dirty_comps.add::<UniformDataC>(entity);
         }
 
         // --------------------------------------------------------------------------------------------------
 
         let mut uniform_data_events_system = system::UniformDataCompEvents {
             uniform_buffer_updates: &mut uniform_buffer_updates,
-            dirty_components: self.dirty_comps.get_mut().take_changes::<UniformDataC>(),
+            dirty_components: dirty_comps.take_changes::<UniformDataC>(),
             renderables: &self.res.renderables,
             run_time: 0.0,
         };
@@ -1365,7 +1262,7 @@ impl Renderer {
             run_time: 0.0,
         };
 
-        self.storage.dispatch_par([
+        storage.dispatch_par([
             System::new(&mut uniform_data_events_system).with::<UniformDataC>(),
             System::new(&mut buffer_update_system),
             System::new(&mut commit_buffer_updates_system).with::<VertexMeshC>(),
@@ -1473,6 +1370,8 @@ impl Renderer {
 
         buffer_updates.push(BufferUpdate::Regions(uniform_buffer_updates));
 
+        drop(storage);
+        drop(dirty_comps);
         unsafe { self.update_device_buffers(&buffer_updates) };
 
         let t1 = Instant::now();
@@ -1487,6 +1386,9 @@ impl Renderer {
     }
 
     fn record_depth_cmd_lists(&mut self) -> u32 {
+        let storage = self.ctx.storage.borrow();
+        let storage = &*storage;
+
         let mat_pipelines = &self.res.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
@@ -1530,7 +1432,7 @@ impl Renderer {
                     }
 
                     let renderable_id = self.ordered_entities[entity_index];
-                    let entry = self.storage.entry(&renderable_id).unwrap();
+                    let entry = storage.entry(&renderable_id).unwrap();
 
                     let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
                         (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), self.res.vertex_meshes.get(&renderable_id)) else {
@@ -1564,9 +1466,9 @@ impl Renderer {
                     let renderable = &self.res.renderables[&renderable_id];
 
                     let (cl, pipeline_id) = if render_config.translucent {
-                        (&mut cl_trans, PIPELINE_TRANSLUCENCY_DEPTHS)
+                        (&mut cl_trans, PipelineKind::TranslucencyDepths as u32)
                     } else {
-                        (&mut cl_sol, PIPELINE_DEPTH_WRITE)
+                        (&mut cl_sol, PipelineKind::DepthWrite as u32)
                     };
                     let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
@@ -1604,7 +1506,7 @@ impl Renderer {
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.g_solid_secondary_cls.len() + 1;
 
-        let storage = &self.storage;
+        let storage = &*self.ctx.storage.borrow();
         let ordered_entities = &self.ordered_entities;
         let res = &self.res;
 
@@ -1653,9 +1555,9 @@ impl Renderer {
                     let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let (cl, pipeline_id) = if render_config.translucent {
                         consts.is_translucent_pass = 1;
-                        (&mut cl_trans, PIPELINE_COLOR_WITH_BLENDING)
+                        (&mut cl_trans, PipelineKind::ColorWithBlending as u32)
                     } else {
-                        (&mut cl_sol, PIPELINE_COLOR)
+                        (&mut cl_sol, PipelineKind::Color as u32)
                     };
                     let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
@@ -1691,6 +1593,7 @@ impl Renderer {
     }
 
     fn record_overlay_cmd_list(&self) {
+        let storage = &*self.ctx.storage.borrow();
         let mat_pipelines = &self.res.material_pipelines;
         let mut cl = self.overlay_secondary_cl.lock();
 
@@ -1698,7 +1601,7 @@ impl Renderer {
             .unwrap();
 
         for renderable_id in &self.ordered_entities {
-            let Some(render_config) = self.storage.get::<MeshRenderConfigC>(renderable_id) else {
+            let Some(render_config) = storage.get::<MeshRenderConfigC>(renderable_id) else {
                 continue;
             };
             if render_config.stage != RenderStage::OVERLAY {
@@ -1711,7 +1614,7 @@ impl Renderer {
             let renderable = self.res.renderables.get(renderable_id).unwrap();
 
             let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-            let pipeline = mat_pipeline.get_pipeline(PIPELINE_OVERLAY).unwrap();
+            let pipeline = mat_pipeline.get_pipeline(PipelineKind::Overlay as u32).unwrap();
             let signature = pipeline.signature();
             cl.bind_pipeline(pipeline);
 
@@ -2194,10 +2097,95 @@ impl Renderer {
             }
         }
 
+        let new_frame_ts = Instant::now();
+        let frame_delta = (new_frame_ts - self.last_frame_ts).as_secs_f64();
+
+        if let FPSLimit::Limit(limit) = self.settings.fps_limit {
+            let expected_dt = 1.0 / (limit as f64);
+            let to_wait = (expected_dt - frame_delta).max(0.0);
+            base::utils::high_precision_sleep(Duration::from_secs_f64(to_wait), Duration::from_micros(50));
+        }
+
         timings
     }
 
-    pub fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
+    fn create_output_framebuffers(&mut self) {
+        let images = self.swapchain.as_ref().unwrap().images();
+
+        self.sw_render_pass = Some(
+            self.device
+                .create_render_pass(
+                    &[Attachment {
+                        format: images[0].format(),
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::PRESENT,
+                        load_store: LoadStore::FinalSave,
+                    }],
+                    &[Subpass::new().with_color(vec![AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    }])],
+                    &[],
+                )
+                .unwrap(),
+        );
+
+        self.sw_framebuffers.clear();
+        for img in images {
+            self.sw_framebuffers.push(
+                self.sw_render_pass
+                    .as_ref()
+                    .unwrap()
+                    .create_framebuffer(
+                        images[0].size_2d(),
+                        &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
+                    )
+                    .unwrap(),
+            );
+        }
+
+        self.compose_pipeline = Some(
+            self.device
+                .create_graphics_pipeline(
+                    self.sw_render_pass.as_ref().unwrap(),
+                    0,
+                    PrimitiveTopology::TRIANGLE_LIST,
+                    Default::default(),
+                    Default::default(),
+                    &[],
+                    &self.compose_signature,
+                )
+                .unwrap(),
+        );
+    }
+}
+
+impl EngineModule for MainRenderer {
+    fn on_object_remove(&mut self, id: &EntityId) {
+        // Free renderable resources if available
+        if let Some(renderable) = self.res.renderables.remove(id) {
+            self.res.renderables_to_destroy.push(renderable);
+        }
+
+        // Cache vertex mesh that's potentially being used in rendering
+        if let Some(mesh) = self.res.vertex_meshes.remove(id) {
+            self.res.vertex_meshes_to_destroy.push(mesh);
+        }
+
+        // Cache vertex meshes whose buffers is being transferring to the GPU
+        if let Some(pending_mesh) = self.vertex_mesh_pending_updates.remove(id) {
+            self.res.vertex_meshes_to_destroy.push(pending_mesh);
+        }
+
+        // New vertex mesh doesn't need to be uploaded to the GPU
+        self.vertex_mesh_updates.remove(id);
+    }
+
+    fn on_update(&mut self) {
+        self.on_draw();
+    }
+
+    fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
         let new_size = new_wsi_size.real();
         let new_size = (new_size.x as u32, new_size.y as u32);
 
@@ -2438,85 +2426,18 @@ impl Renderer {
                 ],
             );
         }
-
-        for (_, module) in &mut self.modules {
-            module.borrow_mut().on_resize(new_wsi_size);
-        }
     }
 
-    fn create_output_framebuffers(&mut self) {
-        let images = self.swapchain.as_ref().unwrap().images();
-
-        self.sw_render_pass = Some(
-            self.device
-                .create_render_pass(
-                    &[Attachment {
-                        format: images[0].format(),
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::PRESENT,
-                        load_store: LoadStore::FinalSave,
-                    }],
-                    &[Subpass::new().with_color(vec![AttachmentRef {
-                        index: 0,
-                        layout: ImageLayout::COLOR_ATTACHMENT,
-                    }])],
-                    &[],
-                )
-                .unwrap(),
-        );
-
-        self.sw_framebuffers.clear();
-        for img in images {
-            self.sw_framebuffers.push(
-                self.sw_render_pass
-                    .as_ref()
-                    .unwrap()
-                    .create_framebuffer(
-                        images[0].size_2d(),
-                        &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
-                    )
-                    .unwrap(),
-            );
-        }
-
-        self.compose_pipeline = Some(
-            self.device
-                .create_graphics_pipeline(
-                    self.sw_render_pass.as_ref().unwrap(),
-                    0,
-                    PrimitiveTopology::TRIANGLE_LIST,
-                    Default::default(),
-                    Default::default(),
-                    &[],
-                    &self.compose_signature,
-                )
-                .unwrap(),
-        );
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
-    pub fn register_module<M: RendererModule + Send + Sync + 'static>(&mut self, module: M) {
-        self.modules
-            .insert(TypeId::of::<M>(), RefCell::new(Box::new(module)));
-    }
-
-    pub fn on_event(&mut self, event: &Event) {
-        for module in self.modules.values() {
-            let ctx = RendererContext {
-                modules: &self.modules,
-            };
-            let access = SceneAccess::new(&mut self.storage, &self.dirty_comps, ctx);
-            module.borrow_mut().on_event(access, event);
-        }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
-impl RendererContextI for Renderer {
-    fn modules(&self) -> &HashMap<TypeId, RefCell<Box<dyn RendererModule>>> {
-        &self.modules
-    }
-}
-
-impl Drop for Renderer {
+impl Drop for MainRenderer {
     fn drop(&mut self) {
         // Safe pipeline cache
         let pl_cache = self.device.get_pipeline_cache().unwrap();

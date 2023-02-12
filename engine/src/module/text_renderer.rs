@@ -2,12 +2,12 @@ use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
-use crate::ecs::SceneAccess;
-use crate::renderer::module::ui_renderer::RectUniformData;
-use crate::renderer::module::RendererModule;
-use crate::renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
-use crate::renderer::SceneObject;
-use crate::{HashSet, Renderer};
+use crate::ecs::SceneObject;
+use crate::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
+use crate::module::main_renderer::MainRenderer;
+use crate::module::ui_renderer::RectUniformData;
+use crate::module::EngineModule;
+use crate::{attributes_impl, uniform_struct_impl, EngineContext, HashSet};
 use base::scene::relation::Relation;
 use base::utils::unsafe_slice::UnsafeSlice;
 use base::utils::HashMap;
@@ -510,11 +510,12 @@ impl TextObject {
 impl SceneObject for TextObject {}
 
 impl TextRenderer {
-    pub(crate) fn new(renderer: &mut Renderer) -> Self {
+    pub fn new(ctx: EngineContext) -> Self {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
         let device = Arc::clone(renderer.device());
         let vertex_shader = device
             .create_vertex_shader(
-                include_bytes!("../../../shaders/build/text_char.vert.spv"),
+                include_bytes!("../../shaders/build/text_char.vert.spv"),
                 &[
                     ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
                     ("inGlyphSize", Format::RG32_FLOAT, VInputRate::INSTANCE),
@@ -527,7 +528,7 @@ impl TextRenderer {
             .unwrap();
         let pixel_shader = device
             .create_pixel_shader(
-                include_bytes!("../../../shaders/build/text_char.frag.spv"),
+                include_bytes!("../../shaders/build/text_char.frag.spv"),
                 "text_char.frag",
             )
             .unwrap();
@@ -609,7 +610,7 @@ impl TextRenderer {
             .unwrap();
 
         let fallback_font =
-            FontSet::from_bytes(include_bytes!("../../../fallback-font.ttf").to_vec(), None).unwrap();
+            FontSet::from_bytes(include_bytes!("../../fallback-font.ttf").to_vec(), None).unwrap();
 
         let mut char_locations = HashMap::with_capacity(size3d.2 as usize);
         let mut char_locations_rev = HashMap::with_capacity(size3d.2 as usize);
@@ -631,6 +632,14 @@ impl TextRenderer {
             chars_to_load.insert(g_uid);
             g_uid
         };
+
+        {
+            let ctx = ctx.clone();
+            renderer.register_update_handler(Box::new(move || {
+                let mut text_renderer = ctx.module_mut::<Self>();
+                Self::on_render_update(&mut text_renderer, ctx.clone())
+            }));
+        }
 
         Self {
             device,
@@ -728,18 +737,12 @@ impl TextRenderer {
         let (_, size) = layout_glyphs(&self.allocator, seq, TextHAlign::LEFT, false, 0.0, 0.0, false);
         size * seq.style().font_size()
     }
-}
 
-impl RendererModule for TextRenderer {
-    fn on_object_remove(&mut self, id: &EntityId, _scene: SceneAccess<()>) {
-        if let Some(seq) = self.allocated_sequences.remove(id) {
-            self.sequences_to_destroy.push(seq);
-        }
-    }
+    fn on_render_update(&mut self, ctx: EngineContext) -> Option<Arc<Mutex<CmdList>>> {
+        let mut scene = ctx.scene();
 
-    fn on_update(&mut self, mut scene: SceneAccess<()>) -> Option<Arc<Mutex<CmdList>>> {
         let unit_scale = rusttype::Scale::uniform(1.0);
-        let dirty_texts = scene.dirty_components.borrow_mut().take_changes::<SimpleTextC>();
+        let dirty_texts = ctx.dirty_comps.borrow_mut().take_changes::<SimpleTextC>();
 
         for seq in self.sequences_to_destroy.drain(..) {
             self.allocator.free(&seq.glyphs);
@@ -834,6 +837,14 @@ impl RendererModule for TextRenderer {
         drop(cl);
 
         Some(staging_cl)
+    }
+}
+
+impl EngineModule for TextRenderer {
+    fn on_object_remove(&mut self, id: &EntityId) {
+        if let Some(seq) = self.allocated_sequences.remove(id) {
+            self.sequences_to_destroy.push(seq);
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

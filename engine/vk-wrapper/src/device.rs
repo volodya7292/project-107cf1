@@ -591,7 +591,7 @@ impl Device {
     pub fn create_swapchain(
         self: &Arc<Self>,
         surface: &Arc<Surface>,
-        size: (u32, u32),
+        preferred_size: (u32, u32),
         vsync: bool,
         preferred_n_images: u32,
         old_swapchain: Option<Swapchain>,
@@ -614,13 +614,15 @@ impl Device {
             ));
         }
 
-        // TODO: HDR metadata
+        // TODO: use surface_capabs.current_extend as size and preferred_size as backup
 
         let size = (
-            size.0
+            preferred_size
+                .0
                 .min(surface_capabs.max_image_extent.width)
                 .max(surface_capabs.min_image_extent.width),
-            size.1
+            preferred_size
+                .1
                 .min(surface_capabs.max_image_extent.height)
                 .max(surface_capabs.min_image_extent.height),
         );

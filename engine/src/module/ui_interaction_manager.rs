@@ -1,42 +1,41 @@
 use crate::ecs::component::ui::UIEventHandlerC;
-use crate::ecs::SceneAccess;
 use crate::event::{Event, WindowEvent};
-use crate::renderer::module::ui_renderer::UIRenderer;
-use crate::renderer::module::RendererModule;
-use crate::renderer::{RendererContext, RendererContextI};
+use crate::module::ui_renderer::UIRenderer;
+use crate::module::EngineModule;
+use crate::EngineContext;
 use entity_data::EntityId;
 use std::any::Any;
-use std::rc::Rc;
 
 pub struct UIInteractionManager {
+    ctx: EngineContext,
     global_event_handler: UIEventHandlerC,
     curr_hover_entity: EntityId,
 }
 
 impl UIInteractionManager {
-    pub fn new() -> Self {
+    pub fn new(ctx: EngineContext) -> Self {
         Self {
+            ctx,
             global_event_handler: Default::default(),
             curr_hover_entity: EntityId::NULL,
         }
     }
 }
 
-impl RendererModule for UIInteractionManager {
-    fn on_object_remove(&mut self, id: &EntityId, _scene: SceneAccess<()>) {
+impl EngineModule for UIInteractionManager {
+    fn on_object_remove(&mut self, id: &EntityId) {
         if id == &self.curr_hover_entity {
             self.curr_hover_entity = EntityId::NULL;
         }
     }
 
-    fn on_event(&mut self, mut scene: SceneAccess<RendererContext>, event: &Event) {
+    fn on_event(&mut self, event: &Event) {
         let Event::WindowEvent { event: win_event, .. } = event else {
             return;
         };
 
-        let ctx = Rc::clone(&scene.context);
-        let mut ctx = ctx.borrow();
-        let ui_renderer = ctx.module_mut::<UIRenderer>().unwrap();
+        let mut scene = self.ctx.scene();
+        let ui_renderer = self.ctx.module_mut::<UIRenderer>();
 
         match win_event {
             WindowEvent::CursorMoved { position, .. } => {

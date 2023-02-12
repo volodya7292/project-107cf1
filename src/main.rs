@@ -1,12 +1,3 @@
-use std::thread;
-use std::time::{Duration, Instant};
-
-use simple_logger::SimpleLogger;
-
-use engine::{utils, Engine};
-
-use crate::game::Game;
-
 mod client;
 mod default_resources;
 mod game;
@@ -15,6 +6,12 @@ mod rendering;
 mod resource_mapping;
 #[cfg(test)]
 mod tests;
+
+use crate::game::Game;
+use engine::{utils, Engine};
+use simple_logger::SimpleLogger;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub const PROGRAM_NAME: &str = "project-107cf1";
 
@@ -66,8 +63,8 @@ fn main() {
         .init()
         .unwrap();
 
-    let game = Box::new(Game::init());
-    let engine = Engine::init(PROGRAM_NAME, 4, game);
+    let game = Game::init();
+    let engine = Engine::init(game);
 
     base::execution::spawn_coroutine(async {
         println!("coroutine test!");

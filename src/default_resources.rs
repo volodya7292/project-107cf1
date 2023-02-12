@@ -1,15 +1,12 @@
-use std::sync::Arc;
-
-use nalgebra_glm::Vec4;
-
-use base::main_registry::MainRegistry;
-use base::utils::resource_file::ResourceFile;
-use engine::renderer::material::MatComponent;
-use engine::renderer::TextureAtlasType;
-
 use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use crate::resource_mapping::ResourceMapping;
+use base::main_registry::MainRegistry;
+use base::utils::resource_file::ResourceFile;
+use engine::module::main_renderer::material::MatComponent;
+use engine::module::main_renderer::TextureAtlasType;
+use nalgebra_glm::Vec4;
+use std::sync::Arc;
 
 const MAX_BLOCKS: usize = 16384;
 

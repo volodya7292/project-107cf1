@@ -1,7 +1,6 @@
+use engine::module::main_renderer::material::MatComponent;
+use engine::module::main_renderer::{MaterialInfo, TEXTURE_ID_NONE};
 use nalgebra_glm::Vec4;
-
-use engine::renderer::material::MatComponent;
-use engine::renderer::{MaterialInfo, TEXTURE_ID_NONE};
 
 const TEXTURE_ID_NAME: u16 = u16::MAX;
 

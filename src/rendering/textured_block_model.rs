@@ -13,7 +13,7 @@ use base::overworld::raw_cluster::RawCluster;
 use base::physics::aabb::AABB;
 use base::registry::Registry;
 use engine::attributes_impl;
-use engine::renderer::vertex_mesh::VertexPositionImpl;
+use engine::module::main_renderer::vertex_mesh::VertexPositionImpl;
 
 use crate::resource_mapping::ResourceMapping;
 

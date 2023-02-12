@@ -102,6 +102,19 @@ impl SafeThreadPool {
 
         Ok(SafeThreadPool { inner, threads })
     }
+
+    pub fn init_global(
+        num_threads: usize,
+        priority: TaskPriority,
+    ) -> Result<(), rayon::ThreadPoolBuildError> {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .spawn_handler(|thread| {
+                schedule_worker(thread, priority);
+                Ok(())
+            })
+            .build_global()
+    }
 }
 
 impl Deref for SafeThreadPool {

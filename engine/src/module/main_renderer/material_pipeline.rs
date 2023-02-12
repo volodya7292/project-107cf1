@@ -12,7 +12,7 @@ pub trait UniformStruct {
 #[macro_export]
 macro_rules! uniform_struct_impl {
     ($uniform_struct: ty, $model_name: ident) => {
-        impl $crate::renderer::material_pipeline::UniformStruct for $uniform_struct {
+        impl $crate::module::main_renderer::material_pipeline::UniformStruct for $uniform_struct {
             fn model_offset() -> u32 {
                 let dummy = <$uniform_struct>::default();
                 let offset = ((&dummy.$model_name) as *const _ as usize) - ((&dummy) as *const _ as usize);

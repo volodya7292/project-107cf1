@@ -2,32 +2,31 @@ pub mod ecs;
 pub mod event;
 pub mod execution;
 pub mod input;
+pub mod module;
 mod platform;
-pub mod renderer;
 #[cfg(test)]
 mod tests;
 pub mod utils;
 
+use crate::ecs::dirty_components::DirtyComponents;
+use crate::ecs::SceneAccess;
 use crate::event::{Event, WEvent, WWindowEvent};
-use crate::execution::realtime_queue;
 use crate::input::{Keyboard, Mouse};
-use crate::platform::EngineMonitorExt;
-use crate::renderer::module::text_renderer::TextRenderer;
-use crate::renderer::module::ui_interaction_manager::UIInteractionManager;
-use crate::renderer::module::ui_renderer::UIRenderer;
-use crate::renderer::{FPSLimit, Renderer, RendererTimings};
-use crate::utils::wsi::{real_scale_factor, real_window_size, WSISize};
-use base::utils::{HashSet, MO_RELAXED};
+use crate::module::EngineModule;
+use crate::utils::wsi::WSISize;
+use base::utils::{HashMap, HashSet, MO_RELAXED};
+use common::utils::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
+use entity_data::EntityStorage;
 use lazy_static::lazy_static;
-use nalgebra_glm::{UVec2, Vec2};
 pub use platform::Platform;
+use std::any::{Any, TypeId};
+use std::cell::{Ref, RefCell};
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use vk_wrapper as vkw;
-use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
@@ -54,98 +53,103 @@ impl Input {
 #[derive(Default, Copy, Clone)]
 pub struct EngineStatistics {
     update_time: f64,
-    render_time: RendererTimings,
 }
 
 impl EngineStatistics {
     pub fn total(&self) -> f64 {
-        self.update_time + self.render_time.update.total + self.render_time.render.total
+        self.update_time
     }
 }
 
 impl Display for EngineStatistics {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "Engine Statistics: upd {:.5} | renderer: {:.5}",
-            self.update_time, self.render_time
-        ))
+        f.write_fmt(format_args!("Engine Statistics: upd {:.5}", self.update_time))
     }
 }
 
-// TODO: make `Renderer` a module for `Engine`.
-
 pub struct Engine {
-    renderer: Renderer,
-    frame_start_time: Instant,
-    frame_end_time: Instant,
+    last_frame_end_time: Instant,
     delta_time: f64,
-    event_loop: EventLoop<()>,
+    event_loop: Option<EventLoop<()>>,
     main_window: Window,
     input: Input,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
-    app: Box<dyn Application + Send>,
+    modules: Lrc<HashMap<TypeId, Lrc<dyn EngineModule>>>,
+    storage: Lrc<EntityStorage>,
+    dirty_comps: Lrc<DirtyComponents>,
+    object_count: Lrc<usize>,
+    app: Lrc<dyn Application>,
 }
 
-pub trait Application {
+#[derive(Clone)]
+pub struct EngineContext {
+    storage: Lrc<EntityStorage>,
+    dirty_comps: Lrc<DirtyComponents>,
+    object_count: Lrc<usize>,
+    modules: Lrc<HashMap<TypeId, Lrc<dyn EngineModule>>>,
+    app: Lrc<dyn Application>,
+}
+
+impl EngineContext {
+    pub fn scene(&self) -> SceneAccess {
+        SceneAccess::new(self)
+    }
+
+    fn modules(&self) -> Ref<HashMap<TypeId, Lrc<dyn EngineModule>>> {
+        self.modules.borrow()
+    }
+
+    pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
+        let modules = self.modules.borrow();
+        let module = modules.get(&TypeId::of::<M>()).unwrap().clone();
+
+        OwnedRefMut::map(module.borrow_mut_owned(), |v| {
+            v.as_any_mut().downcast_mut::<M>().unwrap()
+        })
+    }
+
+    pub fn app<T: Application>(&self) -> OwnedRef<dyn Application, T> {
+        OwnedRef::map(self.app.borrow_owned(), |v| {
+            v.as_any().downcast_ref::<T>().unwrap()
+        })
+    }
+}
+
+pub trait Application: Send + 'static {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
     fn on_adapter_select(&mut self, adapters: &[Arc<vkw::Adapter>]) -> usize;
-    fn on_engine_initialized(&mut self, renderer: &mut Renderer);
-    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input);
+    fn initialize_engine(&mut self, engine: &mut Engine);
+    fn on_update(&mut self, delta_time: f64, ctx: EngineContext, input: &mut Input);
     fn on_event(
         &mut self,
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
-        renderer: &mut Renderer,
+        ctx: EngineContext,
     );
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl Engine {
-    pub fn init(program_name: &str, max_texture_count: u32, mut app: Box<dyn Application + Send>) -> Engine {
+    pub fn init(app: impl Application) -> Engine {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
             panic!("Engine has already been initialized!");
         }
 
+        let app = Rc::new(RefCell::new(app));
+
         let event_loop = EventLoop::new();
-        let main_window = app.on_engine_start(&event_loop);
-
-        let vke = vkw::Entry::new().unwrap();
-        let instance = vke.create_instance(program_name, &main_window).unwrap();
-        let surface = instance.create_surface(&main_window).unwrap();
-        let adapters = instance.enumerate_adapters(Some(&surface)).unwrap();
-
-        let adapter_index = app.on_adapter_select(&adapters);
-        let adapter = &adapters[adapter_index];
-        let device = adapter.create_device().unwrap();
-
-        let mut renderer = Renderer::new(
-            &surface,
-            WSISize::from_logical(Vec2::new(1280.0, 720.0), &main_window),
-            Default::default(),
-            &device,
-            max_texture_count,
-        );
-
-        let text_renderer = TextRenderer::new(&mut renderer);
-        let ui_renderer = UIRenderer::new(&mut renderer);
-        let ui_interaction_manager = UIInteractionManager::new();
-
-        renderer.register_module(text_renderer);
-        renderer.register_module(ui_renderer);
-        renderer.register_module(ui_interaction_manager);
-
-        app.on_engine_initialized(&mut renderer);
+        let main_window = app.borrow_mut().on_engine_start(&event_loop);
 
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
-        Engine {
-            renderer,
-            frame_start_time: Instant::now(),
-            frame_end_time: Instant::now(),
+        let mut engine = Engine {
+            last_frame_end_time: Instant::now(),
             delta_time: 1.0,
-            event_loop,
+            event_loop: Some(event_loop),
             main_window,
             input: Input {
                 keyboard: Keyboard::new(),
@@ -153,12 +157,41 @@ impl Engine {
             },
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
-            app,
+            modules: Default::default(),
+            storage: Default::default(),
+            dirty_comps: Rc::new(RefCell::new(Default::default())),
+            object_count: Rc::new(RefCell::new(0)),
+            app: app.clone(),
+        };
+
+        app.borrow_mut().initialize_engine(&mut engine);
+
+        engine
+    }
+
+    pub fn window(&self) -> &Window {
+        &self.main_window
+    }
+
+    pub fn register_module<M: EngineModule>(&self, module: M) {
+        let mut modules = self.modules.borrow_mut();
+        modules.insert(TypeId::of::<M>(), Lrc::wrap(module));
+    }
+
+    pub fn context(&self) -> EngineContext {
+        EngineContext {
+            storage: self.storage.clone(),
+            dirty_comps: self.dirty_comps.clone(),
+            object_count: self.object_count.clone(),
+            modules: self.modules.clone(),
+            app: self.app.clone(),
         }
     }
 
     pub fn run(mut self) {
-        self.event_loop.run_return(move |event, _, control_flow| {
+        let mut event_loop = self.event_loop.take().unwrap();
+
+        event_loop.run_return(move |event, _, control_flow| {
             use winit::event::ElementState;
 
             *control_flow = ControlFlow::Poll;
@@ -191,7 +224,10 @@ impl Engine {
                                 (raw_size.width, raw_size.height),
                                 &self.main_window,
                             );
-                            self.renderer.on_resize(new_wsi_size);
+
+                            for module in self.modules.borrow().values() {
+                                module.borrow_mut().on_resize(new_wsi_size);
+                            }
                         }
                     }
                     _ => {}
@@ -201,59 +237,67 @@ impl Engine {
 
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
-                    realtime_queue().install(|| {
-                        let t0 = Instant::now();
-                        self.app
-                            .on_update(self.delta_time, &mut self.renderer, &mut self.input);
-                        let t1 = Instant::now();
-                        self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
+                    let mut app = self.app.borrow_mut();
+                    let modules = &*self.modules;
+                    let delta_time = self.delta_time;
+                    let ctx = self.context();
 
-                        self.curr_statistics.render_time = self.renderer.on_draw();
-                    });
+                    let t0 = Instant::now();
+                    app.on_update(delta_time, ctx, &mut self.input);
+
+                    for module in &mut modules.borrow().values() {
+                        module.borrow_mut().on_update();
+                    }
+                    let t1 = Instant::now();
+                    self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
+
+                    let end_t = Instant::now();
+                    self.delta_time = (end_t - self.last_frame_end_time).as_secs_f64().min(1.0);
+                    self.last_frame_end_time = end_t;
 
                     // let t1 = Instant::now();
                     // self.curr_statistics.total = (t1 - t0).as_secs_f64();
                 }
-                WEvent::RedrawEventsCleared => {
-                    let end_dt = Instant::now();
-                    self.delta_time = (end_dt - self.frame_start_time).as_secs_f64().min(1.0);
-
-                    let expected_dt;
-
-                    if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
-                        expected_dt = 1.0 / (limit as f64);
-                        let to_wait = (expected_dt - self.delta_time).max(0.0);
-                        base::utils::high_precision_sleep(
-                            Duration::from_secs_f64(to_wait),
-                            Duration::from_micros(50),
-                        );
-                        self.delta_time += to_wait;
-                    } else {
-                        // expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
-                    }
-
-                    // if self.delta_time >= (1.0 / self.curr_mode_refresh_rate as f64) {
-                    let total_frame_time = self.curr_statistics.total();
-                    if total_frame_time >= 0.017 {
-                        println!(
-                            "dt {:.5}| total {:.5} | {}",
-                            self.delta_time, total_frame_time, self.curr_statistics
-                        );
-                    }
-
-                    // println!("dt {}", self.delta_time);
-                    self.frame_end_time = Instant::now();
-                    self.frame_start_time = self.frame_end_time;
-                }
+                // WEvent::RedrawEventsCleared => {
+                //     let expected_dt;
+                //
+                //     if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
+                //         expected_dt = 1.0 / (limit as f64);
+                //         let to_wait = (expected_dt - self.delta_time).max(0.0);
+                //         base::utils::high_precision_sleep(
+                //             Duration::from_secs_f64(to_wait),
+                //             Duration::from_micros(50),
+                //         );
+                //         self.delta_time += to_wait;
+                //     } else {
+                //         // expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
+                //     }
+                //
+                //     // if self.delta_time >= (1.0 / self.curr_mode_refresh_rate as f64) {
+                //     let total_frame_time = self.curr_statistics.total();
+                //     if total_frame_time >= 0.017 {
+                //         println!(
+                //             "dt {:.5}| total {:.5} | {}",
+                //             self.delta_time, total_frame_time, self.curr_statistics
+                //         );
+                //     }
+                //
+                //     // println!("dt {}", self.delta_time);
+                //     self.last_frame_end_time = Instant::now();
+                //     self.frame_start_time = self.last_frame_end_time;
+                // }
                 _ => {}
             }
 
             if let Some(event) = Event::from_winit(&event, &self.main_window) {
-                self.renderer.on_event(&event);
+                for module in self.modules.borrow().values() {
+                    module.borrow_mut().on_event(&event);
+                }
             }
 
             self.app
-                .on_event(event, &self.main_window, control_flow, &mut self.renderer);
+                .borrow_mut()
+                .on_event(event, &self.main_window, control_flow, self.context());
         });
     }
 }

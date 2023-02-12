@@ -34,19 +34,21 @@ use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
-use engine::renderer::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::renderer::module::ui_renderer::{UIObject, UIRenderer};
-use engine::renderer::ui::element::{TextState, UIText};
-use engine::renderer::{Renderer, RendererContextI, VertexMeshObject};
+use engine::module::main_renderer;
+use engine::module::main_renderer::ui::element::{TextState, UIText};
+use engine::module::main_renderer::{camera, MainRenderer, SimpleObject};
+use engine::module::text_renderer::{FontSet, TextObject, TextRenderer};
+use engine::module::ui_interaction_manager::UIInteractionManager;
+use engine::module::ui_renderer::{UIObject, UIRenderer};
 use engine::utils::wsi::find_best_video_mode;
-use engine::{renderer, Application, Input};
+use engine::{Application, Engine, EngineContext, Input};
 use entity_data::{AnyState, EntityId};
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec2, Vec3};
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use rayon::ThreadPool;
-use renderer::camera;
+use std::any::Any;
 use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -74,6 +76,7 @@ pub struct Game {
     overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
 
     cursor_grab: bool,
+    root_entity: EntityId,
 }
 
 impl Game {
@@ -133,6 +136,7 @@ impl Game {
             main_state,
             overworld_renderer: None,
             cursor_grab: true,
+            root_entity: Default::default(),
         };
         program
     }
@@ -150,6 +154,8 @@ impl Game {
         }
     }
 }
+
+// TODO: Make Application this a module
 
 impl Application for Game {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window {
@@ -178,18 +184,37 @@ impl Application for Game {
         0
     }
 
-    fn on_engine_initialized(&mut self, renderer: &mut Renderer) {
-        renderer.set_settings(renderer::Settings {
-            fps_limit: renderer::FPSLimit::VSync,
-            prefer_triple_buffering: false,
-            textures_mipmaps: true,
-            texture_quality: renderer::TextureQuality::STANDARD,
-            textures_max_anisotropy: 1.0,
-        });
+    fn initialize_engine(&mut self, engine: &mut Engine) {
+        let ctx = engine.context();
+        self.root_entity = ctx.scene().add_object(None, SimpleObject::new()).unwrap();
+
+        let mut renderer = MainRenderer::new(
+            "VulkanRenderer",
+            engine.window(),
+            main_renderer::Settings {
+                fps_limit: main_renderer::FPSLimit::VSync,
+                prefer_triple_buffering: false,
+                textures_mipmaps: true,
+                texture_quality: main_renderer::TextureQuality::STANDARD,
+                textures_max_anisotropy: 1.0,
+            },
+            512,
+            |adapter| 0,
+            engine.context(),
+            self.root_entity,
+        );
+        engine.register_module(renderer);
+
+        engine.register_module(TextRenderer::new(engine.context()));
+        engine.register_module(UIRenderer::new(engine.context(), self.root_entity));
+        engine.register_module(UIInteractionManager::new(engine.context()));
+
+        // ------------------------------------------------------------------------------------------------
+        let mut renderer = ctx.module_mut::<MainRenderer>();
 
         let mat_pipelines;
         {
-            mat_pipelines = material_pipelines::create(&self.resources, renderer);
+            mat_pipelines = material_pipelines::create(&self.resources, &mut renderer);
 
             for (index, (ty, res_ref)) in self.res_map.storage().textures().iter().enumerate() {
                 renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
@@ -207,6 +232,7 @@ impl Application for Game {
             mat_pipelines.cluster(),
             Arc::clone(self.res_map.storage()),
             Arc::clone(state.overworld_orchestrator.lock().loaded_clusters()),
+            self.root_entity,
         );
         drop(state);
 
@@ -222,10 +248,11 @@ impl Application for Game {
                 });
             });
         }
+        drop(renderer);
 
         // -------------------------------------------------------
 
-        let mut text_renderer = renderer.module_mut::<TextRenderer>().unwrap();
+        let mut text_renderer = ctx.module_mut::<TextRenderer>();
         let font_id = text_renderer.register_font(
             FontSet::from_bytes(
                 include_bytes!("../res/fonts/Romanesco-Regular.ttf").to_vec(),
@@ -236,8 +263,8 @@ impl Application for Game {
         drop(text_renderer);
 
         let player_pos = self.main_state.lock().player_pos;
-        let text = renderer.add_object(
-            None,
+        let text = ctx.scene().add_object(
+            Some(self.root_entity),
             TextObject::new(
                 TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
                 SimpleTextC::new()
@@ -251,7 +278,7 @@ impl Application for Game {
         );
 
         // let panel = renderer.add_object(
-        //     None,
+        //     Some(self.root_entity),
         //     VertexMeshObject::new(
         //         component::Transform::new()
         //             .with_position(DVec3::new(0.0, 0.0, 1.0))
@@ -263,11 +290,11 @@ impl Application for Game {
         //     ),
         // );
 
-        let ui_renderer = renderer.module_mut::<UIRenderer>().unwrap();
+        let ui_renderer = ctx.module_mut::<UIRenderer>();
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        let panel = renderer.add_object(
+        let panel = ctx.scene().add_object(
             Some(root_ui_entity),
             UIObject::new_raw(
                 UILayoutC::new()
@@ -281,10 +308,10 @@ impl Application for Game {
             .with_mesh(VertexMeshC::without_data(4, 1)),
         );
 
-        let text = renderer.add_object(panel, UIText::new());
+        let text = ctx.scene().add_object(panel, UIText::new());
 
-        let access = renderer.access();
-        let mut obj = access.object::<UIText>(&text.unwrap()).unwrap();
+        let scene = ctx.scene();
+        let mut obj = scene.object::<UIText>(&text.unwrap()).unwrap();
         obj.set_text(StyledString::new(
             "Loremipsumdsadsf dorer",
             TextStyle::new().with_font(font_id).with_font_size(100.5),
@@ -305,7 +332,9 @@ impl Application for Game {
         // );
     }
 
-    fn on_update(&mut self, delta_time: f64, renderer: &mut Renderer, input: &mut Input) {
+    fn on_update(&mut self, delta_time: f64, ctx: EngineContext, input: &mut Input) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+
         let kb = input.keyboard();
         let mut curr_state = self.main_state.lock();
         let mut vel_front_back = 0;
@@ -416,10 +445,11 @@ impl Application for Game {
         }
 
         drop(curr_state);
+        drop(renderer);
 
         {
             let mut overworld_renderer = self.overworld_renderer.as_ref().unwrap().lock();
-            overworld_renderer.update_scene(renderer);
+            overworld_renderer.update_scene(&mut ctx.scene());
         }
     }
 
@@ -428,7 +458,7 @@ impl Application for Game {
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
-        renderer: &mut Renderer,
+        ctx: EngineContext,
     ) {
         use winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
@@ -525,6 +555,14 @@ impl Application for Game {
             },
             _ => {}
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 

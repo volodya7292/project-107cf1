@@ -1,6 +1,4 @@
-use crate::utils;
 use crate::utils::wsi::WSIPosition;
-use nalgebra_glm::Vec2;
 use winit::window::Window;
 
 pub enum Event {

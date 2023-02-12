@@ -1,17 +1,15 @@
-use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::texture_atlas::TextureAtlas;
-use crate::renderer::vertex_mesh::RawVertexMesh;
-use crate::renderer::MaterialInfo;
+use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
+use crate::module::main_renderer::texture_atlas::TextureAtlas;
+use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
 use base::utils::HashMap;
 use entity_data::EntityId;
 use index_pool::IndexPool;
 use nalgebra_glm::Vec4;
-use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use vk_wrapper::{
-    CmdList, DescriptorPool, DescriptorSet, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageView,
-    Pipeline, PipelineSignature, RenderPass, Sampler, Shader, SubmitPacket,
+    DescriptorPool, DescriptorSet, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageView, Pipeline,
+    PipelineSignature, RenderPass, Sampler, Shader,
 };
 
 pub(crate) const N_CUSTOM_DESCRIPTORS: usize = 1;

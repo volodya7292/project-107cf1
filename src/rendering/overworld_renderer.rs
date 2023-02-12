@@ -1,14 +1,15 @@
 use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
 use crate::default_resources::DefaultResourceMapping;
+use crate::game::Game;
 use crate::resource_mapping::ResourceMapping;
 use base::overworld::orchestrator::get_side_clusters;
 use base::overworld::orchestrator::OverworldUpdateResult;
 use base::overworld::position::ClusterPos;
 use base::overworld::LoadedClusters;
 use base::utils::{HashMap, HashSet};
-use engine::ecs::component;
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
-use engine::renderer::{Renderer, VertexMeshObject};
+use engine::ecs::{component, SceneAccess};
+use engine::module::main_renderer::{MainRenderer, VertexMeshObject};
 use entity_data::EntityId;
 use nalgebra_glm as glm;
 use nalgebra_glm::{DVec3, I64Vec3, Vec3};
@@ -23,6 +24,7 @@ pub struct OverworldRenderer {
     cluster_mat_pipeline: u32,
     resource_mapping: Arc<ResourceMapping>,
     loaded_clusters: LoadedClusters,
+    root_entity: EntityId,
 
     to_add: HashSet<ClusterPos>,
     to_remove: HashSet<ClusterPos>,
@@ -50,12 +52,14 @@ impl OverworldRenderer {
         cluster_mat_pipeline: u32,
         resource_mapping: Arc<ResourceMapping>,
         loaded_clusters: LoadedClusters,
+        root_entity: EntityId,
     ) -> Self {
         Self {
             device,
             cluster_mat_pipeline,
             resource_mapping,
             loaded_clusters,
+            root_entity,
             to_add: HashSet::with_capacity(8192),
             to_remove: HashSet::with_capacity(8192),
             to_build_mesh: Mutex::new(HashSet::with_capacity(8192)),
@@ -135,14 +139,14 @@ impl OverworldRenderer {
         }
     }
 
-    pub fn update_scene(&mut self, renderer: &mut Renderer) {
+    pub fn update_scene(&mut self, scene: &mut SceneAccess) {
         let mut to_update_mesh = self.to_update_mesh.lock();
 
         // Remove objects
         for pos in self.to_remove.drain() {
             if let Some(entities) = self.entities.remove(&pos) {
-                renderer.remove_object(&entities.solid);
-                renderer.remove_object(&entities.translucent);
+                scene.remove_object(&entities.solid);
+                scene.remove_object(&entities.translucent);
             }
             to_update_mesh.remove(&pos);
         }
@@ -165,12 +169,12 @@ impl OverworldRenderer {
                 let render_config_solid = MeshRenderConfigC::new(self.cluster_mat_pipeline, false);
                 let render_config_translucent = MeshRenderConfigC::new(self.cluster_mat_pipeline, true);
 
-                let entity_solid = renderer.add_object(
-                    None,
+                let entity_solid = scene.add_object(
+                    Some(self.root_entity),
                     VertexMeshObject::new(transform_comp, render_config_solid, Default::default()),
                 );
-                let entity_translucent = renderer.add_object(
-                    None,
+                let entity_translucent = scene.add_object(
+                    Some(self.root_entity),
                     VertexMeshObject::new(transform_comp, render_config_translucent, Default::default()),
                 );
 
@@ -183,11 +187,10 @@ impl OverworldRenderer {
             let mesh_solid = VertexMeshC::new(&meshes.solid.raw());
             let transparent = VertexMeshC::new(&meshes.transparent.raw());
 
-            let access = renderer.access();
-            access.object_raw(&entities.solid).unwrap().modify(|mut entry| {
+            scene.object_raw(&entities.solid).unwrap().modify(|mut entry| {
                 *entry.get_mut::<VertexMeshC>().unwrap() = mesh_solid;
             });
-            access
+            scene
                 .object_raw(&entities.translucent)
                 .unwrap()
                 .modify(|mut entry| {

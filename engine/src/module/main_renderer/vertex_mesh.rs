@@ -76,9 +76,9 @@ macro_rules! vertex_impl_normal {
 #[macro_export]
 macro_rules! attributes_impl {
     ($vertex: ty $(, $member_name: ident)*) => (
-        impl $crate::renderer::vertex_mesh::AttributesImpl for $vertex {
-            fn attributes() -> Vec<$crate::renderer::vertex_mesh::VertexAttribute> {
-                use $crate::renderer::vertex_mesh::{VertexMember, VertexAttribute};
+        impl $crate::module::main_renderer::vertex_mesh::AttributesImpl for $vertex {
+            fn attributes() -> Vec<$crate::module::main_renderer::vertex_mesh::VertexAttribute> {
+                use $crate::module::main_renderer::vertex_mesh::{VertexMember, VertexAttribute};
 
                 fn get_format<T: VertexMember>(_: &T) -> vk_wrapper::Format { T::vk_format() }
 
@@ -98,8 +98,8 @@ macro_rules! attributes_impl {
                 attribs
             }
 
-            fn member_info(name: &str) -> Option<$crate::renderer::vertex_mesh::VertexAttribute> {
-                use $crate::renderer::vertex_mesh::{VertexMember, VertexAttribute};
+            fn member_info(name: &str) -> Option<$crate::module::main_renderer::vertex_mesh::VertexAttribute> {
+                use $crate::module::main_renderer::vertex_mesh::{VertexMember, VertexAttribute};
 
                 $(
                     if name == stringify!($member_name) {

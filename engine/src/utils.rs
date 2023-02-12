@@ -1,9 +1,8 @@
 pub mod wsi;
 
+use crate::module::main_renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 use nalgebra_glm::Vec3;
 use std::mem;
-
-use crate::renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
 
 /// Calculate interpolated normals using neighbour triangles.
 pub fn calc_smooth_mesh_normals<T>(vertices: &mut [T], indices: &[u32])

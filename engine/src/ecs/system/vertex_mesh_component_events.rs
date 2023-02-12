@@ -1,5 +1,5 @@
 use crate::ecs::component::VertexMeshC;
-use crate::renderer::vertex_mesh::RawVertexMesh;
+use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
 use base::utils::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::sync::Arc;

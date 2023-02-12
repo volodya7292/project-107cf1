@@ -50,3 +50,6 @@ opt-level = 2
 
 [profile.dev.package."basis-universal-sys"]
 opt-level = 3
+
+[profile.dev.package."ash"]
+opt-level = 3

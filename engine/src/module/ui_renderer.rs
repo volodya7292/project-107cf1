@@ -3,26 +3,23 @@ use crate::ecs::component::ui::{
     Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UIEventHandlerC,
     UILayoutC, UILayoutCacheC,
 };
-use crate::ecs::component::{EventHandlerC, MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
-use crate::ecs::SceneAccess;
-use crate::renderer::module::RendererModule;
-pub use crate::renderer::ui::management::UIState;
-use crate::renderer::{DirtyComponents, Renderer, RendererContext, SceneObject};
+use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
+use crate::ecs::{SceneAccess, SceneObject};
+use crate::module::main_renderer::ui::management::UIState;
+use crate::module::EngineModule;
 use crate::utils::wsi::WSISize;
 use crate::utils::U8SliceHelper;
+use crate::EngineContext;
 use base::scene::relation::Relation;
 use base::utils::{Bool, HashSet};
 use entity_data::{Archetype, EntityId, SystemAccess};
 use nalgebra_glm::{DVec3, Vec2, Vec3};
-use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::any::Any;
 use std::mem;
-use std::sync::Arc;
-use vk_wrapper::{CmdList, Device};
 
 pub struct UIRenderer {
-    device: Arc<Device>,
+    ctx: EngineContext,
     root_ui_entity: EntityId,
     root_element_size: Vec2,
     root_element_size_dirty: bool,
@@ -49,7 +46,6 @@ where
     uniforms: UniformDataC,
     mesh: VertexMeshC,
 
-    event_handler: EventHandlerC,
     layout_cache: UILayoutCacheC,
     layout: UILayoutC,
     ui_event_handler: UIEventHandlerC,
@@ -66,7 +62,6 @@ impl<E: UIState> UIObject<E> {
             renderer: Default::default(),
             uniforms: Default::default(),
             mesh: Default::default(),
-            event_handler: Default::default(),
             layout_cache: Default::default(),
             layout,
             ui_event_handler: Default::default(),
@@ -203,13 +198,14 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 }
 
 impl UIRenderer {
-    pub fn new(renderer: &mut Renderer) -> Self {
-        let root_ui_entity = renderer
-            .add_object(None, UIObject::new_raw(UILayoutC::new(), ()))
+    pub fn new(ctx: EngineContext, root_entity: EntityId) -> Self {
+        let root_ui_entity = ctx
+            .scene()
+            .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::new(), ()))
             .unwrap();
 
         Self {
-            device: Arc::clone(&renderer.device),
+            ctx,
             root_ui_entity,
             root_element_size: Default::default(),
             root_element_size_dirty: false,
@@ -452,7 +448,7 @@ impl UIRenderer {
 
     fn calculate_transforms(
         linear_tree: &[EntityId],
-        scene: &mut SceneAccess<()>,
+        scene: &mut SceneAccess,
         root_size: &Vec2,
         dirty_elements: &mut HashSet<EntityId>,
     ) {
@@ -511,23 +507,30 @@ impl UIRenderer {
         }
     }
 
-    fn update_hierarchy(&mut self, scene: &mut SceneAccess<()>) {
-        let mut dirty_elements = scene.dirty_components.borrow_mut().take_changes::<UILayoutC>();
+    fn update_hierarchy(&mut self) {
+        let mut dirty_elements = self.ctx.dirty_comps.borrow_mut().take_changes::<UILayoutC>();
         if dirty_elements.is_empty() {
             return;
         }
 
-        let access = scene.storage.access();
+        let mut storage = self.ctx.storage.borrow_mut();
+        let access = storage.access();
         let linear_tree = base::scene::collect_relation_tree(&access, &self.root_ui_entity);
 
         Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
 
         Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
 
-        Self::calculate_transforms(&linear_tree, scene, &self.root_element_size, &mut dirty_elements);
+        drop(storage);
+        Self::calculate_transforms(
+            &linear_tree,
+            &mut self.ctx.scene(),
+            &self.root_element_size,
+            &mut dirty_elements,
+        );
     }
 
-    pub fn find_element_at_point<C>(&self, point: &Vec2, scene: &mut SceneAccess<C>) -> Option<EntityId> {
+    pub fn find_element_at_point(&self, point: &Vec2, scene: &mut SceneAccess) -> Option<EntityId> {
         let linear_tree = base::scene::collect_relation_tree(&scene.storage.access(), &self.root_ui_entity);
 
         // Iterate starting from children
@@ -544,8 +547,10 @@ impl UIRenderer {
     }
 }
 
-impl RendererModule for UIRenderer {
-    fn on_update(&mut self, mut scene: SceneAccess<()>) -> Option<Arc<Mutex<CmdList>>> {
+impl EngineModule for UIRenderer {
+    fn on_update(&mut self) {
+        let mut scene = self.ctx.scene();
+
         if self.root_element_size_dirty {
             let mut root = scene.entry_mut(&self.root_ui_entity).unwrap();
             let layout = root.get_mut::<UILayoutC>().unwrap();
@@ -556,9 +561,8 @@ impl RendererModule for UIRenderer {
             self.root_element_size_dirty = false;
         }
 
-        self.update_hierarchy(&mut scene);
-
-        None
+        drop(scene);
+        self.update_hierarchy();
     }
 
     fn on_resize(&mut self, new_size: WSISize<u32>) {

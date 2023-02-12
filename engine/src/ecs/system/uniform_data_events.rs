@@ -1,15 +1,10 @@
-use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::{MeshRenderConfigC, UniformDataC};
-use crate::renderer;
-use crate::renderer::material_pipeline::MaterialPipelineSet;
-use crate::renderer::resources::Renderable;
-use crate::renderer::BufferUpdate2;
+use crate::ecs::component::UniformDataC;
+use crate::module::main_renderer::resources::Renderable;
+use crate::module::main_renderer::BufferUpdate2;
 use base::utils::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
-use nalgebra_glm::Mat4;
 use std::time::Instant;
-use std::{mem, slice};
 use vk_wrapper as vkw;
 
 // Updates global transform uniform buffers

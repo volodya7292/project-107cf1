@@ -1,5 +1,5 @@
 use crate::ecs::SceneAccess;
-use crate::renderer::RendererContext;
+use crate::EngineContext;
 use entity_data::EntityId;
 use nalgebra_glm::Vec2;
 
@@ -259,7 +259,7 @@ pub struct UILayoutCacheC {
     pub(crate) clip_rect: Rect,
 }
 
-type BasicEventCallback = fn(entity: &EntityId, scene: &mut SceneAccess<RendererContext>);
+type BasicEventCallback = fn(entity: &EntityId, scene: &mut SceneAccess);
 
 #[derive(Copy, Clone)]
 pub struct UIEventHandlerC {
@@ -268,8 +268,8 @@ pub struct UIEventHandlerC {
 }
 
 pub trait UIEventHandlerI {
-    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess<RendererContext>) {}
-    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess<RendererContext>) {}
+    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess) {}
+    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {}
 }
 
 impl UIEventHandlerI for () {}
