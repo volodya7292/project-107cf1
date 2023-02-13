@@ -14,6 +14,7 @@ use crate::event::{WEvent, WSIEvent, WWindowEvent};
 use crate::input::{Keyboard, Mouse};
 use crate::module::{EngineModule, ModuleManager};
 use crate::utils::wsi::WSISize;
+use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::types::HashMap;
 use common::MO_RELAXED;
@@ -72,7 +73,7 @@ pub struct Engine {
     last_frame_end_time: Instant,
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
-    main_window: Window,
+    main_window: Lrc<Window>,
     input: Input,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
@@ -83,18 +84,26 @@ pub struct Engine {
     app: Lrc<dyn Application>,
 }
 
-#[derive(Clone)]
 pub struct EngineContext {
     storage: Lrc<EntityStorage>,
     dirty_comps: Lrc<DirtyComponents>,
     object_count: Lrc<usize>,
     module_manager: Lrc<ModuleManager>,
     app: Lrc<dyn Application>,
+    window: Lrc<Window>,
 }
 
 impl EngineContext {
+    pub fn window(&self) -> Ref<Window> {
+        self.window.borrow()
+    }
+
     pub fn scene(&self) -> SceneAccess {
         SceneAccess::new(self)
+    }
+
+    pub fn register_module<M: EngineModule>(&self, module: M) {
+        self.module_manager.borrow_mut().register_module(module);
     }
 
     pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
@@ -108,19 +117,17 @@ impl EngineContext {
     }
 }
 
-pub trait Application: Send + 'static {
+pub trait Application: AsAny + Send {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
-    fn initialize_engine(&mut self, engine: &mut Engine);
-    fn on_update(&mut self, delta_time: f64, ctx: EngineContext, input: &mut Input);
+    fn initialize_engine(&mut self, _: &EngineContext);
+    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext, input: &mut Input);
     fn on_event(
         &mut self,
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
-        ctx: EngineContext,
+        ctx: &EngineContext,
     );
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 impl Engine {
@@ -141,7 +148,7 @@ impl Engine {
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop: Some(event_loop),
-            main_window,
+            main_window: Lrc::wrap(main_window),
             input: Input {
                 keyboard: Keyboard::new(),
                 mouse: Mouse::new(),
@@ -155,26 +162,19 @@ impl Engine {
             app: app.clone(),
         };
 
-        app.borrow_mut().initialize_engine(&mut engine);
+        app.borrow_mut().initialize_engine(&engine.context());
 
         engine
     }
 
-    pub fn window(&self) -> &Window {
-        &self.main_window
-    }
-
-    pub fn register_module<M: EngineModule>(&self, module: M) {
-        self.module_manager.borrow_mut().register_module(module);
-    }
-
-    pub fn context(&self) -> EngineContext {
+    fn context(&self) -> EngineContext {
         EngineContext {
             storage: self.storage.clone(),
             dirty_comps: self.dirty_comps.clone(),
             object_count: self.object_count.clone(),
             module_manager: self.module_manager.clone(),
             app: self.app.clone(),
+            window: self.main_window.clone(),
         }
     }
 
@@ -221,8 +221,8 @@ impl Engine {
 
                     let t0 = Instant::now();
 
-                    app.on_update(delta_time, ctx, &mut self.input);
-                    module_manger.on_update();
+                    app.on_update(delta_time, &ctx, &mut self.input);
+                    module_manger.on_update(&ctx);
 
                     let t1 = Instant::now();
                     self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
@@ -265,15 +265,17 @@ impl Engine {
                 _ => {}
             }
 
-            if let Some(event) = WSIEvent::from_winit(&event, &self.main_window) {
-                self.module_manager
-                    .borrow()
-                    .on_wsi_event(&self.main_window, &event);
+            if let Some(event) = WSIEvent::from_winit(&event, &*self.main_window.borrow()) {
+                self.module_manager.borrow().on_wsi_event(
+                    &*self.main_window.borrow(),
+                    &event,
+                    &self.context(),
+                );
             }
 
             self.app
                 .borrow_mut()
-                .on_event(event, &self.main_window, control_flow, self.context());
+                .on_event(event, &*self.main_window.borrow(), control_flow, &self.context());
         });
     }
 }

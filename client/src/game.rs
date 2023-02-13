@@ -180,13 +180,12 @@ impl Application for Game {
         window
     }
 
-    fn initialize_engine(&mut self, engine: &mut Engine) {
-        let ctx = engine.context();
+    fn initialize_engine(&mut self, ctx: &EngineContext) {
         self.root_entity = ctx.scene().add_object(None, SimpleObject::new()).unwrap();
 
         let mut renderer = MainRenderer::new(
             "VulkanRenderer",
-            engine.window(),
+            &*ctx.window(),
             main_renderer::Settings {
                 fps_limit: main_renderer::FPSLimit::VSync,
                 prefer_triple_buffering: false,
@@ -196,18 +195,18 @@ impl Application for Game {
             },
             512,
             |adapter| 0,
-            engine.context(),
+            ctx,
             self.root_entity,
         );
-        engine.register_module(renderer);
+        ctx.register_module(renderer);
 
-        engine.register_module(TextRenderer::new(engine.context()));
-        engine.register_module(UIRenderer::new(engine.context(), self.root_entity));
-        engine.register_module(UIInteractionManager::new(engine.context()));
+        ctx.register_module(TextRenderer::new(ctx));
+        ctx.register_module(UIRenderer::new(ctx, self.root_entity));
+        ctx.register_module(UIInteractionManager::new());
 
         // ------------------------------------------------------------------------------------------------
 
-        self.grab_cursor(engine.window(), true, &ctx);
+        self.grab_cursor(&*ctx.window(), true, ctx);
 
         // ------------------------------------------------------------------------------------------------
         let mut renderer = ctx.module_mut::<MainRenderer>();
@@ -332,7 +331,7 @@ impl Application for Game {
         // );
     }
 
-    fn on_update(&mut self, delta_time: f64, ctx: EngineContext, input: &mut Input) {
+    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext, input: &mut Input) {
         let mut renderer = ctx.module_mut::<MainRenderer>();
 
         let kb = input.keyboard();
@@ -458,7 +457,7 @@ impl Application for Game {
         event: winit::event::Event<()>,
         main_window: &Window,
         control_flow: &mut ControlFlow,
-        ctx: EngineContext,
+        ctx: &EngineContext,
     ) {
         use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
@@ -554,14 +553,6 @@ impl Application for Game {
             },
             _ => {}
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

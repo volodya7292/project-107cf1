@@ -83,7 +83,7 @@ impl<'a> SceneAccess<'a> {
         *obj_count += 1;
 
         let module_manager = self.context.module_manager.borrow();
-        module_manager.on_object_added(&entity);
+        module_manager.on_object_added(&entity, self.context);
 
         Some(entity)
     }
@@ -104,7 +104,7 @@ impl<'a> SceneAccess<'a> {
                 }
             }
 
-            module_manager.on_object_remove(id);
+            module_manager.on_object_remove(id, self.context);
             self.storage.remove(&entity);
 
             let mut obj_count = self.context.object_count.borrow_mut();

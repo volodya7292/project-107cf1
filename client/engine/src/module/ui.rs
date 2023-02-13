@@ -25,7 +25,6 @@ use std::mem;
 use winit::window::Window;
 
 pub struct UIRenderer {
-    ctx: EngineContext,
     root_ui_entity: EntityId,
     root_element_size: Vec2,
     root_element_size_dirty: bool,
@@ -204,14 +203,13 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 }
 
 impl UIRenderer {
-    pub fn new(ctx: EngineContext, root_entity: EntityId) -> Self {
+    pub fn new(ctx: &EngineContext, root_entity: EntityId) -> Self {
         let root_ui_entity = ctx
             .scene()
             .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::new(), ()))
             .unwrap();
 
         Self {
-            ctx,
             root_ui_entity,
             root_element_size: Default::default(),
             root_element_size_dirty: false,
@@ -513,13 +511,13 @@ impl UIRenderer {
         }
     }
 
-    fn update_hierarchy(&mut self) {
-        let mut dirty_elements = self.ctx.dirty_comps.borrow_mut().take_changes::<UILayoutC>();
+    fn update_hierarchy(&mut self, ctx: &EngineContext) {
+        let mut dirty_elements = ctx.dirty_comps.borrow_mut().take_changes::<UILayoutC>();
         if dirty_elements.is_empty() {
             return;
         }
 
-        let mut storage = self.ctx.storage.borrow_mut();
+        let mut storage = ctx.storage.borrow_mut();
         let access = storage.access();
         let linear_tree = common::scene::collect_relation_tree(&access, &self.root_ui_entity);
 
@@ -530,7 +528,7 @@ impl UIRenderer {
         drop(storage);
         Self::calculate_transforms(
             &linear_tree,
-            &mut self.ctx.scene(),
+            &mut ctx.scene(),
             &self.root_element_size,
             &mut dirty_elements,
         );
@@ -554,8 +552,8 @@ impl UIRenderer {
 }
 
 impl EngineModule for UIRenderer {
-    fn on_update(&mut self) {
-        let mut scene = self.ctx.scene();
+    fn on_update(&mut self, ctx: &EngineContext) {
+        let mut scene = ctx.scene();
 
         if self.root_element_size_dirty {
             let mut root = scene.entry_mut(&self.root_ui_entity).unwrap();
@@ -568,10 +566,10 @@ impl EngineModule for UIRenderer {
         }
 
         drop(scene);
-        self.update_hierarchy();
+        self.update_hierarchy(ctx);
     }
 
-    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
         match event {
             WSIEvent::Resized(new_size) => {
                 self.set_scale_factor(new_size.scale_factor());
@@ -579,13 +577,5 @@ impl EngineModule for UIRenderer {
             }
             _ => {}
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

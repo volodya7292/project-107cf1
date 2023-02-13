@@ -54,7 +54,7 @@ use common::scene::relation::Relation;
 use common::types::HashMap;
 use common::utils::prev_power_of_two;
 use common::{glm, rayon};
-use entity_data::{Archetype, EntityId, System, SystemHandler};
+use entity_data::{Archetype, EntityId, EntityStorage, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
@@ -125,10 +125,9 @@ impl Display for RendererTimings {
     }
 }
 
-pub type UpdateHandler = dyn Fn() -> Option<Arc<Mutex<CmdList>>>;
+pub type UpdateHandler = dyn Fn(&EngineContext) -> Option<Arc<Mutex<CmdList>>>;
 
 pub struct MainRenderer {
-    ctx: EngineContext,
     root_entity: EntityId,
 
     active_camera: PerspectiveCamera,
@@ -514,7 +513,7 @@ impl MainRenderer {
         settings: Settings,
         max_texture_count: u32,
         adapter_selector: F,
-        ctx: EngineContext,
+        ctx: &EngineContext,
         root_entity: EntityId,
     ) -> MainRenderer {
         let vke = vkw::Entry::new().unwrap();
@@ -1005,7 +1004,6 @@ impl MainRenderer {
         };
 
         let mut renderer = MainRenderer {
-            ctx,
             root_entity,
             active_camera,
             overlay_camera,
@@ -1074,7 +1072,7 @@ impl MainRenderer {
         self.update_handlers.push(handler);
     }
 
-    fn on_update(&mut self) -> UpdateTimings {
+    fn on_update(&mut self, ctx: &EngineContext) -> UpdateTimings {
         let mut timings = UpdateTimings::default();
         let total_t0 = Instant::now();
 
@@ -1084,8 +1082,7 @@ impl MainRenderer {
         // Reset camera to origin (0, 0, 0) to save rendering precision
         // when camera position is too far (distance > 4096) from origin
         if curr_rel_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
-            self.ctx
-                .scene()
+            ctx.scene()
                 .object_raw(&self.root_entity)
                 .unwrap()
                 .modify(move |mut entry| {
@@ -1105,7 +1102,7 @@ impl MainRenderer {
 
         // Call registered update handlers
         for handler in &self.update_handlers {
-            let cl = handler();
+            let cl = handler(ctx);
             if let Some(cl) = cl {
                 update_cls.push(cl);
             }
@@ -1128,8 +1125,8 @@ impl MainRenderer {
 
         // --------------------------------------------------------------------
 
-        let mut storage = self.ctx.storage.borrow_mut();
-        let mut dirty_comps = self.ctx.dirty_comps.borrow_mut();
+        let mut storage = ctx.storage.borrow_mut();
+        let mut dirty_comps = ctx.dirty_comps.borrow_mut();
 
         let mut uniform_buffer_updates = BufferUpdate2 {
             buffer: self.res.uniform_buffer_basic.handle(),
@@ -1386,10 +1383,7 @@ impl MainRenderer {
         timings
     }
 
-    fn record_depth_cmd_lists(&mut self) -> u32 {
-        let storage = self.ctx.storage.borrow();
-        let storage = &*storage;
-
+    fn record_depth_cmd_lists(&mut self, storage: &EntityStorage) -> u32 {
         let mat_pipelines = &self.res.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
@@ -1502,12 +1496,11 @@ impl MainRenderer {
         cull_objects.len() as u32
     }
 
-    fn record_g_cmd_lists(&self) {
+    fn record_g_cmd_lists(&self, storage: &EntityStorage) {
         let mat_pipelines = &self.res.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.g_solid_secondary_cls.len() + 1;
 
-        let storage = &*self.ctx.storage.borrow();
         let ordered_entities = &self.ordered_entities;
         let res = &self.res;
 
@@ -1593,8 +1586,7 @@ impl MainRenderer {
             });
     }
 
-    fn record_overlay_cmd_list(&self) {
-        let storage = &*self.ctx.storage.borrow();
+    fn record_overlay_cmd_list(&self, storage: &EntityStorage) {
         let mat_pipelines = &self.res.material_pipelines;
         let mut cl = self.overlay_secondary_cl.lock();
 
@@ -1653,8 +1645,8 @@ impl MainRenderer {
         cl.end().unwrap();
     }
 
-    fn depth_pass(&mut self) {
-        let frustum_visible_objects = self.record_depth_cmd_lists();
+    fn depth_pass(&mut self, storage: &EntityStorage) {
+        let frustum_visible_objects = self.record_depth_cmd_lists(storage);
         let object_count = self.ordered_entities.len() as u32;
 
         let mut cl = self.staging_cl.lock();
@@ -1827,9 +1819,9 @@ impl MainRenderer {
         submit.wait().unwrap();
     }
 
-    fn g_buffer_pass(&mut self, final_cl: &mut CmdList) {
-        self.record_g_cmd_lists();
-        self.record_overlay_cmd_list();
+    fn g_buffer_pass(&mut self, final_cl: &mut CmdList, storage: &EntityStorage) {
+        self.record_g_cmd_lists(storage);
+        self.record_overlay_cmd_list(storage);
 
         let translucency_colors_image = self.res.translucency_colors_image.as_ref().unwrap();
 
@@ -1891,7 +1883,7 @@ impl MainRenderer {
         );
     }
 
-    fn on_render(&mut self, sw_image: &SwapchainImage) -> RenderTimings {
+    fn on_render(&mut self, sw_image: &SwapchainImage, storage: &EntityStorage) -> RenderTimings {
         let mut timings = RenderTimings::default();
         let total_t0 = Instant::now();
         let device = Arc::clone(&self.device);
@@ -1899,7 +1891,7 @@ impl MainRenderer {
 
         let t1 = Instant::now();
 
-        self.depth_pass();
+        self.depth_pass(storage);
 
         let t2 = Instant::now();
         timings.depth_pass = (t2 - t1).as_secs_f64();
@@ -1910,7 +1902,7 @@ impl MainRenderer {
         let mut final_cl = final_cl.lock();
         final_cl.begin(true).unwrap();
 
-        self.g_buffer_pass(&mut final_cl);
+        self.g_buffer_pass(&mut final_cl, storage);
 
         // ----------------------------------------------------------------------------------------------
         let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
@@ -2005,7 +1997,7 @@ impl MainRenderer {
         timings
     }
 
-    pub fn on_draw(&mut self) -> RendererTimings {
+    pub fn on_draw(&mut self, ctx: &EngineContext) -> RendererTimings {
         let mut timings = RendererTimings::default();
         let device = Arc::clone(&self.device);
         let adapter = device.adapter();
@@ -2072,8 +2064,8 @@ impl MainRenderer {
             Ok((sw_image, suboptimal)) => {
                 self.surface_changed |= suboptimal;
 
-                timings.update = self.on_update();
-                timings.render = self.on_render(&sw_image);
+                timings.update = self.on_update(ctx);
+                timings.render = self.on_render(&sw_image, &ctx.storage.borrow());
 
                 let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
                 let present_result = present_queue.present(sw_image);
@@ -2402,7 +2394,7 @@ impl MainRenderer {
 }
 
 impl EngineModule for MainRenderer {
-    fn on_object_remove(&mut self, id: &EntityId) {
+    fn on_object_remove(&mut self, id: &EntityId, _: &EngineContext) {
         // Free renderable resources if available
         if let Some(renderable) = self.res.renderables.remove(id) {
             self.res.renderables_to_destroy.push(renderable);
@@ -2422,25 +2414,17 @@ impl EngineModule for MainRenderer {
         self.vertex_mesh_updates.remove(id);
     }
 
-    fn on_update(&mut self) {
-        self.on_draw();
+    fn on_update(&mut self, ctx: &EngineContext) {
+        self.on_draw(ctx);
     }
 
-    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
         match event {
             WSIEvent::Resized(new_size) => {
                 self.on_resize(*new_size);
             }
             _ => {}
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

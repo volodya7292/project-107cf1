@@ -511,7 +511,7 @@ impl TextObject {
 impl SceneObject for TextObject {}
 
 impl TextRenderer {
-    pub fn new(ctx: EngineContext) -> Self {
+    pub fn new(ctx: &EngineContext) -> Self {
         let mut renderer = ctx.module_mut::<MainRenderer>();
         let device = Arc::clone(renderer.device());
         let vertex_shader = device
@@ -635,10 +635,9 @@ impl TextRenderer {
         };
 
         {
-            let ctx = ctx.clone();
-            renderer.register_update_handler(Box::new(move || {
+            renderer.register_update_handler(Box::new(move |ctx| {
                 let mut text_renderer = ctx.module_mut::<Self>();
-                Self::on_render_update(&mut text_renderer, ctx.clone())
+                Self::on_render_update(&mut text_renderer, ctx)
             }));
         }
 
@@ -739,7 +738,7 @@ impl TextRenderer {
         size * seq.style().font_size()
     }
 
-    fn on_render_update(&mut self, ctx: EngineContext) -> Option<Arc<Mutex<CmdList>>> {
+    fn on_render_update(&mut self, ctx: &EngineContext) -> Option<Arc<Mutex<CmdList>>> {
         let mut scene = ctx.scene();
 
         let unit_scale = rusttype::Scale::uniform(1.0);
@@ -842,17 +841,9 @@ impl TextRenderer {
 }
 
 impl EngineModule for TextRenderer {
-    fn on_object_remove(&mut self, id: &EntityId) {
+    fn on_object_remove(&mut self, id: &EntityId, _: &EngineContext) {
         if let Some(seq) = self.allocated_sequences.remove(id) {
             self.sequences_to_destroy.push(seq);
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

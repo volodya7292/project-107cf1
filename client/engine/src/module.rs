@@ -1,3 +1,4 @@
+pub mod input;
 pub mod main_renderer;
 pub mod text_renderer;
 pub mod ui;
@@ -5,6 +6,8 @@ pub mod ui_interaction_manager;
 
 use crate::event::WSIEvent;
 use crate::utils::wsi::WSISize;
+use crate::EngineContext;
+use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
 use common::types::HashMap;
 use entity_data::EntityId;
@@ -12,17 +15,14 @@ use std::any::{Any, TypeId};
 use std::cell::{Ref, RefMut};
 use winit::window::Window;
 
-pub trait EngineModule: 'static {
+pub trait EngineModule: AsAny {
     /// Called after an object has been added.
-    fn on_object_added(&mut self, _: &EntityId) {}
+    fn on_object_added(&mut self, _: &EntityId, _: &EngineContext) {}
     /// Called before an object is removed.
-    fn on_object_remove(&mut self, _: &EntityId) {}
+    fn on_object_remove(&mut self, _: &EntityId, _: &EngineContext) {}
     /// Main loop
-    fn on_update(&mut self) {}
-    fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent) {}
-
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn on_update(&mut self, _: &EngineContext) {}
+    fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent, _: &EngineContext) {}
 }
 
 #[derive(Default)]
@@ -39,7 +39,7 @@ impl ModuleManager {
         let module = self.modules.get(&TypeId::of::<M>()).unwrap().clone();
 
         OwnedRefMut::map(module.borrow_mut_owned(), |v| {
-            v.as_any_mut().downcast_mut::<M>().unwrap()
+            v.as_mut_any().downcast_mut::<M>().unwrap()
         })
     }
 
@@ -52,30 +52,30 @@ impl ModuleManager {
     }
 
     #[inline]
-    pub(crate) fn on_object_added(&self, id: &EntityId) {
+    pub(crate) fn on_object_added(&self, id: &EntityId, ctx: &EngineContext) {
         self.for_every(|module| {
-            module.on_object_added(id);
+            module.on_object_added(id, ctx);
         });
     }
 
     #[inline]
-    pub(crate) fn on_object_remove(&self, id: &EntityId) {
+    pub(crate) fn on_object_remove(&self, id: &EntityId, ctx: &EngineContext) {
         self.for_every(|module| {
-            module.on_object_remove(id);
+            module.on_object_remove(id, ctx);
         });
     }
 
     #[inline]
-    pub(crate) fn on_update(&self) {
+    pub(crate) fn on_update(&self, ctx: &EngineContext) {
         self.for_every(|module| {
-            module.on_update();
+            module.on_update(ctx);
         });
     }
 
     #[inline]
-    pub(crate) fn on_wsi_event(&self, window: &Window, event: &WSIEvent) {
+    pub(crate) fn on_wsi_event(&self, window: &Window, event: &WSIEvent, ctx: &EngineContext) {
         self.for_every(|module| {
-            module.on_wsi_event(window, event);
+            module.on_wsi_event(window, event, ctx);
         });
     }
 }

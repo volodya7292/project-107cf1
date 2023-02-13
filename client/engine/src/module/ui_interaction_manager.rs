@@ -9,7 +9,6 @@ use winit::event::{ElementState, MouseButton};
 use winit::window::Window;
 
 pub struct UIInteractionManager {
-    ctx: EngineContext,
     global_event_handler: UIEventHandlerC,
     curr_hover_entity: EntityId,
     mouse_button_press_entity: EntityId,
@@ -17,9 +16,8 @@ pub struct UIInteractionManager {
 }
 
 impl UIInteractionManager {
-    pub fn new(ctx: EngineContext) -> Self {
+    pub fn new() -> Self {
         Self {
-            ctx,
             global_event_handler: Default::default(),
             curr_hover_entity: EntityId::NULL,
             mouse_button_press_entity: EntityId::NULL,
@@ -33,19 +31,19 @@ impl UIInteractionManager {
 }
 
 impl EngineModule for UIInteractionManager {
-    fn on_object_remove(&mut self, id: &EntityId) {
+    fn on_object_remove(&mut self, id: &EntityId, _: &EngineContext) {
         if id == &self.curr_hover_entity {
             self.curr_hover_entity = EntityId::NULL;
         }
     }
 
-    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent) {
+    fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, ctx: &EngineContext) {
         if !self.active {
             return;
         }
 
-        let mut scene = self.ctx.scene();
-        let ui_renderer = self.ctx.module_mut::<UIRenderer>();
+        let mut scene = ctx.scene();
+        let ui_renderer = ctx.module_mut::<UIRenderer>();
 
         match *event {
             WSIEvent::CursorMoved { position, .. } => {
@@ -98,13 +96,5 @@ impl EngineModule for UIInteractionManager {
             }
             _ => {}
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
