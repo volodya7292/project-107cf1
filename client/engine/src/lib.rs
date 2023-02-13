@@ -1,7 +1,6 @@
 pub mod ecs;
 pub mod event;
 pub mod execution;
-pub mod input;
 pub mod module;
 mod platform;
 #[cfg(test)]
@@ -10,18 +9,14 @@ pub mod utils;
 
 use crate::ecs::dirty_components::DirtyComponents;
 use crate::ecs::SceneAccess;
-use crate::event::{WEvent, WSIEvent, WWindowEvent};
-use crate::input::{Keyboard, Mouse};
+use crate::event::{WEvent, WSIEvent};
 use crate::module::{EngineModule, ModuleManager};
-use crate::utils::wsi::WSISize;
 use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
-use common::types::HashMap;
 use common::MO_RELAXED;
 use entity_data::EntityStorage;
 use lazy_static::lazy_static;
 pub use platform::Platform;
-use std::any::{Any, TypeId};
 use std::cell::{Ref, RefCell};
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
@@ -35,21 +30,6 @@ use winit::window::Window;
 
 lazy_static! {
     static ref ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-}
-
-pub struct Input {
-    keyboard: Keyboard,
-    mouse: Mouse,
-}
-
-impl Input {
-    pub fn keyboard(&self) -> &Keyboard {
-        &self.keyboard
-    }
-
-    pub fn mouse(&self) -> &Mouse {
-        &self.mouse
-    }
 }
 
 #[derive(Default, Copy, Clone)]
@@ -74,7 +54,6 @@ pub struct Engine {
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
     main_window: Lrc<Window>,
-    input: Input,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
     storage: Lrc<EntityStorage>,
@@ -106,6 +85,10 @@ impl EngineContext {
         self.module_manager.borrow_mut().register_module(module);
     }
 
+    pub fn module<M: EngineModule>(&self) -> OwnedRef<dyn EngineModule, M> {
+        self.module_manager.borrow().module()
+    }
+
     pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
         self.module_manager.borrow().module_mut()
     }
@@ -120,7 +103,7 @@ impl EngineContext {
 pub trait Application: AsAny + Send {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
     fn initialize_engine(&mut self, _: &EngineContext);
-    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext, input: &mut Input);
+    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext);
     fn on_event(
         &mut self,
         event: winit::event::Event<()>,
@@ -144,15 +127,11 @@ impl Engine {
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
-        let mut engine = Engine {
+        let engine = Engine {
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop: Some(event_loop),
             main_window: Lrc::wrap(main_window),
-            input: Input {
-                keyboard: Keyboard::new(),
-                mouse: Mouse::new(),
-            },
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
             storage: Default::default(),
@@ -182,33 +161,9 @@ impl Engine {
         let mut event_loop = self.event_loop.take().unwrap();
 
         event_loop.run_return(move |event, _, control_flow| {
-            use winit::event::ElementState;
-
             *control_flow = ControlFlow::Poll;
 
             match &event {
-                WEvent::WindowEvent {
-                    window_id: _window_id,
-                    event,
-                } => match event {
-                    WWindowEvent::KeyboardInput { input, .. } => {
-                        if let Some(keycode) = input.virtual_keycode {
-                            if input.state == ElementState::Pressed {
-                                self.input.keyboard.pressed_keys.insert(keycode);
-                            } else {
-                                self.input.keyboard.pressed_keys.remove(&keycode);
-                            }
-                        }
-                    }
-                    WWindowEvent::MouseInput { state, button, .. } => {
-                        if *state == ElementState::Pressed {
-                            self.input.mouse.pressed_buttons.insert(*button);
-                        } else {
-                            self.input.mouse.pressed_buttons.remove(button);
-                        }
-                    }
-                    _ => {}
-                },
                 WEvent::MainEventsCleared => {
                     // let t0 = Instant::now();
 
@@ -221,7 +176,7 @@ impl Engine {
 
                     let t0 = Instant::now();
 
-                    app.on_update(delta_time, &ctx, &mut self.input);
+                    app.on_update(delta_time, &ctx);
                     module_manger.on_update(&ctx);
 
                     let t1 = Instant::now();
@@ -262,20 +217,23 @@ impl Engine {
                 //     self.last_frame_end_time = Instant::now();
                 //     self.frame_start_time = self.last_frame_end_time;
                 // }
-                _ => {}
-            }
+                _ => {
+                    if let Some(event) = WSIEvent::from_winit(&event, &*self.main_window.borrow()) {
+                        self.module_manager.borrow().on_wsi_event(
+                            &*self.main_window.borrow(),
+                            &event,
+                            &self.context(),
+                        );
+                    }
 
-            if let Some(event) = WSIEvent::from_winit(&event, &*self.main_window.borrow()) {
-                self.module_manager.borrow().on_wsi_event(
-                    &*self.main_window.borrow(),
-                    &event,
-                    &self.context(),
-                );
+                    self.app.borrow_mut().on_event(
+                        event,
+                        &*self.main_window.borrow(),
+                        control_flow,
+                        &self.context(),
+                    );
+                }
             }
-
-            self.app
-                .borrow_mut()
-                .on_event(event, &*self.main_window.borrow(), control_flow, &self.context());
         });
     }
 }

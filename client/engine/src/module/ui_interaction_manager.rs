@@ -4,7 +4,6 @@ use crate::module::ui::UIRenderer;
 use crate::module::EngineModule;
 use crate::EngineContext;
 use entity_data::EntityId;
-use std::any::Any;
 use winit::event::{ElementState, MouseButton};
 use winit::window::Window;
 

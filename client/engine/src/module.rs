@@ -5,14 +5,12 @@ pub mod ui;
 pub mod ui_interaction_manager;
 
 use crate::event::WSIEvent;
-use crate::utils::wsi::WSISize;
 use crate::EngineContext;
 use common::any::AsAny;
-use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
-use common::types::HashMap;
+use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
+use common::types::IndexMap;
 use entity_data::EntityId;
-use std::any::{Any, TypeId};
-use std::cell::{Ref, RefMut};
+use std::any::TypeId;
 use winit::window::Window;
 
 pub trait EngineModule: AsAny {
@@ -27,12 +25,20 @@ pub trait EngineModule: AsAny {
 
 #[derive(Default)]
 pub(crate) struct ModuleManager {
-    modules: HashMap<TypeId, Lrc<dyn EngineModule>>,
+    modules: IndexMap<TypeId, Lrc<dyn EngineModule>>,
 }
 
 impl ModuleManager {
+    /// Registers a new `EngineModule`.
+    /// Callbacks to all modules will be called in reversed registration order of the modules.
     pub fn register_module<M: EngineModule>(&mut self, module: M) {
         self.modules.insert(TypeId::of::<M>(), Lrc::wrap(module));
+    }
+
+    pub fn module<M: EngineModule>(&self) -> OwnedRef<dyn EngineModule, M> {
+        let module = self.modules.get(&TypeId::of::<M>()).unwrap().clone();
+
+        OwnedRef::map(module.borrow_owned(), |v| v.as_any().downcast_ref::<M>().unwrap())
     }
 
     pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
@@ -45,7 +51,7 @@ impl ModuleManager {
 
     #[inline]
     fn for_every<F: Fn(&mut dyn EngineModule)>(&self, f: F) {
-        for module in self.modules.values() {
+        for module in self.modules.values().rev() {
             let mut module = module.borrow_mut();
             f(&mut *module);
         }

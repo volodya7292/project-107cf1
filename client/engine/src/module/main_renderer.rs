@@ -58,7 +58,6 @@ use entity_data::{Archetype, EntityId, EntityStorage, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::any::Any;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -513,7 +512,6 @@ impl MainRenderer {
         settings: Settings,
         max_texture_count: u32,
         adapter_selector: F,
-        ctx: &EngineContext,
         root_entity: EntityId,
     ) -> MainRenderer {
         let vke = vkw::Entry::new().unwrap();

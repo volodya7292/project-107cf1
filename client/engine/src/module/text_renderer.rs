@@ -19,7 +19,6 @@ use entity_data::{Archetype, EntityId};
 use fixedbitset::FixedBitSet;
 use memoffset::offset_of;
 use rusttype::{Font, GlyphId};
-use std::any::Any;
 use std::collections::hash_map;
 use std::mem;
 use std::sync::Arc;

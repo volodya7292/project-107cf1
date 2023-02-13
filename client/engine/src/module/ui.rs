@@ -11,7 +11,6 @@ use crate::ecs::{SceneAccess, SceneObject};
 use crate::event::WSIEvent;
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
-use crate::utils::wsi::WSISize;
 use crate::utils::U8SliceHelper;
 use crate::EngineContext;
 use common::glm::{DVec3, Vec2, Vec3};
@@ -20,7 +19,6 @@ use common::types::Bool;
 use common::types::HashSet;
 use entity_data::{Archetype, EntityId, SystemAccess};
 use smallvec::SmallVec;
-use std::any::Any;
 use std::mem;
 use winit::window::Window;
 

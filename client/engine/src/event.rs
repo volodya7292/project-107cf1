@@ -1,5 +1,5 @@
 use crate::utils::wsi::{WSIPosition, WSISize};
-use winit::event::{ElementState, MouseButton};
+use winit::event::{ElementState, KeyboardInput, MouseButton};
 use winit::window::Window;
 
 pub enum WSIEvent {
@@ -10,6 +10,9 @@ pub enum WSIEvent {
     MouseInput {
         state: ElementState,
         button: MouseButton,
+    },
+    KeyboardInput {
+        input: KeyboardInput,
     },
 }
 
@@ -41,6 +44,7 @@ impl WSIEvent {
                 state: *state,
                 button: *button,
             },
+            WWindowEvent::KeyboardInput { input, .. } => WSIEvent::KeyboardInput { input: *input },
             _ => return None,
         };
 

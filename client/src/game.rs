@@ -38,6 +38,7 @@ use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use engine::module::input::Input;
 use engine::module::main_renderer;
 use engine::module::main_renderer::{camera, MainRenderer, SimpleObject};
 use engine::module::text_renderer::{FontSet, TextObject, TextRenderer};
@@ -49,7 +50,7 @@ use engine::winit::dpi::LogicalSize;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::{ControlFlow, EventLoop};
 use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
-use engine::{winit, Application, Engine, EngineContext, Input};
+use engine::{winit, Application, Engine, EngineContext};
 use entity_data::{AnyState, EntityId};
 use std::any::Any;
 use std::collections::hash_map;
@@ -195,7 +196,6 @@ impl Application for Game {
             },
             512,
             |adapter| 0,
-            ctx,
             self.root_entity,
         );
         ctx.register_module(renderer);
@@ -203,6 +203,7 @@ impl Application for Game {
         ctx.register_module(TextRenderer::new(ctx));
         ctx.register_module(UIRenderer::new(ctx, self.root_entity));
         ctx.register_module(UIInteractionManager::new());
+        ctx.register_module(Input::new());
 
         // ------------------------------------------------------------------------------------------------
 
@@ -331,8 +332,9 @@ impl Application for Game {
         // );
     }
 
-    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext, input: &mut Input) {
+    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {
         let mut renderer = ctx.module_mut::<MainRenderer>();
+        let input = ctx.module::<Input>();
 
         let kb = input.keyboard();
         let mut curr_state = self.main_state.lock();
@@ -445,6 +447,7 @@ impl Application for Game {
 
         drop(curr_state);
         drop(renderer);
+        drop(input);
 
         {
             let mut overworld_renderer = self.overworld_renderer.as_ref().unwrap().lock();
