@@ -53,26 +53,26 @@ pub struct Engine {
     last_frame_end_time: Instant,
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
-    main_window: Lrc<Window>,
+    main_window: RefCell<Window>,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
-    storage: Lrc<EntityStorage>,
-    dirty_comps: Lrc<DirtyComponents>,
-    object_count: Lrc<usize>,
-    module_manager: Lrc<ModuleManager>,
-    app: Lrc<dyn Application>,
+    storage: RefCell<EntityStorage>,
+    dirty_comps: RefCell<DirtyComponents>,
+    object_count: RefCell<usize>,
+    module_manager: RefCell<ModuleManager>,
+    app: RefCell<Box<dyn Application>>,
 }
 
-pub struct EngineContext {
-    storage: Lrc<EntityStorage>,
-    dirty_comps: Lrc<DirtyComponents>,
-    object_count: Lrc<usize>,
-    module_manager: Lrc<ModuleManager>,
-    app: Lrc<dyn Application>,
-    window: Lrc<Window>,
+pub struct EngineContext<'a> {
+    storage: &'a RefCell<EntityStorage>,
+    dirty_comps: &'a RefCell<DirtyComponents>,
+    object_count: &'a RefCell<usize>,
+    module_manager: &'a RefCell<ModuleManager>,
+    app: &'a RefCell<Box<dyn Application>>,
+    window: &'a RefCell<Window>,
 }
 
-impl EngineContext {
+impl EngineContext<'_> {
     pub fn window(&self) -> Ref<Window> {
         self.window.borrow()
     }
@@ -93,12 +93,12 @@ impl EngineContext {
         self.module_manager.borrow().module_mut()
     }
 
-    pub fn app<T: Application>(&self) -> OwnedRef<dyn Application, T> {
-        OwnedRef::map(self.app.borrow_owned(), |v| {
-            v.as_any().downcast_ref::<T>().unwrap()
-        })
+    pub fn app<T: Application>(&self) -> Ref<T> {
+        Ref::map(self.app.borrow(), |app| app.as_any().downcast_ref::<T>().unwrap())
     }
 }
+
+// TODO: refactor Application into a module
 
 pub trait Application: AsAny + Send {
     fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
@@ -114,46 +114,44 @@ pub trait Application: AsAny + Send {
 }
 
 impl Engine {
-    pub fn init(app: impl Application) -> Engine {
+    pub fn init(mut app: impl Application) -> Self {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
             panic!("Engine has already been initialized!");
         }
 
-        let app = Rc::new(RefCell::new(app));
-
         let event_loop = EventLoop::new();
-        let main_window = app.borrow_mut().on_engine_start(&event_loop);
+        let main_window = app.on_engine_start(&event_loop);
 
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
-        let engine = Engine {
+        let engine = Self {
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop: Some(event_loop),
-            main_window: Lrc::wrap(main_window),
+            main_window: RefCell::new(main_window),
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
             storage: Default::default(),
-            dirty_comps: Rc::new(RefCell::new(Default::default())),
-            object_count: Rc::new(RefCell::new(0)),
+            dirty_comps: RefCell::new(Default::default()),
+            object_count: RefCell::new(0),
             module_manager: Default::default(),
-            app: app.clone(),
+            app: RefCell::new(Box::new(app)),
         };
 
-        app.borrow_mut().initialize_engine(&engine.context());
+        engine.app.borrow_mut().initialize_engine(&engine.context());
 
         engine
     }
 
     fn context(&self) -> EngineContext {
         EngineContext {
-            storage: self.storage.clone(),
-            dirty_comps: self.dirty_comps.clone(),
-            object_count: self.object_count.clone(),
-            module_manager: self.module_manager.clone(),
-            app: self.app.clone(),
-            window: self.main_window.clone(),
+            storage: &self.storage,
+            dirty_comps: &self.dirty_comps,
+            object_count: &self.object_count,
+            module_manager: &self.module_manager,
+            app: &self.app,
+            window: &self.main_window,
         }
     }
 

@@ -42,7 +42,7 @@ pub trait SceneObject: StaticArchetype {}
 
 /// Provides access to the `EntityStorage` with component change tracking.
 pub struct SceneAccess<'a> {
-    pub context: &'a EngineContext,
+    pub context: &'a EngineContext<'a>,
     pub storage: RefMut<'a, EntityStorage>,
     modifications: RefCell<Modifications>,
 }
@@ -191,7 +191,7 @@ impl Drop for SceneAccess<'_> {
 }
 
 pub struct EntityAccess<'a, A> {
-    context: &'a EngineContext,
+    context: &'a EngineContext<'a>,
     entry: entity_data::Entry<'a>,
     modifications: &'a RefCell<Modifications>,
     _arch: PhantomData<A>,
