@@ -2,7 +2,7 @@ use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::UniformDataC;
 use crate::module::main_renderer::resources::Renderable;
 use crate::module::main_renderer::BufferUpdate2;
-use common::types::{HashMap, HashSet};
+use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::time::Instant;
 use vk_wrapper as vkw;
@@ -10,7 +10,7 @@ use vk_wrapper as vkw;
 // Updates global transform uniform buffers
 pub(crate) struct UniformDataCompEvents<'a> {
     pub uniform_buffer_updates: &'a mut BufferUpdate2,
-    pub dirty_components: HashSet<EntityId>,
+    pub dirty_components: Vec<EntityId>,
     pub renderables: &'a HashMap<EntityId, Renderable>,
     pub run_time: f64,
 }

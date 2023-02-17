@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use ash::vk;
-use spirv_cross::spirv;
-
 use crate::{Device, Format};
+use ash::vk;
+use common::types::HashMap;
+use spirv_cross::spirv;
+use std::sync::Arc;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ShaderStageFlags(pub(crate) vk::ShaderStageFlags);

@@ -1,12 +1,13 @@
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::StyledString;
 use crate::ecs::component::ui::{UIEventHandlerC, UIEventHandlerI, UILayoutC};
-use crate::ecs::component::SimpleTextC;
-use crate::ecs::{EntityAccess, SceneAccess};
+use crate::ecs::component::{SceneEventHandler, SimpleTextC};
+use crate::module::scene::{EntityAccess, Scene};
 use crate::module::text_renderer;
 use crate::module::text_renderer::TextRenderer;
 use crate::module::ui::management::UIState;
 use crate::module::ui::UIObject;
+use crate::EngineContext;
 use entity_data::EntityId;
 
 pub type UIText = UIObject<SimpleTextC>;
@@ -21,20 +22,36 @@ impl UIText {
                 .with_max_width(0.0)
                 .with_stage(RenderStage::OVERLAY),
         )
+        .with_scene_event_handler(SceneEventHandler::new().with_on_update(Self::on_update))
         .with_event_handler(UIEventHandlerC::new::<Self>())
+    }
+
+    fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
+        let mut entry = scene.entry(entity).unwrap();
+
+        let simple_text = entry.get::<SimpleTextC>();
+        let text_renderer = ctx.module_mut::<TextRenderer>();
+        let size = text_renderer.calculate_minimum_text_size(&simple_text.text);
+
+        let layout = entry.get_mut::<UILayoutC>().unwrap();
+        layout.constraints[0].min = size.x;
+        layout.constraints[1].min = size.y;
+
+        let scene_handler = entry.get_mut::<SceneEventHandler>().unwrap();
+        scene_handler.set_on_update_active(false);
     }
 }
 
 impl UIEventHandlerI for UIText {
-    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess) {
+    fn on_hover_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {
         println!("HOVER ENTER");
     }
 
-    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {
+    fn on_hover_exit(_: &EntityId, _: &mut Scene, _: &EngineContext) {
         println!("HOVER EXIT");
     }
 
-    fn on_click(_: &EntityId, _: &mut SceneAccess) {
+    fn on_click(_: &EntityId, _: &mut Scene, _: &EngineContext) {
         println!("ON CLICK");
     }
 }
@@ -52,16 +69,10 @@ impl<'a> TextState for EntityAccess<'a, UIText> {
     }
 
     fn set_text(&mut self, text: StyledString) {
-        let ctx = self.context();
-        let text_renderer = ctx.module_mut::<TextRenderer>();
-        let size = text_renderer.calculate_minimum_text_size(&text);
+        let simple_text = self.get_mut::<SimpleTextC>().unwrap();
+        simple_text.text = text;
 
-        self.modify(move |mut access| {
-            access.get_mut::<SimpleTextC>().unwrap().text = text;
-
-            let layout = access.get_mut::<UILayoutC>().unwrap();
-            layout.constraints[0].min = size.x;
-            layout.constraints[1].min = size.y;
-        });
+        let scene_handler = self.get_mut::<SceneEventHandler>().unwrap();
+        scene_handler.set_on_update_active(true);
     }
 }

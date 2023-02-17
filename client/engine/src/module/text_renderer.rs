@@ -2,9 +2,11 @@ use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
-use crate::ecs::SceneObject;
 use crate::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::module::main_renderer::MainRenderer;
+use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
+use crate::module::scene::Scene;
+use crate::module::scene::SceneObject;
 use crate::module::ui::RectUniformData;
 use crate::module::EngineModule;
 use crate::{attributes_impl, uniform_struct_impl, EngineContext};
@@ -448,7 +450,7 @@ pub struct TextRenderer {
     allocator: GlyphAllocator,
 
     allocated_sequences: HashMap<EntityId, StyledGlyphSequence>,
-    sequences_to_destroy: Vec<StyledGlyphSequence>,
+    simple_text_changes: ComponentChangesHandle,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -511,6 +513,11 @@ impl SceneObject for TextObject {}
 
 impl TextRenderer {
     pub fn new(ctx: &EngineContext) -> Self {
+        let scene = ctx.module_mut::<Scene>();
+        let simple_text_changes = scene
+            .change_manager_mut()
+            .register_component_flow::<SimpleTextC>();
+
         let mut renderer = ctx.module_mut::<MainRenderer>();
         let device = Arc::clone(renderer.device());
         let vertex_shader = device
@@ -659,7 +666,7 @@ impl TextRenderer {
             staging_uniform_buffer,
             glyph_sampler,
             staging_cl,
-            sequences_to_destroy: vec![],
+            simple_text_changes,
         }
     }
 
@@ -738,22 +745,22 @@ impl TextRenderer {
     }
 
     fn on_render_update(&mut self, ctx: &EngineContext) -> Option<Arc<Mutex<CmdList>>> {
-        let mut scene = ctx.scene();
+        let mut scene = ctx.module_mut::<Scene>();
 
         let unit_scale = rusttype::Scale::uniform(1.0);
-        let dirty_texts = ctx.dirty_comps.borrow_mut().take_changes::<SimpleTextC>();
+        let changes = scene.change_manager_mut().take(self.simple_text_changes);
 
-        for seq in self.sequences_to_destroy.drain(..) {
-            self.allocator.free(&seq.glyphs);
-        }
+        for change in &changes {
+            let entity = change.entity();
 
-        for entity in &dirty_texts {
-            if let Some(seq) = self.allocated_sequences.remove(entity) {
+            if change.ty() == ChangeType::Removed {
+                let seq = self.allocated_sequences.remove(entity).unwrap();
                 self.allocator.free(&seq.glyphs);
+                continue;
             }
 
-            let mut entry = scene.entry_mut(entity).unwrap();
-            let simple_text = entry.get::<SimpleTextC>().unwrap();
+            let mut entry = scene.entry(entity).unwrap();
+            let simple_text = entry.get::<SimpleTextC>();
             let stage = simple_text.stage;
             let normalize_transforms = stage == RenderStage::OVERLAY;
 
@@ -839,10 +846,4 @@ impl TextRenderer {
     }
 }
 
-impl EngineModule for TextRenderer {
-    fn on_object_remove(&mut self, id: &EntityId, _: &EngineContext) {
-        if let Some(seq) = self.allocated_sequences.remove(id) {
-            self.sequences_to_destroy.push(seq);
-        }
-    }
-}
+impl EngineModule for TextRenderer {}

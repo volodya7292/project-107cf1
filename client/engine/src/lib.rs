@@ -7,19 +7,16 @@ mod platform;
 mod tests;
 pub mod utils;
 
-use crate::ecs::dirty_components::DirtyComponents;
-use crate::ecs::SceneAccess;
 use crate::event::{WEvent, WSIEvent};
 use crate::module::{EngineModule, ModuleManager};
 use common::any::AsAny;
-use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
+use common::lrc::{OwnedRef, OwnedRefMut};
 use common::MO_RELAXED;
 use entity_data::EntityStorage;
 use lazy_static::lazy_static;
 pub use platform::Platform;
 use std::cell::{Ref, RefCell};
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 pub use vk_wrapper as vkw;
@@ -56,17 +53,11 @@ pub struct Engine {
     main_window: RefCell<Window>,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
-    storage: RefCell<EntityStorage>,
-    dirty_comps: RefCell<DirtyComponents>,
-    object_count: RefCell<usize>,
     module_manager: RefCell<ModuleManager>,
     app: RefCell<Box<dyn Application>>,
 }
 
 pub struct EngineContext<'a> {
-    storage: &'a RefCell<EntityStorage>,
-    dirty_comps: &'a RefCell<DirtyComponents>,
-    object_count: &'a RefCell<usize>,
     module_manager: &'a RefCell<ModuleManager>,
     app: &'a RefCell<Box<dyn Application>>,
     window: &'a RefCell<Window>,
@@ -75,10 +66,6 @@ pub struct EngineContext<'a> {
 impl EngineContext<'_> {
     pub fn window(&self) -> Ref<Window> {
         self.window.borrow()
-    }
-
-    pub fn scene(&self) -> SceneAccess {
-        SceneAccess::new(self)
     }
 
     pub fn register_module<M: EngineModule>(&self, module: M) {
@@ -132,9 +119,6 @@ impl Engine {
             main_window: RefCell::new(main_window),
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
-            storage: Default::default(),
-            dirty_comps: RefCell::new(Default::default()),
-            object_count: RefCell::new(0),
             module_manager: Default::default(),
             app: RefCell::new(Box::new(app)),
         };
@@ -146,9 +130,6 @@ impl Engine {
 
     fn context(&self) -> EngineContext {
         EngineContext {
-            storage: &self.storage,
-            dirty_comps: &self.dirty_comps,
-            object_count: &self.object_count,
             module_manager: &self.module_manager,
             app: &self.app,
             window: &self.main_window,

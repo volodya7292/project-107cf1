@@ -117,7 +117,7 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
 }
 
 pub(crate) struct CommitBufferUpdates<'a> {
-    pub updates: Vec<(EntityId, Arc<RawVertexMesh>)>,
+    pub updates: HashMap<EntityId, Arc<RawVertexMesh>>,
     pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,
 }
@@ -127,7 +127,7 @@ impl SystemHandler for CommitBufferUpdates<'_> {
         let t0 = Instant::now();
         let vertex_mesh_comps = data.component::<VertexMeshC>();
 
-        for (entity, updated_mesh) in self.updates.drain(..) {
+        for (entity, updated_mesh) in self.updates.drain() {
             if vertex_mesh_comps.contains(&entity) {
                 self.vertex_meshes.insert(entity, updated_mesh);
             }

@@ -1,12 +1,13 @@
+use ahash::{AHashMap, AHashSet};
 use std::hash::Hash;
 
-pub type HashSet<T> = ahash::AHashSet<T>;
-pub type HashMap<K, V> = ahash::AHashMap<K, V>;
+pub type HashSet<T> = AHashSet<T>;
+pub type HashMap<K, V> = AHashMap<K, V>;
 pub type ConcurrentCache<K, V> = moka::sync::Cache<K, V, ahash::RandomState>;
 pub type IndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 pub type IndexMap<T, V> = indexmap::IndexMap<T, V, ahash::RandomState>;
 
-pub trait ConcurrentCacheImpl<K, V> {
+pub trait ConcurrentCacheExt<K, V> {
     fn new(max_capacity: usize) -> ConcurrentCache<K, V>;
     fn with_weigher(
         max_capacity: usize,
@@ -14,7 +15,7 @@ pub trait ConcurrentCacheImpl<K, V> {
     ) -> ConcurrentCache<K, V>;
 }
 
-impl<K, V> ConcurrentCacheImpl<K, V> for ConcurrentCache<K, V>
+impl<K, V> ConcurrentCacheExt<K, V> for ConcurrentCache<K, V>
 where
     K: Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,

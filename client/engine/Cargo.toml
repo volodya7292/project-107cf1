@@ -11,8 +11,8 @@ shader_ids = { path = "shader_ids" }
 basis-universal = "0.2"
 fixedbitset = "0.4"
 index-pool = "1.0"
-entity_data = { version = "1.9", features = ["rayon"] }
-#entity_data = { path = "../../entity_data", features = ["rayon"] }
+entity_data = { version = "1.10", features = ["rayon"] }
+#entity_data = { path = "../../../entity_data", features = ["rayon"] }
 smallvec = { version = "1.9", features = ["const_generics"] }
 lazy_static = "1.4"
 winit = "0.28"

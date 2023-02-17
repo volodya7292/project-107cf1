@@ -11,9 +11,10 @@ use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::types::{HashMap, HashSet};
 use common::{glm, rayon};
+use engine::ecs::component;
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
-use engine::ecs::{component, SceneAccess};
 use engine::module::main_renderer::{MainRenderer, VertexMeshObject};
+use engine::module::scene::Scene;
 use engine::vkw;
 use entity_data::EntityId;
 use std::sync::Arc;
@@ -139,7 +140,7 @@ impl OverworldRenderer {
         }
     }
 
-    pub fn update_scene(&mut self, scene: &mut SceneAccess) {
+    pub fn update_scene(&mut self, scene: &mut Scene) {
         let mut to_update_mesh = self.to_update_mesh.lock();
 
         // Remove objects
@@ -184,18 +185,12 @@ impl OverworldRenderer {
                 }
             });
 
-            let mesh_solid = VertexMeshC::new(&meshes.solid.raw());
-            let transparent = VertexMeshC::new(&meshes.transparent.raw());
-
-            scene.object_raw(&entities.solid).unwrap().modify(|mut entry| {
-                *entry.get_mut::<VertexMeshC>().unwrap() = mesh_solid;
-            });
-            scene
-                .object_raw(&entities.translucent)
-                .unwrap()
-                .modify(|mut entry| {
-                    *entry.get_mut::<VertexMeshC>().unwrap() = transparent;
-                });
+            if let Some(mut entry) = scene.entry(&entities.solid) {
+                *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&meshes.solid.raw());
+            }
+            if let Some(mut entry) = scene.entry(&entities.translucent) {
+                *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&meshes.transparent.raw());
+            }
 
             false
         });

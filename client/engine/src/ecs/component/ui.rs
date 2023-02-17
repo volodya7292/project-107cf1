@@ -1,4 +1,5 @@
-use crate::ecs::SceneAccess;
+use crate::module::scene::Scene;
+use crate::EngineContext;
 use common::glm::Vec2;
 use entity_data::EntityId;
 
@@ -258,7 +259,7 @@ pub struct UILayoutCacheC {
     pub(crate) clip_rect: Rect,
 }
 
-type BasicEventCallback = fn(entity: &EntityId, scene: &mut SceneAccess);
+type BasicEventCallback = fn(entity: &EntityId, scene: &mut Scene, scene: &EngineContext);
 
 #[derive(Copy, Clone)]
 pub struct UIEventHandlerC {
@@ -270,11 +271,11 @@ pub struct UIEventHandlerC {
 }
 
 pub trait UIEventHandlerI {
-    fn on_hover_enter(_: &EntityId, _: &mut SceneAccess) {}
-    fn on_hover_exit(_: &EntityId, _: &mut SceneAccess) {}
-    fn on_mouse_press(_: &EntityId, _: &mut SceneAccess) {}
-    fn on_mouse_release(_: &EntityId, _: &mut SceneAccess) {}
-    fn on_click(_: &EntityId, _: &mut SceneAccess) {}
+    fn on_hover_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_hover_exit(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_mouse_press(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_mouse_release(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_click(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
 }
 
 impl UIEventHandlerI for () {}

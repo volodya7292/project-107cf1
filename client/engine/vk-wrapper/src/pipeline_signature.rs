@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use ash::vk;
-
 use crate::shader::{BindingLoc, ShaderStage};
 use crate::{DescriptorPool, Device, Shader, ShaderBinding};
+use ash::vk;
+use common::types::HashMap;
+use std::sync::Arc;
 
 pub struct PipelineSignature {
     pub(crate) device: Arc<Device>,

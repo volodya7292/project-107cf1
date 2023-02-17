@@ -9,7 +9,7 @@ use std::{mem, slice};
 
 // Updates global transform uniform buffers
 pub(crate) struct GlobalTransformEvents<'a> {
-    pub dirty_components: HashSet<EntityId>,
+    pub dirty_components: Vec<EntityId>,
     pub changed_uniforms: HashSet<EntityId>,
     pub material_pipelines: &'a [MaterialPipelineSet],
     pub run_time: f64,

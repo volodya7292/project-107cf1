@@ -26,13 +26,11 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
     let mut log_file = File::create(dst_dir.join("output.log")).unwrap();
 
     // Read timestamp file
-    let mut timestamps: HashMap<String, TSMetaData> = match fs::File::open(ts_path) {
-        Ok(f) => match serde_yaml::from_reader(f) {
-            Ok(x) => x,
-            Err(_) => HashMap::new(),
-        },
-        Err(_) => HashMap::new(),
-    };
+    let mut timestamps = File::open(ts_path)
+        .map(|f| serde_yaml::from_reader::<_, HashMap<String, TSMetaData>>(f).ok())
+        .ok()
+        .flatten()
+        .unwrap_or(Default::default());
 
     for entry in src_dir.read_dir().unwrap() {
         if let Ok(entry) = entry {

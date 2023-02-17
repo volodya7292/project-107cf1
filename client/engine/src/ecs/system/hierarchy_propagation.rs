@@ -8,7 +8,7 @@ use std::time::Instant;
 // Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {
     pub root_entity: EntityId,
-    pub dirty_transform_comps: HashSet<EntityId>,
+    pub dirty_components: HashSet<EntityId>,
     pub ordered_entities: &'a mut Vec<EntityId>,
     pub changed_global_transforms: Vec<EntityId>,
     pub run_time: f64,
@@ -46,7 +46,7 @@ impl SystemHandler for HierarchyPropagation<'_> {
             self.ordered_entities.push(entity);
 
             let global_transform_changed =
-                parent_transform_changed || self.dirty_transform_comps.contains(&entity);
+                parent_transform_changed || self.dirty_components.contains(&entity);
 
             let global_transform = if let Some(global_transform) = global_transform_comps.get_mut(&entity) {
                 if global_transform_changed {

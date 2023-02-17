@@ -6,9 +6,10 @@ use crate::ecs::component::ui::{
     Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UIEventHandlerC,
     UILayoutC, UILayoutCacheC,
 };
-use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
-use crate::ecs::{SceneAccess, SceneObject};
+use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
+use crate::module::scene::change_manager::ComponentChangesHandle;
+use crate::module::scene::{Scene, SceneObject};
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::utils::U8SliceHelper;
@@ -27,6 +28,7 @@ pub struct UIRenderer {
     root_element_size: Vec2,
     root_element_size_dirty: bool,
     scale_factor: f32,
+    ui_layout_changes: ComponentChangesHandle,
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -49,6 +51,7 @@ where
     uniforms: UniformDataC,
     mesh: VertexMeshC,
 
+    scene_event_handler: SceneEventHandler,
     layout_cache: UILayoutCacheC,
     layout: UILayoutC,
     ui_event_handler: UIEventHandlerC,
@@ -65,6 +68,7 @@ impl<E: UIState> UIObject<E> {
             renderer: Default::default(),
             uniforms: Default::default(),
             mesh: Default::default(),
+            scene_event_handler: Default::default(),
             layout_cache: Default::default(),
             layout,
             ui_event_handler: Default::default(),
@@ -79,6 +83,11 @@ impl<E: UIState> UIObject<E> {
 
     pub fn with_mesh(mut self, mesh: VertexMeshC) -> Self {
         self.mesh = mesh;
+        self
+    }
+
+    pub fn with_scene_event_handler(mut self, handler: SceneEventHandler) -> Self {
+        self.scene_event_handler = handler;
         self
     }
 
@@ -202,8 +211,10 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 
 impl UIRenderer {
     pub fn new(ctx: &EngineContext, root_entity: EntityId) -> Self {
-        let root_ui_entity = ctx
-            .scene()
+        let mut scene = ctx.module_mut::<Scene>();
+        let ui_layout_changes = scene.change_manager_mut().register_component_flow::<UILayoutC>();
+
+        let root_ui_entity = scene
             .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::new(), ()))
             .unwrap();
 
@@ -212,6 +223,7 @@ impl UIRenderer {
             root_element_size: Default::default(),
             root_element_size_dirty: false,
             scale_factor: 1.0,
+            ui_layout_changes,
         }
     }
 
@@ -450,7 +462,7 @@ impl UIRenderer {
 
     fn calculate_transforms(
         linear_tree: &[EntityId],
-        scene: &mut SceneAccess,
+        scene: &mut Scene,
         root_size: &Vec2,
         dirty_elements: &mut HashSet<EntityId>,
     ) {
@@ -461,13 +473,13 @@ impl UIRenderer {
                 continue;
             }
 
-            let mut entry = scene.entry_mut(node).unwrap();
+            let mut entry = scene.entry(node).unwrap();
 
-            let Some(transform) = entry.get::<TransformC>() else {
+            let Some(transform) = entry.get_checked::<TransformC>() else {
                 continue;
             };
-            let layout = entry.get::<UILayoutC>().unwrap();
-            let cache = entry.get::<UILayoutCacheC>().unwrap();
+            let layout = entry.get_checked::<UILayoutC>().unwrap();
+            let cache = entry.get_checked::<UILayoutCacheC>().unwrap();
 
             let norm_pos = cache.global_position.component_mul(&root_size_inv);
             let norm_size = cache.final_size.component_mul(&root_size_inv);
@@ -510,12 +522,13 @@ impl UIRenderer {
     }
 
     fn update_hierarchy(&mut self, ctx: &EngineContext) {
-        let mut dirty_elements = ctx.dirty_comps.borrow_mut().take_changes::<UILayoutC>();
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut dirty_elements: HashSet<_> = scene.change_manager_mut().take_new(self.ui_layout_changes);
         if dirty_elements.is_empty() {
             return;
         }
 
-        let mut storage = ctx.storage.borrow_mut();
+        let storage = scene.storage_mut();
         let access = storage.access();
         let linear_tree = common::scene::collect_relation_tree(&access, &self.root_ui_entity);
 
@@ -523,22 +536,22 @@ impl UIRenderer {
 
         Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
 
-        drop(storage);
         Self::calculate_transforms(
             &linear_tree,
-            &mut ctx.scene(),
+            &mut scene,
             &self.root_element_size,
             &mut dirty_elements,
         );
     }
 
-    pub fn find_element_at_point(&self, point: &Vec2, scene: &mut SceneAccess) -> Option<EntityId> {
-        let linear_tree = common::scene::collect_relation_tree(&scene.storage.access(), &self.root_ui_entity);
+    pub fn find_element_at_point(&self, point: &Vec2, scene: &mut Scene) -> Option<EntityId> {
+        let linear_tree =
+            common::scene::collect_relation_tree(&scene.storage_mut().access(), &self.root_ui_entity);
 
         // Iterate starting from children
         for node in linear_tree.iter().rev() {
-            let entry = scene.entry_mut(node).unwrap();
-            let cache = entry.get::<UILayoutCacheC>().unwrap();
+            let entry = scene.entry(node).unwrap();
+            let cache = entry.get::<UILayoutCacheC>();
 
             if cache.clip_rect.contains_point(point) {
                 return Some(*node);
@@ -551,10 +564,10 @@ impl UIRenderer {
 
 impl EngineModule for UIRenderer {
     fn on_update(&mut self, ctx: &EngineContext) {
-        let mut scene = ctx.scene();
+        let mut scene = ctx.module_mut::<Scene>();
 
         if self.root_element_size_dirty {
-            let mut root = scene.entry_mut(&self.root_ui_entity).unwrap();
+            let mut root = scene.entry(&self.root_ui_entity).unwrap();
             let layout = root.get_mut::<UILayoutC>().unwrap();
 
             layout.constraints[0] = Constraint::exact(self.root_element_size.x);

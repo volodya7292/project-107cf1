@@ -6,7 +6,7 @@ use crate::utils::white_noise::WhiteNoise;
 use bit_vec::BitVec;
 use common::glm::I64Vec3;
 use common::types::ConcurrentCache;
-use common::types::ConcurrentCacheImpl;
+use common::types::ConcurrentCacheExt;
 use common::types::UInt;
 use once_cell::sync::OnceCell;
 use rand::Rng;

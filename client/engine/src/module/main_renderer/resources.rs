@@ -54,12 +54,8 @@ pub struct RendererResources {
 
     pub renderables: HashMap<EntityId, Renderable>,
     /// Meshes ready to be used on GPU (their staging buffers have been uploaded to GPU)
-    pub vertex_meshes: HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub curr_vertex_meshes: HashMap<EntityId, Arc<RawVertexMesh>>,
     pub material_pipelines: Vec<MaterialPipelineSet>,
-
-    // Temporary resources
-    pub renderables_to_destroy: Vec<Renderable>,
-    pub vertex_meshes_to_destroy: Vec<Arc<RawVertexMesh>>,
 }
 
 #[derive(Copy, Clone)]

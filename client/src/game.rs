@@ -41,6 +41,7 @@ use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexM
 use engine::module::input::Input;
 use engine::module::main_renderer;
 use engine::module::main_renderer::{camera, MainRenderer, SimpleObject};
+use engine::module::scene::Scene;
 use engine::module::text_renderer::{FontSet, TextObject, TextRenderer};
 use engine::module::ui::element::{TextState, UIText};
 use engine::module::ui::{UIObject, UIRenderer};
@@ -182,7 +183,13 @@ impl Application for Game {
     }
 
     fn initialize_engine(&mut self, ctx: &EngineContext) {
-        self.root_entity = ctx.scene().add_object(None, SimpleObject::new()).unwrap();
+        let mut scene = Scene::new();
+        ctx.register_module(scene);
+
+        self.root_entity = ctx
+            .module_mut::<Scene>()
+            .add_object(None, SimpleObject::new())
+            .unwrap();
 
         let mut renderer = MainRenderer::new(
             "VulkanRenderer",
@@ -197,12 +204,13 @@ impl Application for Game {
             512,
             |adapter| 0,
             self.root_entity,
+            ctx,
         );
         ctx.register_module(renderer);
 
         ctx.register_module(TextRenderer::new(ctx));
         ctx.register_module(UIRenderer::new(ctx, self.root_entity));
-        ctx.register_module(UIInteractionManager::new());
+        ctx.register_module(UIInteractionManager::new(ctx));
         ctx.register_module(Input::new());
 
         // ------------------------------------------------------------------------------------------------
@@ -251,6 +259,7 @@ impl Application for Game {
         drop(renderer);
 
         // -------------------------------------------------------
+        let mut scene = ctx.module_mut::<Scene>();
 
         let mut text_renderer = ctx.module_mut::<TextRenderer>();
         let font_id = text_renderer.register_font(
@@ -263,7 +272,7 @@ impl Application for Game {
         drop(text_renderer);
 
         let player_pos = self.main_state.lock().player_pos;
-        let text = ctx.scene().add_object(
+        let text = scene.add_object(
             Some(self.root_entity),
             TextObject::new(
                 TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
@@ -294,7 +303,7 @@ impl Application for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        let panel = ctx.scene().add_object(
+        let panel = scene.add_object(
             Some(root_ui_entity),
             UIObject::new_raw(
                 UILayoutC::new()
@@ -308,9 +317,8 @@ impl Application for Game {
             .with_mesh(VertexMeshC::without_data(4, 1)),
         );
 
-        let text = ctx.scene().add_object(panel, UIText::new());
+        let text = scene.add_object(panel, UIText::new());
 
-        let scene = ctx.scene();
         let mut obj = scene.object::<UIText>(&text.unwrap()).unwrap();
         obj.set_text(StyledString::new(
             "Loremipsumdsadsf dorer",
@@ -451,7 +459,7 @@ impl Application for Game {
 
         {
             let mut overworld_renderer = self.overworld_renderer.as_ref().unwrap().lock();
-            overworld_renderer.update_scene(&mut ctx.scene());
+            overworld_renderer.update_scene(&mut ctx.module_mut::<Scene>());
         }
     }
 

@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use ash::vk;
+use common::types::HashMap;
+use std::sync::Arc;
 
 use crate::format::DEPTH_FORMAT;
 use crate::{

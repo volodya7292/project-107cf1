@@ -1,5 +1,6 @@
 pub mod input;
 pub mod main_renderer;
+pub mod scene;
 pub mod text_renderer;
 pub mod ui;
 pub mod ui_interaction_manager;
@@ -9,15 +10,10 @@ use crate::EngineContext;
 use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::types::IndexMap;
-use entity_data::EntityId;
 use std::any::TypeId;
 use winit::window::Window;
 
 pub trait EngineModule: AsAny {
-    /// Called after an object has been added.
-    fn on_object_added(&mut self, _: &EntityId, _: &EngineContext) {}
-    /// Called before an object is removed.
-    fn on_object_remove(&mut self, _: &EntityId, _: &EngineContext) {}
     /// Main loop
     fn on_update(&mut self, _: &EngineContext) {}
     fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent, _: &EngineContext) {}
@@ -55,20 +51,6 @@ impl ModuleManager {
             let mut module = module.borrow_mut();
             f(&mut *module);
         }
-    }
-
-    #[inline]
-    pub(crate) fn on_object_added(&self, id: &EntityId, ctx: &EngineContext) {
-        self.for_every(|module| {
-            module.on_object_added(id, ctx);
-        });
-    }
-
-    #[inline]
-    pub(crate) fn on_object_remove(&self, id: &EntityId, ctx: &EngineContext) {
-        self.for_every(|module| {
-            module.on_object_remove(id, ctx);
-        });
     }
 
     #[inline]

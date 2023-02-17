@@ -4,7 +4,8 @@ use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
 use crate::module::main_renderer::resources::{Renderable, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::module::main_renderer::{BufferUpdate, BufferUpdate1};
-use common::types::{HashMap, HashSet};
+use crate::module::scene::change_manager::{ChangeType, ComponentChange};
+use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
 use smallvec::{smallvec, SmallVec};
@@ -16,10 +17,10 @@ use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};
 
-pub(crate) struct RendererComponentEvents<'a> {
+pub(crate) struct RenderConfigComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
     pub renderables: &'a mut HashMap<EntityId, Renderable>,
-    pub dirty_components: HashSet<EntityId>,
+    pub component_changes: Vec<ComponentChange>,
     pub buffer_updates: &'a mut Vec<BufferUpdate>,
     pub material_pipelines: &'a mut [MaterialPipelineSet],
     pub uniform_buffer_basic: &'a DeviceBuffer,
@@ -27,7 +28,7 @@ pub(crate) struct RendererComponentEvents<'a> {
     pub run_time: f64,
 }
 
-impl RendererComponentEvents<'_> {
+impl RenderConfigComponentEvents<'_> {
     fn renderer_comp_created(renderable: &mut Renderable, mat_pipelines: &mut [MaterialPipelineSet]) {
         let mat_pipe = &mut mat_pipelines[renderable.mat_pipeline as usize];
 
@@ -115,44 +116,47 @@ impl RendererComponentEvents<'_> {
     }
 }
 
-impl SystemHandler for RendererComponentEvents<'_> {
+impl SystemHandler for RenderConfigComponentEvents<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
 
         let mut renderer_comps = data.component_mut::<MeshRenderConfigC>();
 
-        let mut binding_updates = Vec::<vkw::Binding>::with_capacity(self.dirty_components.len());
+        let mut binding_updates = Vec::<vkw::Binding>::with_capacity(self.component_changes.len());
         let mut desc_updates =
-            Vec::<(DescriptorSet, Range<usize>)>::with_capacity(self.dirty_components.len());
+            Vec::<(DescriptorSet, Range<usize>)>::with_capacity(self.component_changes.len());
 
-        for entity in &self.dirty_components {
+        for change in &self.component_changes {
+            let entity = change.entity();
+
+            if change.ty() == ChangeType::Removed {
+                Self::renderer_comp_removed(
+                    &self.renderables.remove(entity).unwrap(),
+                    self.material_pipelines,
+                    self.uniform_buffer_offsets,
+                );
+                continue;
+            }
+
             let config = renderer_comps.get_mut(entity).unwrap();
-
             if config.mat_pipeline == u32::MAX {
                 continue;
             }
 
-            let mut renderable = if let Some(mut renderable) = self.renderables.remove(&entity) {
+            if change.ty() == ChangeType::Modified {
                 Self::renderer_comp_removed(
-                    &renderable,
+                    &self.renderables.remove(&entity).unwrap(),
                     self.material_pipelines,
                     self.uniform_buffer_offsets,
                 );
+            }
 
-                renderable.buffers = smallvec![];
-                renderable.mat_pipeline = config.mat_pipeline;
-                renderable.descriptor_sets = Default::default();
-
-                renderable
-            } else {
-                Renderable {
-                    buffers: smallvec![],
-                    mat_pipeline: config.mat_pipeline,
-                    uniform_buf_index: self.uniform_buffer_offsets.new_id(),
-                    descriptor_sets: Default::default(),
-                }
+            let mut renderable = Renderable {
+                buffers: smallvec![],
+                mat_pipeline: config.mat_pipeline,
+                uniform_buf_index: self.uniform_buffer_offsets.new_id(),
+                descriptor_sets: Default::default(),
             };
-
             Self::renderer_comp_created(&mut renderable, self.material_pipelines);
             Self::renderer_comp_modified(
                 config,

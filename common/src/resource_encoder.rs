@@ -1,13 +1,13 @@
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::string::String;
 use std::time::SystemTime;
 use std::{env, fmt, fs};
-
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 /**
 File structure
@@ -146,14 +146,15 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
     }
 
     // Read timestamp file
-    let mut timestamps;
-    match fs::read(&ts_path) {
-        Ok(x) => match bincode::decode_from_slice(&x, bincode::config::standard()) {
-            Ok((x, _)) => timestamps = x,
-            Err(_) => timestamps = HashMap::new(),
-        },
-        Err(_) => timestamps = HashMap::new(),
-    };
+    let mut timestamps: HashMap<String, SystemTime> = fs::read(&ts_path)
+        .map(|v| {
+            bincode::decode_from_slice::<HashMap<String, SystemTime>, _>(&v, bincode::config::standard())
+                .map(|v| v.0)
+                .ok()
+        })
+        .ok()
+        .flatten()
+        .unwrap_or(Default::default());
 
     // Create destination directories
     if !out_dir_path.exists() {

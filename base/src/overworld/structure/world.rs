@@ -17,7 +17,7 @@ use bit_vec::BitVec;
 use common::glm;
 use common::glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
 use common::types::ConcurrentCache;
-use common::types::ConcurrentCacheImpl;
+use common::types::ConcurrentCacheExt;
 use noise;
 use noise::{NoiseFn, Seedable};
 use once_cell::sync::OnceCell;
