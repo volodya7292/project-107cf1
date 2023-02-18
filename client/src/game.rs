@@ -36,7 +36,7 @@ use common::{glm, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{Sizing, UILayoutC};
+use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::module::input::Input;
 use engine::module::main_renderer;
@@ -317,7 +317,11 @@ impl Application for Game {
             .with_mesh(VertexMeshC::without_data(4, 1)),
         );
 
-        let text = scene.add_object(panel, UIText::new());
+        let text = scene.add_object(
+            panel,
+            UIText::new()
+                .add_event_handler(UIEventHandlerC::new().add_on_cursor_enter(|_, _, _| println!("GOV"))),
+        );
 
         let mut obj = scene.object::<UIText>(&text.unwrap()).unwrap();
         obj.set_text(StyledString::new(

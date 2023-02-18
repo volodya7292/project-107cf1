@@ -3,6 +3,7 @@ pub mod render_config;
 mod scene_event_handler;
 pub mod simple_text;
 mod transform;
+#[macro_use]
 pub mod ui;
 pub mod uniform_data;
 mod vertex_mesh;

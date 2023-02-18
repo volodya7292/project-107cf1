@@ -59,6 +59,7 @@ impl EngineModule for UIInteractionManager {
 
         let mut scene = ctx.module_mut::<Scene>();
         let ui_renderer = ctx.module_mut::<UIRenderer>();
+        let global_handler = &self.global_event_handler;
 
         match *event {
             WSIEvent::CursorMoved { position, .. } => {
@@ -69,33 +70,52 @@ impl EngineModule for UIInteractionManager {
                 if self.curr_hover_entity != new_hover_entity {
                     if let Some(handler) = scene
                         .entry(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_leave)
+                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_leave.clone())
                     {
-                        handler(&self.curr_hover_entity, &mut scene, ctx);
-                    }
-
-                    if let Some(handler) = scene
-                        .entry(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_enter)
-                    {
-                        handler(&new_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(
+                            global_handler.on_cursor_leave,
+                            &self.curr_hover_entity,
+                            &mut scene,
+                            ctx,
+                        );
+                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
                     }
 
                     self.curr_hover_entity = new_hover_entity;
+
+                    if let Some(handler) = scene
+                        .entry(&self.curr_hover_entity)
+                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_enter.clone())
+                    {
+                        ui_invoke_callback_set!(
+                            global_handler.on_cursor_enter,
+                            &self.curr_hover_entity,
+                            &mut scene,
+                            ctx,
+                        );
+                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                    }
                 }
             }
             WSIEvent::MouseInput { state, button } => {
                 if button != MouseButton::Left {
                     return;
                 }
+
                 if state == ElementState::Pressed {
                     self.mouse_button_press_entity = self.curr_hover_entity;
 
                     if let Some(handler) = scene
                         .entry(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_press)
+                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_press.clone())
                     {
-                        handler(&self.curr_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(
+                            global_handler.on_mouse_press,
+                            &self.curr_hover_entity,
+                            &mut scene,
+                            ctx,
+                        );
+                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
                     }
                 } else if state == ElementState::Released {
                     let on_release_entity = self.curr_hover_entity;
@@ -103,17 +123,29 @@ impl EngineModule for UIInteractionManager {
                     if self.mouse_button_press_entity == on_release_entity {
                         if let Some(handler) = scene
                             .entry(&self.curr_hover_entity)
-                            .map(|e| e.get::<UIEventHandlerC>().on_click)
+                            .map(|e| e.get::<UIEventHandlerC>().on_click.clone())
                         {
-                            handler(&on_release_entity, &mut scene, ctx);
+                            ui_invoke_callback_set!(
+                                global_handler.on_click,
+                                &self.curr_hover_entity,
+                                &mut scene,
+                                ctx,
+                            );
+                            ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
                         }
                     }
 
                     if let Some(handler) = scene
                         .entry(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_release)
+                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_release.clone())
                     {
-                        handler(&on_release_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(
+                            global_handler.on_mouse_release,
+                            &self.curr_hover_entity,
+                            &mut scene,
+                            ctx,
+                        );
+                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
                     }
 
                     self.mouse_button_press_entity = EntityId::NULL;

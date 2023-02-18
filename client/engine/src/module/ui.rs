@@ -91,8 +91,20 @@ impl<E: UIState> UIObject<E> {
         self
     }
 
-    pub fn with_event_handler(mut self, handler: UIEventHandlerC) -> Self {
-        self.ui_event_handler = handler;
+    pub fn add_event_handler(mut self, handler: UIEventHandlerC) -> Self {
+        self.ui_event_handler
+            .on_cursor_enter
+            .extend(&handler.on_cursor_enter);
+        self.ui_event_handler
+            .on_cursor_leave
+            .extend(&handler.on_cursor_leave);
+        self.ui_event_handler
+            .on_mouse_press
+            .extend(&handler.on_mouse_press);
+        self.ui_event_handler
+            .on_mouse_release
+            .extend(&handler.on_mouse_release);
+        self.ui_event_handler.on_click.extend(&handler.on_click);
         self
     }
 }

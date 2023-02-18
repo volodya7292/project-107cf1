@@ -1,3 +1,4 @@
+#[macro_use]
 pub mod ecs;
 pub mod event;
 pub mod execution;

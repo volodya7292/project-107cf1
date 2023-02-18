@@ -23,7 +23,7 @@ impl UIText {
                 .with_stage(RenderStage::OVERLAY),
         )
         .with_scene_event_handler(SceneEventHandler::new().with_on_update(Self::on_update))
-        .with_event_handler(UIEventHandlerC::new::<Self>())
+        .add_event_handler(UIEventHandlerC::from_impl::<Self>())
     }
 
     fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
@@ -43,11 +43,11 @@ impl UIText {
 }
 
 impl UIEventHandlerI for UIText {
-    fn on_hover_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {
+    fn on_cursor_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {
         println!("HOVER ENTER");
     }
 
-    fn on_hover_exit(_: &EntityId, _: &mut Scene, _: &EngineContext) {
+    fn on_cursor_leave(_: &EntityId, _: &mut Scene, _: &EngineContext) {
         println!("HOVER EXIT");
     }
 

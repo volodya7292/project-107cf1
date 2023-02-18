@@ -1,7 +1,9 @@
 use crate::module::scene::Scene;
 use crate::EngineContext;
 use common::glm::Vec2;
+use common::types::{HashSet, IndexSet};
 use entity_data::EntityId;
+use std::hash::{Hash, Hasher};
 
 pub type Factor = f32;
 
@@ -259,20 +261,51 @@ pub struct UILayoutCacheC {
     pub(crate) clip_rect: Rect,
 }
 
-type BasicEventCallback = fn(entity: &EntityId, scene: &mut Scene, scene: &EngineContext);
+type BasicEventCallback = fn(&EntityId, &mut Scene, &EngineContext);
 
 #[derive(Copy, Clone)]
+pub struct BasicEventCallbackWrapper(pub fn(&EntityId, &mut Scene, &EngineContext));
+
+impl PartialEq for BasicEventCallbackWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        let p1 = self.0 as *const u8;
+        let p2 = other.0 as *const u8;
+        p1 == p2
+    }
+}
+
+impl Eq for BasicEventCallbackWrapper {}
+
+impl Hash for BasicEventCallbackWrapper {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let p = self.0 as *const u8;
+        p.hash(state);
+    }
+}
+
 pub struct UIEventHandlerC {
-    pub on_cursor_enter: BasicEventCallback,
-    pub on_cursor_leave: BasicEventCallback,
-    pub on_mouse_press: BasicEventCallback,
-    pub on_mouse_release: BasicEventCallback,
-    pub on_click: BasicEventCallback,
+    pub on_cursor_enter: IndexSet<BasicEventCallbackWrapper>,
+    pub on_cursor_leave: IndexSet<BasicEventCallbackWrapper>,
+    pub on_mouse_press: IndexSet<BasicEventCallbackWrapper>,
+    pub on_mouse_release: IndexSet<BasicEventCallbackWrapper>,
+    pub on_click: IndexSet<BasicEventCallbackWrapper>,
+}
+
+impl Default for UIEventHandlerC {
+    fn default() -> Self {
+        Self {
+            on_cursor_enter: Default::default(),
+            on_cursor_leave: Default::default(),
+            on_mouse_press: Default::default(),
+            on_mouse_release: Default::default(),
+            on_click: Default::default(),
+        }
+    }
 }
 
 pub trait UIEventHandlerI {
-    fn on_hover_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
-    fn on_hover_exit(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_cursor_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_cursor_leave(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
     fn on_mouse_press(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
     fn on_mouse_release(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
     fn on_click(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
@@ -281,19 +314,35 @@ pub trait UIEventHandlerI {
 impl UIEventHandlerI for () {}
 
 impl UIEventHandlerC {
-    pub fn new<I: UIEventHandlerI>() -> Self {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_impl<I: UIEventHandlerI + 'static>() -> Self {
         Self {
-            on_cursor_enter: I::on_hover_enter,
-            on_cursor_leave: I::on_hover_exit,
-            on_mouse_press: I::on_mouse_press,
-            on_mouse_release: I::on_mouse_release,
-            on_click: I::on_click,
+            on_cursor_enter: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            on_cursor_leave: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            on_mouse_press: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            on_mouse_release: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            on_click: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
         }
+    }
+
+    pub fn add_on_cursor_enter(mut self, handler: BasicEventCallback) -> Self {
+        self.on_cursor_enter.insert(BasicEventCallbackWrapper(handler));
+        self
+    }
+
+    pub fn add_on_cursor_leave(mut self, handler: BasicEventCallback) -> Self {
+        self.on_cursor_leave.insert(BasicEventCallbackWrapper(handler));
+        self
     }
 }
 
-impl Default for UIEventHandlerC {
-    fn default() -> Self {
-        Self::new::<()>()
-    }
+macro_rules! ui_invoke_callback_set {
+    ($callback_set: expr, $($param: expr),* $(,)?) => {
+        for callback in &$callback_set {
+            callback.0($($param,)*);
+        }
+    };
 }
