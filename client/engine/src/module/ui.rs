@@ -485,7 +485,7 @@ impl UIRenderer {
                 continue;
             }
 
-            let mut entry = scene.entry(node).unwrap();
+            let mut entry = scene.entry(node);
 
             let Some(transform) = entry.get_checked::<TransformC>() else {
                 continue;
@@ -511,7 +511,7 @@ impl UIRenderer {
                 let uniform_crop_rect_offset = layout.uniform_crop_rect_offset as usize;
                 let rect = cache.clip_rect;
 
-                let transform = entry.get_mut::<TransformC>().unwrap();
+                let transform = entry.get_mut::<TransformC>();
                 transform.scale = new_scale;
                 transform.position = new_position;
 
@@ -519,13 +519,13 @@ impl UIRenderer {
                     min: rect.min.component_mul(&root_size_inv),
                     max: rect.max.component_mul(&root_size_inv),
                 };
-                let uniform_data = entry.get_mut::<UniformDataC>().unwrap();
+                let uniform_data = entry.get_mut::<UniformDataC>();
                 let raw_rect = &mut uniform_data.0
                     [uniform_crop_rect_offset..uniform_crop_rect_offset + mem::size_of_val(&rect_data)];
                 raw_rect.raw_copy_from(rect_data);
 
                 // if parent transform changed, then all children transforms must be recalculated
-                let relation = entry.get_mut::<Relation>().unwrap();
+                let relation = entry.get_mut::<Relation>();
                 for child in &relation.children {
                     dirty_elements.insert(*child);
                 }
@@ -562,7 +562,7 @@ impl UIRenderer {
 
         // Iterate starting from children
         for node in linear_tree.iter().rev() {
-            let entry = scene.entry(node).unwrap();
+            let entry = scene.entry(node);
             let cache = entry.get::<UILayoutCacheC>();
 
             if cache.clip_rect.contains_point(point) {
@@ -579,8 +579,8 @@ impl EngineModule for UIRenderer {
         let mut scene = ctx.module_mut::<Scene>();
 
         if self.root_element_size_dirty {
-            let mut root = scene.entry(&self.root_ui_entity).unwrap();
-            let layout = root.get_mut::<UILayoutC>().unwrap();
+            let mut root = scene.entry(&self.root_ui_entity);
+            let layout = root.get_mut::<UILayoutC>();
 
             layout.constraints[0] = Constraint::exact(self.root_element_size.x);
             layout.constraints[1] = Constraint::exact(self.root_element_size.y);

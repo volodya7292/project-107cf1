@@ -1101,9 +1101,9 @@ impl MainRenderer {
         // when camera position is too far (distance > 4096) from origin
         if curr_rel_camera_pos.magnitude() >= RESET_CAMERA_POS_THRESHOLD {
             let mut scene = ctx.module_mut::<Scene>();
-            let mut root = scene.entry(&self.root_entity).unwrap();
+            let mut root = scene.entry(&self.root_entity);
 
-            let global_transform = root.get_mut::<TransformC>().unwrap();
+            let global_transform = root.get_mut::<TransformC>();
             global_transform.position -= curr_rel_camera_pos;
 
             self.relative_camera_pos = Vec3::default();

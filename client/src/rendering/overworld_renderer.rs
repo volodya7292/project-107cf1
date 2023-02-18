@@ -185,11 +185,14 @@ impl OverworldRenderer {
                 }
             });
 
-            if let Some(mut entry) = scene.entry(&entities.solid) {
-                *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&meshes.solid.raw());
+            {
+                let mut entry = scene.entry(&entities.solid);
+                *entry.get_mut_checked::<VertexMeshC>().unwrap() = VertexMeshC::new(&meshes.solid.raw());
             }
-            if let Some(mut entry) = scene.entry(&entities.translucent) {
-                *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&meshes.transparent.raw());
+            {
+                let mut entry = scene.entry(&entities.translucent);
+                *entry.get_mut_checked::<VertexMeshC>().unwrap() =
+                    VertexMeshC::new(&meshes.transparent.raw());
             }
 
             false

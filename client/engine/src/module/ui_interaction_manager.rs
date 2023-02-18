@@ -69,7 +69,7 @@ impl EngineModule for UIInteractionManager {
 
                 if self.curr_hover_entity != new_hover_entity {
                     if let Some(handler) = scene
-                        .entry(&self.curr_hover_entity)
+                        .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_cursor_leave.clone())
                     {
                         ui_invoke_callback_set!(
@@ -84,7 +84,7 @@ impl EngineModule for UIInteractionManager {
                     self.curr_hover_entity = new_hover_entity;
 
                     if let Some(handler) = scene
-                        .entry(&self.curr_hover_entity)
+                        .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_cursor_enter.clone())
                     {
                         ui_invoke_callback_set!(
@@ -106,7 +106,7 @@ impl EngineModule for UIInteractionManager {
                     self.mouse_button_press_entity = self.curr_hover_entity;
 
                     if let Some(handler) = scene
-                        .entry(&self.curr_hover_entity)
+                        .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_mouse_press.clone())
                     {
                         ui_invoke_callback_set!(
@@ -122,7 +122,7 @@ impl EngineModule for UIInteractionManager {
 
                     if self.mouse_button_press_entity == on_release_entity {
                         if let Some(handler) = scene
-                            .entry(&self.curr_hover_entity)
+                            .entry_checked(&self.curr_hover_entity)
                             .map(|e| e.get::<UIEventHandlerC>().on_click.clone())
                         {
                             ui_invoke_callback_set!(
@@ -136,7 +136,7 @@ impl EngineModule for UIInteractionManager {
                     }
 
                     if let Some(handler) = scene
-                        .entry(&self.curr_hover_entity)
+                        .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_mouse_release.clone())
                     {
                         ui_invoke_callback_set!(

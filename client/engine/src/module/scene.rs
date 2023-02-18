@@ -47,12 +47,16 @@ impl Scene {
         &mut self.storage
     }
 
-    pub fn entry(&mut self, entity: &EntityId) -> Option<EntityAccess<()>> {
+    pub fn entry_checked(&mut self, entity: &EntityId) -> Option<EntityAccess<()>> {
         Some(EntityAccess {
             entry: self.storage.entry_mut(entity)?,
             change_manager: self.change_manager.borrow_mut(),
             _arch: Default::default(),
         })
+    }
+
+    pub fn entry(&mut self, entity: &EntityId) -> EntityAccess<()> {
+        self.entry_checked(entity).unwrap()
     }
 
     pub fn object<A: StaticArchetype>(&mut self, entity: &EntityId) -> Option<EntityAccess<A>> {
@@ -166,7 +170,7 @@ impl EngineModule for Scene {
                 continue;
             }
 
-            let entry = self.entry(&entity).unwrap();
+            let entry = self.entry_checked(&entity).unwrap();
             let event_handler = *entry.get::<SceneEventHandler>();
             let on_update = event_handler.on_update();
 
@@ -199,8 +203,13 @@ impl<A> EntityAccess<'_, A> {
     }
 
     #[inline]
-    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> {
+    pub fn get_mut_checked<C: Component>(&mut self) -> Option<&mut C> {
         self.change_manager.record_modification::<C>(*self.entry.entity());
         self.entry.get_mut::<C>()
+    }
+
+    #[inline]
+    pub fn get_mut<C: Component>(&mut self) -> &mut C {
+        self.get_mut_checked().unwrap()
     }
 }

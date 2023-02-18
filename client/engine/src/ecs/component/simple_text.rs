@@ -68,6 +68,10 @@ impl TextStyle {
     pub fn color(&self) -> U8Vec4 {
         self.color
     }
+
+    pub fn set_color(&mut self, color: U8Vec4) {
+        self.color = color;
+    }
 }
 
 impl Default for TextStyle {
@@ -101,6 +105,10 @@ impl StyledString {
 
     pub fn style(&self) -> &TextStyle {
         &self.text_style
+    }
+
+    pub fn style_mut(&mut self) -> &mut TextStyle {
+        &mut self.text_style
     }
 }
 

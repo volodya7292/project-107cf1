@@ -759,7 +759,7 @@ impl TextRenderer {
                 continue;
             }
 
-            let mut entry = scene.entry(entity).unwrap();
+            let mut entry = scene.entry(entity);
             let simple_text = entry.get::<SimpleTextC>();
             let stage = simple_text.stage;
             let normalize_transforms = stage == RenderStage::OVERLAY;
@@ -820,8 +820,8 @@ impl TextRenderer {
                 )
                 .unwrap();
 
-            *entry.get_mut::<VertexMeshC>().unwrap() = VertexMeshC::new(&mesh.raw());
-            *entry.get_mut::<MeshRenderConfigC>().unwrap() =
+            *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw());
+            *entry.get_mut::<MeshRenderConfigC>() =
                 MeshRenderConfigC::new(self.mat_pipeline, true).with_stage(stage)
         }
 

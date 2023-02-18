@@ -27,17 +27,17 @@ impl UIText {
     }
 
     fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
-        let mut entry = scene.entry(entity).unwrap();
+        let mut entry = scene.entry(entity);
 
         let simple_text = entry.get::<SimpleTextC>();
         let text_renderer = ctx.module_mut::<TextRenderer>();
         let size = text_renderer.calculate_minimum_text_size(&simple_text.text);
 
-        let layout = entry.get_mut::<UILayoutC>().unwrap();
+        let layout = entry.get_mut::<UILayoutC>();
         layout.constraints[0].min = size.x;
         layout.constraints[1].min = size.y;
 
-        let scene_handler = entry.get_mut::<SceneEventHandler>().unwrap();
+        let scene_handler = entry.get_mut::<SceneEventHandler>();
         scene_handler.set_on_update_active(false);
     }
 }
@@ -69,10 +69,10 @@ impl<'a> TextState for EntityAccess<'a, UIText> {
     }
 
     fn set_text(&mut self, text: StyledString) {
-        let simple_text = self.get_mut::<SimpleTextC>().unwrap();
+        let simple_text = self.get_mut_checked::<SimpleTextC>().unwrap();
         simple_text.text = text;
 
-        let scene_handler = self.get_mut::<SceneEventHandler>().unwrap();
+        let scene_handler = self.get_mut_checked::<SceneEventHandler>().unwrap();
         scene_handler.set_on_update_active(true);
     }
 }

@@ -25,7 +25,7 @@ use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use base::physics::aabb::{AABBRayIntersection, AABB};
 use base::physics::MOTION_EPSILON;
 use base::registry::Registry;
-use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
+use common::glm::{DVec3, I64Vec3, U8Vec4, Vec2, Vec3};
 use common::parking_lot::{Mutex, RwLock};
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
@@ -319,8 +319,25 @@ impl Application for Game {
 
         let text = scene.add_object(
             panel,
-            UIText::new()
-                .add_event_handler(UIEventHandlerC::new().add_on_cursor_enter(|_, _, _| println!("GOV"))),
+            UIText::new().add_event_handler(
+                UIEventHandlerC::new()
+                    .add_on_cursor_enter(|entity, scene, _| {
+                        let mut entry = scene.entry(entity);
+                        let simple_text = entry.get_mut::<SimpleTextC>();
+                        simple_text
+                            .text
+                            .style_mut()
+                            .set_color(U8Vec4::new(255, 100, 50, 255));
+                    })
+                    .add_on_cursor_leave(|entity, scene, _| {
+                        let mut entry = scene.entry(entity);
+                        let simple_text = entry.get_mut::<SimpleTextC>();
+                        simple_text
+                            .text
+                            .style_mut()
+                            .set_color(U8Vec4::new(255, 255, 255, 255));
+                    }),
+            ),
         );
 
         let mut obj = scene.object::<UIText>(&text.unwrap()).unwrap();
