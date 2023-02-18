@@ -4,12 +4,14 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    let target = env::var("CARGO_CFG_TARGET_ENV").unwrap();
+    let vulkan_sdk_path = env::var("VULKAN_SDK").unwrap();
+    let vulkan_include_path = format!("{}/include", vulkan_sdk_path);
 
     let mut build = cc::Build::new();
-    build.file("wrapper.cpp").cpp(true).flag("-w").warnings(false);
+    build.include(&vulkan_include_path).file("wrapper.cpp").cpp(true).flag("-w").warnings(false);
 
-    if target_env != "msvc" {
+    if target != "msvc" {
         build.flag("-std=c++17");
     }
 
@@ -19,6 +21,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg("-v")
+        .clang_arg(format!("-I{}", &vulkan_include_path))
         .allowlist_function("vma.*")
         .allowlist_function("PFN_vma.*")
         .allowlist_type("Vma.*")

@@ -16,6 +16,7 @@ pub use async_executor;
 pub use crossbeam_channel;
 pub use futures_lite;
 pub use log;
+#[cfg(target_os = "macos")]
 pub use macos;
 pub use nalgebra;
 pub use nalgebra_glm as glm;

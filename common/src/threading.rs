@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 use std::mem;
 use std::ops::Deref;

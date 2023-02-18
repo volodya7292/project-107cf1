@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
 fn main() {
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=wrapper.h");
@@ -26,3 +27,6 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 }
+
+#[cfg(not(target_os = "macos"))]
+fn main() {}

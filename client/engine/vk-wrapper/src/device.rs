@@ -224,7 +224,7 @@ impl Device {
 
             let mut alloc_create_info: vma::VmaAllocationCreateInfo = mem::zeroed();
             if mem_usage == MemoryUsage::Host {
-                alloc_create_info.flags = vma::VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                alloc_create_info.flags = vma::VMA_ALLOCATION_CREATE_MAPPED_BIT as u32;
                 alloc_create_info.pool = self.host_mem_pool;
             } else {
                 alloc_create_info.pool = self.device_mem_pool;
