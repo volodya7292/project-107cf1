@@ -5,11 +5,19 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
 
     let target = env::var("CARGO_CFG_TARGET_ENV").unwrap();
-    let vulkan_sdk_path = env::var("VULKAN_SDK").unwrap();
+    let vulkan_sdk_path = env::var("VULKAN_SDK").unwrap_or_else(|_| {
+        eprintln!("VULKAN_SDK is not defined.");
+        "".to_string()
+    });
     let vulkan_include_path = format!("{}/include", vulkan_sdk_path);
 
     let mut build = cc::Build::new();
-    build.include(&vulkan_include_path).file("wrapper.cpp").cpp(true).flag("-w").warnings(false);
+    build
+        .include(&vulkan_include_path)
+        .file("wrapper.cpp")
+        .cpp(true)
+        .flag("-w")
+        .warnings(false);
 
     if target != "msvc" {
         build.flag("-std=c++17");
