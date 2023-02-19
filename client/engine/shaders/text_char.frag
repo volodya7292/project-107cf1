@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_debug_printf : enable
 
 layout(early_fragment_tests) in;
 
@@ -10,7 +11,7 @@ layout(set = SET_CUSTOM_PER_FRAME, binding = 1) uniform sampler2DArray msdfArray
 
 layout(location = 0) in Input {
     vec2 texCoord;
-    uint glyphIndex;
+    flat uint glyphIndex;
     vec4 color;
     float pxRange;
 } vs_in;

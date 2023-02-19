@@ -198,7 +198,11 @@ impl Instance {
                 "VK_KHR_shader_float16_int8",
                 "VK_EXT_scalar_block_layout",
             ];
-            let preferred_extensions = ["VK_KHR_portability_subset"];
+            let mut preferred_extensions = vec!["VK_KHR_portability_subset"];
+
+            if cfg!(debug_assertions) {
+                preferred_extensions.push("VK_KHR_shader_non_semantic_info");
+            }
 
             let enabled_extensions_res =
                 utils::filter_names(&available_extensions, &required_extensions, true);

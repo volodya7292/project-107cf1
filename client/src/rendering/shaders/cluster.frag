@@ -14,7 +14,7 @@ layout(location = 0) in Output {
     vec3 local_pos;
     vec3 world_pos;
     vec3 surface_normal;
-    uint material_id;
+    flat uint material_id;
     float ao;
     vec3 light;
 } vs_in;
