@@ -1667,12 +1667,12 @@ impl MainRenderer {
         );
 
         // Render solid objects
-        cl.execute_secondary(&self.depth_secondary_cls);
+        cl.execute_secondary(self.depth_secondary_cls.iter());
 
         cl.next_subpass(true);
 
         // Find closest depths of translucent objects
-        cl.execute_secondary(&self.translucency_depths_secondary_cls);
+        cl.execute_secondary(self.translucency_depths_secondary_cls.iter());
 
         cl.end_render_pass();
 
@@ -1858,12 +1858,15 @@ impl MainRenderer {
             ],
             true,
         );
-        final_cl.execute_secondary(&self.g_solid_secondary_cls);
-        final_cl.execute_secondary(&self.g_translucent_secondary_cls);
+        final_cl.execute_secondary(
+            self.g_solid_secondary_cls
+                .iter()
+                .chain(&self.g_translucent_secondary_cls),
+        );
 
         // Overlay subpass
         final_cl.next_subpass(true);
-        final_cl.execute_secondary(&[Arc::clone(&self.overlay_secondary_cl)]);
+        final_cl.execute_secondary(iter::once(&self.overlay_secondary_cl));
 
         final_cl.end_render_pass();
 

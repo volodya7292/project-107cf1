@@ -878,9 +878,9 @@ impl CmdList {
         self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers);
     }
 
-    pub fn execute_secondary(&mut self, cmd_lists: &[Arc<Mutex<CmdList>>]) {
+    pub fn execute_secondary<'a>(&mut self, cmd_lists: impl Iterator<Item = &'a Arc<Mutex<CmdList>>>) {
         let native_cmd_lists: SmallVec<[vk::CommandBuffer; 64]> =
-            cmd_lists.iter().map(|cmd_list| cmd_list.lock().native).collect();
+            cmd_lists.map(|cmd_list| cmd_list.lock().native).collect();
 
         unsafe {
             self.device_wrapper
