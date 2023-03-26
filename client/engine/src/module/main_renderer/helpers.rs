@@ -1,5 +1,5 @@
-use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, UniformStruct};
+use crate::ecs::component::uniform_data::{BASIC_UNIFORM_BLOCK_MAX_SIZE, CUSTOM_UNIFORM_BLOCK_MAX_SIZE};
+use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig};
 use crate::module::main_renderer::{
     BufferUpdate, MainRenderer, MaterialInfo, PipelineKind, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS,
     N_MAX_MATERIALS,
@@ -63,14 +63,12 @@ impl MainRenderer {
     }
 
     /// Returns id of registered material pipeline.
-    pub fn register_material_pipeline<T: UniformStruct>(
+    pub fn register_material_pipeline(
         &mut self,
         shaders: &[Arc<Shader>],
         topology: PrimitiveTopology,
         cull_back_faces: bool,
     ) -> u32 {
-        assert!(mem::size_of::<T>() <= BASIC_UNIFORM_BLOCK_MAX_SIZE as usize);
-
         let main_signature = self
             .device
             .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
@@ -112,8 +110,6 @@ impl MainRenderer {
             main_signature: Arc::clone(&main_signature),
             pipelines: Default::default(),
             topology,
-            uniform_buffer_size: mem::size_of::<T>() as u32,
-            uniform_buffer_model_offset: T::model_offset(),
             per_object_desc_pool,
             per_frame_desc_pool,
             per_frame_desc,

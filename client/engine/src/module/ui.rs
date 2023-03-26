@@ -9,7 +9,7 @@ use crate::ecs::component::ui::{
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
 use crate::module::scene::change_manager::ComponentChangesHandle;
-use crate::module::scene::{Scene, SceneObject};
+use crate::module::scene::{EntityAccess, Scene, SceneObject};
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::utils::U8SliceHelper;
@@ -56,11 +56,11 @@ where
     layout: UILayoutC,
     ui_event_handler: UIEventHandlerC,
 
-    element: S,
+    pub state: S,
 }
 
 impl<E: UIState> UIObject<E> {
-    pub fn new_raw(layout: UILayoutC, element: E) -> Self {
+    pub fn new_raw(layout: UILayoutC, state: E) -> Self {
         Self {
             relation: Default::default(),
             global_transform: Default::default(),
@@ -72,7 +72,7 @@ impl<E: UIState> UIObject<E> {
             layout_cache: Default::default(),
             layout,
             ui_event_handler: Default::default(),
-            element,
+            state,
         }
     }
 
@@ -88,6 +88,11 @@ impl<E: UIState> UIObject<E> {
 
     pub fn with_scene_event_handler(mut self, handler: SceneEventHandler) -> Self {
         self.scene_event_handler = handler;
+        self
+    }
+
+    pub fn disable_pointer_events(mut self) -> Self {
+        self.ui_event_handler.enabled = false;
         self
     }
 
@@ -109,8 +114,13 @@ impl<E: UIState> UIObject<E> {
     }
 }
 
-impl<E: UIState> SceneObject for UIObject<E> {}
+impl<E: UIState> SceneObject for UIObject<E> {
+    fn request_update_on_addition() -> bool {
+        true
+    }
+}
 
+#[derive(Debug)]
 struct ChildFlowSizingInfo {
     entity: EntityId,
     min: f32,
@@ -268,7 +278,7 @@ impl UIRenderer {
         // Start from children (bottom of the tree)
         for (i, node) in linear_tree.iter().enumerate().rev() {
             if !dirty_elements.contains(node) {
-                return;
+                continue;
             }
 
             let relation = relation_comps.get(node).unwrap();
@@ -382,10 +392,6 @@ impl UIRenderer {
                 // Set new cross-flow size
                 if child_new_cross_size != child_cache.final_size[cross_flow_axis] {
                     child_cache.final_size[cross_flow_axis] = child_new_cross_size;
-                    child_cache
-                        .clip_rect
-                        .set_axis_size(cross_flow_axis, parent_clip.size_by_axis(cross_flow_axis));
-
                     dirty_elements.insert(*child);
                 }
 
@@ -400,23 +406,19 @@ impl UIRenderer {
             }
 
             // Calculate flow-size of each child
-            let calculated_children_sizes =
+            let calculated_children_flow_sizes =
                 flow_calculate_children_sizes(parent_size[flow_axis], &children_flow_sizings);
 
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());
 
             // Set children flow sizes
-            for (child, child_new_flow_size) in &calculated_children_sizes {
+            for (child, child_new_flow_size) in &calculated_children_flow_sizes {
                 let child_layout = layout_comps.get(child).unwrap();
                 let child_cache = layout_cache_comps.get_mut(child).unwrap();
 
                 if *child_new_flow_size != child_cache.final_size[flow_axis] {
                     child_cache.final_size[flow_axis] = *child_new_flow_size;
-                    child_cache
-                        .clip_rect
-                        .set_axis_size(flow_axis, child_cache.final_size[flow_axis]);
-
                     dirty_elements.insert(*child);
                 }
 
@@ -448,14 +450,15 @@ impl UIRenderer {
             );
 
             // Calculate clipping regions
-            for (child, child_final_size) in &calculated_children_sizes {
+            for (child, child_final_flow_size) in &calculated_children_flow_sizes {
                 let child_cache = layout_cache_comps.get_mut(child).unwrap();
 
                 let mut local_clip_rect = Rect::default();
                 local_clip_rect.min = child_cache.relative_position;
                 local_clip_rect.max = local_clip_rect.min;
-                local_clip_rect.max[cross_flow_axis] += parent_size[cross_flow_axis];
-                local_clip_rect.max[flow_axis] += child_final_size;
+                local_clip_rect.max[cross_flow_axis] +=
+                    child_cache.final_size[cross_flow_axis].min(parent_size[cross_flow_axis]);
+                local_clip_rect.max[flow_axis] += child_final_flow_size.min(parent_size[flow_axis]);
 
                 let global_clip_rect = Rect {
                     min: parent_cache.global_position + local_clip_rect.min,
@@ -502,27 +505,26 @@ impl UIRenderer {
                 1.0 - if layout.shader_inverted_y {
                     norm_pos.y
                 } else {
-                    norm_size.y - norm_pos.y
+                    norm_size.y + norm_pos.y
                 } as f64,
                 1000.0 - (i as f64),
             );
 
             if new_scale != transform.scale || new_position != transform.position {
-                let uniform_crop_rect_offset = layout.uniform_crop_rect_offset as usize;
-                let rect = cache.clip_rect;
+                if let Some(rect_offset) = layout.uniform_clip_rect_offset {
+                    let rect_offset = rect_offset as usize;
+                    let rect = cache.clip_rect;
+                    let rect_data = RectUniformData {
+                        min: rect.min.component_mul(&root_size_inv),
+                        max: rect.max.component_mul(&root_size_inv),
+                    };
+                    let uniform_data = entry.get_mut::<UniformDataC>();
+                    uniform_data.copy_from_with_offset(rect_offset, rect_data);
+                }
 
                 let transform = entry.get_mut::<TransformC>();
                 transform.scale = new_scale;
                 transform.position = new_position;
-
-                let rect_data = RectUniformData {
-                    min: rect.min.component_mul(&root_size_inv),
-                    max: rect.max.component_mul(&root_size_inv),
-                };
-                let uniform_data = entry.get_mut::<UniformDataC>();
-                let raw_rect = &mut uniform_data.0
-                    [uniform_crop_rect_offset..uniform_crop_rect_offset + mem::size_of_val(&rect_data)];
-                raw_rect.raw_copy_from(rect_data);
 
                 // if parent transform changed, then all children transforms must be recalculated
                 let relation = entry.get_mut::<Relation>();
@@ -556,7 +558,14 @@ impl UIRenderer {
         );
     }
 
-    pub fn find_element_at_point(&self, point: &Vec2, scene: &mut Scene) -> Option<EntityId> {
+    /// Outputs objects that contain the specified point to the specified closure.
+    /// If the closure returns `true` the traversal is stopped.
+    pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
+        &self,
+        point: &Vec2,
+        scene: &mut Scene,
+        mut output: F,
+    ) {
         let linear_tree =
             common::scene::collect_relation_tree(&scene.storage_mut().access(), &self.root_ui_entity);
 
@@ -565,12 +574,13 @@ impl UIRenderer {
             let entry = scene.entry(node);
             let cache = entry.get::<UILayoutCacheC>();
 
-            if cache.clip_rect.contains_point(point) {
-                return Some(*node);
+            if !cache.clip_rect.contains_point(point) {
+                continue;
+            }
+            if output(entry) {
+                break;
             }
         }
-
-        None
     }
 }
 

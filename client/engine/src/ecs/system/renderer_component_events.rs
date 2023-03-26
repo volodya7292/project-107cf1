@@ -55,14 +55,6 @@ impl RenderConfigComponentEvents<'_> {
 
         // Add default uniform buffer binding
         new_binding_updates.push(object_desc_pool.create_binding(
-            shader_ids::BINDING_GENERAL_OBJECT_INFO,
-            0,
-            BindingRes::BufferRange(
-                uniform_buffer_basic.handle(),
-                0..BASIC_UNIFORM_BLOCK_MAX_SIZE as u64,
-            ),
-        ));
-        new_binding_updates.push(object_desc_pool.create_binding(
             shader_ids::BINDING_OBJECT_INFO,
             0,
             BindingRes::BufferRange(

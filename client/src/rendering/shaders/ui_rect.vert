@@ -1,11 +1,11 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "../../engine/shaders/common.glsl"
+#include "../../../engine/shaders/common.glsl"
 
 layout(set = 0, binding = 0, scalar) uniform FrameData {
     FrameInfo info;
 };
-layout(set = SET_PER_OBJECT, binding = BINDING_GENERAL_OBJECT_INFO) uniform ObjectData {
+layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     mat4 model;
 };
 

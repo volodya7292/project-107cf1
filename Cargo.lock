@@ -488,6 +488,7 @@ dependencies = [
  "async-channel",
  "async-executor",
  "bincode",
+ "bumpalo",
  "byteorder",
  "crossbeam-channel",
  "entity_data",

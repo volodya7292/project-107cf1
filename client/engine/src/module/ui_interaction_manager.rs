@@ -63,9 +63,15 @@ impl EngineModule for UIInteractionManager {
 
         match *event {
             WSIEvent::CursorMoved { position, .. } => {
-                let new_hover_entity = ui_renderer
-                    .find_element_at_point(&position.logical(), &mut scene)
-                    .unwrap_or(EntityId::NULL);
+                let mut new_hover_entity = EntityId::NULL;
+
+                ui_renderer.traverse_at_point(&position.logical(), &mut scene, |entry| {
+                    let handler = entry.get::<UIEventHandlerC>();
+                    if handler.enabled {
+                        new_hover_entity = *entry.entity();
+                    }
+                    handler.enabled
+                });
 
                 if self.curr_hover_entity != new_hover_entity {
                     if let Some(handler) = scene

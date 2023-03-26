@@ -22,7 +22,6 @@
 
 /// MaterialPipeline-specific descriptor set for per object data (eg. model matrix)
 #define SET_PER_OBJECT 2
-#define BINDING_GENERAL_OBJECT_INFO 0
-#define BINDING_OBJECT_INFO 1
+#define BINDING_OBJECT_INFO 0
 
 

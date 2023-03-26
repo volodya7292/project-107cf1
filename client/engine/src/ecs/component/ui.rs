@@ -134,7 +134,7 @@ impl Default for CrossAlign {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Overflow {
     Visible,
     Hidden,
@@ -157,7 +157,7 @@ pub struct UILayoutC {
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
-    pub uniform_crop_rect_offset: u32,
+    pub uniform_clip_rect_offset: Option<u32>,
 }
 
 impl UILayoutC {
@@ -220,12 +220,12 @@ impl UILayoutC {
     }
 
     pub fn with_uniform_crop_rect_offset(mut self, uniform_crop_rect_offset: u32) -> Self {
-        self.uniform_crop_rect_offset = uniform_crop_rect_offset;
+        self.uniform_clip_rect_offset = Some(uniform_crop_rect_offset);
         self
     }
 }
 
-#[derive(Default, Copy, Clone, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct Rect {
     pub min: Vec2,
     pub max: Vec2,
@@ -289,6 +289,7 @@ pub struct UIEventHandlerC {
     pub on_mouse_press: IndexSet<BasicEventCallbackWrapper>,
     pub on_mouse_release: IndexSet<BasicEventCallbackWrapper>,
     pub on_click: IndexSet<BasicEventCallbackWrapper>,
+    pub enabled: bool,
 }
 
 impl Default for UIEventHandlerC {
@@ -299,6 +300,7 @@ impl Default for UIEventHandlerC {
             on_mouse_press: Default::default(),
             on_mouse_release: Default::default(),
             on_click: Default::default(),
+            enabled: true,
         }
     }
 }
@@ -318,6 +320,17 @@ impl UIEventHandlerC {
         Self::default()
     }
 
+    pub fn passthrough() -> Self {
+        Self {
+            on_cursor_enter: Default::default(),
+            on_cursor_leave: Default::default(),
+            on_mouse_press: Default::default(),
+            on_mouse_release: Default::default(),
+            on_click: Default::default(),
+            enabled: false,
+        }
+    }
+
     pub fn from_impl<I: UIEventHandlerI + 'static>() -> Self {
         Self {
             on_cursor_enter: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
@@ -325,6 +338,7 @@ impl UIEventHandlerC {
             on_mouse_press: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
             on_mouse_release: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
             on_click: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            enabled: true,
         }
     }
 

@@ -21,7 +21,7 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) unifor
 layout(set = SET_CUSTOM_PER_FRAME, binding = 0) uniform TextFrameData {
     float pxRange;
 };
-layout(set = SET_PER_OBJECT, binding = BINDING_GENERAL_OBJECT_INFO) uniform ObjectData {
+layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     mat4 model;
 };
 

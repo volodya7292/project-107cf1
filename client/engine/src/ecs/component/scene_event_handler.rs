@@ -7,7 +7,6 @@ type BasicEventCallback = fn(entity: &EntityId, scene: &mut Scene, ctx: &EngineC
 #[derive(Default, Copy, Clone)]
 pub struct SceneEventHandler {
     pub on_update: Option<BasicEventCallback>,
-    pub on_update_active: bool,
 }
 
 impl SceneEventHandler {
@@ -20,17 +19,8 @@ impl SceneEventHandler {
         self
     }
 
-    pub fn with_on_update_active(mut self, active: bool) -> Self {
-        self.on_update_active = active;
-        self
-    }
-
     #[inline]
     pub fn on_update(&self) -> BasicEventCallback {
         self.on_update.unwrap_or(|_, _, _| {})
-    }
-
-    pub fn set_on_update_active(&mut self, active: bool) {
-        self.on_update_active = active;
     }
 }

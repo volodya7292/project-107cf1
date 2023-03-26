@@ -9,7 +9,7 @@ use crate::module::scene::Scene;
 use crate::module::scene::SceneObject;
 use crate::module::ui::RectUniformData;
 use crate::module::EngineModule;
-use crate::{attributes_impl, uniform_struct_impl, EngineContext};
+use crate::{attributes_impl, EngineContext};
 use common::glm::{Mat4, U8Vec4, Vec2};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
@@ -469,10 +469,9 @@ struct FrameUniformData {
     px_range: f32,
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 #[repr(C)]
 pub struct ObjectUniformData {
-    model: Mat4,
     clip_rect: RectUniformData,
 }
 
@@ -481,8 +480,6 @@ impl ObjectUniformData {
         offset_of!(Self, clip_rect) as u32
     }
 }
-
-uniform_struct_impl!(ObjectUniformData, model);
 
 #[derive(Archetype)]
 pub struct TextObject {
@@ -540,7 +537,7 @@ impl TextRenderer {
             )
             .unwrap();
 
-        let mat_pipeline = renderer.register_material_pipeline::<ObjectUniformData>(
+        let mat_pipeline = renderer.register_material_pipeline(
             &[vertex_shader, pixel_shader],
             PrimitiveTopology::TRIANGLE_STRIP,
             true,

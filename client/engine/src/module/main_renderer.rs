@@ -357,7 +357,7 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 10] = [
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 9] = [
         // Per frame info
         (
             BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_FRAME_INFO),
@@ -427,15 +427,6 @@ lazy_static! {
             ShaderBinding {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::INPUT_ATTACHMENT,
-                count: 1,
-            },
-        ),
-        // General per object info (engine-specific, eg. only model matrix)
-        (
-            BindingLoc::new(shader_ids::SET_PER_OBJECT, shader_ids::BINDING_GENERAL_OBJECT_INFO),
-            ShaderBinding {
-                stage_flags: ShaderStageFlags::VERTEX,
-                binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
             },
         ),
@@ -1472,7 +1463,6 @@ impl MainRenderer {
 
                     cl.bind_graphics_inputs(signature, 0, &descriptors, &[
                         render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
-                        renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32 + mat_pipeline.uniform_buffer_model_offset,
                         renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32
                     ]);
 
@@ -1565,9 +1555,6 @@ impl MainRenderer {
                         &descriptors,
                         &[
                             render_config.stage as u32 * res.per_frame_ub.aligned_element_size() as u32,
-                            renderable.uniform_buf_index as u32
-                                * res.uniform_buffer_basic.aligned_element_size() as u32
-                                + mat_pipeline.uniform_buffer_model_offset,
                             renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
@@ -1618,9 +1605,6 @@ impl MainRenderer {
                 &descriptors,
                 &[
                     render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
-                    renderable.uniform_buf_index as u32
-                        * self.res.uniform_buffer_basic.aligned_element_size() as u32
-                        + mat_pipeline.uniform_buffer_model_offset,
                     renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );

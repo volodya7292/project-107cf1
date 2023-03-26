@@ -1,4 +1,5 @@
 pub mod any;
+pub mod function_storage;
 pub mod instant_meter;
 pub mod lrc;
 pub mod resource_encoder;

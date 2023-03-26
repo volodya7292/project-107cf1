@@ -2,6 +2,8 @@ use crate::client::utils;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
+use crate::rendering::ui::fancy_button;
+use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
 use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
@@ -303,48 +305,57 @@ impl Application for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        let panel = scene.add_object(
-            Some(root_ui_entity),
-            UIObject::new_raw(
-                UILayoutC::new()
-                    .with_width(Sizing::Preferred(300.0))
-                    .with_height(Sizing::Grow(0.5)),
-                (),
+        let panel = scene
+            .add_object(
+                Some(root_ui_entity),
+                UIObject::new_raw(
+                    UILayoutC::new()
+                        .with_width(Sizing::Preferred(300.0))
+                        .with_height(Sizing::Grow(0.5)),
+                    (),
+                )
+                .with_renderer(
+                    MeshRenderConfigC::new(mat_pipelines.panel(), true).with_stage(RenderStage::OVERLAY),
+                )
+                .with_mesh(VertexMeshC::without_data(4, 1)),
             )
-            .with_renderer(
-                MeshRenderConfigC::new(mat_pipelines.panel(), true).with_stage(RenderStage::OVERLAY),
+            .unwrap();
+
+        let text = scene
+            .add_object(
+                Some(panel),
+                UIText::new().add_event_handler(
+                    UIEventHandlerC::new()
+                        .add_on_cursor_enter(|entity, scene, _| {
+                            let mut entry = scene.entry(entity);
+                            let simple_text = entry.get_mut::<SimpleTextC>();
+                            simple_text
+                                .text
+                                .style_mut()
+                                .set_color(U8Vec4::new(255, 100, 50, 255));
+                        })
+                        .add_on_cursor_leave(|entity, scene, _| {
+                            let mut entry = scene.entry(entity);
+                            let simple_text = entry.get_mut::<SimpleTextC>();
+                            simple_text
+                                .text
+                                .style_mut()
+                                .set_color(U8Vec4::new(255, 255, 255, 255));
+                        }),
+                ),
             )
-            .with_mesh(VertexMeshC::without_data(4, 1)),
-        );
+            .unwrap();
 
-        let text = scene.add_object(
-            panel,
-            UIText::new().add_event_handler(
-                UIEventHandlerC::new()
-                    .add_on_cursor_enter(|entity, scene, _| {
-                        let mut entry = scene.entry(entity);
-                        let simple_text = entry.get_mut::<SimpleTextC>();
-                        simple_text
-                            .text
-                            .style_mut()
-                            .set_color(U8Vec4::new(255, 100, 50, 255));
-                    })
-                    .add_on_cursor_leave(|entity, scene, _| {
-                        let mut entry = scene.entry(entity);
-                        let simple_text = entry.get_mut::<SimpleTextC>();
-                        simple_text
-                            .text
-                            .style_mut()
-                            .set_color(U8Vec4::new(255, 255, 255, 255));
-                    }),
-            ),
-        );
-
-        let mut obj = scene.object::<UIText>(&text.unwrap()).unwrap();
+        let mut obj = scene.object::<UIText>(&text);
         obj.set_text(StyledString::new(
             "Loremipsumdsadsf dorer",
             TextStyle::new().with_font(font_id).with_font_size(100.5),
         ));
+        drop(obj);
+
+        let fb = fancy_button::new(&mut scene, panel, mat_pipelines.fancy_button());
+        let mut fb_obj = scene.object::<FancyButton>(&fb);
+        fb_obj.set_text("GOV");
 
         // let panel2 = renderer.add_object(
         //     panel,

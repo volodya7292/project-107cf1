@@ -1,14 +1,16 @@
+use crate::rendering::ui::fancy_button;
 use common::nalgebra as na;
 use common::resource_file::ResourceFile;
 use engine::module::main_renderer::MainRenderer;
+use engine::vkw;
 use engine::vkw::shader::VInputRate;
 use engine::vkw::PrimitiveTopology;
-use engine::{uniform_struct_impl, vkw};
 use std::sync::Arc;
 
 pub struct MaterialPipelines {
     cluster: u32,
     panel: u32,
+    fancy_button: u32,
 }
 
 impl MaterialPipelines {
@@ -18,6 +20,10 @@ impl MaterialPipelines {
 
     pub fn panel(&self) -> u32 {
         self.panel
+    }
+
+    pub fn fancy_button(&self) -> u32 {
+        self.fancy_button
     }
 }
 
@@ -59,11 +65,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> Mat
             )
             .unwrap();
 
-        renderer.register_material_pipeline::<BasicUniformInfo>(
-            &[vertex, pixel],
-            PrimitiveTopology::TRIANGLE_LIST,
-            true,
-        )
+        renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_LIST, true)
     };
 
     let panel = {
@@ -74,7 +76,7 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> Mat
             //     .unwrap()
             //     .read()
             //     .unwrap(),
-            include_bytes!("../../engine/shaders/build/ui_rect.vert.spv"),
+            include_bytes!("../../res/shaders/ui_rect.vert.spv"),
             &[],
             "ui_rect.vert",
         )
@@ -91,20 +93,18 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> Mat
             )
             .unwrap();
 
-        renderer.register_material_pipeline::<BasicUniformInfo>(
-            &[vertex, pixel],
-            PrimitiveTopology::TRIANGLE_STRIP,
-            true,
-        )
+        renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_STRIP, true)
     };
 
-    MaterialPipelines { cluster, panel }
+    let fancy_button = fancy_button::load_pipeline(renderer);
+
+    MaterialPipelines {
+        cluster,
+        panel,
+        fancy_button,
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 #[repr(C)]
-pub struct BasicUniformInfo {
-    model: na::Matrix4<f32>,
-}
-
-uniform_struct_impl!(BasicUniformInfo, model);
+pub struct BasicUniformInfo {}

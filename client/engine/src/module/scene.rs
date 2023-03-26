@@ -7,35 +7,39 @@ use crate::EngineContext;
 use change_manager::SceneChangeManager;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
 use common::scene::relation::Relation;
-use common::types::HashSet;
+use common::types::{HashMap, HashSet};
 use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
+use smallvec::SmallVec;
 use std::any::TypeId;
-use std::cell::RefMut;
+use std::cell::{RefCell, RefMut};
+use std::collections::hash_map;
 use std::marker::PhantomData;
 
 pub const N_MAX_OBJECTS: usize = 65535;
 
-pub trait SceneObject: StaticArchetype {}
+pub trait SceneObject: StaticArchetype {
+    fn request_update_on_addition() -> bool {
+        false
+    }
+}
+
+pub type EntityUpdateJob = fn(entity: &EntityId, scene: &mut Scene, &EngineContext);
 
 pub struct Scene {
     storage: EntityStorage,
     object_count: usize,
     change_manager: Lrc<SceneChangeManager>,
-    scene_event_handler_changes: ComponentChangesHandle,
-    on_update_entities: HashSet<EntityId>,
+    entities_to_update: HashSet<EntityId>,
 }
 
 impl Scene {
     pub fn new() -> Self {
         let mut change_manager = SceneChangeManager::new();
-        let scene_event_handler_changes = change_manager.register_component_flow::<SceneEventHandler>();
-
         Self {
             storage: Default::default(),
             object_count: 0,
             change_manager: Lrc::wrap(change_manager),
-            scene_event_handler_changes,
-            on_update_entities: HashSet::with_capacity(1024),
+            entities_to_update: HashSet::with_capacity(1024),
         }
     }
 
@@ -51,6 +55,7 @@ impl Scene {
         Some(EntityAccess {
             entry: self.storage.entry_mut(entity)?,
             change_manager: self.change_manager.borrow_mut(),
+            entities_to_update: &mut self.entities_to_update,
             _arch: Default::default(),
         })
     }
@@ -59,20 +64,20 @@ impl Scene {
         self.entry_checked(entity).unwrap()
     }
 
-    pub fn object<A: StaticArchetype>(&mut self, entity: &EntityId) -> Option<EntityAccess<A>> {
+    pub fn object<A: StaticArchetype>(&mut self, entity: &EntityId) -> EntityAccess<A> {
         assert_eq!(
             self.storage.type_id_to_archetype_id(&TypeId::of::<A>()),
             Some(entity.archetype_id)
         );
 
-        Some(EntityAccess {
-            entry: self.storage.entry_mut(entity)?,
+        EntityAccess {
+            entry: self.storage.entry_mut(entity).unwrap(),
             change_manager: self.change_manager.borrow_mut(),
+            entities_to_update: &mut self.entities_to_update,
             _arch: Default::default(),
-        })
+        }
     }
 
-    // TODO: add entity `generation` property
     pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> Option<EntityId> {
         let obj_count = &mut self.object_count;
         let mut change_manager = self.change_manager.borrow_mut();
@@ -95,6 +100,10 @@ impl Scene {
 
         if let Some(parent) = parent {
             self.add_children(parent, &[entity]);
+        }
+
+        if O::request_update_on_addition() {
+            self.entities_to_update.insert(entity);
         }
 
         Some(entity)
@@ -124,6 +133,8 @@ impl Scene {
 
             self.storage.remove(&entity);
             self.object_count -= 1;
+
+            self.entities_to_update.remove(&entity);
         }
     }
 
@@ -136,6 +147,9 @@ impl Scene {
 
             if relation.parent != EntityId::NULL {
                 panic!("child already has a parent assigned");
+            }
+            if *child == parent {
+                panic!("child must not be parent itself");
             }
 
             relation.parent = parent;
@@ -160,27 +174,12 @@ impl Scene {
 
 impl EngineModule for Scene {
     fn on_update(&mut self, ctx: &EngineContext) {
-        let changes: Vec<_> = self.change_manager_mut().take(self.scene_event_handler_changes);
+        let to_update: Vec<_> = self.entities_to_update.drain().collect();
 
-        for change in changes {
-            let entity = change.entity();
-
-            if change.ty() == ChangeType::Removed {
-                self.on_update_entities.remove(entity);
-                continue;
-            }
-
-            let entry = self.entry_checked(&entity).unwrap();
-            let event_handler = *entry.get::<SceneEventHandler>();
+        for entity in to_update {
+            let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();
             let on_update = event_handler.on_update();
-
-            drop(entry);
-
-            if event_handler.on_update_active {
-                on_update(entity, self, ctx);
-            } else {
-                self.on_update_entities.remove(entity);
-            }
+            on_update(&entity, self, ctx);
         }
     }
 }
@@ -188,10 +187,15 @@ impl EngineModule for Scene {
 pub struct EntityAccess<'a, A> {
     entry: entity_data::EntryMut<'a>,
     change_manager: RefMut<'a, SceneChangeManager>,
+    entities_to_update: &'a mut HashSet<EntityId>,
     _arch: PhantomData<A>,
 }
 
 impl<A> EntityAccess<'_, A> {
+    pub fn entity(&self) -> &EntityId {
+        self.entry.entity()
+    }
+
     #[inline]
     pub fn get_checked<C: Component>(&self) -> Option<&C> {
         self.entry.get()
@@ -211,5 +215,9 @@ impl<A> EntityAccess<'_, A> {
     #[inline]
     pub fn get_mut<C: Component>(&mut self) -> &mut C {
         self.get_mut_checked().unwrap()
+    }
+
+    pub fn request_update(&mut self) {
+        self.entities_to_update.insert(*self.entry.entity());
     }
 }

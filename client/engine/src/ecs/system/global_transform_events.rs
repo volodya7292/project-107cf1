@@ -1,4 +1,5 @@
 use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::uniform_data::{MODEL_MATRIX_OFFSET, MODEL_MATRIX_SIZE};
 use crate::ecs::component::{MeshRenderConfigC, UniformDataC};
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
 use common::glm::Mat4;
@@ -38,8 +39,8 @@ impl SystemHandler for GlobalTransformEvents<'_> {
             let matrix_bytes =
                 unsafe { slice::from_raw_parts(matrix.as_ptr() as *const u8, mem::size_of::<Mat4>()) };
 
-            let offset = pipe.uniform_buffer_offset_model() as usize;
-            uniform_data.0[offset..(offset + matrix_bytes.len())].copy_from_slice(matrix_bytes);
+            uniform_data.0[MODEL_MATRIX_OFFSET..(MODEL_MATRIX_OFFSET + MODEL_MATRIX_SIZE)]
+                .copy_from_slice(matrix_bytes);
 
             self.changed_uniforms.insert(*entity);
         }

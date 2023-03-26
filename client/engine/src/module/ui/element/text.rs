@@ -23,7 +23,7 @@ impl UIText {
                 .with_stage(RenderStage::OVERLAY),
         )
         .with_scene_event_handler(SceneEventHandler::new().with_on_update(Self::on_update))
-        .add_event_handler(UIEventHandlerC::from_impl::<Self>())
+        .disable_pointer_events()
     }
 
     fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
@@ -36,23 +36,6 @@ impl UIText {
         let layout = entry.get_mut::<UILayoutC>();
         layout.constraints[0].min = size.x;
         layout.constraints[1].min = size.y;
-
-        let scene_handler = entry.get_mut::<SceneEventHandler>();
-        scene_handler.set_on_update_active(false);
-    }
-}
-
-impl UIEventHandlerI for UIText {
-    fn on_cursor_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {
-        println!("HOVER ENTER");
-    }
-
-    fn on_cursor_leave(_: &EntityId, _: &mut Scene, _: &EngineContext) {
-        println!("HOVER EXIT");
-    }
-
-    fn on_click(_: &EntityId, _: &mut Scene, _: &EngineContext) {
-        println!("ON CLICK");
     }
 }
 
@@ -71,8 +54,6 @@ impl<'a> TextState for EntityAccess<'a, UIText> {
     fn set_text(&mut self, text: StyledString) {
         let simple_text = self.get_mut_checked::<SimpleTextC>().unwrap();
         simple_text.text = text;
-
-        let scene_handler = self.get_mut_checked::<SceneEventHandler>().unwrap();
-        scene_handler.set_on_update_active(true);
+        self.request_update();
     }
 }
