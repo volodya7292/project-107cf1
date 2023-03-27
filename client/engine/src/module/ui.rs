@@ -585,7 +585,7 @@ impl UIRenderer {
 }
 
 impl EngineModule for UIRenderer {
-    fn on_update(&mut self, ctx: &EngineContext) {
+    fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         let mut scene = ctx.module_mut::<Scene>();
 
         if self.root_element_size_dirty {

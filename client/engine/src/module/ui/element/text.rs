@@ -26,7 +26,7 @@ impl UIText {
         .disable_pointer_events()
     }
 
-    fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
+    fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _: f64) {
         let mut entry = scene.entry(entity);
 
         let simple_text = entry.get::<SimpleTextC>();

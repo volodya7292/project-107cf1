@@ -2379,7 +2379,7 @@ impl MainRenderer {
 }
 
 impl EngineModule for MainRenderer {
-    fn on_update(&mut self, ctx: &EngineContext) {
+    fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         self.on_draw(ctx);
     }
 

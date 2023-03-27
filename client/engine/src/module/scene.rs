@@ -173,13 +173,13 @@ impl Scene {
 }
 
 impl EngineModule for Scene {
-    fn on_update(&mut self, ctx: &EngineContext) {
+    fn on_update(&mut self, dt: f64, ctx: &EngineContext) {
         let to_update: Vec<_> = self.entities_to_update.drain().collect();
 
         for entity in to_update {
             let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();
             let on_update = event_handler.on_update();
-            on_update(&entity, self, ctx);
+            on_update(&entity, self, ctx, dt);
         }
     }
 }

@@ -43,7 +43,7 @@ impl UIInteractionManager {
 }
 
 impl EngineModule for UIInteractionManager {
-    fn on_update(&mut self, ctx: &EngineContext) {
+    fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         let scene = ctx.module_mut::<Scene>();
         let changes = scene.change_manager_mut().take(self.ui_layout_changes);
 

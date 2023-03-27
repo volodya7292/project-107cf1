@@ -15,7 +15,7 @@ use winit::window::Window;
 
 pub trait EngineModule: AsAny {
     /// Main loop
-    fn on_update(&mut self, _: &EngineContext) {}
+    fn on_update(&mut self, _dt: f64, _: &EngineContext) {}
     fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent, _: &EngineContext) {}
 }
 
@@ -54,9 +54,9 @@ impl ModuleManager {
     }
 
     #[inline]
-    pub(crate) fn on_update(&self, ctx: &EngineContext) {
+    pub(crate) fn on_update(&self, dt: f64, ctx: &EngineContext) {
         self.for_every(|module| {
-            module.on_update(ctx);
+            module.on_update(dt, ctx);
         });
     }
 

@@ -151,20 +151,19 @@ impl Engine {
 
                     let mut app = self.app.borrow_mut();
                     let module_manger = &*self.module_manager.borrow();
-                    let delta_time = self.delta_time;
                     let ctx = self.context();
 
                     let t0 = Instant::now();
 
-                    app.on_update(delta_time, &ctx);
-                    module_manger.on_update(&ctx);
+                    app.on_update(self.delta_time, &ctx);
+                    module_manger.on_update(self.delta_time, &ctx);
 
                     let t1 = Instant::now();
                     self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
 
-                    let end_t = Instant::now();
-                    self.delta_time = (end_t - self.last_frame_end_time).as_secs_f64().min(1.0);
-                    self.last_frame_end_time = end_t;
+                    let curr_end_t = Instant::now();
+                    self.delta_time = (curr_end_t - self.last_frame_end_time).as_secs_f64().min(1.0);
+                    self.last_frame_end_time = curr_end_t;
 
                     // let t1 = Instant::now();
                     // self.curr_statistics.total = (t1 - t0).as_secs_f64();

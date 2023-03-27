@@ -2,7 +2,7 @@ use crate::module::scene::Scene;
 use crate::EngineContext;
 use entity_data::EntityId;
 
-type BasicEventCallback = fn(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext);
+type BasicEventCallback = fn(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, dt: f64);
 
 #[derive(Default, Copy, Clone)]
 pub struct SceneEventHandler {
@@ -21,6 +21,6 @@ impl SceneEventHandler {
 
     #[inline]
     pub fn on_update(&self) -> BasicEventCallback {
-        self.on_update.unwrap_or(|_, _, _| {})
+        self.on_update.unwrap_or(|_, _, _, _| {})
     }
 }

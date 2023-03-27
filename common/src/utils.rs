@@ -1,4 +1,5 @@
-use nalgebra_glm::Vec3;
+use nalgebra_glm as glm;
+use nalgebra_glm::{RealNumber, Vec3};
 use std::time::{Duration, Instant};
 use std::{mem, slice, thread};
 
@@ -73,4 +74,12 @@ pub fn calc_triangle_normal(v0: &Vec3, v1: &Vec3, v2: &Vec3) -> Vec3 {
     let side0 = v1 - v0;
     let side1 = v2 - v0;
     side0.cross(&side1).normalize()
+}
+
+pub fn smoothstep<S: RealNumber>(x: S) -> S {
+    x * x * (glm::convert::<_, S>(3.0) - glm::convert::<_, S>(2.0) * x)
+}
+
+pub fn smootherstep<S: RealNumber>(x: S) -> S {
+    x * x * x * (x * (x * glm::convert(6.0) - glm::convert(15.0)) + glm::convert(10.0))
 }

@@ -2,8 +2,9 @@ use common::glm::{Mat4, U8Vec4, Vec4};
 use common::scene::relation::Relation;
 use engine::ecs::component::render_config::RenderStage;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
+use engine::ecs::component::transition::{TransValue, Transition};
 use engine::ecs::component::ui::{UIEventHandlerC, UILayoutC};
-use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
+use engine::ecs::component::{transition, MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::MainRenderer;
 use engine::module::scene::{EntityAccess, Scene};
 use engine::module::ui::element::{TextState, UIText};
@@ -18,6 +19,7 @@ pub struct FancyButtonState {
     text_entity: EntityId,
     text: String,
     background_color: Vec4,
+    transition: Transition<Vec4>,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -56,7 +58,8 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: u32) -> EntityId {
         FancyButtonState {
             text_entity: Default::default(),
             text: "".to_owned(),
-            background_color: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            background_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            transition: Transition::none(Vec4::new(0.5, 0.5, 0.5, 1.0)),
         },
     )
     .with_scene_event_handler(SceneEventHandler::new())
@@ -90,14 +93,25 @@ impl FancyButtonImpl for EntityAccess<'_, FancyButton> {
     }
 }
 
-fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
+fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
     let mut entry = scene.entry(entity);
-    let state = entry.get::<FancyButtonState>().clone();
+    let state = entry.get_mut::<FancyButtonState>();
+    let mut update_needed = false;
+
+    if !state.transition.advance(&mut state.background_color, dt) {
+        update_needed = true;
+    }
+
+    let state = state.clone();
 
     let raw_uniform_data = entry.get_mut::<UniformDataC>();
     raw_uniform_data.copy_from(UniformData {
         background_color: state.background_color,
     });
+
+    if update_needed {
+        entry.request_update();
+    }
 
     drop(entry);
 
@@ -110,16 +124,26 @@ fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
     ));
 }
 
-fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
+fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
     let mut entry = scene.entry(entity);
     let state = entry.get_mut::<FancyButtonState>();
-    state.background_color = Vec4::new(0.7, 0.7, 0.7, 1.0);
+    state.transition = Transition::new(
+        state.background_color,
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        0.2,
+        transition::FN_EASE_IN_OUT,
+    );
     entry.request_update();
 }
 
-fn on_cursor_leave(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {
+fn on_cursor_leave(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
     let mut entry = scene.entry(entity);
     let state = entry.get_mut::<FancyButtonState>();
-    state.background_color = Vec4::new(1.0, 1.0, 1.0, 1.0);
+    state.transition = Transition::new(
+        state.background_color,
+        Vec4::new(0.5, 0.5, 0.5, 1.0),
+        0.2,
+        transition::FN_EASE_IN_OUT,
+    );
     entry.request_update();
 }
