@@ -201,11 +201,7 @@ impl Engine {
                 //     self.frame_start_time = self.last_frame_end_time;
                 // }
                 WEvent::WindowEvent { window_id: _, event } => match event {
-                    WindowEvent::Resized(_)
-                    | WindowEvent::ScaleFactorChanged {
-                        scale_factor: _,
-                        new_inner_size: _,
-                    } => {
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                         self.curr_sizing_info = WSizingInfo::get(&self.main_window.borrow());
                     }
                     _ => {}

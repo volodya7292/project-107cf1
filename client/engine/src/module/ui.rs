@@ -24,8 +24,9 @@ use winit::window::Window;
 pub struct UIRenderer {
     root_ui_entity: EntityId,
     root_element_size: Vec2,
-    root_element_size_dirty: bool,
     scale_factor: f32,
+    root_element_size_dirty: bool,
+    force_update_transforms: bool,
     ui_layout_changes: ComponentChangesHandle,
 }
 
@@ -244,6 +245,7 @@ impl UIRenderer {
             root_element_size_dirty: false,
             scale_factor: 1.0,
             ui_layout_changes,
+            force_update_transforms: false,
         }
     }
 
@@ -478,11 +480,12 @@ impl UIRenderer {
         scene: &mut Scene,
         root_size: &Vec2,
         dirty_elements: &mut HashSet<EntityId>,
+        force_update_all: bool,
     ) {
         let root_size_inv = Vec2::from_element(1.0).component_div(root_size);
 
         for (i, node) in linear_tree.iter().enumerate() {
-            if !dirty_elements.contains(node) {
+            if !force_update_all && !dirty_elements.contains(node) {
                 continue;
             }
 
@@ -533,29 +536,6 @@ impl UIRenderer {
         }
     }
 
-    fn update_hierarchy(&mut self, ctx: &EngineContext) {
-        let mut scene = ctx.module_mut::<Scene>();
-        let mut dirty_elements: HashSet<_> = scene.change_manager_mut().take_new(self.ui_layout_changes);
-        if dirty_elements.is_empty() {
-            return;
-        }
-
-        let storage = scene.storage_mut();
-        let access = storage.access();
-        let linear_tree = common::scene::collect_relation_tree(&access, &self.root_ui_entity);
-
-        Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
-
-        Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
-
-        Self::calculate_transforms(
-            &linear_tree,
-            &mut scene,
-            &self.root_element_size,
-            &mut dirty_elements,
-        );
-    }
-
     /// Outputs objects that contain the specified point to the specified closure.
     /// If the closure returns `true` the traversal is stopped.
     pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
@@ -596,8 +576,28 @@ impl EngineModule for UIRenderer {
             self.root_element_size_dirty = false;
         }
 
-        drop(scene);
-        self.update_hierarchy(ctx);
+        let mut dirty_elements: HashSet<_> = scene.change_manager_mut().take_new(self.ui_layout_changes);
+
+        if !self.force_update_transforms && dirty_elements.is_empty() {
+            return;
+        }
+
+        let storage = scene.storage_mut();
+        let access = storage.access();
+        let linear_tree = common::scene::collect_relation_tree(&access, &self.root_ui_entity);
+
+        Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
+        Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
+
+        Self::calculate_transforms(
+            &linear_tree,
+            &mut scene,
+            &self.root_element_size,
+            &mut dirty_elements,
+            self.force_update_transforms
+        );
+
+        self.force_update_transforms = false;
     }
 
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
@@ -605,6 +605,7 @@ impl EngineModule for UIRenderer {
             WSIEvent::Resized(new_size) => {
                 self.set_scale_factor(new_size.scale_factor());
                 self.set_root_element_size(new_size.logical());
+                self.force_update_transforms = true;
             }
             _ => {}
         }
