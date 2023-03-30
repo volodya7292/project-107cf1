@@ -24,6 +24,11 @@ pub trait AllSameBy<I: Iterator> {
     fn all_same_by<F>(&mut self, f: F) -> bool
     where
         F: FnMut(&I::Item, &I::Item) -> bool;
+
+    fn all_same_by_key<F, K>(&mut self, f: F) -> bool
+    where
+        F: FnMut(&I::Item) -> K,
+        K: PartialEq;
 }
 
 impl<I: Iterator> AllSame for I
@@ -46,6 +51,19 @@ impl<I: Iterator> AllSameBy<I> for I {
     {
         if let Some(first) = self.next() {
             self.all(|v| f(&first, &v))
+        } else {
+            true
+        }
+    }
+
+    fn all_same_by_key<F, K>(&mut self, mut f: F) -> bool
+    where
+        F: FnMut(&I::Item) -> K,
+        K: PartialEq,
+    {
+        if let Some(first) = self.next() {
+            let first = f(&first);
+            self.all(|v| f(&v) == first)
         } else {
             true
         }

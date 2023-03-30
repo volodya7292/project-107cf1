@@ -1,6 +1,6 @@
 use crate::device::DeviceWrapper;
+use crate::{Device, DeviceError};
 use ash::vk;
-use common::parking_lot::Mutex;
 use std::slice;
 use std::sync::Arc;
 
@@ -8,7 +8,6 @@ pub struct Semaphore {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) native: vk::Semaphore,
     pub(crate) semaphore_type: vk::SemaphoreTypeKHR,
-    pub(crate) last_signal_value: Mutex<u64>,
 }
 
 impl Semaphore {
@@ -20,7 +19,7 @@ impl Semaphore {
         }
     }
 
-    pub fn wait(&self, value: u64) -> Result<(), vk::Result> {
+    pub fn wait(&self, value: u64) -> Result<(), DeviceError> {
         if self.semaphore_type != vk::SemaphoreTypeKHR::TIMELINE {
             panic!("Semaphore type must be TIMELINE!");
         }
@@ -29,32 +28,36 @@ impl Semaphore {
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
 
-        unsafe { self.device_wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX) }
+        Ok(unsafe { self.device_wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX)? })
     }
 
-    pub fn signal(&self) -> Result<u64, vk::Result> {
+    pub fn signal(&self, value: u64) -> Result<(), DeviceError> {
         if self.semaphore_type != vk::SemaphoreTypeKHR::TIMELINE {
             panic!("Semaphore type must be TIMELINE!");
         }
 
-        let mut last_signal_value = self.last_signal_value.lock();
-        *last_signal_value += 1;
-
         let signal_info = vk::SemaphoreSignalInfoKHR::builder()
             .semaphore(self.native)
-            .value(*last_signal_value);
+            .value(value);
 
-        unsafe { self.device_wrapper.ts_khr.signal_semaphore(&signal_info)? };
-
-        Ok(*last_signal_value)
+        Ok(unsafe { self.device_wrapper.ts_khr.signal_semaphore(&signal_info)? })
     }
 }
 
 impl Drop for Semaphore {
     fn drop(&mut self) {
-        if self.semaphore_type == vk::SemaphoreTypeKHR::TIMELINE {
-            self.wait(*self.last_signal_value.lock()).unwrap();
-        }
         unsafe { self.device_wrapper.native.destroy_semaphore(self.native, None) };
+    }
+}
+
+impl Device {
+    pub fn wait_semaphores(&self, semaphores: &[&Semaphore], values: &[u64]) -> Result<(), vk::Result> {
+        let natives: Vec<_> = semaphores.iter().map(|v| v.native).collect();
+
+        let wait_info = vk::SemaphoreWaitInfoKHR::builder()
+            .semaphores(&natives)
+            .values(values);
+
+        unsafe { self.wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX) }
     }
 }

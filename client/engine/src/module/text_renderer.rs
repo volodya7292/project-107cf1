@@ -2,6 +2,7 @@ use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
+use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt};
 use crate::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use crate::module::main_renderer::MainRenderer;
 use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
@@ -10,8 +11,8 @@ use crate::module::scene::SceneObject;
 use crate::module::ui::RectUniformData;
 use crate::module::EngineModule;
 use crate::{attributes_impl, EngineContext};
-use common::glm::{Mat4, U8Vec4, Vec2};
-use common::parking_lot::Mutex;
+use common::glm::{U8Vec4, Vec2};
+use common::lrc::{Lrc, LrcExt, LrcExtSized};
 use common::rayon::prelude::*;
 use common::scene::relation::Relation;
 use common::types::HashMap;
@@ -23,6 +24,7 @@ use memoffset::offset_of;
 use rusttype::{Font, GlyphId};
 use std::collections::hash_map;
 use std::mem;
+use std::rc::Rc;
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 use vk_wrapper::buffer::BufferHandleImpl;
@@ -30,7 +32,7 @@ use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     AccessFlags, BindingRes, BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image,
-    ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, Queue, Sampler, SamplerFilter,
+    ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, QueueType, Sampler, SamplerFilter,
     SamplerMipmap,
 };
 
@@ -438,7 +440,7 @@ fn layout_glyphs(
 pub struct TextRenderer {
     device: Arc<Device>,
     mat_pipeline: u32,
-    staging_cl: Arc<Mutex<CmdList>>,
+    staging_job: Lrc<GPUJob>,
 
     glyph_sampler: Arc<Sampler>,
     glyph_array: Arc<Image>,
@@ -608,10 +610,7 @@ impl TextRenderer {
             );
         }
 
-        let staging_cl = device
-            .get_queue(Queue::TYPE_GRAPHICS)
-            .create_primary_cmd_list("text-staging-cl")
-            .unwrap();
+        let staging_job = Lrc::wrap(device.create_job("text-staging", QueueType::Graphics).unwrap());
 
         let fallback_font =
             FontSet::from_bytes(include_bytes!("../../fallback-font.ttf").to_vec(), None).unwrap();
@@ -662,7 +661,7 @@ impl TextRenderer {
             allocated_sequences: Default::default(),
             staging_uniform_buffer,
             glyph_sampler,
-            staging_cl,
+            staging_job,
             simple_text_changes,
         }
     }
@@ -741,7 +740,7 @@ impl TextRenderer {
         size * seq.style().font_size()
     }
 
-    fn on_render_update(&mut self, ctx: &EngineContext) -> Option<Arc<Mutex<CmdList>>> {
+    fn on_render_update(&mut self, ctx: &EngineContext) -> Option<Lrc<GPUJob>> {
         let mut scene = ctx.module_mut::<Scene>();
 
         let unit_scale = rusttype::Scale::uniform(1.0);
@@ -822,8 +821,8 @@ impl TextRenderer {
                 MeshRenderConfigC::new(self.mat_pipeline, true).with_stage(stage)
         }
 
-        let staging_cl = Arc::clone(&self.staging_cl);
-        let mut cl = staging_cl.lock();
+        let mut staging_job = self.staging_job.borrow_mut_owned();
+        let cl = staging_job.get_cmd_list_for_recording();
         cl.begin(true).unwrap();
 
         // Copy uniforms to the GPU
@@ -834,12 +833,11 @@ impl TextRenderer {
         cl.copy_raw_host_buffer_to_device(&self.staging_uniform_buffer.raw(), 0, &self.uniform_buffer, 0, 1);
 
         // Copy new glyphs to the GPU
-        self.load_glyphs(&mut cl);
+        self.load_glyphs(cl);
 
         cl.end().unwrap();
-        drop(cl);
 
-        Some(staging_cl)
+        Some(Rc::clone(&self.staging_job))
     }
 }
 

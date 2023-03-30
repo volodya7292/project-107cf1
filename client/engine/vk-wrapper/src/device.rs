@@ -5,13 +5,13 @@ use crate::PipelineSignature;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{
-    utils, BindingType, Fence, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
+    utils, BindingType, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding};
 use crate::{AttachmentColorBlend, ImageWrapper};
-use crate::{LoadStore, RenderPass, Shader, SubmitInfo, SubmitPacket};
+use crate::{LoadStore, RenderPass, Shader};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
 use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
@@ -147,7 +147,6 @@ pub(crate) fn create_semaphore(
         device_wrapper: Arc::clone(device_wrapper),
         native: unsafe { device_wrapper.native.create_semaphore(&create_info, None)? },
         semaphore_type: sp_type,
-        last_signal_value: Mutex::new(0),
     })
 }
 
@@ -161,14 +160,14 @@ pub(crate) fn create_timeline_semaphore(
     create_semaphore(device_wrapper, vk::SemaphoreType::TIMELINE)
 }
 
-pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence, vk::Result> {
-    let mut create_info = vk::FenceCreateInfo::builder().build();
-    create_info.flags = vk::FenceCreateFlags::SIGNALED;
-    Ok(Fence {
-        device_wrapper: Arc::clone(device_wrapper),
-        native: unsafe { device_wrapper.native.create_fence(&create_info, None)? },
-    })
-}
+// pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence, vk::Result> {
+//     let mut create_info = vk::FenceCreateInfo::builder().build();
+//     create_info.flags = vk::FenceCreateFlags::SIGNALED;
+//     Ok(Fence {
+//         device_wrapper: Arc::clone(device_wrapper),
+//         native: unsafe { device_wrapper.native.create_fence(&create_info, None)? },
+//     })
+// }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MemoryUsage {
@@ -186,11 +185,19 @@ impl Device {
     }
 
     pub fn get_queue(&self, queue_type: QueueType) -> &Queue {
-        &self.queues[queue_type.0 as usize]
+        &self.queues[queue_type as usize]
     }
 
     pub fn calc_real_device_mem_usage(&self) -> u64 {
         self.total_used_dev_memory.load(atomic::Ordering::Relaxed) as u64
+    }
+
+    pub fn create_binary_semaphore(self: &Arc<Self>) -> Result<Semaphore, DeviceError> {
+        Ok(create_binary_semaphore(&self.wrapper)?)
+    }
+
+    pub fn create_timeline_semaphore(self: &Arc<Self>) -> Result<Semaphore, DeviceError> {
+        Ok(create_timeline_semaphore(&self.wrapper)?)
     }
 
     fn create_buffer(
@@ -327,16 +334,20 @@ impl Device {
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
-    fn create_image(
+    pub fn create_image(
         self: &Arc<Self>,
         image_type: ImageType,
         is_array: bool,
         format: Format,
         max_mip_levels: u32,
         usage: ImageUsageFlags,
-        mut size: (u32, u32, u32),
+        preferred_size: (u32, u32, u32),
         name: &str,
     ) -> Result<Arc<Image>, DeviceError> {
+        if image_type == Image::TYPE_3D {
+            assert_eq!(is_array, false);
+        }
+
         if !IMAGE_FORMATS.contains_key(&format)
             && !BC_IMAGE_FORMATS.contains(&format)
             && format != DEPTH_FORMAT
@@ -351,6 +362,7 @@ impl Device {
             usage.0,
         )?;
 
+        let mut size = preferred_size;
         size.0 = size.0.min(format_props.max_extent.width);
         size.1 = size.1.min(format_props.max_extent.height);
 
@@ -1464,16 +1476,6 @@ impl Device {
             native: pipeline,
             bind_point: vk::PipelineBindPoint::COMPUTE,
         }))
-    }
-
-    pub fn create_submit_packet(
-        self: &Arc<Self>,
-        submit_infos: &[SubmitInfo],
-    ) -> Result<SubmitPacket, vk::Result> {
-        Ok(SubmitPacket {
-            infos: submit_infos.into(),
-            fence: create_fence(&self.wrapper)?,
-        })
     }
 
     pub fn wait_idle(&self) -> Result<(), vk::Result> {

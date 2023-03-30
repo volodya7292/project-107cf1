@@ -7,7 +7,6 @@ use crate::{
 use crate::{BufferHandle, DeviceWrapper};
 use crate::{DescriptorSet, RawHostBuffer};
 use ash::vk;
-use common::parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -47,8 +46,6 @@ impl CopyRegion {
         self.0.dst_offset
     }
 }
-
-unsafe impl Send for CmdList {}
 
 impl CmdList {
     pub(crate) fn clear_resources(&mut self) {
@@ -878,9 +875,9 @@ impl CmdList {
         self.barrier_buffer_image(src_stage_mask, dst_stage_mask, &[], image_barriers);
     }
 
-    pub fn execute_secondary<'a>(&mut self, cmd_lists: impl Iterator<Item = &'a Arc<Mutex<CmdList>>>) {
+    pub fn execute_secondary<'a>(&mut self, cmd_lists: impl Iterator<Item = &'a CmdList>) {
         let native_cmd_lists: SmallVec<[vk::CommandBuffer; 64]> =
-            cmd_lists.map(|cmd_list| cmd_list.lock().native).collect();
+            cmd_lists.map(|cmd_list| cmd_list.native).collect();
 
         unsafe {
             self.device_wrapper
@@ -929,3 +926,7 @@ impl Drop for CmdList {
         unsafe { self.device_wrapper.native.destroy_command_pool(self.pool, None) };
     }
 }
+
+unsafe impl Send for CmdList {}
+
+unsafe impl Sync for CmdList {}

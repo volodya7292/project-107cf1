@@ -1,6 +1,7 @@
 use crate::ecs::component::VertexMeshC;
+use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
-use common::parking_lot::Mutex;
+use crate::module::main_renderer::ParallelJob;
 use common::types::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::sync::Arc;
@@ -12,8 +13,7 @@ const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
 
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
-    pub transfer_cl: &'a [Arc<Mutex<vkw::CmdList>>; 2],
-    pub transfer_submit: &'a mut [vkw::SubmitPacket; 2],
+    pub transfer_jobs: &'a mut ParallelJob,
     pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub sorted_buffer_updates_entities: &'a Vec<(EntityId, f32)>,
     pub pending_buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
@@ -23,17 +23,17 @@ pub(crate) struct GpuBuffersUpdate<'a> {
 impl SystemHandler for GpuBuffersUpdate<'_> {
     fn run(&mut self, _: SystemAccess) {
         let t0 = Instant::now();
-        let transfer_queue = self.device.get_queue(vkw::Queue::TYPE_TRANSFER);
-        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
+        let transfer_queue = self.device.get_queue(vkw::QueueType::Transfer);
+        let graphics_queue = self.device.get_queue(vkw::QueueType::Graphics);
 
-        self.transfer_submit[0].wait().unwrap();
-        self.transfer_submit[1].wait().unwrap();
+        self.transfer_jobs.work.wait().unwrap();
+        self.transfer_jobs.sync.wait().unwrap();
 
         let mut processed_meshes = HashSet::new();
 
         {
-            let mut t_cl = self.transfer_cl[0].lock();
-            let mut g_cl = self.transfer_cl[1].lock();
+            let mut t_cl = self.transfer_jobs.work.get_cmd_list_for_recording();
+            let mut g_cl = self.transfer_jobs.sync.get_cmd_list_for_recording();
 
             t_cl.begin(true).unwrap();
             g_cl.begin(true).unwrap();
@@ -97,19 +97,11 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
             g_cl.end().unwrap();
         }
 
-        unsafe { transfer_queue.submit(&mut self.transfer_submit[0]).unwrap() };
-
-        self.transfer_submit[1]
-            .set(&[vkw::SubmitInfo::new(
-                &[WaitSemaphore {
-                    semaphore: Arc::clone(transfer_queue.timeline_semaphore()),
-                    wait_dst_mask: vkw::PipelineStageFlags::TRANSFER,
-                    wait_value: self.transfer_submit[0].get_signal_value(0).unwrap(),
-                }],
-                &[Arc::clone(&self.transfer_cl[1])],
-                &[],
-            )])
-            .unwrap();
+        unsafe {
+            self.device
+                .run_jobs(&mut [GPUJobExecInfo::new(&mut self.transfer_jobs.work)])
+                .unwrap()
+        };
 
         let t1 = Instant::now();
         self.run_time = (t1 - t0).as_secs_f64();

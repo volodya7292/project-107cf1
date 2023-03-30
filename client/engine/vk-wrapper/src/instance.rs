@@ -4,7 +4,7 @@ use std::{collections::HashMap, os::raw::c_void};
 use ash::vk;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
 
-use crate::adapter::Adapter;
+use crate::adapter::{Adapter, QueueId};
 use crate::entry::VK_API_VERSION;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
@@ -132,7 +132,11 @@ impl Instance {
             // Check queue families
             // ------------------------------------------------------------------------------------
             let queue_families = unsafe { self.native.get_physical_device_queue_family_properties(p_device) };
-            let mut queue_fam_indices: [[u32; 2]; 4] = [[u32::MAX, 0]; 4];
+
+            let mut graphics_queue_id = QueueId::default();
+            let mut compute_queue_id = QueueId::default();
+            let mut transfer_queue_id = QueueId::default();
+            let mut present_queue_id = QueueId::default();
 
             for (i, fam_prop) in queue_families.iter().enumerate() {
                 // Check for present usage
@@ -146,46 +150,49 @@ impl Instance {
                 } else {
                     false
                 };
+                let max_queue_idx = fam_prop.queue_count - 1;
 
-                if surface_supported && queue_fam_indices[3][0] == u32::MAX {
-                    queue_fam_indices[3] = [i as u32, 0]; // present
-                }
-                if fam_prop.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                    && queue_fam_indices[0][0] == u32::MAX
-                {
-                    queue_fam_indices[0] = [i as u32, 0]; // graphics
-                } else if fam_prop.queue_flags.contains(vk::QueueFlags::COMPUTE)
-                    && queue_fam_indices[1][0] == u32::MAX
-                {
-                    queue_fam_indices[1] = [i as u32, 0]; // compute
-                } else if fam_prop.queue_flags.contains(vk::QueueFlags::TRANSFER)
-                    && queue_fam_indices[2][0] == u32::MAX
-                {
-                    queue_fam_indices[2] = [i as u32, 0]; // transfer
+                if surface_supported && present_queue_id.family_index == u32::MAX {
+                    present_queue_id.family_index = i as u32;
+                    present_queue_id.index = 0;
                 }
 
-                if queue_fam_indices[0][0] != u32::MAX
-                    && queue_fam_indices[1][0] != u32::MAX
-                    && queue_fam_indices[2][0] != u32::MAX
-                    && queue_fam_indices[3][0] != u32::MAX
-                {
-                    break;
+                // Seek different family for each queue type for maximum parallelism
+                if fam_prop.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
+                    if graphics_queue_id.family_index == u32::MAX {
+                        graphics_queue_id.family_index = i as u32;
+                        graphics_queue_id.index = 0;
+
+                        compute_queue_id.family_index = i as u32;
+                        compute_queue_id.index = 1.min(max_queue_idx);
+
+                        transfer_queue_id.family_index = i as u32;
+                        transfer_queue_id.index = 2.min(max_queue_idx);
+                    }
+                } else if fam_prop.queue_flags.contains(vk::QueueFlags::COMPUTE) {
+                    compute_queue_id.family_index = i as u32;
+                    compute_queue_id.index = 0;
+
+                    transfer_queue_id.family_index = i as u32;
+                    transfer_queue_id.index = 1.min(max_queue_idx);
+                } else if fam_prop.queue_flags.contains(vk::QueueFlags::TRANSFER) {
+                    transfer_queue_id.family_index = i as u32;
+                    transfer_queue_id.index = 0;
                 }
             }
 
-            // The same queue(graphics) is used for the rest if separate queues not available
-            if queue_fam_indices[1][0] == u32::MAX {
-                queue_fam_indices[1] = queue_fam_indices[0]; // compute -> graphics
-            }
-            if queue_fam_indices[2][0] == u32::MAX {
-                queue_fam_indices[2] = queue_fam_indices[1]; // transfer -> compute
-            }
-
-            if queue_fam_indices[0][0] == u32::MAX
-                || (queue_fam_indices[3][0] == u32::MAX && surface.is_some())
+            if graphics_queue_id.family_index == u32::MAX
+                || (present_queue_id.family_index == u32::MAX && surface.is_some())
             {
                 continue;
             }
+
+            let queue_ids = [
+                graphics_queue_id,
+                compute_queue_id,
+                transfer_queue_id,
+                present_queue_id,
+            ];
 
             // Check extensions
             // ------------------------------------------------------------------------------------
@@ -369,7 +376,7 @@ impl Instance {
                 ts_features: enabled_ts_features,
                 storage8bit_features: enabled_8bit_storage_features,
                 shader_float16_int8_features: enabled_shader_float16_int8_features,
-                queue_family_indices: queue_fam_indices,
+                queue_family_indices: queue_ids,
                 formats_props,
             }));
         }

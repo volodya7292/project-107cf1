@@ -1,6 +1,8 @@
+use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use common::parking_lot::Mutex;
 use std::sync::Arc;
 use vk_wrapper as vkw;
+use vk_wrapper::QueueType;
 
 #[derive(Debug)]
 pub enum Error {
@@ -9,8 +11,7 @@ pub enum Error {
 
 pub struct TextureAtlas {
     device: Arc<vkw::Device>,
-    cmd_list: Arc<Mutex<vkw::CmdList>>,
-    submit_packet: vkw::SubmitPacket,
+    gpu_job: GPUJob,
     image: Arc<vkw::Image>,
     _width: u32,
     width_in_tiles: u32,
@@ -54,17 +55,15 @@ impl TextureAtlas {
         // Copy mip_maps
         let mut offset = 0;
         for (level, mip_map) in mip_maps.iter().enumerate() {
-            let mip_size = self.calc_texture_size(level as u32);
+            let mip_size = calc_texture_size(self.tile_width, level as u32);
             let texture_byte_size = mip_size * mip_size * vkw::FORMAT_SIZES[&self.image.format()] as u32;
 
             buffer.write(offset, &mip_map[..(texture_byte_size as usize)]);
             offset += texture_byte_size as u64;
         }
 
-        let graphics_queue = self.device.get_queue(vkw::Queue::TYPE_GRAPHICS);
-
         {
-            let mut cl = self.cmd_list.lock();
+            let mut cl = self.gpu_job.get_cmd_list_for_recording();
             cl.begin(true).unwrap();
             cl.barrier_image(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
@@ -79,8 +78,9 @@ impl TextureAtlas {
 
             let mut offset = 0;
             for level in 0..mip_maps.len().min(self.image.mip_levels() as usize) {
-                let mip_size = self.calc_texture_size(level as u32);
-                let texture_offset = self.get_image_texture_offset(index, level as u32);
+                let mip_size = calc_texture_size(self.tile_width, level as u32);
+                let texture_offset =
+                    calc_texture_offset(self.width_in_tiles, self.tile_width, index, level as u32);
                 let texture_byte_size = mip_size * mip_size * vkw::FORMAT_SIZES[&self.image.format()] as u32;
 
                 cl.copy_host_buffer_to_image_2d(
@@ -110,26 +110,27 @@ impl TextureAtlas {
         }
 
         unsafe {
-            graphics_queue.submit(&mut self.submit_packet).unwrap();
+            self.device
+                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.gpu_job)])
+                .unwrap();
         }
-        self.submit_packet.wait().unwrap();
         Ok(())
-    }
-
-    fn get_image_texture_offset(&self, index: u32, level: u32) -> (u32, u32) {
-        (
-            (index % self.width_in_tiles) * self.tile_width / (1 << level),
-            (index / self.width_in_tiles) * self.tile_width / (1 << level),
-        )
-    }
-
-    fn calc_texture_size(&self, level: u32) -> u32 {
-        self.tile_width / (1 << level)
     }
 
     /*pub fn get_cell(&self, pos: (u32, u32)) -> &Cell {
         &self.cells[(pos.1 * self.size_in_cells + pos.0) as usize]
     }*/
+}
+
+fn calc_texture_offset(width_in_tiles: u32, tile_width: u32, index: u32, level: u32) -> (u32, u32) {
+    (
+        (index % width_in_tiles) * tile_width / (1 << level),
+        (index / width_in_tiles) * tile_width / (1 << level),
+    )
+}
+
+fn calc_texture_size(tile_width: u32, level: u32) -> u32 {
+    tile_width / (1 << level)
 }
 
 /// Creates a new texture atlas with resolution (size x size) and
@@ -157,15 +158,11 @@ pub fn new(
         (width, width),
     )?;
 
-    let graphics_queue = device.get_queue(vkw::Queue::TYPE_GRAPHICS);
-    let cmd_list = graphics_queue.create_primary_cmd_list("tex-atlas_cmd")?;
-
-    let mut submit_packet =
-        device.create_submit_packet(&[vkw::SubmitInfo::new(&[], &[Arc::clone(&cmd_list)], &[])])?;
+    let mut gpu_job = device.create_job("tex-atlas", QueueType::Graphics)?;
 
     // Change image initial layout
     {
-        let mut cl = cmd_list.lock();
+        let mut cl = gpu_job.get_cmd_list_for_recording();
         cl.begin(true)?;
         cl.barrier_image(
             vkw::PipelineStageFlags::TOP_OF_PIPE,
@@ -179,14 +176,13 @@ pub fn new(
     }
 
     unsafe {
-        graphics_queue.submit(&mut submit_packet)?;
+        device.run_jobs(&mut [GPUJobExecInfo::new(&mut gpu_job)])?;
     }
-    submit_packet.wait()?;
+    gpu_job.wait()?;
 
     Ok(TextureAtlas {
         device: Arc::clone(&device),
-        cmd_list,
-        submit_packet,
+        gpu_job,
         image,
         _width: width,
         width_in_tiles,

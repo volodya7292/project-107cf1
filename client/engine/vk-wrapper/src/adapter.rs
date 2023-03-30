@@ -1,7 +1,7 @@
 use crate::device::DeviceWrapper;
 use crate::entry::VK_API_VERSION;
 use crate::sampler::SamplerClamp;
-use crate::{device, device::Device, surface::Surface, Instance, Queue, SamplerFilter, SamplerMipmap};
+use crate::{device::Device, surface::Surface, Instance, Queue, QueueType, SamplerFilter, SamplerMipmap};
 use ash::vk;
 use ash::vk::Handle;
 use common::parking_lot::{Mutex, RwLock};
@@ -9,7 +9,21 @@ use std::sync::Arc;
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
 use std::{mem, ptr};
 
-pub(crate) const QUEUE_TYPE_COUNT: usize = 4;
+#[derive(Copy, Clone)]
+pub(crate) struct QueueId {
+    pub family_index: u32,
+    /// A queue family may have multiple queues in it. This identifies queue array index.
+    pub index: u32,
+}
+
+impl Default for QueueId {
+    fn default() -> Self {
+        Self {
+            family_index: u32::MAX,
+            index: 0,
+        }
+    }
+}
 
 pub struct Adapter {
     pub(crate) instance: Arc<Instance>,
@@ -22,7 +36,7 @@ pub struct Adapter {
     pub(crate) ts_features: vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR,
     pub(crate) storage8bit_features: vk::PhysicalDevice8BitStorageFeaturesKHR,
     pub(crate) shader_float16_int8_features: vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR,
-    pub(crate) queue_family_indices: [[u32; 2]; QUEUE_TYPE_COUNT],
+    pub(crate) queue_family_indices: [QueueId; QueueType::TOTAL_QUEUES],
     pub(crate) formats_props: HashMap<vk::Format, vk::FormatProperties>,
 }
 
@@ -32,25 +46,21 @@ unsafe impl Sync for Adapter {}
 
 impl Adapter {
     pub fn create_device(self: &Arc<Self>) -> Result<Arc<Device>, vk::Result> {
-        let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(QUEUE_TYPE_COUNT);
+        let mut queue_infos = Vec::<vk::DeviceQueueCreateInfo>::with_capacity(QueueType::TOTAL_QUEUES);
         let priorities = [1.0_f32; u8::MAX as usize];
 
-        for i in 0..QUEUE_TYPE_COUNT {
-            let mut used_indices = Vec::<u32>::with_capacity(256);
+        let mut queue_count_by_family = HashMap::<u32, u32>::new();
 
-            for fam_index in self.queue_family_indices.iter() {
-                if fam_index[0] == i as u32 && !used_indices.contains(&fam_index[1]) {
-                    used_indices.push(fam_index[1]);
-                }
-            }
-            if used_indices.is_empty() {
-                continue;
-            }
+        for id in &self.queue_family_indices {
+            let count = queue_count_by_family.entry(id.family_index).or_default();
+            *count = (*count).max(id.index + 1);
+        }
 
+        for (family_idx, count) in queue_count_by_family {
             let mut queue_info = vk::DeviceQueueCreateInfo::builder();
             queue_info = queue_info
-                .queue_family_index(i as u32)
-                .queue_priorities(&priorities[0..used_indices.len()]);
+                .queue_family_index(family_idx)
+                .queue_priorities(&priorities[0..count as usize]);
             queue_infos.push(queue_info.build());
         }
 
@@ -89,33 +99,41 @@ impl Adapter {
         });
 
         // Get queues
-        let mut queues = Vec::with_capacity(QUEUE_TYPE_COUNT);
-        for queue_info in &queue_infos {
-            for i in 0..queue_info.queue_count {
-                queues.push(Arc::new(Queue {
-                    device_wrapper: Arc::clone(&device_wrapper),
-                    swapchain_khr: swapchain_khr.clone(),
-                    native: RwLock::new(unsafe {
-                        device_wrapper
-                            .native
-                            .get_device_queue(queue_info.queue_family_index, i)
-                    }),
-                    semaphore: Arc::new(device::create_binary_semaphore(&device_wrapper)?),
-                    timeline_sp: Arc::new(device::create_timeline_semaphore(&device_wrapper)?),
-                    family_index: queue_info.queue_family_index,
-                }));
-            }
-        }
+        let unique_queues: HashMap<u32, Vec<Arc<Queue>>> = queue_infos
+            .iter()
+            .map(|info| {
+                let queues: Vec<_> = (0..info.queue_count)
+                    .map(|idx| {
+                        Arc::new(Queue {
+                            device_wrapper: Arc::clone(&device_wrapper),
+                            swapchain_khr: swapchain_khr.clone(),
+                            native: RwLock::new(unsafe {
+                                device_wrapper
+                                    .native
+                                    .get_device_queue(info.queue_family_index, idx)
+                            }),
+                            family_index: info.queue_family_index,
+                            ty: QueueType::from_idx(
+                                self.queue_family_indices
+                                    .iter()
+                                    .position(|id| {
+                                        id.family_index == info.queue_family_index && id.index == idx
+                                    })
+                                    .unwrap(),
+                            ),
+                        })
+                    })
+                    .collect();
 
-        // Graphics queue always exists. Compute, transfer, present queues may be the same as the graphics queue.
-        for i in queues.len()..QUEUE_TYPE_COUNT {
-            queues.push(Arc::clone(
-                &queues
-                    .iter()
-                    .find(|v| v.family_index == self.queue_family_indices[i][0])
-                    .unwrap(),
-            ));
-        }
+                (info.queue_family_index, queues)
+            })
+            .collect();
+
+        let queues: Vec<_> = self
+            .queue_family_indices
+            .iter()
+            .map(|id| Arc::clone(&unique_queues[&id.family_index][id.index as usize]))
+            .collect();
 
         let memory_props = unsafe {
             self.instance

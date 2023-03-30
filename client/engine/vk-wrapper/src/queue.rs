@@ -1,38 +1,49 @@
-use std::sync::Arc;
-use std::{ptr, slice};
-
-use ash::vk;
-use ash::vk::Handle;
-use common::parking_lot::{Mutex, RwLock};
-use smallvec::SmallVec;
-
 use crate::device::DeviceWrapper;
 use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
 use crate::{DeviceError, SwapchainImage};
+use ash::vk;
+use ash::vk::Handle;
+use common::parking_lot::RwLock;
+use smallvec::SmallVec;
+use std::sync::Arc;
+use std::{ptr, slice};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct QueueType(pub(crate) u32);
+#[repr(usize)]
+pub enum QueueType {
+    Graphics = 0,
+    Compute = 1,
+    Transfer = 2,
+    Present = 3,
+}
+
+impl QueueType {
+    pub(crate) const TOTAL_QUEUES: usize = 4;
+
+    pub fn from_idx(idx: usize) -> Self {
+        assert!(idx <= Self::Present as usize);
+        unsafe { std::mem::transmute(idx) }
+    }
+}
 
 pub struct Queue {
     pub(crate) device_wrapper: Arc<DeviceWrapper>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
     pub(crate) native: RwLock<vk::Queue>,
-    pub(crate) semaphore: Arc<Semaphore>,
-    pub(crate) timeline_sp: Arc<Semaphore>,
     pub(crate) family_index: u32,
+    pub(crate) ty: QueueType,
 }
 
 impl Queue {
-    pub const TYPE_GRAPHICS: QueueType = QueueType(0);
-    pub const TYPE_COMPUTE: QueueType = QueueType(1);
-    pub const TYPE_TRANSFER: QueueType = QueueType(2);
-    pub const TYPE_PRESENT: QueueType = QueueType(3);
+    pub fn family_index(&self) -> u32 {
+        self.family_index
+    }
 
-    fn create_cmd_list(
-        &self,
-        name: &str,
-        level: vk::CommandBufferLevel,
-    ) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+    pub fn ty(&self) -> QueueType {
+        self.ty
+    }
+
+    fn create_cmd_list(&self, name: &str, level: vk::CommandBufferLevel) -> Result<CmdList, DeviceError> {
         let create_info = vk::CommandPoolCreateInfo::builder().queue_family_index(self.family_index);
         let native_pool = unsafe {
             self.device_wrapper
@@ -59,25 +70,35 @@ impl Queue {
             )?;
         }
 
-        Ok(Arc::new(Mutex::new(CmdList {
+        Ok(CmdList {
             device_wrapper: Arc::clone(&self.device_wrapper),
             pool: native_pool,
             native,
             one_time_exec: false,
             last_pipeline: ptr::null(),
             curr_framebuffer_size: (0, 0),
-        })))
+        })
     }
 
-    pub fn create_primary_cmd_list(&self, name: &str) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+    pub fn create_primary_cmd_list(&self, name: &str) -> Result<CmdList, DeviceError> {
         self.create_cmd_list(name, vk::CommandBufferLevel::PRIMARY)
     }
 
-    pub fn create_secondary_cmd_list(&self, name: &str) -> Result<Arc<Mutex<CmdList>>, DeviceError> {
+    pub fn create_secondary_cmd_list(&self, name: &str) -> Result<CmdList, DeviceError> {
         self.create_cmd_list(name, vk::CommandBufferLevel::SECONDARY)
     }
 
-    fn submit_infos(&self, submit_infos: &[SubmitInfo], fence: &mut Fence) -> Result<(), vk::Result> {
+    /// # Safety
+    /// All resources used in command lists must be valid until all pending operations are complete.
+    pub fn submit_infos(
+        &self,
+        submit_infos: &[SubmitInfo],
+        fence: Option<&mut Fence>,
+    ) -> Result<(), DeviceError> {
+        if submit_infos.is_empty() {
+            return Ok(());
+        }
+
         let mut semaphore_count = 0;
         let mut cmd_list_count = 0;
         for info in submit_infos.iter() {
@@ -107,7 +128,7 @@ impl Queue {
             }
             let cmd_buffer_index = command_buffers.len();
             for cmd_buffer in &info.cmd_lists {
-                command_buffers.push(cmd_buffer.lock().native);
+                command_buffers.push(cmd_buffer.native);
             }
 
             native_sp_submit_infos.push(
@@ -139,56 +160,27 @@ impl Queue {
 
         let queue = self.native.write();
 
-        fence.reset()?;
+        let fence_native = if let Some(fence) = fence {
+            fence.reset()?;
+            fence.native
+        } else {
+            vk::Fence::null()
+        };
 
         unsafe {
             self.device_wrapper
                 .native
-                .queue_submit(*queue, &native_submit_infos, fence.native)?
+                .queue_submit(*queue, &native_submit_infos, fence_native)?
         }
 
         Ok(())
     }
 
-    /// # Safety
-    /// All resources used in command lists must be valid
-    pub unsafe fn submit(&self, packet: &mut SubmitPacket) -> Result<(), vk::Result> {
-        if packet.infos.is_empty() {
-            return Ok(());
-        }
-
-        let mut sp_last_signal_value = self.timeline_sp.last_signal_value.lock();
-        let mut new_last_signal_value = *sp_last_signal_value;
-
-        for info in &mut packet.infos {
-            info.wait_semaphores.push(WaitSemaphore {
-                semaphore: Arc::clone(&self.timeline_sp),
-                wait_dst_mask: PipelineStageFlags::ALL_COMMANDS,
-                wait_value: new_last_signal_value,
-            });
-
-            new_last_signal_value += 1;
-            let signal_sp = SignalSemaphore {
-                semaphore: Arc::clone(&self.timeline_sp),
-                signal_value: new_last_signal_value,
-            };
-            info.signal_semaphores.push(signal_sp.clone());
-            info.completion_signal_sp = Some(signal_sp);
-        }
-
-        self.submit_infos(&packet.infos, &mut packet.fence)?;
-        *sp_last_signal_value = new_last_signal_value;
-
-        // Remove implicitly added semaphores
-        for info in &mut packet.infos {
-            info.wait_semaphores.pop();
-            info.signal_semaphores.pop();
-        }
-
-        Ok(())
-    }
-
-    pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
+    pub fn present(
+        &self,
+        wait_semaphore: &Semaphore,
+        sw_image: SwapchainImage,
+    ) -> Result<bool, swapchain::Error> {
         let queue = self.native.write();
         let swapchain = sw_image
             .image
@@ -200,7 +192,7 @@ impl Queue {
             .lock();
 
         let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(slice::from_ref(&self.semaphore.native))
+            .wait_semaphores(slice::from_ref(&wait_semaphore.native))
             .swapchains(slice::from_ref(&*swapchain))
             .image_indices(slice::from_ref(&sw_image.index));
         let result = unsafe { self.swapchain_khr.queue_present(*queue, &present_info) };
@@ -210,14 +202,6 @@ impl Queue {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(swapchain::Error::IncompatibleSurface),
             Err(e) => Err(swapchain::Error::VkError(e)),
         }
-    }
-
-    pub fn end_of_frame_semaphore(&self) -> &Arc<Semaphore> {
-        &self.semaphore
-    }
-
-    pub fn timeline_semaphore(&self) -> &Arc<Semaphore> {
-        &self.timeline_sp
     }
 
     pub fn wait_idle(&self) -> Result<(), vk::Result> {
@@ -245,85 +229,9 @@ pub struct SignalSemaphore {
     pub signal_value: u64,
 }
 
-#[derive(Clone)]
-pub struct SubmitInfo {
-    wait_semaphores: SmallVec<[WaitSemaphore; 4]>,
-    cmd_lists: SmallVec<[Arc<Mutex<CmdList>>; 4]>,
-    signal_semaphores: SmallVec<[SignalSemaphore; 4]>,
-    completion_signal_sp: Option<SignalSemaphore>,
-}
-
-impl SubmitInfo {
-    pub fn new(
-        wait_semaphores: &[WaitSemaphore],
-        cmd_lists: &[Arc<Mutex<CmdList>>],
-        signal_semaphores: &[SignalSemaphore],
-    ) -> SubmitInfo {
-        SubmitInfo {
-            wait_semaphores: wait_semaphores.iter().cloned().collect(),
-            cmd_lists: cmd_lists.iter().cloned().collect(),
-            signal_semaphores: signal_semaphores.iter().cloned().collect(),
-            completion_signal_sp: None,
-        }
-    }
-
-    pub fn set_cmd_lists(&mut self, cmd_lists: Vec<Arc<Mutex<CmdList>>>) {
-        self.cmd_lists = cmd_lists.into();
-    }
-
-    pub fn get_wait_semaphores(&self) -> &[WaitSemaphore] {
-        &self.wait_semaphores
-    }
-
-    pub fn get_wait_semaphores_mut(&mut self) -> &mut [WaitSemaphore] {
-        &mut self.wait_semaphores
-    }
-}
-
-pub struct SubmitPacket {
-    pub(crate) infos: SmallVec<[SubmitInfo; 4]>,
-    pub(crate) fence: Fence,
-}
-
-impl SubmitPacket {
-    pub fn get(&self) -> &[SubmitInfo] {
-        &self.infos
-    }
-
-    pub fn get_mut(&mut self) -> Result<&mut [SubmitInfo], vk::Result> {
-        self.wait()?;
-        Ok(&mut self.infos)
-    }
-
-    pub fn set(&mut self, infos: &[SubmitInfo]) -> Result<(), vk::Result> {
-        self.wait()?;
-        self.infos = infos.into();
-        Ok(())
-    }
-
-    pub fn get_signal_value(&self, submit_index: u32) -> Option<u64> {
-        let sp = self.infos[submit_index as usize].completion_signal_sp.as_ref()?;
-        Some(sp.signal_value)
-    }
-
-    pub fn wait(&mut self) -> Result<(), vk::Result> {
-        self.fence.wait()?;
-
-        for info in &self.infos {
-            for cmd_list in &info.cmd_lists {
-                let mut cmd_list = cmd_list.lock();
-                if cmd_list.one_time_exec {
-                    cmd_list.clear_resources();
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl Drop for SubmitPacket {
-    fn drop(&mut self) {
-        self.wait().unwrap();
-    }
+#[derive(Clone, Default)]
+pub struct SubmitInfo<'a> {
+    pub wait_semaphores: Vec<WaitSemaphore>,
+    pub cmd_lists: Vec<&'a CmdList>,
+    pub signal_semaphores: Vec<SignalSemaphore>,
 }

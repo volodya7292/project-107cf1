@@ -1,4 +1,5 @@
 use crate::ecs::component::uniform_data::{BASIC_UNIFORM_BLOCK_MAX_SIZE, CUSTOM_UNIFORM_BLOCK_MAX_SIZE};
+use crate::module::main_renderer::gpu_executor::{GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig};
 use crate::module::main_renderer::{
     BufferUpdate, MainRenderer, MaterialInfo, PipelineKind, TextureAtlasType, ADDITIONAL_PIPELINE_BINDINGS,
@@ -201,15 +202,13 @@ impl MainRenderer {
             return;
         }
 
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-
         let update_count = updates.len();
         let staging_size = self.staging_buffer.size();
         let mut used_size = 0;
         let mut i = 0;
 
         while i < update_count {
-            let mut cl = self.staging_cl.lock();
+            let mut cl = self.staging_job.get_cmd_list_for_recording();
             cl.begin(true).unwrap();
 
             while i < update_count {
@@ -272,11 +271,10 @@ impl MainRenderer {
             }
 
             cl.end().unwrap();
-            drop(cl);
 
-            let submit = &mut self.staging_submit;
-            graphics_queue.submit(submit).unwrap();
-            submit.wait().unwrap();
+            self.device
+                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
+                .unwrap();
         }
     }
 }

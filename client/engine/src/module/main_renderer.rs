@@ -16,8 +16,10 @@ pub mod material_pipeline;
 pub mod vertex_mesh;
 pub mod camera;
 pub mod component;
+pub(crate) mod gpu_executor;
 mod helpers;
 pub mod material;
+mod resource_manager;
 pub(crate) mod resources;
 
 // Notes
@@ -38,6 +40,7 @@ use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexM
 use crate::ecs::system;
 use crate::event::WSIEvent;
 use crate::module::main_renderer::camera::OrthoCamera;
+use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::material::MatComponent;
 use crate::module::main_renderer::resources::{CullObject, RendererResources, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::module::scene::change_manager::ComponentChangesHandle;
@@ -49,6 +52,8 @@ use crate::EngineContext;
 use basis_universal::TranscoderTextureFormat;
 use camera::{Frustum, PerspectiveCamera};
 use common::glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec2, Vec3, Vec4};
+use common::lrc::Lrc;
+use common::lrc::LrcExt;
 use common::nalgebra::{Matrix4, Vector4};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
@@ -60,7 +65,9 @@ use entity_data::{Archetype, EntityId, EntityStorage, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fs, iter, mem, slice};
@@ -74,9 +81,9 @@ use vk_wrapper::{
     swapchain, AccessFlags, Attachment, AttachmentRef, BindingLoc, BindingRes, BindingType, BufferUsageFlags,
     ClearValue, CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format,
     Framebuffer, HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, RenderPass, Sampler, SamplerFilter,
-    SamplerMipmap, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore, SubmitInfo, SubmitPacket,
-    Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, QueueType, RenderPass, Sampler,
+    SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore,
+    SubmitInfo, Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
 };
 use winit::window::Window;
 
@@ -126,7 +133,7 @@ impl Display for RendererTimings {
     }
 }
 
-pub type UpdateHandler = dyn Fn(&EngineContext) -> Option<Arc<Mutex<CmdList>>>;
+pub type UpdateHandler = dyn Fn(&EngineContext) -> Option<Lrc<GPUJob>>;
 
 pub struct MainRenderer {
     root_entity: EntityId,
@@ -142,6 +149,7 @@ pub struct MainRenderer {
 
     surface: Arc<Surface>,
     swapchain: Option<Swapchain>,
+    frame_completion_semaphore: Arc<Semaphore>,
     surface_changed: bool,
     surface_size: U32Vec2,
     settings: Settings,
@@ -149,24 +157,20 @@ pub struct MainRenderer {
     device: Arc<Device>,
 
     staging_buffer: HostBuffer<u8>,
-    transfer_cl: [Arc<Mutex<CmdList>>; 2],
-    transfer_submit: [SubmitPacket; 2],
-    staging_cl: Arc<Mutex<CmdList>>,
-    staging_submit: SubmitPacket,
-    modules_updates_submit: SubmitPacket,
-    final_cl: [Arc<Mutex<CmdList>>; 2],
-    final_submit: [SubmitPacket; 2],
+    transfer_jobs: ParallelJob,
+    staging_job: GPUJob,
+    final_jobs: ParallelJob,
 
     sw_framebuffers: Vec<Arc<Framebuffer>>,
 
-    // Depth-stage render commands
-    depth_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
-    translucency_depths_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
+    // Depth-gpu_executor render commands
+    depth_secondary_cls: Vec<CmdList>,
+    translucency_depths_secondary_cls: Vec<CmdList>,
     // G-buffer render commands
-    g_solid_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
-    g_translucent_secondary_cls: Vec<Arc<Mutex<CmdList>>>,
+    g_solid_secondary_cls: Vec<CmdList>,
+    g_translucent_secondary_cls: Vec<CmdList>,
     // "Overlay" render commands
-    overlay_secondary_cl: Arc<Mutex<CmdList>>,
+    overlay_secondary_cl: CmdList,
 
     sw_render_pass: Option<Arc<RenderPass>>,
     compose_pipeline: Option<Arc<Pipeline>>,
@@ -331,6 +335,11 @@ pub(crate) struct BufferUpdate2 {
 pub(crate) enum BufferUpdate {
     WithOffset(BufferUpdate1),
     Regions(BufferUpdate2),
+}
+
+pub(crate) struct ParallelJob {
+    pub work: GPUJob,
+    pub sync: GPUJob,
 }
 
 pub const TEXTURE_ID_NONE: u16 = u16::MAX;
@@ -542,9 +551,7 @@ impl MainRenderer {
         let active_camera = PerspectiveCamera::new(1.0, std::f32::consts::FRAC_PI_2, 0.1);
         let overlay_camera = OrthoCamera::new();
 
-        let transfer_queue = device.get_queue(Queue::TYPE_TRANSFER);
-        let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
-        let present_queue = device.get_queue(Queue::TYPE_PRESENT);
+        let graphics_queue = device.get_queue(QueueType::Graphics);
         // Available threads in the render thread pool
         let available_threads = rayon::current_num_threads();
 
@@ -942,36 +949,21 @@ impl MainRenderer {
             );
         }
 
-        let transfer_cl = [
-            transfer_queue.create_primary_cmd_list("transfer_0").unwrap(),
-            graphics_queue.create_primary_cmd_list("transfer_1").unwrap(),
-        ];
-        let transfer_submit = [
-            device
-                .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[0])], &[])])
-                .unwrap(),
-            device
-                .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&transfer_cl[1])], &[])])
-                .unwrap(),
-        ];
+        let transfer_jobs = ParallelJob {
+            work: device.create_job("transfer", QueueType::Transfer).unwrap(),
+            sync: device.create_job("transfer-sync", QueueType::Graphics).unwrap(),
+        };
 
-        let staging_cl = graphics_queue.create_primary_cmd_list("staging").unwrap();
-        let staging_submit = device
-            .create_submit_packet(&[SubmitInfo::new(&[], &[Arc::clone(&staging_cl)], &[])])
+        let staging_job = device
+            .create_job("renderer-staging", QueueType::Graphics)
             .unwrap();
 
-        let modules_updates_submit = device
-            .create_submit_packet(&[SubmitInfo::new(&[], &[], &[])])
-            .unwrap();
+        let final_jobs = ParallelJob {
+            work: device.create_job("final", QueueType::Graphics).unwrap(),
+            sync: device.create_job("final-sync", QueueType::Present).unwrap(),
+        };
 
-        let final_cl = [
-            graphics_queue.create_primary_cmd_list("final").unwrap(),
-            present_queue.create_primary_cmd_list("final").unwrap(),
-        ];
-        let final_submit = [
-            device.create_submit_packet(&[]).unwrap(),
-            device.create_submit_packet(&[]).unwrap(),
-        ];
+        let frame_completion_semaphore = Arc::new(device.create_binary_semaphore().unwrap());
 
         let resources = RendererResources {
             texture_atlases,
@@ -1020,19 +1012,16 @@ impl MainRenderer {
             relative_camera_pos: Default::default(),
             surface,
             swapchain: None,
+            frame_completion_semaphore,
             surface_changed: false,
             surface_size: glm::convert_unchecked(curr_size.real()),
             settings,
             last_frame_ts: Instant::now(),
             device,
             staging_buffer,
-            transfer_cl,
-            transfer_submit,
-            staging_cl,
-            staging_submit,
-            modules_updates_submit,
-            final_cl,
-            final_submit,
+            transfer_jobs,
+            staging_job,
+            final_jobs,
             sw_framebuffers: vec![],
             depth_secondary_cls,
             translucency_depths_secondary_cls,
@@ -1105,19 +1094,26 @@ impl MainRenderer {
 
         // --------------------------------------------------------------------
 
-        let mut update_cls = vec![];
+        let mut module_update_jobs = vec![];
 
         // Call registered update handlers
         for handler in &self.update_handlers {
-            let cl = handler(ctx);
-            if let Some(cl) = cl {
-                update_cls.push(cl);
+            let job = handler(ctx);
+            if let Some(job) = job {
+                module_update_jobs.push(job.borrow_mut_owned());
             }
         }
-        self.modules_updates_submit.get_mut().unwrap()[0].set_cmd_lists(update_cls);
 
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-        unsafe { graphics_queue.submit(&mut self.modules_updates_submit).unwrap() };
+        unsafe {
+            self.device
+                .run_jobs_sync(
+                    &mut module_update_jobs
+                        .iter_mut()
+                        .map(|v| GPUJobExecInfo::new(v))
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+        }
 
         // --------------------------------------------------------------------
 
@@ -1133,9 +1129,12 @@ impl MainRenderer {
 
         // Wait for transfer and acquire buffers from transfer queue to render queue
         if !self.vertex_mesh_pending_updates.is_empty() {
-            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-            unsafe { graphics_queue.submit(&mut self.transfer_submit[1]).unwrap() };
-            self.transfer_submit[1].wait().unwrap();
+            unsafe {
+                self.device
+                    .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.transfer_jobs.sync)
+                        .with_wait_semaphores(&[self.transfer_jobs.work.wait_semaphore()])])
+                    .unwrap();
+            }
         }
 
         // Before updating new buffers, collect all the completed updates to commit them
@@ -1233,8 +1232,7 @@ impl MainRenderer {
         };
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
-            transfer_cl: &self.transfer_cl,
-            transfer_submit: &mut self.transfer_submit,
+            transfer_jobs: &mut self.transfer_jobs,
             buffer_updates: &mut self.new_vertex_mesh_updates,
             sorted_buffer_updates_entities: &sorted_buffer_updates_entities,
             pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
@@ -1361,7 +1359,9 @@ impl MainRenderer {
         let t1 = Instant::now();
         timings.uniform_buffers_update = (t1 - t11).as_secs_f64();
 
-        self.modules_updates_submit.wait().unwrap();
+        for job in module_update_jobs {
+            job.wait().unwrap();
+        }
 
         let total_t1 = Instant::now();
         timings.total = (total_t1 - total_t0).as_secs_f64();
@@ -1380,14 +1380,13 @@ impl MainRenderer {
         let frustum = Frustum::new(proj_mat * view_mat);
 
         self.depth_secondary_cls
-            .par_iter()
-            .zip(&self.translucency_depths_secondary_cls)
+            .par_iter_mut()
+            .zip(&mut self.translucency_depths_secondary_cls)
             .enumerate()
             .for_each(|(i, (cmd_list_solid, cmd_list_translucency))| {
                 let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
-
-                let mut cl_sol = cmd_list_solid.lock();
-                let mut cl_trans = cmd_list_translucency.lock();
+                let mut cl_sol = cmd_list_solid;
+                let mut cl_trans = cmd_list_translucency;
 
                 cl_sol
                     .begin_secondary_graphics(
@@ -1481,7 +1480,7 @@ impl MainRenderer {
         cull_objects.len() as u32
     }
 
-    fn record_g_cmd_lists(&self, storage: &EntityStorage) {
+    fn record_g_cmd_lists(&mut self, storage: &EntityStorage) {
         let mat_pipelines = &self.res.material_pipelines;
         let object_count = self.ordered_entities.len();
         let draw_count_step = object_count / self.g_solid_secondary_cls.len() + 1;
@@ -1490,12 +1489,12 @@ impl MainRenderer {
         let res = &self.res;
 
         self.g_solid_secondary_cls
-            .par_iter()
-            .zip(&self.g_translucent_secondary_cls)
+            .par_iter_mut()
+            .zip(&mut self.g_translucent_secondary_cls)
             .enumerate()
             .for_each(|(i, (cmd_list_solid, cmd_list_translucent))| {
-                let mut cl_sol = cmd_list_solid.lock();
-                let mut cl_trans = cmd_list_translucent.lock();
+                let mut cl_sol = cmd_list_solid;
+                let mut cl_trans = cmd_list_translucent;
 
                 cl_sol
                     .begin_secondary_graphics(true, &res.g_render_pass, 0, res.g_framebuffer.as_ref())
@@ -1534,9 +1533,9 @@ impl MainRenderer {
                     let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let (cl, pipeline_id) = if render_config.translucent {
                         consts.is_translucent_pass = 1;
-                        (&mut cl_trans, PipelineKind::ColorWithBlending as u32)
+                        (&mut *cl_trans, PipelineKind::ColorWithBlending as u32)
                     } else {
-                        (&mut cl_sol, PipelineKind::Color as u32)
+                        (&mut *cl_sol, PipelineKind::Color as u32)
                     };
                     let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
                     let signature = pipeline.signature();
@@ -1568,9 +1567,9 @@ impl MainRenderer {
             });
     }
 
-    fn record_overlay_cmd_list(&self, storage: &EntityStorage) {
+    fn record_overlay_cmd_list(&mut self, storage: &EntityStorage) {
         let mat_pipelines = &self.res.material_pipelines;
-        let mut cl = self.overlay_secondary_cl.lock();
+        let mut cl = &mut self.overlay_secondary_cl;
 
         cl.begin_secondary_graphics(true, &self.res.g_render_pass, 1, self.res.g_framebuffer.as_ref())
             .unwrap();
@@ -1615,7 +1614,7 @@ impl MainRenderer {
             };
 
             // TODO: FIXME on release target (push constants blocks are stripped when optimizations are on):
-            // 2023-01-31T11:44:18.418Z ERROR [vulkan] [VAL] "Validation Error: [ VUID-vkCmdPushConstants-offset-01795 ] Object 0: handle = 0x142658008, name = overlay_secondary, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x27bc88c6 | vkCmdPushConstants(): VK_SHADER_STAGE_ALL, VkPushConstantRange in VkPipelineLayout 0x3307610000000114[] overlapping offset = 0 and size = 4, do not contain VK_SHADER_STAGE_ALL. The Vulkan spec states: For each byte in the range specified by offset and size and for each shader stage in stageFlags, there must be a push constant range in layout that includes that byte and that stage (https://vulkan.lunarg.com/doc/view/1.3.239.0/mac/1.3-extensions/vkspec.html#VUID-vkCmdPushConstants-offset-01795)"
+            // 2023-01-31T11:44:18.418Z ERROR [vulkan] [VAL] "Validation Error: [ VUID-vkCmdPushConstants-offset-01795 ] Object 0: handle = 0x142658008, name = overlay_secondary, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x27bc88c6 | vkCmdPushConstants(): VK_SHADER_STAGE_ALL, VkPushConstantRange in VkPipelineLayout 0x3307610000000114[] overlapping offset = 0 and size = 4, do not contain VK_SHADER_STAGE_ALL. The Vulkan spec states: For each byte in the range specified by offset and size and for each shader gpu_executor in stageFlags, there must be a push constant range in layout that includes that byte and that gpu_executor (https://vulkan.lunarg.com/doc/view/1.3.239.0/mac/1.3-extensions/vkspec.html#VUID-vkCmdPushConstants-offset-01795)"
             cl.push_constants(signature, &consts);
 
             cl.bind_and_draw_vertex_mesh(vertex_mesh);
@@ -1628,7 +1627,7 @@ impl MainRenderer {
         let frustum_visible_objects = self.record_depth_cmd_lists(storage);
         let object_count = self.ordered_entities.len() as u32;
 
-        let mut cl = self.staging_cl.lock();
+        let mut cl = self.staging_job.get_cmd_list_for_recording();
         cl.begin(true).unwrap();
 
         let translucency_depths_image = self.res.translucency_depths_image.as_ref().unwrap();
@@ -1790,20 +1789,21 @@ impl MainRenderer {
         );
 
         cl.end().unwrap();
-        drop(cl);
 
-        let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-        let submit = &mut self.staging_submit;
-        unsafe { graphics_queue.submit(submit).unwrap() };
-        submit.wait().unwrap();
+        unsafe {
+            self.device
+                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
+                .unwrap();
+        }
     }
 
-    fn g_buffer_pass(&mut self, final_cl: &mut CmdList, storage: &EntityStorage) {
+    fn g_buffer_pass(&mut self, storage: &EntityStorage) {
         self.record_g_cmd_lists(storage);
         self.record_overlay_cmd_list(storage);
 
         let translucency_colors_image = self.res.translucency_colors_image.as_ref().unwrap();
 
+        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
         final_cl.barrier_image(
             PipelineStageFlags::TOP_OF_PIPE,
             PipelineStageFlags::TRANSFER,
@@ -1872,7 +1872,6 @@ impl MainRenderer {
         let mut timings = RenderTimings::default();
         let total_t0 = Instant::now();
         let device = Arc::clone(&self.device);
-        let graphics_queue = device.get_queue(Queue::TYPE_GRAPHICS);
 
         let t1 = Instant::now();
 
@@ -1883,14 +1882,17 @@ impl MainRenderer {
 
         // Record G-Buffer cmd list
         // -------------------------------------------------------------------------------------------------------------
-        let final_cl = Arc::clone(&self.final_cl[0]);
-        let mut final_cl = final_cl.lock();
+        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
         final_cl.begin(true).unwrap();
+        drop(final_cl);
 
-        self.g_buffer_pass(&mut final_cl, storage);
+        self.g_buffer_pass(storage);
+
+        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
 
         // ----------------------------------------------------------------------------------------------
-        let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
+        let graphics_queue = device.get_queue(QueueType::Graphics);
+        let present_queue = self.device.get_queue(QueueType::Present);
         let albedo = self.res.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
 
         final_cl.barrier_image(
@@ -1931,45 +1933,51 @@ impl MainRenderer {
         }
 
         final_cl.end().unwrap();
-        drop(final_cl);
 
         unsafe {
-            graphics_queue.submit(&mut self.final_submit[0]).unwrap();
+            let signal_sem = &[SignalSemaphore {
+                semaphore: Arc::clone(&self.frame_completion_semaphore),
+                signal_value: 0,
+            }];
+
+            self.device
+                .run_jobs(&mut [GPUJobExecInfo::new(&mut self.final_jobs.work)
+                    .with_wait_semaphores(&[WaitSemaphore {
+                        semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
+                        wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
+                        wait_value: 0,
+                    }])
+                    .with_signal_semaphores(if graphics_queue == present_queue {
+                        signal_sem
+                    } else {
+                        &[]
+                    })])
+                .unwrap();
 
             if graphics_queue != present_queue {
-                {
-                    let mut cl = self.final_cl[1].lock();
-                    cl.begin(true).unwrap();
-                    cl.barrier_image(
-                        PipelineStageFlags::TOP_OF_PIPE,
-                        PipelineStageFlags::BOTTOM_OF_PIPE,
-                        &[sw_image
-                            .get()
-                            .barrier()
-                            .old_layout(ImageLayout::PRESENT)
-                            .new_layout(ImageLayout::PRESENT)
-                            .src_queue(graphics_queue)
-                            .dst_queue(present_queue)],
-                    );
-                    cl.end().unwrap();
-                }
+                let mut cl = self.final_jobs.sync.get_cmd_list_for_recording();
+                cl.begin(true).unwrap();
+                cl.barrier_image(
+                    PipelineStageFlags::TOP_OF_PIPE,
+                    PipelineStageFlags::BOTTOM_OF_PIPE,
+                    &[sw_image
+                        .get()
+                        .barrier()
+                        .old_layout(ImageLayout::PRESENT)
+                        .new_layout(ImageLayout::PRESENT)
+                        .src_queue(graphics_queue)
+                        .dst_queue(present_queue)],
+                );
+                cl.end().unwrap();
 
-                self.final_submit[1]
-                    .set(&[SubmitInfo::new(
-                        &[WaitSemaphore {
-                            semaphore: Arc::clone(graphics_queue.timeline_semaphore()),
-                            wait_dst_mask: PipelineStageFlags::ALL_COMMANDS,
-                            wait_value: self.final_submit[0].get_signal_value(0).unwrap(),
-                        }],
-                        &[Arc::clone(&self.final_cl[1])],
-                        &[SignalSemaphore {
-                            semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
+                self.device
+                    .run_jobs(&mut [GPUJobExecInfo::new(&mut self.final_jobs.sync)
+                        .with_wait_semaphores(&[self.final_jobs.work.wait_semaphore()])
+                        .with_signal_semaphores(&[SignalSemaphore {
+                            semaphore: Arc::clone(&self.frame_completion_semaphore),
                             signal_value: 0,
-                        }],
-                    )])
+                        }])])
                     .unwrap();
-
-                present_queue.submit(&mut self.final_submit[1]).unwrap();
             }
         }
 
@@ -1993,13 +2001,10 @@ impl MainRenderer {
         }
 
         // Wait for previous frame completion
-        self.final_submit[0].wait().unwrap();
-        self.final_submit[1].wait().unwrap();
+        self.final_jobs.work.wait().unwrap();
+        self.final_jobs.sync.wait().unwrap();
 
         if self.surface_changed {
-            let graphics_queue = self.device.get_queue(Queue::TYPE_GRAPHICS);
-            let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-
             self.sw_framebuffers.clear();
 
             self.swapchain = Some(
@@ -2018,27 +2023,6 @@ impl MainRenderer {
                     .unwrap(),
             );
 
-            let signal_sem = &[SignalSemaphore {
-                semaphore: Arc::clone(present_queue.end_of_frame_semaphore()),
-                signal_value: 0,
-            }];
-
-            self.final_submit[0]
-                .set(&[SubmitInfo::new(
-                    &[WaitSemaphore {
-                        semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                        wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                        wait_value: 0,
-                    }],
-                    &[Arc::clone(&self.final_cl[0])],
-                    if graphics_queue == present_queue {
-                        signal_sem
-                    } else {
-                        &[]
-                    },
-                )])
-                .unwrap();
-
             self.create_output_framebuffers();
             self.surface_changed = false;
         }
@@ -2052,8 +2036,8 @@ impl MainRenderer {
                 timings.update = self.on_update(ctx);
                 timings.render = self.on_render(&sw_image, ctx);
 
-                let present_queue = self.device.get_queue(Queue::TYPE_PRESENT);
-                let present_result = present_queue.present(sw_image);
+                let present_queue = self.device.get_queue(QueueType::Present);
+                let present_result = present_queue.present(&self.frame_completion_semaphore, sw_image);
 
                 match present_result {
                     Ok(suboptimal) => {
