@@ -2,7 +2,7 @@ pub mod vec2;
 
 /// Window System Integration
 use crate::platform::EngineMonitorExt;
-use crate::utils::wsi::vec2::WSIVec2;
+use crate::utils::wsi::vec2::{WSIVec2, WSizingInfo};
 use common::log;
 use winit::window::Window;
 
@@ -41,7 +41,9 @@ pub fn real_scale_factor(window: &Window) -> f64 {
 }
 
 /// Calculates best UI scale factor relative `window` size depending on corresponding monitor's DPI.
+/// Expensive to call on Windows.
 pub fn real_window_size(window: &Window) -> WSISize<u32> {
     let inner = window.inner_size();
-    WSISize::<u32>::from_winit((inner.width, inner.height), window)
+    let sizing_info = WSizingInfo::get(window);
+    WSISize::<u32>::from_raw((inner.width, inner.height), &sizing_info)
 }

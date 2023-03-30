@@ -10,6 +10,7 @@ pub mod utils;
 
 use crate::event::{WEvent, WSIEvent};
 use crate::module::{EngineModule, ModuleManager};
+use crate::utils::wsi::vec2::WSizingInfo;
 use common::any::AsAny;
 use common::lrc::{OwnedRef, OwnedRefMut};
 use common::MO_RELAXED;
@@ -21,6 +22,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 pub use vk_wrapper as vkw;
 pub use winit;
+use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use winit::window::Window;
@@ -51,6 +53,7 @@ pub struct Engine {
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
     main_window: RefCell<Window>,
+    curr_sizing_info: WSizingInfo,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
     module_manager: RefCell<ModuleManager>,
@@ -108,6 +111,7 @@ impl Engine {
 
         let event_loop = EventLoop::new();
         let main_window = app.on_engine_start(&event_loop);
+        let sizing_info = WSizingInfo::get(&main_window);
 
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
@@ -117,6 +121,7 @@ impl Engine {
             delta_time: 1.0,
             event_loop: Some(event_loop),
             main_window: RefCell::new(main_window),
+            curr_sizing_info: sizing_info,
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
             module_manager: Default::default(),
@@ -195,23 +200,32 @@ impl Engine {
                 //     self.last_frame_end_time = Instant::now();
                 //     self.frame_start_time = self.last_frame_end_time;
                 // }
-                _ => {
-                    if let Some(event) = WSIEvent::from_winit(&event, &*self.main_window.borrow()) {
-                        self.module_manager.borrow().on_wsi_event(
-                            &*self.main_window.borrow(),
-                            &event,
-                            &self.context(),
-                        );
+                WEvent::WindowEvent { window_id: _, event } => match event {
+                    WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged {
+                        scale_factor: _,
+                        new_inner_size: _,
+                    } => {
+                        self.curr_sizing_info = WSizingInfo::get(&self.main_window.borrow());
                     }
-
-                    self.app.borrow_mut().on_event(
-                        event,
-                        &*self.main_window.borrow(),
-                        control_flow,
-                        &self.context(),
-                    );
-                }
+                    _ => {}
+                },
+                _ => {}
             }
+
+            if let Some(event) =
+                WSIEvent::from_winit(&event, &*self.main_window.borrow(), &self.curr_sizing_info)
+            {
+                self.module_manager.borrow().on_wsi_event(
+                    &*self.main_window.borrow(),
+                    &event,
+                    &self.context(),
+                );
+            }
+
+            self.app
+                .borrow_mut()
+                .on_event(event, &*self.main_window.borrow(), control_flow, &self.context());
         });
     }
 }

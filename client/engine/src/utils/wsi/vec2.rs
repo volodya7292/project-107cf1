@@ -2,12 +2,35 @@ use crate::utils::wsi::{find_best_video_mode, real_scale_factor};
 use common::glm;
 use common::glm::{TVec2, Vec2};
 use std::fmt::Debug;
+use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 pub trait WSINumber: Copy + PartialEq + Debug + 'static {}
 
 impl WSINumber for u32 {}
 impl WSINumber for f32 {}
+
+pub struct WSizingInfo {
+    monitor_native_size: PhysicalSize<u32>,
+    // On macOS this may be larger than native width
+    monitor_logical_size: PhysicalSize<u32>,
+    scale_factor: f32,
+}
+
+impl WSizingInfo {
+    pub fn get(window: &Window) -> Self {
+        let monitor = window.current_monitor().unwrap();
+        let native_mode = find_best_video_mode(&monitor);
+        let native_size = native_mode.size();
+        let logical_size = monitor.size();
+
+        Self {
+            monitor_native_size: native_size,
+            monitor_logical_size: logical_size,
+            scale_factor: real_scale_factor(window) as f32,
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct WSIVec2<T: WSINumber> {
@@ -36,11 +59,9 @@ impl WSIVec2<u32> {
         }
     }
 
-    pub fn from_winit(raw: (u32, u32), window: &Window) -> Self {
-        let monitor = window.current_monitor().unwrap();
-        let native_mode = find_best_video_mode(&monitor);
-        let native_size = native_mode.size();
-        let logical_size = monitor.size(); // On macOS this may be larger than native width
+    pub fn from_raw(raw: (u32, u32), sizing_info: &WSizingInfo) -> Self {
+        let native_size = sizing_info.monitor_native_size;
+        let logical_size = sizing_info.monitor_logical_size;
 
         let real = glm::vec2(
             raw.0 * native_size.width / logical_size.width,
@@ -49,7 +70,7 @@ impl WSIVec2<u32> {
 
         Self {
             real,
-            scale_factor: real_scale_factor(window) as f32,
+            scale_factor: sizing_info.scale_factor,
         }
     }
 
@@ -59,11 +80,9 @@ impl WSIVec2<u32> {
 }
 
 impl WSIVec2<f32> {
-    pub fn from_winit(raw: (f32, f32), window: &Window) -> Self {
-        let monitor = window.current_monitor().unwrap();
-        let native_mode = find_best_video_mode(&monitor);
-        let native_size = native_mode.size();
-        let logical_size = monitor.size(); // On macOS this may be larger than native width
+    pub fn from_raw(raw: (f32, f32), sizing_info: &WSizingInfo) -> Self {
+        let native_size = sizing_info.monitor_native_size;
+        let logical_size = sizing_info.monitor_logical_size;
 
         let real = glm::vec2(
             raw.0 * native_size.width as f32 / logical_size.width as f32,
@@ -72,7 +91,7 @@ impl WSIVec2<f32> {
 
         WSIVec2 {
             real,
-            scale_factor: real_scale_factor(window) as f32,
+            scale_factor: sizing_info.scale_factor,
         }
     }
 
