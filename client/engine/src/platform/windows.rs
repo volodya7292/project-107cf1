@@ -1,6 +1,5 @@
 use crate::platform::{Platform, PlatformImpl};
 use windows_sys::Win32::Foundation::S_OK;
-use windows_sys::Win32::Graphics::Gdi::HMONITOR;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_RAW_DPI};
 use winit::monitor::MonitorHandle;
 use winit::platform::windows::MonitorHandleExtWindows;

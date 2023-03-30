@@ -1,5 +1,3 @@
-mod depth_pass;
-
 use common::any::AsAny;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
@@ -8,7 +6,7 @@ use common::utils::AllSameBy;
 use smallvec::SmallVec;
 use std::any::TypeId;
 use std::sync::Arc;
-use std::{iter, slice};
+use std::{iter};
 use vk_wrapper::{
     CmdList, Device, DeviceError, PipelineStageFlags, QueueType, Semaphore, SignalSemaphore, SubmitInfo,
     WaitSemaphore,
@@ -234,7 +232,7 @@ impl StageManager {
 
         let stages_infos: HashMap<_, _> = stages
             .iter()
-            .map(|(id, v)| {
+            .map(|(id, _)| {
                 (
                     *id,
                     StageInfo {
@@ -275,7 +273,7 @@ impl StageManager {
         for submit_batch in &self.submit_batches {
             submit_batch.stages.par_iter().for_each(|id| {
                 let mut stage = self.stages[id].lock();
-                let mut info = &self.stages_infos[id];
+                let info = &self.stages_infos[id];
 
                 let record_deps: HashMap<_, _> = stage
                     .record_dependencies()

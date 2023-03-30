@@ -1,9 +1,5 @@
-use crate::module::scene::Scene;
-use common::glm::{Vec2, Vec4};
-use entity_data::EntityId;
-use std::fmt::Display;
+use common::glm::{Vec4};
 use std::ops::{Add, Mul, Sub};
-use std::time::Duration;
 
 /// Maps linear time to function-specific time. In and out are in range [0; 1].
 /// f(0) must return 0 and f(1) must return 1.

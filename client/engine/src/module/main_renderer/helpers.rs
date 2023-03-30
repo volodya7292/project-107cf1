@@ -1,4 +1,3 @@
-use crate::ecs::component::uniform_data::{BASIC_UNIFORM_BLOCK_MAX_SIZE, CUSTOM_UNIFORM_BLOCK_MAX_SIZE};
 use crate::module::main_renderer::gpu_executor::{GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig};
 use crate::module::main_renderer::{
@@ -9,9 +8,8 @@ use basis_universal::TranscodeParameters;
 use common::resource_file::ResourceRef;
 use common::utils::is_pow_of_2;
 use smallvec::SmallVec;
-use std::mem;
 use std::sync::Arc;
-use vk_wrapper::{CopyRegion, PrimitiveTopology, Queue, Shader, ShaderStageFlags};
+use vk_wrapper::{CopyRegion, PrimitiveTopology, Shader, ShaderStageFlags};
 
 impl MainRenderer {
     pub fn load_texture_into_atlas(
@@ -208,7 +206,7 @@ impl MainRenderer {
         let mut i = 0;
 
         while i < update_count {
-            let mut cl = self.staging_job.get_cmd_list_for_recording();
+            let cl = self.staging_job.get_cmd_list_for_recording();
             cl.begin(true).unwrap();
 
             while i < update_count {

@@ -1,5 +1,4 @@
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
-use common::parking_lot::Mutex;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::QueueType;
@@ -63,7 +62,7 @@ impl TextureAtlas {
         }
 
         {
-            let mut cl = self.gpu_job.get_cmd_list_for_recording();
+            let cl = self.gpu_job.get_cmd_list_for_recording();
             cl.begin(true).unwrap();
             cl.barrier_image(
                 vkw::PipelineStageFlags::TOP_OF_PIPE,
@@ -162,7 +161,7 @@ pub fn new(
 
     // Change image initial layout
     {
-        let mut cl = gpu_job.get_cmd_list_for_recording();
+        let cl = gpu_job.get_cmd_list_for_recording();
         cl.begin(true)?;
         cl.barrier_image(
             vkw::PipelineStageFlags::TOP_OF_PIPE,

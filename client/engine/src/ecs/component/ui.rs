@@ -1,7 +1,7 @@
 use crate::module::scene::Scene;
 use crate::EngineContext;
 use common::glm::Vec2;
-use common::types::{HashSet, IndexSet};
+use common::types::{IndexSet};
 use entity_data::EntityId;
 use std::hash::{Hash, Hasher};
 

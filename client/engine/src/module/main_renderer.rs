@@ -19,7 +19,6 @@ pub mod component;
 pub(crate) mod gpu_executor;
 mod helpers;
 pub mod material;
-mod resource_manager;
 pub(crate) mod resources;
 
 // Notes
@@ -65,9 +64,7 @@ use entity_data::{Archetype, EntityId, EntityStorage, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
-use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fs, iter, mem, slice};
@@ -1493,8 +1490,8 @@ impl MainRenderer {
             .zip(&mut self.g_translucent_secondary_cls)
             .enumerate()
             .for_each(|(i, (cmd_list_solid, cmd_list_translucent))| {
-                let mut cl_sol = cmd_list_solid;
-                let mut cl_trans = cmd_list_translucent;
+                let cl_sol = cmd_list_solid;
+                let cl_trans = cmd_list_translucent;
 
                 cl_sol
                     .begin_secondary_graphics(true, &res.g_render_pass, 0, res.g_framebuffer.as_ref())
@@ -1569,7 +1566,7 @@ impl MainRenderer {
 
     fn record_overlay_cmd_list(&mut self, storage: &EntityStorage) {
         let mat_pipelines = &self.res.material_pipelines;
-        let mut cl = &mut self.overlay_secondary_cl;
+        let cl = &mut self.overlay_secondary_cl;
 
         cl.begin_secondary_graphics(true, &self.res.g_render_pass, 1, self.res.g_framebuffer.as_ref())
             .unwrap();
@@ -1627,7 +1624,7 @@ impl MainRenderer {
         let frustum_visible_objects = self.record_depth_cmd_lists(storage);
         let object_count = self.ordered_entities.len() as u32;
 
-        let mut cl = self.staging_job.get_cmd_list_for_recording();
+        let cl = self.staging_job.get_cmd_list_for_recording();
         cl.begin(true).unwrap();
 
         let translucency_depths_image = self.res.translucency_depths_image.as_ref().unwrap();
@@ -1955,7 +1952,7 @@ impl MainRenderer {
                 .unwrap();
 
             if graphics_queue != present_queue {
-                let mut cl = self.final_jobs.sync.get_cmd_list_for_recording();
+                let cl = self.final_jobs.sync.get_cmd_list_for_recording();
                 cl.begin(true).unwrap();
                 cl.barrier_image(
                     PipelineStageFlags::TOP_OF_PIPE,

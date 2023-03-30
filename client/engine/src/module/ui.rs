@@ -12,7 +12,6 @@ use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::{EntityAccess, Scene, SceneObject};
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
-use crate::utils::U8SliceHelper;
 use crate::EngineContext;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
@@ -20,7 +19,6 @@ use common::types::Bool;
 use common::types::HashSet;
 use entity_data::{Archetype, EntityId, SystemAccess};
 use smallvec::SmallVec;
-use std::mem;
 use winit::window::Window;
 
 pub struct UIRenderer {

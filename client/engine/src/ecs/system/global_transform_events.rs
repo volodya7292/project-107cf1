@@ -27,11 +27,7 @@ impl SystemHandler for GlobalTransformEvents<'_> {
 
         for entity in &self.dirty_components {
             let global_transform = global_transform_comps.get(entity).unwrap();
-            let (Some(render_config), Some(uniform_data)) =
-                    (renderer_comps.get(entity), uniform_data_comps.get_mut(entity)) else {
-                continue;
-            };
-            let Some(pipe) = self.material_pipelines.get(render_config.mat_pipeline as usize) else {
+            let Some(uniform_data) = uniform_data_comps.get_mut(entity) else {
                 continue;
             };
 

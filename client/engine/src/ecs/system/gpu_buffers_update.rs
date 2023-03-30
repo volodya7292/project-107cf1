@@ -1,5 +1,5 @@
 use crate::ecs::component::VertexMeshC;
-use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
+use crate::module::main_renderer::gpu_executor::{GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
 use crate::module::main_renderer::ParallelJob;
 use common::types::{HashMap, HashSet};
@@ -7,7 +7,6 @@ use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
-use vk_wrapper::WaitSemaphore;
 
 const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
 
@@ -32,8 +31,8 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
         let mut processed_meshes = HashSet::new();
 
         {
-            let mut t_cl = self.transfer_jobs.work.get_cmd_list_for_recording();
-            let mut g_cl = self.transfer_jobs.sync.get_cmd_list_for_recording();
+            let t_cl = self.transfer_jobs.work.get_cmd_list_for_recording();
+            let g_cl = self.transfer_jobs.sync.get_cmd_list_for_recording();
 
             t_cl.begin(true).unwrap();
             g_cl.begin(true).unwrap();

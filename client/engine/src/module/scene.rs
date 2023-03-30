@@ -1,18 +1,16 @@
 pub mod change_manager;
 
 use crate::ecs::component::SceneEventHandler;
-use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
+use crate::module::scene::change_manager::{ChangeType};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use change_manager::SceneChangeManager;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
 use common::scene::relation::Relation;
-use common::types::{HashMap, HashSet};
+use common::types::{HashSet};
 use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
-use smallvec::SmallVec;
 use std::any::TypeId;
-use std::cell::{RefCell, RefMut};
-use std::collections::hash_map;
+use std::cell::{RefMut};
 use std::marker::PhantomData;
 
 pub const N_MAX_OBJECTS: usize = 65535;
@@ -34,7 +32,7 @@ pub struct Scene {
 
 impl Scene {
     pub fn new() -> Self {
-        let mut change_manager = SceneChangeManager::new();
+        let change_manager = SceneChangeManager::new();
         Self {
             storage: Default::default(),
             object_count: 0,

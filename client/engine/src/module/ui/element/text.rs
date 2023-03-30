@@ -1,6 +1,6 @@
 use crate::ecs::component::render_config::RenderStage;
 use crate::ecs::component::simple_text::StyledString;
-use crate::ecs::component::ui::{UIEventHandlerC, UIEventHandlerI, UILayoutC};
+use crate::ecs::component::ui::{UILayoutC};
 use crate::ecs::component::{SceneEventHandler, SimpleTextC};
 use crate::module::scene::{EntityAccess, Scene};
 use crate::module::text_renderer;

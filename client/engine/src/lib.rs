@@ -13,7 +13,6 @@ use crate::module::{EngineModule, ModuleManager};
 use common::any::AsAny;
 use common::lrc::{OwnedRef, OwnedRefMut};
 use common::MO_RELAXED;
-use entity_data::EntityStorage;
 use lazy_static::lazy_static;
 pub use platform::Platform;
 use std::cell::{Ref, RefCell};
