@@ -78,7 +78,7 @@ impl CmdList {
         one_time_execution: bool,
         render_pass: &Arc<RenderPass>,
         subpass: u32,
-        framebuffer: Option<&Arc<Framebuffer>>,
+        framebuffer: Option<&Framebuffer>,
     ) -> Result<(), vk::Result> {
         self.clear_resources();
 
@@ -119,7 +119,7 @@ impl CmdList {
     pub fn begin_render_pass(
         &mut self,
         render_pass: &Arc<RenderPass>,
-        framebuffer: &Arc<Framebuffer>,
+        framebuffer: &Framebuffer,
         clear_values: &[ClearValue],
         secondary_cmd_lists: bool,
     ) {

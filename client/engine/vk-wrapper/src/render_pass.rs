@@ -190,6 +190,12 @@ impl RenderPass {
     }
 }
 
+impl PartialEq for RenderPass {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+    }
+}
+
 impl Drop for RenderPass {
     fn drop(&mut self) {
         unsafe { self.device.wrapper.native.destroy_render_pass(self.native, None) };

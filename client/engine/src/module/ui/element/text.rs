@@ -1,6 +1,6 @@
-use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::component::render_config::RenderType;
 use crate::ecs::component::simple_text::StyledString;
-use crate::ecs::component::ui::{UILayoutC};
+use crate::ecs::component::ui::UILayoutC;
 use crate::ecs::component::{SceneEventHandler, SimpleTextC};
 use crate::module::scene::{EntityAccess, Scene};
 use crate::module::text_renderer;
@@ -20,7 +20,7 @@ impl UIText {
                 .with_uniform_crop_rect_offset(text_renderer::ObjectUniformData::clip_rect_offset()),
             SimpleTextC::new()
                 .with_max_width(0.0)
-                .with_stage(RenderStage::OVERLAY),
+                .with_render_type(RenderType::OVERLAY),
         )
         .with_scene_event_handler(SceneEventHandler::new().with_on_update(Self::on_update))
         .disable_pointer_events()

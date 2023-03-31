@@ -204,20 +204,20 @@ impl Device {
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         elem_size: u64,
-        size: u64,
+        len: u64,
         mem_usage: MemoryUsage,
         name: &str,
     ) -> Result<(Buffer, vma::VmaAllocationInfo), DeviceError> {
         if elem_size == 0 {
             return Err(DeviceError::ZeroBufferElementSize);
         }
-        if size == 0 {
+        if len == 0 {
             return Err(DeviceError::ZeroBufferSize);
         }
 
         let elem_align = 1;
         let aligned_elem_size = utils::make_mul_of_u64(elem_size, elem_align as u64);
-        let bytesize = aligned_elem_size as u64 * size;
+        let bytesize = aligned_elem_size as u64 * len;
 
         let buffer_info = vk::BufferCreateInfo::builder()
             .usage(usage.0)
@@ -278,7 +278,7 @@ impl Device {
                 used_dev_memory,
                 elem_size,
                 aligned_elem_size: aligned_elem_size as u64,
-                size,
+                len,
                 _bytesize: bytesize as u64,
             },
             alloc_info,
@@ -288,11 +288,11 @@ impl Device {
     pub fn create_host_buffer_named<T>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
-        size: u64,
+        len: u64,
         name: &str,
     ) -> Result<HostBuffer<T>, DeviceError> {
         let (buffer, alloc_info) =
-            self.create_buffer(usage, mem::size_of::<T>() as u64, size, MemoryUsage::Host, name)?;
+            self.create_buffer(usage, mem::size_of::<T>() as u64, len, MemoryUsage::Host, name)?;
 
         assert_ne!(alloc_info.pMappedData, ptr::null_mut());
 
@@ -306,19 +306,19 @@ impl Device {
     pub fn create_host_buffer<T>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
-        size: u64,
+        len: u64,
     ) -> Result<HostBuffer<T>, DeviceError> {
-        self.create_host_buffer_named(usage, size, "")
+        self.create_host_buffer_named(usage, len, "")
     }
 
     pub fn create_device_buffer_named(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         element_size: u64,
-        size: u64,
+        len: u64,
         name: &str,
     ) -> Result<DeviceBuffer, DeviceError> {
-        let (buffer, _) = self.create_buffer(usage, element_size, size, MemoryUsage::Device, name)?;
+        let (buffer, _) = self.create_buffer(usage, element_size, len, MemoryUsage::Device, name)?;
         Ok(DeviceBuffer {
             buffer: Arc::new(buffer),
         })
@@ -328,9 +328,9 @@ impl Device {
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         element_size: u64,
-        size: u64,
+        len: u64,
     ) -> Result<DeviceBuffer, DeviceError> {
-        self.create_device_buffer_named(usage, element_size, size, "")
+        self.create_device_buffer_named(usage, element_size, len, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.

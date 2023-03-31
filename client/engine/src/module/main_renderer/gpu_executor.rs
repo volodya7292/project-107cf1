@@ -1,12 +1,15 @@
+use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineKindId};
+use crate::module::main_renderer::resource_manager::{ResourceManagementScope, ResourceManager};
+use crate::module::main_renderer::resources::MaterialPipelineParams;
 use common::any::AsAny;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::types::{HashMap, HashSet};
 use common::utils::AllSameBy;
 use smallvec::SmallVec;
-use std::any::TypeId;
+use std::any::{Any, TypeId};
+use std::iter;
 use std::sync::Arc;
-use std::{iter};
 use vk_wrapper::{
     CmdList, Device, DeviceError, PipelineStageFlags, QueueType, Semaphore, SignalSemaphore, SubmitInfo,
     WaitSemaphore,
@@ -152,6 +155,14 @@ pub type RenderStageId = TypeId;
 
 pub trait RenderStage: AsAny + Send + Sync + 'static {
     fn name(&self) -> &str;
+    fn num_pipeline_kinds(&self) -> u32;
+    fn setup(&mut self, pipeline_kinds: &[PipelineKindId]);
+    fn register_pipeline_kind(
+        &self,
+        params: MaterialPipelineParams,
+        material_pipeline_set: &mut MaterialPipelineSet,
+    );
+
     /// Recorded `CmdList` of this gpu_executor is run on GPU
     /// only after the returned dependencies have been completed.
     fn execution_dependencies(&self) -> &'static [RenderStageId];
@@ -163,6 +174,8 @@ pub trait RenderStage: AsAny + Send + Sync + 'static {
         &mut self,
         record_dependencies: &HashMap<TypeId, &Mutex<Box<dyn RenderStage>>>,
         cmd_list: &mut CmdList,
+        resources: &ResourceManagementScope,
+        ctx: &dyn Any,
     );
 }
 
@@ -177,6 +190,7 @@ struct SubmitBatch {
 
 pub struct StageManager {
     device: Arc<Device>,
+    res_manager: ResourceManager,
     stages: HashMap<RenderStageId, Mutex<Box<dyn RenderStage>>>,
     stages_infos: HashMap<RenderStageId, StageInfo>,
     submit_batches: Vec<SubmitBatch>,
@@ -260,15 +274,18 @@ impl StageManager {
 
         Self {
             device: Arc::clone(device),
+            res_manager: ResourceManager::new(device),
             stages,
             stages_infos,
             submit_batches,
         }
     }
 
-    pub unsafe fn run(&mut self) -> Result<(), DeviceError> {
+    pub unsafe fn run(&mut self, ctx: &(dyn Any + Sync)) -> Result<(), DeviceError> {
         // Safety: waiting for completion of pending cmd lists
         // is done inside Device::run_jobs()
+
+        let scope = self.res_manager.scope();
 
         for submit_batch in &self.submit_batches {
             submit_batch.stages.par_iter().for_each(|id| {
@@ -283,7 +300,7 @@ impl StageManager {
 
                 let mut job = info.job.lock();
                 let cmd_list = job.get_cmd_list_for_recording();
-                stage.record(&record_deps, cmd_list);
+                stage.record(&record_deps, cmd_list, &scope, ctx);
             });
 
             let mut submit_jobs: Vec<_> = submit_batch

@@ -19,7 +19,9 @@ pub mod component;
 pub(crate) mod gpu_executor;
 mod helpers;
 pub mod material;
+mod resource_manager;
 pub(crate) mod resources;
+mod stage;
 
 // Notes
 // --------------------------------------------
@@ -33,7 +35,7 @@ pub(crate) mod resources;
 //
 
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::component::render_config::RenderType;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::system;
@@ -1259,7 +1261,7 @@ impl MainRenderer {
         {
             let mut per_frame_infos: [FrameInfoUniforms; 2] = Default::default();
 
-            per_frame_infos[RenderStage::MAIN as usize] = {
+            per_frame_infos[RenderType::MAIN as usize] = {
                 let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
                 let cam_dir = camera.direction();
                 let proj = camera.projection();
@@ -1283,7 +1285,7 @@ impl MainRenderer {
                     frame_size: glm::convert_unchecked(self.surface_size),
                 }
             };
-            per_frame_infos[RenderStage::OVERLAY as usize] = {
+            per_frame_infos[RenderType::OVERLAY as usize] = {
                 let cam_dir = self.overlay_camera.direction();
                 let proj = self.overlay_camera.projection();
                 let view = camera::create_view_matrix(
@@ -1301,7 +1303,7 @@ impl MainRenderer {
                         z_near: camera.z_near(),
                         fovy: camera.fovy(),
                     },
-                    ..per_frame_infos[RenderStage::MAIN as usize]
+                    ..per_frame_infos[RenderType::MAIN as usize]
                 }
             };
 
@@ -1390,7 +1392,7 @@ impl MainRenderer {
                         true,
                         &self.res.depth_render_pass,
                         0,
-                        self.res.depth_framebuffer.as_ref(),
+                        self.res.depth_framebuffer.as_ref().map(|v| &**v),
                     )
                     .unwrap();
                 cl_trans
@@ -1398,7 +1400,7 @@ impl MainRenderer {
                         true,
                         &self.res.depth_render_pass,
                         1,
-                        self.res.depth_framebuffer.as_ref(),
+                        self.res.depth_framebuffer.as_ref().map(|v| &**v),
                     )
                     .unwrap();
 
@@ -1416,7 +1418,7 @@ impl MainRenderer {
                         continue;
                     };
 
-                    if render_config.stage != RenderStage::MAIN || !render_config.visible || vertex_mesh.is_empty() {
+                    if render_config.render_ty != RenderType::MAIN || !render_config.visible || vertex_mesh.is_empty() {
                         continue;
                     }
 
@@ -1458,7 +1460,7 @@ impl MainRenderer {
                     );
 
                     cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
+                        render_config.render_ty as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
                         renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32
                     ]);
 
@@ -1494,10 +1496,20 @@ impl MainRenderer {
                 let cl_trans = cmd_list_translucent;
 
                 cl_sol
-                    .begin_secondary_graphics(true, &res.g_render_pass, 0, res.g_framebuffer.as_ref())
+                    .begin_secondary_graphics(
+                        true,
+                        &res.g_render_pass,
+                        0,
+                        res.g_framebuffer.as_ref().map(|v| &**v),
+                    )
                     .unwrap();
                 cl_trans
-                    .begin_secondary_graphics(true, &res.g_render_pass, 0, res.g_framebuffer.as_ref())
+                    .begin_secondary_graphics(
+                        true,
+                        &res.g_render_pass,
+                        0,
+                        res.g_framebuffer.as_ref().map(|v| &**v),
+                    )
                     .unwrap();
 
                 for j in 0..draw_count_step {
@@ -1510,7 +1522,7 @@ impl MainRenderer {
                     let Some(render_config) = storage.get::<MeshRenderConfigC>(&renderable_id) else {
                         continue;
                     };
-                    if render_config.stage != RenderStage::MAIN {
+                    if render_config.render_ty != RenderType::MAIN {
                         continue;
                     }
 
@@ -1550,7 +1562,7 @@ impl MainRenderer {
                         0,
                         &descriptors,
                         &[
-                            render_config.stage as u32 * res.per_frame_ub.aligned_element_size() as u32,
+                            render_config.render_ty as u32 * res.per_frame_ub.aligned_element_size() as u32,
                             renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
@@ -1568,14 +1580,19 @@ impl MainRenderer {
         let mat_pipelines = &self.res.material_pipelines;
         let cl = &mut self.overlay_secondary_cl;
 
-        cl.begin_secondary_graphics(true, &self.res.g_render_pass, 1, self.res.g_framebuffer.as_ref())
-            .unwrap();
+        cl.begin_secondary_graphics(
+            true,
+            &self.res.g_render_pass,
+            1,
+            self.res.g_framebuffer.as_ref().map(|v| &**v),
+        )
+        .unwrap();
 
         for renderable_id in &self.ordered_entities {
             let Some(render_config) = storage.get::<MeshRenderConfigC>(renderable_id) else {
                 continue;
             };
-            if render_config.stage != RenderStage::OVERLAY {
+            if render_config.render_ty != RenderType::OVERLAY {
                 continue;
             }
 
@@ -1600,7 +1617,7 @@ impl MainRenderer {
                 0,
                 &descriptors,
                 &[
-                    render_config.stage as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
+                    render_config.render_ty as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
                     renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );
@@ -1941,7 +1958,7 @@ impl MainRenderer {
                 .run_jobs(&mut [GPUJobExecInfo::new(&mut self.final_jobs.work)
                     .with_wait_semaphores(&[WaitSemaphore {
                         semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                        wait_dst_mask: PipelineStageFlags::TOP_OF_PIPE,
+                        wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                         wait_value: 0,
                     }])
                     .with_signal_semaphores(if graphics_queue == present_queue {

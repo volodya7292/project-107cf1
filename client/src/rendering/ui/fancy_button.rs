@@ -1,6 +1,6 @@
 use common::glm::{Mat4, U8Vec4, Vec4};
 use common::scene::relation::Relation;
-use engine::ecs::component::render_config::RenderStage;
+use engine::ecs::component::render_config::RenderType;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::transition::{TransValue, Transition};
 use engine::ecs::component::ui::{UIEventHandlerC, UILayoutC};
@@ -63,7 +63,7 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: u32) -> EntityId {
         },
     )
     .with_scene_event_handler(SceneEventHandler::new())
-    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_stage(RenderStage::OVERLAY))
+    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_stage(RenderType::OVERLAY))
     .with_mesh(VertexMeshC::without_data(4, 1))
     .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update))
     .add_event_handler(

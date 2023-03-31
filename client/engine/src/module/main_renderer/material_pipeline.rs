@@ -25,8 +25,10 @@ pub struct MaterialPipelineSet {
     pub(crate) per_frame_desc: vkw::DescriptorSet,
 }
 
+pub type PipelineKindId = u32;
+
 impl MaterialPipelineSet {
-    pub fn prepare_pipeline(&mut self, id: u32, params: &PipelineConfig) {
+    pub fn prepare_pipeline(&mut self, id: PipelineKindId, params: &PipelineConfig) {
         match self.pipelines.entry(id) {
             hash_map::Entry::Vacant(entry) => {
                 let pipeline = self
@@ -53,7 +55,7 @@ impl MaterialPipelineSet {
         }
     }
 
-    pub fn get_pipeline(&self, id: u32) -> Option<&Arc<vkw::Pipeline>> {
+    pub fn get_pipeline(&self, id: PipelineKindId) -> Option<&Arc<vkw::Pipeline>> {
         self.pipelines.get(&id)
     }
 

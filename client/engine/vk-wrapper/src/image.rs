@@ -276,3 +276,9 @@ impl Image {
         }
     }
 }
+
+impl PartialEq for Image {
+    fn eq(&self, other: &Self) -> bool {
+        self.wrapper.native == other.wrapper.native
+    }
+}

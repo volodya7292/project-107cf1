@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use vk_wrapper::{
     DescriptorPool, DescriptorSet, DeviceBuffer, Framebuffer, HostBuffer, Image, ImageView, Pipeline,
-    PipelineSignature, RenderPass, Sampler, Shader,
+    PipelineSignature, PrimitiveTopology, RenderPass, Sampler, Shader,
 };
 
 pub(crate) const N_CUSTOM_DESCRIPTORS: usize = 1;
@@ -70,4 +70,11 @@ pub struct Renderable {
     pub mat_pipeline: u32,
     pub uniform_buf_index: usize,
     pub descriptor_sets: [DescriptorSet; N_CUSTOM_DESCRIPTORS],
+}
+
+pub struct MaterialPipelineParams<'a> {
+    pub shaders: &'a [Arc<Shader>],
+    pub topology: PrimitiveTopology,
+    pub cull_back_faces: bool,
+    pub main_signature: &'a PipelineSignature,
 }

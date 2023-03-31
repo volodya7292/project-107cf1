@@ -1,4 +1,4 @@
-use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::component::render_config::RenderType;
 use common::glm::U8Vec4;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -132,7 +132,7 @@ pub struct SimpleTextC {
     pub long_word_breaking: bool,
     pub max_width: f32,
     pub max_height: f32,
-    pub stage: RenderStage,
+    pub render_type: RenderType,
 }
 
 impl SimpleTextC {
@@ -143,7 +143,7 @@ impl SimpleTextC {
             long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
-            stage: RenderStage::MAIN,
+            render_type: RenderType::MAIN,
         }
     }
 
@@ -152,8 +152,8 @@ impl SimpleTextC {
         self
     }
 
-    pub fn with_stage(mut self, stage: RenderStage) -> Self {
-        self.stage = stage;
+    pub fn with_render_type(mut self, stage: RenderType) -> Self {
+        self.render_type = stage;
         self
     }
 

@@ -1,5 +1,5 @@
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderStage;
+use crate::ecs::component::render_config::RenderType;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt};
@@ -757,8 +757,8 @@ impl TextRenderer {
 
             let mut entry = scene.entry(entity);
             let simple_text = entry.get::<SimpleTextC>();
-            let stage = simple_text.stage;
-            let normalize_transforms = stage == RenderStage::OVERLAY;
+            let stage = simple_text.render_type;
+            let normalize_transforms = stage == RenderType::OVERLAY;
 
             let seq = self.allocator.alloc_for(&simple_text.text);
 

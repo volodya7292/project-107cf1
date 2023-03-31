@@ -9,6 +9,12 @@ pub struct ImageView {
     pub(crate) native: vk::ImageView,
 }
 
+impl PartialEq for ImageView {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+    }
+}
+
 impl Drop for ImageView {
     fn drop(&mut self) {
         unsafe {

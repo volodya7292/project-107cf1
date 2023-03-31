@@ -26,7 +26,7 @@ pub(crate) struct Buffer {
     pub(crate) used_dev_memory: u64,
     pub(crate) elem_size: u64,
     pub(crate) aligned_elem_size: u64,
-    pub(crate) size: u64,
+    pub(crate) len: u64,
     pub(crate) _bytesize: u64,
 }
 
@@ -60,7 +60,7 @@ impl RawHostBuffer {
     }
 
     pub fn size(&self) -> u64 {
-        self.0.size
+        self.0.len
     }
 }
 
@@ -108,7 +108,7 @@ impl<'a, T> IntoIterator for &'a HostBuffer<T> {
         HostBufferIterator {
             p_data: self.p_data,
             stride: self.buffer.aligned_elem_size as usize,
-            size: self.buffer.size as usize,
+            size: self.buffer.len as usize,
             _marker: PhantomData,
             index: 0,
         }
@@ -141,10 +141,10 @@ impl<T> Index<usize> for HostBuffer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        if index as u64 >= self.buffer.size {
+        if index as u64 >= self.buffer.len {
             panic!(
                 "VkBuffer: index out of bounds: the len is {} but the index is {}",
-                self.buffer.size, index
+                self.buffer.len, index
             );
         }
 
@@ -158,10 +158,10 @@ impl<T> Index<usize> for HostBuffer<T> {
 
 impl<T> IndexMut<usize> for HostBuffer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        if index as u64 >= self.buffer.size {
+        if index as u64 >= self.buffer.len {
             panic!(
                 "VkBuffer: index out of bounds: the len is {} but the index is {}",
-                self.buffer.size, index
+                self.buffer.len, index
             );
         }
         unsafe {
@@ -178,7 +178,7 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn size(&self) -> u64 {
-        self.buffer.size
+        self.buffer.len
     }
 
     pub fn as_ptr(&self) -> *const T {
@@ -191,16 +191,16 @@ impl<T> HostBuffer<T> {
 
     pub fn as_slice(&self) -> &[T] {
         assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
-        unsafe { slice::from_raw_parts(self.p_data as *const T, self.buffer.size as usize) }
+        unsafe { slice::from_raw_parts(self.p_data as *const T, self.buffer.len as usize) }
     }
 
     pub fn as_mut_slice(&self) -> &mut [T] {
         assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
-        unsafe { slice::from_raw_parts_mut(self.p_data as *mut T, self.buffer.size as usize) }
+        unsafe { slice::from_raw_parts_mut(self.p_data as *mut T, self.buffer.len as usize) }
     }
 
     pub fn read(&self, first_element: u64, elements: &mut [T]) {
-        if first_element + elements.len() as u64 > self.buffer.size {
+        if first_element + elements.len() as u64 > self.buffer.len {
             panic!(
                 "VkBuffer: index {} out of range for slice of length {}",
                 first_element + elements.len() as u64,
@@ -232,7 +232,7 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn write(&mut self, first_element: u64, elements: &[T]) {
-        if first_element + elements.len() as u64 > self.buffer.size {
+        if first_element + elements.len() as u64 > self.buffer.len {
             panic!(
                 "VkBuffer: index {} out of range for slice of length {}",
                 first_element + elements.len() as u64,
@@ -292,7 +292,7 @@ pub struct DeviceBuffer {
 
 impl DeviceBuffer {
     pub fn size(&self) -> u64 {
-        self.buffer.size
+        self.buffer.len
     }
 
     pub fn aligned_element_size(&self) -> u64 {
