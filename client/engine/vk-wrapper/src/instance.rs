@@ -1,13 +1,12 @@
-use std::sync::Arc;
-use std::{collections::HashMap, os::raw::c_void};
-
-use ash::vk;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
-
 use crate::adapter::{Adapter, QueueId};
 use crate::entry::VK_API_VERSION;
+use crate::platform::metal;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
+use ash::vk;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
+use std::sync::Arc;
+use std::{collections::HashMap, os::raw::c_void};
 
 pub struct Instance {
     pub(crate) entry: Arc<Entry>,
@@ -72,20 +71,10 @@ impl Instance {
             }
             #[cfg(any(target_os = "macos"))]
             RawWindowHandle::AppKit(handle) => {
-                use raw_window_metal::{appkit, Layer};
-
-                let layer = unsafe {
-                    if !handle.ns_view.is_null() {
-                        appkit::metal_layer_from_ns_view(handle.ns_view)
-                    } else if !handle.ns_window.is_null() {
-                        appkit::metal_layer_from_ns_window(handle.ns_window)
-                    } else {
-                        Layer::None
-                    }
-                };
+                let layer = unsafe { metal::metal_layer_from_handle(handle) };
                 let layer = match layer {
-                    Layer::Existing(layer) | Layer::Allocated(layer) => layer as *mut _,
-                    Layer::None => return Err(vk::Result::ERROR_INITIALIZATION_FAILED),
+                    metal::Layer::Allocated(layer) => layer as *mut _,
+                    _ => return Err(vk::Result::ERROR_INITIALIZATION_FAILED),
                 };
 
                 let surface_desc = vk::MetalSurfaceCreateInfoEXT::builder().layer(layer);

@@ -22,6 +22,7 @@ pub mod material;
 mod resource_manager;
 pub(crate) mod resources;
 mod stage;
+mod stage_manager;
 
 // Notes
 // --------------------------------------------
@@ -151,6 +152,7 @@ pub struct MainRenderer {
     frame_completion_semaphore: Arc<Semaphore>,
     surface_changed: bool,
     surface_size: U32Vec2,
+    render_size: U32Vec2,
     settings: Settings,
     last_frame_ts: Instant,
     device: Arc<Device>,
@@ -176,6 +178,7 @@ pub struct MainRenderer {
     compose_signature: Arc<PipelineSignature>,
     compose_pool: DescriptorPool,
     compose_desc: DescriptorSet,
+    compose_sampler: Arc<Sampler>,
 
     material_updates: HashMap<u32, MaterialInfo>,
     new_vertex_mesh_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
@@ -701,6 +704,16 @@ impl MainRenderer {
         let mut compose_pool = compose_signature.create_pool(0, 1).unwrap();
         let compose_desc = compose_pool.alloc().unwrap();
 
+        let compose_sampler = device
+            .create_sampler(
+                SamplerFilter::LINEAR,
+                SamplerFilter::NEAREST,
+                SamplerMipmap::NEAREST,
+                SamplerClamp::REPEAT,
+                1.0,
+            )
+            .unwrap();
+
         // Create G-Buffer pass resources
         // -----------------------------------------------------------------------------------------------------------------
         let g_render_pass = device
@@ -1014,6 +1027,7 @@ impl MainRenderer {
             frame_completion_semaphore,
             surface_changed: false,
             surface_size: glm::convert_unchecked(curr_size.real()),
+            render_size: glm::convert_unchecked(curr_size.real()),
             settings,
             last_frame_ts: Instant::now(),
             device,
@@ -1033,6 +1047,7 @@ impl MainRenderer {
             compose_pool,
             material_updates: Default::default(),
             compose_desc,
+            compose_sampler,
             new_vertex_mesh_updates: HashMap::with_capacity(1024),
             vertex_mesh_pending_updates: HashMap::with_capacity(1024),
             ordered_entities: Vec::with_capacity(N_MAX_OBJECTS as usize),
@@ -1282,7 +1297,7 @@ impl MainRenderer {
                     },
 
                     atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
-                    frame_size: glm::convert_unchecked(self.surface_size),
+                    frame_size: glm::convert_unchecked(self.render_size),
                 }
             };
             per_frame_infos[RenderType::OVERLAY as usize] = {
@@ -2089,7 +2104,8 @@ impl MainRenderer {
         let new_size = new_wsi_size.real();
         let new_size = (new_size.x as u32, new_size.y as u32);
 
-        self.surface_size = glm::convert_unchecked(new_wsi_size.real());
+        let surf_size = self.device.adapter().get_surface_size(&self.surface).unwrap();
+        self.surface_size = glm::vec2(surf_size.0, surf_size.1);
         self.surface_changed = true;
 
         self.device.wait_idle().unwrap();
@@ -2299,7 +2315,11 @@ impl MainRenderer {
                     self.compose_pool.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(albedo), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(
+                            Arc::clone(albedo),
+                            Some(Arc::clone(&self.compose_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
                     ),
                     self.compose_pool.create_binding(
                         1,

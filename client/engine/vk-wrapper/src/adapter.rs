@@ -332,6 +332,11 @@ impl Adapter {
         Ok(capabs.min_image_extent.width > 0 && capabs.min_image_extent.height > 0)
     }
 
+    pub fn get_surface_size(&self, surface: &Surface) -> Result<(u32, u32), vk::Result> {
+        let capabs = self.get_surface_capabilities(surface)?;
+        Ok((capabs.current_extent.width, capabs.current_extent.height))
+    }
+
     pub(crate) fn is_linear_filter_supported(&self, format: vk::Format, tiling: vk::ImageTiling) -> bool {
         return if tiling == vk::ImageTiling::OPTIMAL {
             self.formats_props[&format].optimal_tiling_features

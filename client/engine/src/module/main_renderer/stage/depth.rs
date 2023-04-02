@@ -2,13 +2,12 @@ use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::render_config::RenderType;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::camera::Frustum;
-use crate::module::main_renderer::gpu_executor::{RenderStage, RenderStageId};
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
 use crate::module::main_renderer::resource_manager::{
     CmdListParams, DeviceBufferParams, HostBufferParams, ImageParams, ResourceManagementScope,
 };
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
-use crate::module::main_renderer::stage::StageContext;
+use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{calc_group_count, camera, compose_descriptor_sets};
 use crate::module::scene::N_MAX_OBJECTS;
@@ -29,6 +28,8 @@ use vk_wrapper::{
 };
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
+
+pub type VisibilityType = u32;
 
 pub struct DepthStage {
     device: Arc<Device>,
@@ -64,6 +65,9 @@ struct CullConstants {
 }
 
 impl DepthStage {
+    pub const RES_DEPTH_IMAGE: &'static str = "depth_image";
+    pub const RES_VISIBILITY_HOST_BUFFER: &'static str = "visibility_host_buffer";
+
     pub fn new(device: &Arc<Device>) -> Self {
         let render_pass = device
             .create_render_pass(
@@ -260,7 +264,7 @@ impl DepthStage {
 }
 
 impl RenderStage for DepthStage {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "depth_pass"
     }
 
@@ -326,21 +330,12 @@ impl RenderStage for DepthStage {
         );
     }
 
-    fn execution_dependencies(&self) -> &'static [RenderStageId] {
-        todo!()
-    }
-
-    fn record_dependencies(&self) -> &'static [RenderStageId] {
-        todo!()
-    }
-
-    fn record(
+    fn run(
         &mut self,
-        _: &HashMap<TypeId, &Mutex<Box<dyn RenderStage>>>,
         cl: &mut CmdList,
         resources: &ResourceManagementScope,
         ctx: &dyn Any,
-    ) {
+    ) -> StageRunResult {
         let ctx = ctx.downcast_ref::<StageContext>().unwrap();
         let available_threads = rayon::current_num_threads();
 
@@ -354,7 +349,7 @@ impl RenderStage for DepthStage {
         );
 
         let depth_image = resources.request_image(
-            "depth_image",
+            Self::RES_DEPTH_IMAGE,
             ImageParams::d2(
                 Format::D32_FLOAT,
                 ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
@@ -401,7 +396,8 @@ impl RenderStage for DepthStage {
             "depth_pyramid_descriptors",
             (Arc::clone(&depth_image), Arc::clone(&depth_pyramid_views)),
             |(depth_image, depth_pyramid_views), _| {
-                // TODO: reset depth_pyramid_pool
+                self.depth_pyramid_pool.reset();
+
                 let sets: Vec<_> = (0..depth_pyramid_levels as usize)
                     .map(|i| {
                         let set = self.depth_pyramid_pool.alloc().unwrap();
@@ -494,8 +490,8 @@ impl RenderStage for DepthStage {
             ),
         );
 
-        let visibility_host_buffer = resources.request_host_buffer::<u32>(
-            "cull_host_buffer",
+        let visibility_host_buffer = resources.request_host_buffer::<VisibilityType>(
+            Self::RES_VISIBILITY_HOST_BUFFER,
             HostBufferParams::new(BufferUsageFlags::TRANSFER_DST, N_MAX_OBJECTS as u64),
         );
 
@@ -654,5 +650,7 @@ impl RenderStage for DepthStage {
         );
 
         cl.end().unwrap();
+
+        StageRunResult::new()
     }
 }

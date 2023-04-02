@@ -85,6 +85,7 @@ pub mod image_view;
 pub mod instance;
 pub mod pipeline;
 pub mod pipeline_signature;
+mod platform;
 pub mod query_pool;
 pub mod queue;
 pub mod render_pass;

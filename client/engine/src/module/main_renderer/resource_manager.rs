@@ -1,3 +1,5 @@
+use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt};
+use common::any::AsAny;
 use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::any::Any;
@@ -13,6 +15,7 @@ type Name = String;
 
 pub struct ResourceManager {
     device: Arc<Device>,
+    res_params: Mutex<HashMap<Name, Box<dyn Any + Send + Sync>>>,
     resources: Mutex<HashMap<Name, Box<dyn Any + Send + Sync>>>,
 }
 
@@ -20,6 +23,7 @@ impl ResourceManager {
     pub fn new(device: &Arc<Device>) -> Self {
         Self {
             device: Arc::clone(device),
+            res_params: Mutex::new(HashMap::with_capacity(128)),
             resources: Mutex::new(HashMap::with_capacity(128)),
         }
     }
@@ -45,6 +49,21 @@ impl ResourceManagementScope<'_> {
         }
     }
 
+    pub fn get<Res: 'static>(&self, name: &str) -> Arc<Res> {
+        let resources = self.manager.resources.lock();
+        let res = resources.get(name).unwrap();
+        let res = res.as_any().downcast_ref::<Arc<Res>>().unwrap();
+        Arc::clone(res)
+    }
+
+    pub fn get_host_buffer<T: 'static>(&self, name: &str) -> Arc<Mutex<HostBuffer<T>>> {
+        self.get(name)
+    }
+
+    pub fn get_image(&self, name: &str) -> Arc<Arc<Image>> {
+        self.get(name)
+    }
+
     pub fn request<
         Params: PartialEq + Send + Sync + 'static,
         Res: Send + Sync + 'static,
@@ -58,21 +77,26 @@ impl ResourceManagementScope<'_> {
         self.add_used_name(name);
 
         let mut data = self.manager.resources.lock();
+        let mut params = self.manager.res_params.lock();
 
-        match data.entry(name.to_owned()) {
-            hash_map::Entry::Vacant(e) => {
+        match (params.entry(name.to_owned()), data.entry(name.to_owned())) {
+            (hash_map::Entry::Vacant(params), hash_map::Entry::Vacant(res)) => {
                 let val = on_create(&key_params, name);
-                e.insert(Box::new((key_params, Arc::clone(&val))));
+                params.insert(Box::new(key_params));
+                res.insert(Box::new(Arc::clone(&val)));
                 val
             }
-            hash_map::Entry::Occupied(mut e) => {
-                let v = e.get_mut().downcast_mut::<(Params, Arc<Res>)>().unwrap();
-                if &(*v).0 != &key_params {
-                    let val = on_create(&key_params, name);
-                    *v = (key_params, val);
+            (hash_map::Entry::Occupied(mut curr_params), hash_map::Entry::Occupied(mut curr_res)) => {
+                let curr_params = curr_params.get_mut().downcast_mut::<Params>().unwrap();
+                let curr_res = curr_res.get_mut().downcast_mut::<Arc<Res>>().unwrap();
+
+                if curr_params != &key_params {
+                    *curr_res = on_create(&key_params, name);
+                    *curr_params = key_params;
                 }
-                Arc::clone(&v.1)
+                Arc::clone(curr_res)
             }
+            _ => unreachable!(),
         }
     }
 
@@ -89,6 +113,28 @@ impl ResourceManagementScope<'_> {
                 })
                 .collect::<Vec<_>>();
             Arc::new(Mutex::new(cmd_lists))
+        })
+    }
+
+    pub fn request_cmd_list(&self, name: &str, params: CmdListParams) -> Arc<Mutex<CmdList>> {
+        assert_eq!(params.count, 1);
+
+        self.request(name, params, |params, name| {
+            let queue = self.manager.device.get_queue(params.queue_type);
+            let cmd_list = if params.secondary {
+                queue.create_primary_cmd_list(name).unwrap()
+            } else {
+                queue.create_secondary_cmd_list(name).unwrap()
+            };
+            Arc::new(Mutex::new(cmd_list))
+        })
+    }
+
+    pub fn request_job(&self, name: &str, queue_type: QueueType) -> Arc<Mutex<GPUJob>> {
+        self.request(name, (queue_type,), |(queue_type,), name| {
+            Arc::new(Mutex::new(
+                self.manager.device.create_job(name, *queue_type).unwrap(),
+            ))
         })
     }
 
@@ -154,14 +200,6 @@ pub struct CmdListParams {
 }
 
 impl CmdListParams {
-    pub fn primary(queue: QueueType) -> Self {
-        Self {
-            queue_type: queue,
-            secondary: false,
-            count: 1,
-        }
-    }
-
     pub fn secondary(queue: QueueType) -> Self {
         Self {
             queue_type: queue,

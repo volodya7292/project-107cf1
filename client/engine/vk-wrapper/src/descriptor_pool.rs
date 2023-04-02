@@ -132,6 +132,12 @@ impl DescriptorPool {
         self.free_sets.insert(descriptor_set.id as usize);
     }
 
+    pub fn reset(&mut self) {
+        for set in self.allocated.drain(..) {
+            self.free_sets.insert(set.id as usize);
+        }
+    }
+
     pub fn create_binding(&self, id: u32, array_index: u32, res: BindingRes) -> Binding {
         let ty = self.signature.binding_types[self.set_layout_id as usize][&id];
         Binding {

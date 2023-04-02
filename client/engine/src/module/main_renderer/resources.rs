@@ -76,5 +76,5 @@ pub struct MaterialPipelineParams<'a> {
     pub shaders: &'a [Arc<Shader>],
     pub topology: PrimitiveTopology,
     pub cull_back_faces: bool,
-    pub main_signature: &'a PipelineSignature,
+    pub main_signature: &'a Arc<PipelineSignature>,
 }
