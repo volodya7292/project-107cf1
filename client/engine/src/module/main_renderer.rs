@@ -1367,17 +1367,14 @@ impl MainRenderer {
     }
 
     fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
-        let new_size = new_wsi_size.real();
-        let new_size = (new_size.x as u32, new_size.y as u32);
+        self.render_size = new_wsi_size.real();
 
         let surf_size = self.device.adapter().get_surface_size(&self.surface).unwrap();
         self.surface_size = glm::vec2(surf_size.0, surf_size.1);
         self.surface_changed = true;
 
-        self.device.wait_idle().unwrap();
-
-        // Set camera aspect
-        self.active_camera.set_aspect(new_size.0, new_size.1);
+        self.active_camera
+            .set_aspect(self.render_size.x, self.render_size.y);
     }
 }
 

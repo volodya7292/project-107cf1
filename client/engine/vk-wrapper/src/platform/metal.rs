@@ -60,6 +60,8 @@ pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
         if !window.is_null() {
             let scale_factor: CGFloat = msg_send![window, backingScaleFactor];
             let () = msg_send![layer, setContentsScale: scale_factor];
+
+            // TODO: update scale_factor when view is resized
         }
 
         Layer::Allocated(layer)
