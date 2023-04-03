@@ -116,6 +116,7 @@ impl Queue {
 
         for info in submit_infos {
             let wait_sp_index = semaphores.len();
+            let wait_masks_index = wait_masks.len();
             for sp in &info.wait_semaphores {
                 semaphores.push(sp.semaphore.native);
                 wait_masks.push(sp.wait_dst_mask.0);
@@ -145,7 +146,7 @@ impl Queue {
                 vk::SubmitInfo::builder()
                     .wait_semaphores(&semaphores[wait_sp_index..wait_sp_index + info.wait_semaphores.len()])
                     .wait_dst_stage_mask(
-                        &wait_masks[wait_sp_index..wait_sp_index + info.wait_semaphores.len()],
+                        &wait_masks[wait_masks_index..wait_masks_index + info.wait_semaphores.len()],
                     )
                     .command_buffers(
                         &command_buffers[cmd_buffer_index..cmd_buffer_index + info.cmd_lists.len()],
@@ -176,6 +177,7 @@ impl Queue {
         Ok(())
     }
 
+    /// Returns whether the swapchain is in suboptimal state.
     pub fn present(
         &self,
         wait_semaphore: &Semaphore,

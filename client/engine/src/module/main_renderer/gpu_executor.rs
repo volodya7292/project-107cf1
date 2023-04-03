@@ -1,13 +1,5 @@
-use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineKindId};
-use crate::module::main_renderer::resource_manager::{ResourceManagementScope, ResourceManager};
-use crate::module::main_renderer::resources::MaterialPipelineParams;
-use common::any::AsAny;
-use common::parking_lot::Mutex;
-use common::rayon::prelude::*;
-use common::types::{HashMap, HashSet};
 use common::utils::AllSameBy;
 use smallvec::SmallVec;
-use std::any::{Any, TypeId};
 use std::iter;
 use std::sync::Arc;
 use vk_wrapper::{

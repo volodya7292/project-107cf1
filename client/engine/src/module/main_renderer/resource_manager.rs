@@ -1,5 +1,3 @@
-use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt};
-use common::any::AsAny;
 use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::any::Any;
@@ -52,7 +50,7 @@ impl ResourceManagementScope<'_> {
     pub fn get<Res: 'static>(&self, name: &str) -> Arc<Res> {
         let resources = self.manager.resources.lock();
         let res = resources.get(name).unwrap();
-        let res = res.as_any().downcast_ref::<Arc<Res>>().unwrap();
+        let res = res.downcast_ref::<Arc<Res>>().unwrap();
         Arc::clone(res)
     }
 
@@ -60,10 +58,12 @@ impl ResourceManagementScope<'_> {
         self.get(name)
     }
 
-    pub fn get_image(&self, name: &str) -> Arc<Arc<Image>> {
+    pub fn get_image(&self, name: &str) -> Arc<Image> {
         self.get(name)
     }
 
+    /// Requests a resource. If `key_params` has been changed, `on_create` is called.
+    /// Panics if the resource with `name` is already requested.
     pub fn request<
         Params: PartialEq + Send + Sync + 'static,
         Res: Send + Sync + 'static,
@@ -106,9 +106,9 @@ impl ResourceManagementScope<'_> {
             let cmd_lists = (0..params.count)
                 .map(|i| {
                     if params.secondary {
-                        queue.create_primary_cmd_list(&format!("{name}-{i}")).unwrap()
-                    } else {
                         queue.create_secondary_cmd_list(&format!("{name}-{i}")).unwrap()
+                    } else {
+                        queue.create_primary_cmd_list(&format!("{name}-{i}")).unwrap()
                     }
                 })
                 .collect::<Vec<_>>();
@@ -122,19 +122,11 @@ impl ResourceManagementScope<'_> {
         self.request(name, params, |params, name| {
             let queue = self.manager.device.get_queue(params.queue_type);
             let cmd_list = if params.secondary {
-                queue.create_primary_cmd_list(name).unwrap()
-            } else {
                 queue.create_secondary_cmd_list(name).unwrap()
+            } else {
+                queue.create_primary_cmd_list(name).unwrap()
             };
             Arc::new(Mutex::new(cmd_list))
-        })
-    }
-
-    pub fn request_job(&self, name: &str, queue_type: QueueType) -> Arc<Mutex<GPUJob>> {
-        self.request(name, (queue_type,), |(queue_type,), name| {
-            Arc::new(Mutex::new(
-                self.manager.device.create_job(name, *queue_type).unwrap(),
-            ))
         })
     }
 

@@ -3,14 +3,15 @@ use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, Pipel
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::resources::{MaterialPipelineParams, Renderable};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
-use common::any::AsAny;
 use common::glm::Vec3;
-use common::parking_lot::Mutex;
 use common::types::HashMap;
 use entity_data::{EntityId, EntityStorage};
 use std::any::{Any, TypeId};
 use std::sync::Arc;
-use vk_wrapper::{CmdList, DescriptorSet, DeviceBuffer, Semaphore, Swapchain, SwapchainImage, WaitSemaphore};
+use vk_wrapper::{
+    CmdList, DescriptorPool, DescriptorSet, DeviceBuffer, Semaphore, SignalSemaphore, Swapchain,
+    SwapchainImage, WaitSemaphore,
+};
 
 pub mod compose;
 pub mod depth;
@@ -25,23 +26,27 @@ pub struct StageContext<'a> {
     pub relative_camera_pos: Vec3,
     pub curr_vertex_meshes: &'a HashMap<EntityId, Arc<RawVertexMesh>>,
     pub renderables: &'a HashMap<EntityId, Renderable>,
+    pub g_per_frame_pool: &'a DescriptorPool,
     pub g_per_frame_in: DescriptorSet,
     pub per_frame_ub: &'a DeviceBuffer,
     pub uniform_buffer_basic: &'a DeviceBuffer,
     pub render_size: (u32, u32),
     pub swapchain: &'a Arc<Swapchain>,
     pub render_sw_image: &'a SwapchainImage,
+    pub frame_completion_semaphore: &'a Arc<Semaphore>,
 }
 
 pub struct StageRunResult {
     /// The stage waits for these semaphores before execution.
     pub(crate) wait_semaphores: Vec<WaitSemaphore>,
+    pub(crate) signal_semaphores: Vec<SignalSemaphore>,
 }
 
 impl StageRunResult {
     fn new() -> Self {
         Self {
             wait_semaphores: vec![],
+            signal_semaphores: vec![],
         }
     }
 
@@ -49,11 +54,16 @@ impl StageRunResult {
         self.wait_semaphores = semaphores;
         self
     }
+
+    pub fn with_signal_semaphores(mut self, semaphores: Vec<SignalSemaphore>) -> Self {
+        self.signal_semaphores = semaphores;
+        self
+    }
 }
 
 pub type RenderStageId = TypeId;
 
-pub trait RenderStage: AsAny + Send + Sync + 'static {
+pub trait RenderStage: Any + Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn num_pipeline_kinds(&self) -> u32 {
         0
@@ -65,7 +75,7 @@ pub trait RenderStage: AsAny + Send + Sync + 'static {
         vec![]
     }
     /// [RenderStage::run] will be called
-    /// only after the returned dependencies have been completed.
+    /// only after the returned dependencies have been submitted and completed.
     fn record_dependencies(&self) -> Vec<RenderStageId> {
         vec![]
     }
@@ -83,6 +93,6 @@ pub trait RenderStage: AsAny + Send + Sync + 'static {
         &mut self,
         cmd_list: &mut CmdList,
         resources: &ResourceManagementScope,
-        ctx: &dyn Any,
+        ctx: &StageContext,
     ) -> StageRunResult;
 }

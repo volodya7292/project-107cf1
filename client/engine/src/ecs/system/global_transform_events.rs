@@ -1,7 +1,6 @@
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::uniform_data::{MODEL_MATRIX_OFFSET, MODEL_MATRIX_SIZE};
-use crate::ecs::component::{MeshRenderConfigC, UniformDataC};
-use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
+use crate::ecs::component::UniformDataC;
 use common::glm::Mat4;
 use common::types::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
@@ -9,18 +8,16 @@ use std::time::Instant;
 use std::{mem, slice};
 
 // Updates global transform uniform buffers
-pub(crate) struct GlobalTransformEvents<'a> {
+pub(crate) struct GlobalTransformEvents {
     pub dirty_components: Vec<EntityId>,
     pub changed_uniforms: HashSet<EntityId>,
-    pub material_pipelines: &'a [MaterialPipelineSet],
     pub run_time: f64,
 }
 
-impl SystemHandler for GlobalTransformEvents<'_> {
+impl SystemHandler for GlobalTransformEvents {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
         let global_transform_comps = data.component::<GlobalTransformC>();
-        let renderer_comps = data.component::<MeshRenderConfigC>();
         let mut uniform_data_comps = data.component_mut::<UniformDataC>();
 
         self.changed_uniforms.reserve(self.dirty_components.len());

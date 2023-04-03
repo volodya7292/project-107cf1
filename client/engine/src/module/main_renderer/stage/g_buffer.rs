@@ -8,27 +8,21 @@ use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OB
 use crate::module::main_renderer::stage::depth::{DepthStage, VisibilityType};
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
-use common::parking_lot::Mutex;
 use common::rayon;
 use common::rayon::prelude::*;
-use common::types::HashMap;
-use std::any::{Any, TypeId};
 use std::iter;
 use std::sync::Arc;
 use vk_wrapper::{
-    AccessFlags, Attachment, AttachmentRef, ClearValue, CmdList, Device, Format, Framebuffer, HostBuffer,
+    AccessFlags, Attachment, AttachmentRef, BindingRes, ClearValue, CmdList, Device, Format, Framebuffer,
     ImageLayout, ImageMod, ImageUsageFlags, LoadStore, PipelineStageFlags, QueueType, RenderPass, Subpass,
     SubpassDependency,
 };
 
 const ALBEDO_ATTACHMENT_ID: u32 = 0;
-
-#[repr(C)]
-struct GPassConsts {
-    is_translucent_pass: u32,
-}
+const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 
 pub struct GBufferStage {
+    device: Arc<Device>,
     color_pipe: PipelineKindId,
     color_with_blending_pipe: PipelineKindId,
     overlay_pipe: PipelineKindId,
@@ -37,6 +31,7 @@ pub struct GBufferStage {
 
 impl GBufferStage {
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
+    pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
 
     pub fn new(device: &Arc<Device>) -> Self {
         // Create G-Buffer pass resources
@@ -149,6 +144,7 @@ impl GBufferStage {
             .unwrap();
 
         Self {
+            device: Arc::clone(device),
             color_pipe: u32::MAX,
             color_with_blending_pipe: u32::MAX,
             overlay_pipe: u32::MAX,
@@ -211,13 +207,9 @@ impl GBufferStage {
                     }
 
                     let renderable = ctx.renderables.get(&renderable_id).unwrap();
-                    let mut consts = GPassConsts {
-                        is_translucent_pass: 0,
-                    };
 
                     let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let (cl, pipeline_id) = if render_config.translucent {
-                        consts.is_translucent_pass = 1;
                         (&mut *cl_trans, self.color_with_blending_pipe)
                     } else {
                         (&mut *cl_sol, self.color_pipe)
@@ -242,7 +234,6 @@ impl GBufferStage {
                             renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
-                    cl.push_constants(signature, &consts);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
@@ -291,15 +282,6 @@ impl GBufferStage {
                     renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );
-            let consts = GPassConsts {
-                // Overlay is by default translucent and doesn't have translucency pass.
-                // Set this to 0 to prevent shaders writing to translucency texture.
-                is_translucent_pass: 0,
-            };
-
-            // TODO: FIXME on release target (push constants blocks are stripped when optimizations are on):
-            // 2023-01-31T11:44:18.418Z ERROR [vulkan] [VAL] "Validation Error: [ VUID-vkCmdPushConstants-offset-01795 ] Object 0: handle = 0x142658008, name = overlay_secondary, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x27bc88c6 | vkCmdPushConstants(): VK_SHADER_STAGE_ALL, VkPushConstantRange in VkPipelineLayout 0x3307610000000114[] overlapping offset = 0 and size = 4, do not contain VK_SHADER_STAGE_ALL. The Vulkan spec states: For each byte in the range specified by offset and size and for each shader gpu_executor in stageFlags, there must be a push constant range in layout that includes that byte and that gpu_executor (https://vulkan.lunarg.com/doc/view/1.3.239.0/mac/1.3-extensions/vkspec.html#VUID-vkCmdPushConstants-offset-01795)"
-            cl.push_constants(signature, &consts);
 
             cl.bind_and_draw_vertex_mesh(vertex_mesh);
         }
@@ -338,6 +320,7 @@ impl RenderStage for GBufferStage {
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
+                spec_consts: &[(shader_ids::CONST_ID_PASS_TYPE, shader_ids::PASS_TYPE_G_BUFFER)],
             },
         );
         pipeline_set.prepare_pipeline(
@@ -350,6 +333,10 @@ impl RenderStage for GBufferStage {
                 blend_attachments: &[ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: false,
+                spec_consts: &[(
+                    shader_ids::CONST_ID_PASS_TYPE,
+                    shader_ids::PASS_TYPE_G_BUFFER_TRANSLUCENCY,
+                )],
             },
         );
         pipeline_set.prepare_pipeline(
@@ -362,6 +349,10 @@ impl RenderStage for GBufferStage {
                 blend_attachments: &[ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: true,
+                spec_consts: &[(
+                    shader_ids::CONST_ID_PASS_TYPE,
+                    shader_ids::PASS_TYPE_G_BUFFER_OVERLAY,
+                )],
             },
         );
     }
@@ -370,9 +361,8 @@ impl RenderStage for GBufferStage {
         &mut self,
         cl: &mut CmdList,
         resources: &ResourceManagementScope,
-        ctx: &dyn Any,
+        ctx: &StageContext,
     ) -> StageRunResult {
-        let ctx = ctx.downcast_ref::<StageContext>().unwrap();
         let available_threads = rayon::current_num_threads();
 
         let solid_objects_cmd_lists = resources.request_cmd_lists(
@@ -384,7 +374,7 @@ impl RenderStage for GBufferStage {
             CmdListParams::secondary(QueueType::Graphics).with_count(available_threads),
         );
         let overlay_cmd_list = resources.request_cmd_list(
-            "translucent-objects-secondary",
+            "overlay-objects-secondary",
             CmdListParams::secondary(QueueType::Graphics),
         );
 
@@ -419,15 +409,26 @@ impl RenderStage for GBufferStage {
         );
 
         let translucency_colors_image = resources.request_image(
-            "translucency_colors",
-            ImageParams::d2(
+            Self::RES_TRANSLUCENCY_COLORS_IMAGE,
+            ImageParams::d2_array(
                 Format::RGBA8_UNORM,
                 ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
-                ctx.render_size,
+                (ctx.render_size.0, ctx.render_size.1, TRANSLUCENCY_N_DEPTH_LAYERS),
             ),
         );
 
         // ------------------------------------------------------------------------------------------
+
+        unsafe {
+            self.device.update_descriptor_set(
+                ctx.g_per_frame_in,
+                &[ctx.g_per_frame_pool.create_binding(
+                    shader_ids::BINDING_TRANSPARENCY_COLORS,
+                    0,
+                    BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
+                )],
+            );
+        }
 
         self.record_g_cmd_lists(
             &mut solid_objects_cmd_lists.lock(),
@@ -492,6 +493,7 @@ impl RenderStage for GBufferStage {
         cl.execute_secondary(iter::once(&*overlay_cmd_list.lock()));
 
         cl.end_render_pass();
+        cl.end().unwrap();
 
         StageRunResult::new()
     }

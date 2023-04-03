@@ -56,6 +56,8 @@ struct FrameInfo {
 
 
 #ifdef ENGINE_PIXEL_SHADER
+layout(constant_id = CONST_ID_PASS_TYPE) const uint PASS_TYPE = 0;
+
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outSpecular;
 layout(location = 2) out vec4 outEmission;
@@ -75,10 +77,6 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std43
     uint depthsArray[];
 };
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_COLORS, rgba8) uniform image2DArray translucencyColorsArray;
-
-layout(push_constant) uniform PushConstants {
-    uint isTranslucentPass;
-};
 
 /// tile_width: with of single tile in pixels
 /// tex_coord: regular texture coordinates
@@ -108,7 +106,7 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
 }
 
 void writeOutputAlbedo(vec4 albedo) {
-    if (isTranslucentPass == 0 || albedo.a < ALPHA_BIAS) {
+    if (PASS_TYPE != PASS_TYPE_G_BUFFER_TRANSLUCENCY || albedo.a < ALPHA_BIAS) {
         // Do not render translucency, this is solid colors pass
         outAlbedo = albedo;
         return;

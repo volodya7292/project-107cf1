@@ -1,8 +1,8 @@
+use common::types::HashMap;
 use std::collections::hash_map;
 use std::sync::Arc;
-
-use common::types::HashMap;
 use vk_wrapper as vkw;
+use vk_wrapper::device::{SpecConstId, SpecConstValue};
 use vk_wrapper::{AttachmentColorBlend, PrimitiveTopology};
 
 pub struct PipelineConfig<'a> {
@@ -13,6 +13,7 @@ pub struct PipelineConfig<'a> {
     pub blend_attachments: &'a [u32],
     pub depth_test: bool,
     pub depth_write: bool,
+    pub spec_consts: &'a [(SpecConstId, SpecConstValue)],
 }
 
 pub struct MaterialPipelineSet {
@@ -47,6 +48,7 @@ impl MaterialPipelineSet {
                             .map(|id| (*id, AttachmentColorBlend::default().enabled(true)))
                             .collect::<Vec<_>>(),
                         params.signature,
+                        &params.spec_consts,
                     )
                     .unwrap();
                 entry.insert(Arc::clone(&pipeline));

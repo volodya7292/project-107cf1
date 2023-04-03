@@ -74,6 +74,12 @@ impl Swapchain {
     }
 }
 
+impl PartialEq for Swapchain {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::as_ptr(&self.wrapper) == Arc::as_ptr(&other.wrapper)
+    }
+}
+
 pub struct SwapchainImage {
     pub(crate) image: Arc<Image>,
     pub(crate) index: u32,

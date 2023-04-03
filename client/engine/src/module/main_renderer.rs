@@ -17,7 +17,6 @@ pub mod vertex_mesh;
 pub mod camera;
 pub mod component;
 pub(crate) mod gpu_executor;
-mod helpers;
 pub mod material;
 mod resource_manager;
 pub(crate) mod resources;
@@ -44,46 +43,47 @@ use crate::event::WSIEvent;
 use crate::module::main_renderer::camera::OrthoCamera;
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::material::MatComponent;
-use crate::module::main_renderer::resources::{CullObject, RendererResources, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
+use crate::module::main_renderer::resources::{MaterialPipelineParams, RendererResources};
+use crate::module::main_renderer::stage::compose::ComposeStage;
+use crate::module::main_renderer::stage::depth::DepthStage;
+use crate::module::main_renderer::stage::g_buffer::GBufferStage;
+use crate::module::main_renderer::stage::present_queue_transition::PresentQueueTransitionStage;
+use crate::module::main_renderer::stage::{RenderStage, StageContext};
+use crate::module::main_renderer::stage_manager::StageManager;
 use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::SceneObject;
 use crate::module::scene::{Scene, N_MAX_OBJECTS};
 use crate::module::EngineModule;
 use crate::utils::wsi::{real_window_size, WSISize};
 use crate::EngineContext;
-use basis_universal::TranscoderTextureFormat;
-use camera::{Frustum, PerspectiveCamera};
-use common::glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec2, Vec3, Vec4};
+use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
+use camera::PerspectiveCamera;
+use common::glm;
+use common::glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec3, Vec4};
 use common::lrc::Lrc;
 use common::lrc::LrcExt;
 use common::nalgebra::{Matrix4, Vector4};
-use common::parking_lot::Mutex;
-use common::rayon::prelude::*;
+use common::resource_file::ResourceRef;
 use common::scene::relation::Relation;
 use common::types::HashMap;
-use common::utils::prev_power_of_two;
-use common::{glm, rayon};
-use entity_data::{Archetype, EntityId, EntityStorage, System, SystemHandler};
+use entity_data::{Archetype, EntityId, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{fs, iter, mem, slice};
+use std::{fs, mem, slice};
 use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
-use vertex_mesh::VertexMeshCmdList;
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
-    swapchain, AccessFlags, Attachment, AttachmentRef, BindingLoc, BindingRes, BindingType, BufferUsageFlags,
-    ClearValue, CmdList, CopyRegion, DescriptorPool, DescriptorSet, Device, DeviceBuffer, Format,
-    Framebuffer, HostBuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineSignature, PipelineStageFlags, PrimitiveTopology, Queue, QueueType, RenderPass, Sampler,
-    SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, SignalSemaphore,
-    SubmitInfo, Subpass, SubpassDependency, Surface, Swapchain, SwapchainImage, WaitSemaphore,
+    swapchain, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet, Device,
+    Format, HostBuffer, ImageLayout, PrimitiveTopology, QueueType, SamplerFilter, SamplerMipmap, Semaphore,
+    Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain, SwapchainImage,
 };
 use winit::window::Window;
 
@@ -148,7 +148,7 @@ pub struct MainRenderer {
     relative_camera_pos: Vec3,
 
     surface: Arc<Surface>,
-    swapchain: Option<Swapchain>,
+    swapchain: Option<Arc<Swapchain>>,
     frame_completion_semaphore: Arc<Semaphore>,
     surface_changed: bool,
     surface_size: U32Vec2,
@@ -160,25 +160,6 @@ pub struct MainRenderer {
     staging_buffer: HostBuffer<u8>,
     transfer_jobs: ParallelJob,
     staging_job: GPUJob,
-    final_jobs: ParallelJob,
-
-    sw_framebuffers: Vec<Arc<Framebuffer>>,
-
-    // Depth-gpu_executor render commands
-    depth_secondary_cls: Vec<CmdList>,
-    translucency_depths_secondary_cls: Vec<CmdList>,
-    // G-buffer render commands
-    g_solid_secondary_cls: Vec<CmdList>,
-    g_translucent_secondary_cls: Vec<CmdList>,
-    // "Overlay" render commands
-    overlay_secondary_cl: CmdList,
-
-    sw_render_pass: Option<Arc<RenderPass>>,
-    compose_pipeline: Option<Arc<Pipeline>>,
-    compose_signature: Arc<PipelineSignature>,
-    compose_pool: DescriptorPool,
-    compose_desc: DescriptorSet,
-    compose_sampler: Arc<Sampler>,
 
     material_updates: HashMap<u32, MaterialInfo>,
     new_vertex_mesh_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
@@ -191,6 +172,7 @@ pub struct MainRenderer {
 
     res: RendererResources,
     update_handlers: Vec<Box<UpdateHandler>>,
+    stage_manager: StageManager,
 }
 
 #[derive(Copy, Clone)]
@@ -265,11 +247,6 @@ struct FrameInfoUniforms {
     frame_size: UVec2,
 }
 
-#[repr(C)]
-struct GPassConsts {
-    is_translucent_pass: u32,
-}
-
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub struct MaterialInfo {
@@ -310,18 +287,6 @@ impl MaterialInfo {
     }
 }
 
-#[repr(C)]
-struct DepthPyramidConstants {
-    out_size: Vec2,
-}
-
-#[repr(C)]
-struct CullConstants {
-    pyramid_size: Vec2,
-    max_pyramid_levels: u32,
-    object_count: u32,
-}
-
 pub(crate) struct BufferUpdate1 {
     pub buffer: BufferHandle,
     pub dst_offset: u64,
@@ -349,7 +314,6 @@ pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 pub const N_MAX_MATERIALS: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS: u32 = 32;
 
-const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
 #[repr(u32)]
@@ -553,10 +517,6 @@ impl MainRenderer {
         let active_camera = PerspectiveCamera::new(1.0, std::f32::consts::FRAC_PI_2, 0.1);
         let overlay_camera = OrthoCamera::new();
 
-        let graphics_queue = device.get_queue(QueueType::Graphics);
-        // Available threads in the render thread pool
-        let available_threads = rayon::current_num_threads();
-
         let staging_buffer = device
             .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
             .unwrap();
@@ -594,235 +554,6 @@ impl MainRenderer {
             )
             .unwrap();
 
-        // Create depth pass resources
-        // -----------------------------------------------------------------------------------------------------------------
-        let depth_render_pass = device
-            .create_render_pass(
-                &[Attachment {
-                    format: Format::D32_FLOAT,
-                    init_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::InitClearFinalSave,
-                }],
-                &[
-                    Subpass::new().with_depth(AttachmentRef {
-                        index: 0,
-                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                    }),
-                    Subpass::new()
-                        .with_input(vec![AttachmentRef {
-                            index: 0,
-                            layout: ImageLayout::DEPTH_STENCIL_READ,
-                        }])
-                        .with_depth(AttachmentRef {
-                            index: 0,
-                            layout: ImageLayout::DEPTH_STENCIL_READ,
-                        }),
-                ],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::LATE_TESTS_AND_DS_STORE,
-                    dst_stage_mask: PipelineStageFlags::DS_LOAD_AND_EARLY_TESTS,
-                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                }],
-            )
-            .unwrap();
-
-        // Depth pyramid pipeline
-        // -----------------------------------------------------------------------------------------------------------------
-        let depth_pyramid_compute = device
-            .create_compute_shader(
-                include_bytes!("../../shaders/build/depth_pyramid.comp.spv"),
-                "depth_pyramid",
-            )
-            .unwrap();
-        let depth_pyramid_signature = device
-            .create_pipeline_signature(&[depth_pyramid_compute], &[])
-            .unwrap();
-        let depth_pyramid_pipeline = device.create_compute_pipeline(&depth_pyramid_signature).unwrap();
-
-        // Cull pipeline
-        // -----------------------------------------------------------------------------------------------------------------
-        let cull_compute = device
-            .create_compute_shader(include_bytes!("../../shaders/build/cull.comp.spv"), "cull")
-            .unwrap();
-        let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
-        let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
-        let mut cull_pool = cull_signature.create_pool(0, 1).unwrap();
-        let cull_descriptor = cull_pool.alloc().unwrap();
-
-        let cull_buffer = device
-            .create_device_buffer(
-                BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_DST,
-                mem::size_of::<CullObject>() as u64,
-                N_MAX_OBJECTS as u64,
-            )
-            .unwrap();
-        let cull_host_buffer = device
-            .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, N_MAX_OBJECTS as u64)
-            .unwrap();
-        let visibility_buffer = device
-            .create_device_buffer(
-                BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
-                mem::size_of::<u32>() as u64,
-                N_MAX_OBJECTS as u64,
-            )
-            .unwrap();
-        let visibility_host_buffer = device
-            .create_host_buffer(BufferUsageFlags::TRANSFER_DST, N_MAX_OBJECTS as u64)
-            .unwrap();
-
-        // Translucency depth pipeline
-        // -----------------------------------------------------------------------------------------------------------------
-        let translucency_depths_pixel_shader = device
-            .create_pixel_shader(
-                include_bytes!("../../shaders/build/translucency_closest_depths.frag.spv"),
-                "translucency_closest_depths",
-            )
-            .unwrap();
-
-        // Compose pipeline
-        // -----------------------------------------------------------------------------------------------------------------
-        let quad_vert_shader = device
-            .create_vertex_shader(
-                include_bytes!("../../shaders/build/quad.vert.spv"),
-                &[],
-                "quad.vert",
-            )
-            .unwrap();
-        let compose_pixel_shader = device
-            .create_pixel_shader(
-                include_bytes!("../../shaders/build/compose.frag.spv"),
-                "compose.frag",
-            )
-            .unwrap();
-        let compose_signature = device
-            .create_pipeline_signature(&[quad_vert_shader, compose_pixel_shader], &[])
-            .unwrap();
-        let mut compose_pool = compose_signature.create_pool(0, 1).unwrap();
-        let compose_desc = compose_pool.alloc().unwrap();
-
-        let compose_sampler = device
-            .create_sampler(
-                SamplerFilter::LINEAR,
-                SamplerFilter::NEAREST,
-                SamplerMipmap::NEAREST,
-                SamplerClamp::REPEAT,
-                1.0,
-            )
-            .unwrap();
-
-        // Create G-Buffer pass resources
-        // -----------------------------------------------------------------------------------------------------------------
-        let g_render_pass = device
-            .create_render_pass(
-                &[
-                    // Albedo
-                    Attachment {
-                        format: Format::RGBA8_UNORM,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalSave,
-                    },
-                    // Specular
-                    Attachment {
-                        format: Format::RGBA8_UNORM,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
-                    },
-                    // Emission
-                    Attachment {
-                        format: Format::RGBA8_UNORM,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
-                    },
-                    // Normal
-                    Attachment {
-                        format: Format::RG16_UNORM,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
-                    },
-                    // Depth (read)
-                    Attachment {
-                        format: Format::D32_FLOAT,
-                        init_layout: ImageLayout::DEPTH_STENCIL_READ,
-                        final_layout: ImageLayout::DEPTH_STENCIL_READ,
-                        load_store: LoadStore::InitLoad,
-                    },
-                    // Overlay depth (read/write)
-                    Attachment {
-                        format: Format::D32_FLOAT,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        load_store: LoadStore::InitClear,
-                    },
-                ],
-                &[
-                    // Main pass
-                    Subpass::new()
-                        .with_color(vec![
-                            AttachmentRef {
-                                index: 0,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 1,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 2,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 3,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                        ])
-                        .with_depth(AttachmentRef {
-                            index: 4,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        }),
-                    // Overlay pass
-                    Subpass::new()
-                        .with_color(vec![
-                            AttachmentRef {
-                                index: 0,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 1,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 2,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 3,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                        ])
-                        .with_depth(AttachmentRef {
-                            index: 5,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        }),
-                ],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                    dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                    src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                    dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                }],
-            )
-            .unwrap();
-
         let g_signature = device
             .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
@@ -830,38 +561,6 @@ impl MainRenderer {
             .create_pool(shader_ids::SET_GENERAL_PER_FRAME, 1)
             .unwrap();
         let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
-
-        let depth_secondary_cls = iter::repeat_with(|| {
-            graphics_queue
-                .create_secondary_cmd_list("depth_secondary")
-                .unwrap()
-        })
-        .take(available_threads)
-        .collect();
-        let translucency_depths_secondary_cls = iter::repeat_with(|| {
-            graphics_queue
-                .create_secondary_cmd_list("g_secondary-for-translucency-depths")
-                .unwrap()
-        })
-        .take(available_threads)
-        .collect();
-        let g_solid_secondary_cls = iter::repeat_with(|| {
-            graphics_queue
-                .create_secondary_cmd_list("g_secondary-for-solid-objs")
-                .unwrap()
-        })
-        .take(available_threads)
-        .collect();
-        let g_translucent_secondary_cls = iter::repeat_with(|| {
-            graphics_queue
-                .create_secondary_cmd_list("g_secondary-for-translucent-objs")
-                .unwrap()
-        })
-        .take(available_threads)
-        .collect();
-        let overlay_secondary_cl = graphics_queue
-            .create_secondary_cmd_list("overlay_secondary")
-            .unwrap();
 
         let tile_count = max_texture_count;
         let texture_atlases = [
@@ -970,40 +669,14 @@ impl MainRenderer {
             .create_job("renderer-staging", QueueType::Graphics)
             .unwrap();
 
-        let final_jobs = ParallelJob {
-            work: device.create_job("final", QueueType::Graphics).unwrap(),
-            sync: device.create_job("final-sync", QueueType::Present).unwrap(),
-        };
-
         let frame_completion_semaphore = Arc::new(device.create_binary_semaphore().unwrap());
 
         let resources = RendererResources {
             texture_atlases,
             _tex_atlas_sampler: tex_atlas_sampler,
-            visibility_buffer,
-            depth_render_pass,
-            depth_pyramid_image: None,
-            depth_pyramid_views: vec![],
-            depth_framebuffer: None,
-            depth_pyramid_pipeline,
-            depth_pyramid_signature,
-            depth_pyramid_pool: None,
-            depth_pyramid_descs: vec![],
-            cull_pipeline,
-            cull_signature,
-            cull_pool,
-            cull_desc: cull_descriptor,
-            cull_buffer,
-            g_render_pass,
-            g_framebuffer: None,
             g_per_frame_pool,
             g_per_frame_in,
-            translucency_depths_pixel_shader,
-            translucency_depths_image: None,
-            translucency_colors_image: None,
             per_frame_ub,
-            visibility_host_buffer,
-            cull_host_buffer,
             material_buffer,
             uniform_buffer_basic,
             uniform_buffer_offsets: IndexPool::new(),
@@ -1011,6 +684,27 @@ impl MainRenderer {
             material_pipelines: vec![],
             curr_vertex_meshes: HashMap::with_capacity(N_MAX_OBJECTS as usize),
         };
+
+        let graphics_queue = device.get_queue(QueueType::Graphics);
+        let present_queue = device.get_queue(QueueType::Present);
+
+        let mut stages: Vec<Box<dyn RenderStage>> = vec![
+            Box::new(DepthStage::new(&device)),
+            Box::new(GBufferStage::new(&device)),
+            Box::new(ComposeStage::new(&device)),
+        ];
+        if graphics_queue != present_queue {
+            stages.push(Box::new(PresentQueueTransitionStage::new(&device)))
+        }
+
+        let mut mat_pipe_counter = 0;
+        for stage in &mut stages {
+            let num_pipes = stage.num_pipeline_kinds();
+            stage.setup(&(mat_pipe_counter..mat_pipe_counter + num_pipes).collect::<Vec<_>>());
+            mat_pipe_counter += num_pipes;
+        }
+
+        let stage_manager = StageManager::new(&device, stages);
 
         let mut renderer = MainRenderer {
             root_entity,
@@ -1034,25 +728,13 @@ impl MainRenderer {
             staging_buffer,
             transfer_jobs,
             staging_job,
-            final_jobs,
-            sw_framebuffers: vec![],
-            depth_secondary_cls,
-            translucency_depths_secondary_cls,
-            g_solid_secondary_cls,
-            g_translucent_secondary_cls,
-            overlay_secondary_cl,
-            sw_render_pass: None,
-            compose_pipeline: None,
-            compose_signature,
-            compose_pool,
             material_updates: Default::default(),
-            compose_desc,
-            compose_sampler,
             new_vertex_mesh_updates: HashMap::with_capacity(1024),
             vertex_mesh_pending_updates: HashMap::with_capacity(1024),
             ordered_entities: Vec::with_capacity(N_MAX_OBJECTS as usize),
             res: resources,
             update_handlers: vec![],
+            stage_manager,
         };
         renderer.on_resize(curr_size);
 
@@ -1082,6 +764,197 @@ impl MainRenderer {
 
     pub fn register_update_handler(&mut self, handler: Box<UpdateHandler>) {
         self.update_handlers.push(handler);
+    }
+
+    pub fn load_texture_into_atlas(
+        &mut self,
+        texture_index: u32,
+        atlas_type: TextureAtlasType,
+        res_ref: ResourceRef,
+    ) {
+        let res_data = res_ref.read().unwrap();
+
+        let mut t = basis_universal::Transcoder::new();
+        t.prepare_transcoding(&res_data).unwrap();
+
+        let img_info = t.image_info(&res_data, 0).unwrap();
+        let width = img_info.m_width;
+        let height = img_info.m_height;
+
+        if !width.is_power_of_two() || width != height || width < (self.settings.texture_quality as u32) {
+            return;
+        }
+
+        let mipmaps: Vec<_> = (0..img_info.m_total_levels)
+            .map(|i| {
+                t.transcode_image_level(
+                    &res_data,
+                    atlas_type.basis_decode_type(),
+                    TranscodeParameters {
+                        image_index: 0,
+                        level_index: i,
+                        decode_flags: None,
+                        output_row_pitch_in_blocks_or_pixels: None,
+                        output_rows_in_pixels: None,
+                    },
+                )
+                .unwrap()
+            })
+            .collect();
+
+        t.end_transcoding();
+
+        let first_level = (width / (self.settings.texture_quality as u32)).ilog2();
+        let last_level = (width / 4).ilog2(); // BC block size = 4x4
+
+        self.res.texture_atlases[atlas_type as usize]
+            .set_texture(
+                texture_index,
+                &mipmaps[(first_level as usize)..(last_level as usize + 1)],
+            )
+            .unwrap();
+    }
+
+    /// Returns id of registered material pipeline.
+    pub fn register_material_pipeline(
+        &mut self,
+        shaders: &[Arc<Shader>],
+        topology: PrimitiveTopology,
+        cull_back_faces: bool,
+    ) -> u32 {
+        let main_signature = self
+            .device
+            .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
+            .unwrap();
+
+        let stages = self.stage_manager.stages();
+
+        let mut per_frame_desc_pool = main_signature
+            .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1)
+            .unwrap();
+        let per_frame_desc = per_frame_desc_pool.alloc().unwrap();
+        let per_object_desc_pool = main_signature
+            .create_pool(shader_ids::SET_PER_OBJECT, 16)
+            .unwrap();
+        let mut pipeline_set = MaterialPipelineSet {
+            device: Arc::clone(&self.device),
+            main_signature: Arc::clone(&main_signature),
+            pipelines: Default::default(),
+            topology,
+            per_object_desc_pool,
+            per_frame_desc_pool,
+            per_frame_desc,
+        };
+
+        for stage in stages.values() {
+            stage.lock().register_pipeline_kind(
+                MaterialPipelineParams {
+                    shaders,
+                    topology,
+                    cull_back_faces,
+                    main_signature: &main_signature,
+                },
+                &mut pipeline_set,
+            );
+        }
+
+        self.res.material_pipelines.push(pipeline_set);
+        (self.res.material_pipelines.len() - 1) as u32
+    }
+
+    pub fn get_material_pipeline(&self, id: u32) -> Option<&MaterialPipelineSet> {
+        self.res.material_pipelines.get(id as usize)
+    }
+
+    pub fn get_material_pipeline_mut(&mut self, id: u32) -> Option<&mut MaterialPipelineSet> {
+        self.res.material_pipelines.get_mut(id as usize)
+    }
+
+    pub fn set_material(&mut self, id: u32, info: MaterialInfo) {
+        assert!(id < N_MAX_MATERIALS);
+        self.material_updates.insert(id, info);
+    }
+
+    /// Copy each [u8] slice to appropriate DeviceBuffer with offset u64
+    pub(crate) unsafe fn update_device_buffers(&mut self, updates: &[BufferUpdate]) {
+        if updates.is_empty() {
+            return;
+        }
+
+        let update_count = updates.len();
+        let staging_size = self.staging_buffer.size();
+        let mut used_size = 0;
+        let mut i = 0;
+
+        while i < update_count {
+            let cl = self.staging_job.get_cmd_list_for_recording();
+            cl.begin(true).unwrap();
+
+            while i < update_count {
+                let update = &updates[i];
+
+                let (copy_size, new_used_size) = match update {
+                    BufferUpdate::WithOffset(update) => {
+                        let copy_size = update.data.len() as u64;
+                        assert!(copy_size <= staging_size);
+                        (copy_size, used_size + copy_size)
+                    }
+                    BufferUpdate::Regions(update) => {
+                        let copy_size = update.data.len() as u64;
+                        assert!(copy_size <= staging_size);
+                        (copy_size, used_size + copy_size)
+                    }
+                };
+
+                if new_used_size > staging_size {
+                    used_size = 0;
+                    break;
+                }
+
+                match update {
+                    BufferUpdate::WithOffset(update) => {
+                        self.staging_buffer.write(used_size as u64, &update.data);
+                        cl.copy_buffer_to_device(
+                            &self.staging_buffer,
+                            used_size,
+                            &update.buffer,
+                            update.dst_offset,
+                            copy_size,
+                        );
+                    }
+                    BufferUpdate::Regions(update) => {
+                        self.staging_buffer.write(used_size as u64, &update.data);
+
+                        let regions: SmallVec<[CopyRegion; 64]> = update
+                            .regions
+                            .iter()
+                            .map(|region| {
+                                CopyRegion::new(
+                                    used_size + region.src_offset(),
+                                    region.dst_offset(),
+                                    (region.size() as u64).try_into().unwrap(),
+                                )
+                            })
+                            .collect();
+
+                        cl.copy_buffer_regions_to_device_bytes(
+                            &self.staging_buffer,
+                            &update.buffer,
+                            &regions,
+                        );
+                    }
+                }
+
+                used_size = new_used_size;
+                i += 1;
+            }
+
+            cl.end().unwrap();
+
+            self.device
+                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
+                .unwrap();
+        }
     }
 
     fn on_update(&mut self, ctx: &EngineContext) -> UpdateTimings {
@@ -1227,7 +1100,6 @@ impl MainRenderer {
         let mut global_transform_events_system = system::GlobalTransformEvents {
             dirty_components: hierarchy_propagation_system.changed_global_transforms,
             changed_uniforms: Default::default(),
-            material_pipelines: &self.res.material_pipelines,
             run_time: 0.0,
         };
         global_transform_events_system.run(scene.storage_mut().access());
@@ -1383,639 +1255,36 @@ impl MainRenderer {
         timings
     }
 
-    fn record_depth_cmd_lists(&mut self, storage: &EntityStorage) -> u32 {
-        let mat_pipelines = &self.res.material_pipelines;
-        let object_count = self.ordered_entities.len();
-        let draw_count_step = object_count / self.depth_secondary_cls.len() + 1;
-        let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
-
-        let proj_mat = self.active_camera.projection();
-        let view_mat = camera::create_view_matrix(&self.relative_camera_pos, &self.active_camera.rotation());
-        let frustum = Frustum::new(proj_mat * view_mat);
-
-        self.depth_secondary_cls
-            .par_iter_mut()
-            .zip(&mut self.translucency_depths_secondary_cls)
-            .enumerate()
-            .for_each(|(i, (cmd_list_solid, cmd_list_translucency))| {
-                let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
-                let mut cl_sol = cmd_list_solid;
-                let mut cl_trans = cmd_list_translucency;
-
-                cl_sol
-                    .begin_secondary_graphics(
-                        true,
-                        &self.res.depth_render_pass,
-                        0,
-                        self.res.depth_framebuffer.as_ref().map(|v| &**v),
-                    )
-                    .unwrap();
-                cl_trans
-                    .begin_secondary_graphics(
-                        true,
-                        &self.res.depth_render_pass,
-                        1,
-                        self.res.depth_framebuffer.as_ref().map(|v| &**v),
-                    )
-                    .unwrap();
-
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
-                    }
-
-                    let renderable_id = self.ordered_entities[entity_index];
-                    let entry = storage.entry(&renderable_id).unwrap();
-
-                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), self.res.curr_vertex_meshes.get(&renderable_id)) else {
-                        continue;
-                    };
-
-                    if render_config.render_ty != RenderType::MAIN || !render_config.visible || vertex_mesh.is_empty() {
-                        continue;
-                    }
-
-                    if let Some(sphere) = vertex_mesh.sphere() {
-                        let center = sphere.center() + global_transform.position_f32();
-                        let radius = sphere.radius() * global_transform.scale.max();
-
-                        if !frustum.is_sphere_visible(&center, radius) {
-                            continue;
-                        }
-
-                        curr_cull_objects.push(CullObject {
-                            sphere: Vec4::new(center.x, center.y, center.z, radius),
-                            id: entity_index as u32,
-                        });
-                    } else {
-                        curr_cull_objects.push(CullObject {
-                            sphere: Default::default(),
-                            id: entity_index as u32,
-                        });
-                    }
-
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-                    let renderable = &self.res.renderables[&renderable_id];
-
-                    let (cl, pipeline_id) = if render_config.translucent {
-                        (&mut cl_trans, PipelineKind::TranslucencyDepths as u32)
-                    } else {
-                        (&mut cl_sol, PipelineKind::DepthWrite as u32)
-                    };
-                    let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
-                    let signature = pipeline.signature();
-                    cl.bind_pipeline(pipeline);
-
-                    let descriptors = compose_descriptor_sets(
-                        self.res.g_per_frame_in,
-                        mat_pipeline.per_frame_desc,
-                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
-                    );
-
-                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        render_config.render_ty as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
-                        renderable.uniform_buf_index as u32 * self.res.uniform_buffer_basic.aligned_element_size() as u32
-                    ]);
-
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
-                }
-
-                cl_sol.end().unwrap();
-                cl_trans.end().unwrap();
-
-                cull_objects.lock().extend(curr_cull_objects);
-            });
-
-        let cull_objects = cull_objects.into_inner();
-        self.res.cull_host_buffer.write(0, &cull_objects);
-
-        cull_objects.len() as u32
-    }
-
-    fn record_g_cmd_lists(&mut self, storage: &EntityStorage) {
-        let mat_pipelines = &self.res.material_pipelines;
-        let object_count = self.ordered_entities.len();
-        let draw_count_step = object_count / self.g_solid_secondary_cls.len() + 1;
-
-        let ordered_entities = &self.ordered_entities;
-        let res = &self.res;
-
-        self.g_solid_secondary_cls
-            .par_iter_mut()
-            .zip(&mut self.g_translucent_secondary_cls)
-            .enumerate()
-            .for_each(|(i, (cmd_list_solid, cmd_list_translucent))| {
-                let cl_sol = cmd_list_solid;
-                let cl_trans = cmd_list_translucent;
-
-                cl_sol
-                    .begin_secondary_graphics(
-                        true,
-                        &res.g_render_pass,
-                        0,
-                        res.g_framebuffer.as_ref().map(|v| &**v),
-                    )
-                    .unwrap();
-                cl_trans
-                    .begin_secondary_graphics(
-                        true,
-                        &res.g_render_pass,
-                        0,
-                        res.g_framebuffer.as_ref().map(|v| &**v),
-                    )
-                    .unwrap();
-
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
-                    }
-
-                    let renderable_id = ordered_entities[entity_index];
-                    let Some(render_config) = storage.get::<MeshRenderConfigC>(&renderable_id) else {
-                        continue;
-                    };
-                    if render_config.render_ty != RenderType::MAIN {
-                        continue;
-                    }
-
-                    let Some(vertex_mesh) = res.curr_vertex_meshes.get(&renderable_id) else {
-                        continue;
-                    };
-
-                    if res.visibility_host_buffer[entity_index] == 0 && vertex_mesh.is_empty() {
-                        continue;
-                    }
-
-                    let renderable = res.renderables.get(&renderable_id).unwrap();
-                    let mut consts = GPassConsts {
-                        is_translucent_pass: 0,
-                    };
-
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-                    let (cl, pipeline_id) = if render_config.translucent {
-                        consts.is_translucent_pass = 1;
-                        (&mut *cl_trans, PipelineKind::ColorWithBlending as u32)
-                    } else {
-                        (&mut *cl_sol, PipelineKind::Color as u32)
-                    };
-                    let pipeline = mat_pipeline.get_pipeline(pipeline_id).unwrap();
-                    let signature = pipeline.signature();
-
-                    cl.bind_pipeline(pipeline);
-
-                    let descriptors = compose_descriptor_sets(
-                        res.g_per_frame_in,
-                        mat_pipeline.per_frame_desc,
-                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
-                    );
-
-                    cl.bind_graphics_inputs(
-                        signature,
-                        0,
-                        &descriptors,
-                        &[
-                            render_config.render_ty as u32 * res.per_frame_ub.aligned_element_size() as u32,
-                            renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
-                        ],
-                    );
-                    cl.push_constants(signature, &consts);
-
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
-                }
-
-                cl_sol.end().unwrap();
-                cl_trans.end().unwrap();
-            });
-    }
-
-    fn record_overlay_cmd_list(&mut self, storage: &EntityStorage) {
-        let mat_pipelines = &self.res.material_pipelines;
-        let cl = &mut self.overlay_secondary_cl;
-
-        cl.begin_secondary_graphics(
-            true,
-            &self.res.g_render_pass,
-            1,
-            self.res.g_framebuffer.as_ref().map(|v| &**v),
-        )
-        .unwrap();
-
-        for renderable_id in &self.ordered_entities {
-            let Some(render_config) = storage.get::<MeshRenderConfigC>(renderable_id) else {
-                continue;
-            };
-            if render_config.render_ty != RenderType::OVERLAY {
-                continue;
-            }
-
-            let Some(vertex_mesh) = self.res.curr_vertex_meshes.get(renderable_id) else {
-                continue;
-            };
-            let renderable = self.res.renderables.get(renderable_id).unwrap();
-
-            let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-            let pipeline = mat_pipeline.get_pipeline(PipelineKind::Overlay as u32).unwrap();
-            let signature = pipeline.signature();
-            cl.bind_pipeline(pipeline);
-
-            let descriptors = compose_descriptor_sets(
-                self.res.g_per_frame_in,
-                mat_pipeline.per_frame_desc,
-                renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
-            );
-
-            cl.bind_graphics_inputs(
-                signature,
-                0,
-                &descriptors,
-                &[
-                    render_config.render_ty as u32 * self.res.per_frame_ub.aligned_element_size() as u32,
-                    renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
-                ],
-            );
-            let consts = GPassConsts {
-                // Overlay is by default translucent and doesn't have translucency pass.
-                // Set this to 0 to prevent shaders writing to translucency texture.
-                is_translucent_pass: 0,
-            };
-
-            // TODO: FIXME on release target (push constants blocks are stripped when optimizations are on):
-            // 2023-01-31T11:44:18.418Z ERROR [vulkan] [VAL] "Validation Error: [ VUID-vkCmdPushConstants-offset-01795 ] Object 0: handle = 0x142658008, name = overlay_secondary, type = VK_OBJECT_TYPE_COMMAND_BUFFER; | MessageID = 0x27bc88c6 | vkCmdPushConstants(): VK_SHADER_STAGE_ALL, VkPushConstantRange in VkPipelineLayout 0x3307610000000114[] overlapping offset = 0 and size = 4, do not contain VK_SHADER_STAGE_ALL. The Vulkan spec states: For each byte in the range specified by offset and size and for each shader gpu_executor in stageFlags, there must be a push constant range in layout that includes that byte and that gpu_executor (https://vulkan.lunarg.com/doc/view/1.3.239.0/mac/1.3-extensions/vkspec.html#VUID-vkCmdPushConstants-offset-01795)"
-            cl.push_constants(signature, &consts);
-
-            cl.bind_and_draw_vertex_mesh(vertex_mesh);
-        }
-
-        cl.end().unwrap();
-    }
-
-    fn depth_pass(&mut self, storage: &EntityStorage) {
-        let frustum_visible_objects = self.record_depth_cmd_lists(storage);
-        let object_count = self.ordered_entities.len() as u32;
-
-        let cl = self.staging_job.get_cmd_list_for_recording();
-        cl.begin(true).unwrap();
-
-        let translucency_depths_image = self.res.translucency_depths_image.as_ref().unwrap();
-        cl.fill_buffer(translucency_depths_image, u32::MAX);
-
-        cl.barrier_buffer(
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::PIXEL_SHADER,
-            &[translucency_depths_image
-                .barrier()
-                .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_WRITE | AccessFlags::SHADER_READ)],
-        );
-
-        cl.begin_render_pass(
-            &self.res.depth_render_pass,
-            self.res.depth_framebuffer.as_ref().unwrap(),
-            &[ClearValue::Depth(1.0)],
-            true,
-        );
-
-        // Render solid objects
-        cl.execute_secondary(self.depth_secondary_cls.iter());
-
-        cl.next_subpass(true);
-
-        // Find closest depths of translucent objects
-        cl.execute_secondary(self.translucency_depths_secondary_cls.iter());
-
-        cl.end_render_pass();
-
-        let depth_image = self.res.depth_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-        let depth_pyramid_image = self.res.depth_pyramid_image.as_ref().unwrap();
-
-        // Build depth pyramid
-        // ----------------------------------------------------------------------------------------
-
-        cl.barrier_image(
-            PipelineStageFlags::ALL_GRAPHICS,
-            PipelineStageFlags::COMPUTE,
-            &[
-                depth_image
-                    .barrier()
-                    .src_access_mask(AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_READ)
-                    .layout(ImageLayout::SHADER_READ),
-                depth_pyramid_image
-                    .barrier()
-                    .dst_access_mask(AccessFlags::SHADER_WRITE)
-                    .old_layout(ImageLayout::UNDEFINED)
-                    .new_layout(ImageLayout::GENERAL),
-            ],
-        );
-
-        cl.bind_pipeline(&self.res.depth_pyramid_pipeline);
-
-        let mut out_size = depth_pyramid_image.size_2d();
-
-        for i in 0..(depth_pyramid_image.mip_levels() as usize) {
-            cl.bind_compute_inputs(
-                &self.res.depth_pyramid_signature,
-                0,
-                &[self.res.depth_pyramid_descs[i]],
-                &[],
-            );
-
-            let constants = DepthPyramidConstants {
-                out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
-            };
-            cl.push_constants(&self.res.depth_pyramid_signature, &constants);
-
-            cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
-
-            cl.barrier_image(
-                PipelineStageFlags::COMPUTE,
-                PipelineStageFlags::COMPUTE,
-                &[depth_pyramid_image
-                    .barrier()
-                    .src_access_mask(AccessFlags::SHADER_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_READ)
-                    .old_layout(ImageLayout::GENERAL)
-                    .new_layout(ImageLayout::GENERAL)
-                    .mip_levels(i as u32, 1)],
-            );
-
-            out_size = ((out_size.0 >> 1).max(1), (out_size.1 >> 1).max(1));
-        }
-
-        cl.barrier_image(
-            PipelineStageFlags::COMPUTE,
-            PipelineStageFlags::BOTTOM_OF_PIPE,
-            &[depth_image
-                .barrier()
-                .src_access_mask(AccessFlags::SHADER_READ)
-                .dst_access_mask(Default::default())
-                .old_layout(ImageLayout::SHADER_READ)
-                .new_layout(ImageLayout::DEPTH_STENCIL_READ)],
-        );
-
-        // Compute visibilities
-        // ----------------------------------------------------------------------------------------
-
-        cl.copy_buffer_to_device(
-            &self.res.cull_host_buffer,
-            0,
-            &self.res.cull_buffer,
-            0,
-            frustum_visible_objects as u64,
-        );
-        cl.fill_buffer(&self.res.visibility_buffer, 0);
-
-        cl.barrier_buffer(
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::COMPUTE,
-            &[
-                self.res
-                    .cull_buffer
-                    .barrier()
-                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_READ),
-                self.res
-                    .visibility_buffer
-                    .barrier()
-                    .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_WRITE),
-            ],
-        );
-
-        cl.bind_pipeline(&self.res.cull_pipeline);
-        cl.bind_compute_inputs(&self.res.cull_signature, 0, &[self.res.cull_desc], &[]);
-
-        let pyramid_size = depth_pyramid_image.size_2d();
-        let constants = CullConstants {
-            pyramid_size: Vec2::new(pyramid_size.0 as f32, pyramid_size.1 as f32),
-            max_pyramid_levels: depth_pyramid_image.mip_levels(),
-            object_count: frustum_visible_objects,
+    fn on_render(&mut self, sw_image: &SwapchainImage, ctx: &EngineContext) -> RenderTimings {
+        let mut timings = RenderTimings::default();
+        let t0 = Instant::now();
+
+        let scene = ctx.module_mut::<Scene>();
+
+        let stage_ctx = StageContext {
+            storage: scene.storage(),
+            material_pipelines: &self.res.material_pipelines,
+            ordered_entities: &self.ordered_entities,
+            active_camera: &self.active_camera,
+            relative_camera_pos: self.relative_camera_pos,
+            curr_vertex_meshes: &self.res.curr_vertex_meshes,
+            renderables: &self.res.renderables,
+            g_per_frame_pool: &self.res.g_per_frame_pool,
+            g_per_frame_in: self.res.g_per_frame_in,
+            per_frame_ub: &self.res.per_frame_ub,
+            uniform_buffer_basic: &self.res.uniform_buffer_basic,
+            render_size: (self.render_size.x, self.render_size.y),
+            swapchain: self.swapchain.as_ref().unwrap(),
+            render_sw_image: sw_image,
+            frame_completion_semaphore: &self.frame_completion_semaphore,
         };
-        cl.push_constants(&self.res.cull_signature, &constants);
-
-        cl.dispatch(calc_group_count(frustum_visible_objects), 1, 1);
-
-        cl.barrier_buffer(
-            PipelineStageFlags::COMPUTE,
-            PipelineStageFlags::TRANSFER,
-            &[self
-                .res
-                .visibility_buffer
-                .barrier()
-                .src_access_mask(AccessFlags::SHADER_WRITE)
-                .dst_access_mask(AccessFlags::TRANSFER_READ)],
-        );
-
-        cl.copy_buffer_to_host(
-            &self.res.visibility_buffer,
-            0,
-            &self.res.visibility_host_buffer,
-            0,
-            object_count as u64,
-        );
-
-        cl.end().unwrap();
 
         unsafe {
-            self.device
-                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
-                .unwrap();
+            self.stage_manager.run(&stage_ctx).unwrap();
         }
-    }
-
-    fn g_buffer_pass(&mut self, storage: &EntityStorage) {
-        self.record_g_cmd_lists(storage);
-        self.record_overlay_cmd_list(storage);
-
-        let translucency_colors_image = self.res.translucency_colors_image.as_ref().unwrap();
-
-        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
-        final_cl.barrier_image(
-            PipelineStageFlags::TOP_OF_PIPE,
-            PipelineStageFlags::TRANSFER,
-            &[translucency_colors_image
-                .barrier()
-                .dst_access_mask(AccessFlags::TRANSFER_WRITE)
-                .old_layout(ImageLayout::UNDEFINED)
-                .new_layout(ImageLayout::GENERAL)],
-        );
-        final_cl.clear_image(
-            translucency_colors_image,
-            ImageLayout::GENERAL,
-            ClearValue::ColorF32([0.0; 4]),
-        );
-        final_cl.barrier_image(
-            PipelineStageFlags::TRANSFER,
-            PipelineStageFlags::PIXEL_SHADER,
-            &[translucency_colors_image
-                .barrier()
-                .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_WRITE)
-                .layout(ImageLayout::GENERAL)],
-        );
-
-        // Main g-buffer pass
-        final_cl.begin_render_pass(
-            &self.res.g_render_pass,
-            self.res.g_framebuffer.as_ref().unwrap(),
-            &[
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Depth(1.0),
-            ],
-            true,
-        );
-        final_cl.execute_secondary(
-            self.g_solid_secondary_cls
-                .iter()
-                .chain(&self.g_translucent_secondary_cls),
-        );
-
-        // Overlay subpass
-        final_cl.next_subpass(true);
-        final_cl.execute_secondary(iter::once(&self.overlay_secondary_cl));
-
-        final_cl.end_render_pass();
-
-        final_cl.barrier_image(
-            PipelineStageFlags::ALL_GRAPHICS,
-            PipelineStageFlags::PIXEL_SHADER,
-            &[translucency_colors_image
-                .barrier()
-                .src_access_mask(AccessFlags::SHADER_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_READ)
-                .layout(ImageLayout::GENERAL)],
-        );
-    }
-
-    fn on_render(&mut self, sw_image: &SwapchainImage, ctx: &EngineContext) -> RenderTimings {
-        let scene = ctx.module_mut::<Scene>();
-        let storage = scene.storage();
-
-        let mut timings = RenderTimings::default();
-        let total_t0 = Instant::now();
-        let device = Arc::clone(&self.device);
-
         let t1 = Instant::now();
 
-        self.depth_pass(storage);
-
-        let t2 = Instant::now();
-        timings.depth_pass = (t2 - t1).as_secs_f64();
-
-        // Record G-Buffer cmd list
-        // -------------------------------------------------------------------------------------------------------------
-        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
-        final_cl.begin(true).unwrap();
-        drop(final_cl);
-
-        self.g_buffer_pass(storage);
-
-        let final_cl = self.final_jobs.work.get_cmd_list_for_recording();
-
-        // ----------------------------------------------------------------------------------------------
-        let graphics_queue = device.get_queue(QueueType::Graphics);
-        let present_queue = self.device.get_queue(QueueType::Present);
-        let albedo = self.res.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-
-        final_cl.barrier_image(
-            PipelineStageFlags::ALL_GRAPHICS,
-            PipelineStageFlags::PIXEL_SHADER,
-            &[albedo
-                .barrier()
-                .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
-                .dst_access_mask(AccessFlags::SHADER_READ)
-                .layout(ImageLayout::SHADER_READ)],
-        );
-
-        // Compose final swapchain image
-        final_cl.begin_render_pass(
-            self.sw_render_pass.as_ref().unwrap(),
-            &self.sw_framebuffers[sw_image.index() as usize],
-            &[],
-            false,
-        );
-        final_cl.bind_pipeline(self.compose_pipeline.as_ref().unwrap());
-        final_cl.bind_graphics_inputs(&self.compose_signature, 0, &[self.compose_desc], &[]);
-        final_cl.draw(3, 0);
-        final_cl.end_render_pass();
-
-        if graphics_queue != present_queue {
-            final_cl.barrier_image(
-                PipelineStageFlags::ALL_GRAPHICS,
-                PipelineStageFlags::BOTTOM_OF_PIPE,
-                &[sw_image
-                    .get()
-                    .barrier()
-                    .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .old_layout(ImageLayout::PRESENT)
-                    .new_layout(ImageLayout::PRESENT)
-                    .src_queue(graphics_queue)
-                    .dst_queue(present_queue)],
-            );
-        }
-
-        final_cl.end().unwrap();
-
-        unsafe {
-            let signal_sem = &[SignalSemaphore {
-                semaphore: Arc::clone(&self.frame_completion_semaphore),
-                signal_value: 0,
-            }];
-
-            self.device
-                .run_jobs(&mut [GPUJobExecInfo::new(&mut self.final_jobs.work)
-                    .with_wait_semaphores(&[WaitSemaphore {
-                        semaphore: Arc::clone(self.swapchain.as_ref().unwrap().readiness_semaphore()),
-                        wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                        wait_value: 0,
-                    }])
-                    .with_signal_semaphores(if graphics_queue == present_queue {
-                        signal_sem
-                    } else {
-                        &[]
-                    })])
-                .unwrap();
-
-            if graphics_queue != present_queue {
-                let cl = self.final_jobs.sync.get_cmd_list_for_recording();
-                cl.begin(true).unwrap();
-                cl.barrier_image(
-                    PipelineStageFlags::TOP_OF_PIPE,
-                    PipelineStageFlags::BOTTOM_OF_PIPE,
-                    &[sw_image
-                        .get()
-                        .barrier()
-                        .old_layout(ImageLayout::PRESENT)
-                        .new_layout(ImageLayout::PRESENT)
-                        .src_queue(graphics_queue)
-                        .dst_queue(present_queue)],
-                );
-                cl.end().unwrap();
-
-                self.device
-                    .run_jobs(&mut [GPUJobExecInfo::new(&mut self.final_jobs.sync)
-                        .with_wait_semaphores(&[self.final_jobs.work.wait_semaphore()])
-                        .with_signal_semaphores(&[SignalSemaphore {
-                            semaphore: Arc::clone(&self.frame_completion_semaphore),
-                            signal_value: 0,
-                        }])])
-                    .unwrap();
-            }
-        }
-
-        let t3 = Instant::now();
-        timings.color_pass = (t3 - t2).as_secs_f64();
-
-        let total_t1 = Instant::now();
-        timings.total = (total_t1 - total_t0).as_secs_f64();
-
+        timings.total = (t1 - t0).as_secs_f64();
         timings
     }
 
@@ -2030,13 +1299,10 @@ impl MainRenderer {
         }
 
         // Wait for previous frame completion
-        self.final_jobs.work.wait().unwrap();
-        self.final_jobs.sync.wait().unwrap();
+        self.stage_manager.wait_idle();
 
         if self.surface_changed {
-            self.sw_framebuffers.clear();
-
-            self.swapchain = Some(
+            self.swapchain = Some(Arc::new(
                 device
                     .create_swapchain(
                         &self.surface,
@@ -2047,12 +1313,12 @@ impl MainRenderer {
                         } else {
                             2
                         },
-                        self.swapchain.take(),
+                        None,
+                        // self.swapchain.take(),
                     )
                     .unwrap(),
-            );
+            ));
 
-            self.create_output_framebuffers();
             self.surface_changed = false;
         }
 
@@ -2112,287 +1378,6 @@ impl MainRenderer {
 
         // Set camera aspect
         self.active_camera.set_aspect(new_size.0, new_size.1);
-
-        let depth_image = self
-            .device
-            .create_image_2d(
-                Format::D32_FLOAT,
-                1,
-                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                    | ImageUsageFlags::INPUT_ATTACHMENT
-                    | ImageUsageFlags::SAMPLED,
-                new_size,
-            )
-            .unwrap();
-        self.res.depth_pyramid_image = Some(
-            self.device
-                .create_image_2d_named(
-                    Format::R32_FLOAT,
-                    0,
-                    ImageUsageFlags::SAMPLED | ImageUsageFlags::STORAGE,
-                    // Note: prev_power_of_two makes sure all reductions are at most by 2x2
-                    // which makes sure they are conservative
-                    (prev_power_of_two(new_size.0), prev_power_of_two(new_size.1)),
-                    "depth_pyramid",
-                )
-                .unwrap(),
-        );
-        let depth_pyramid_image = self.res.depth_pyramid_image.as_ref().unwrap();
-        let depth_pyramid_levels = depth_pyramid_image.mip_levels();
-        self.res.depth_pyramid_views = (0..depth_pyramid_levels)
-            .map(|i| {
-                depth_pyramid_image
-                    .create_view_named(&format!("view-mip{}", i))
-                    .base_mip_level(i)
-                    .mip_level_count(1)
-                    .build()
-                    .unwrap()
-            })
-            .collect();
-
-        let mut depth_pyramid_pool = self
-            .res
-            .depth_pyramid_signature
-            .create_pool(0, depth_pyramid_levels)
-            .unwrap();
-        self.res.depth_pyramid_descs = {
-            let pool = &mut depth_pyramid_pool;
-
-            (0..depth_pyramid_levels as usize)
-                .map(|i| {
-                    let set = pool.alloc().unwrap();
-                    unsafe {
-                        self.device.update_descriptor_set(
-                            set,
-                            &[
-                                pool.create_binding(
-                                    0,
-                                    0,
-                                    if i == 0 {
-                                        BindingRes::ImageView(
-                                            Arc::clone(depth_image.view()),
-                                            None,
-                                            ImageLayout::SHADER_READ,
-                                        )
-                                    } else {
-                                        BindingRes::ImageView(
-                                            Arc::clone(&self.res.depth_pyramid_views[i - 1]),
-                                            None,
-                                            ImageLayout::GENERAL,
-                                        )
-                                    },
-                                ),
-                                pool.create_binding(
-                                    1,
-                                    0,
-                                    BindingRes::ImageView(
-                                        Arc::clone(&self.res.depth_pyramid_views[i]),
-                                        None,
-                                        ImageLayout::GENERAL,
-                                    ),
-                                ),
-                            ],
-                        )
-                    };
-                    set
-                })
-                .collect()
-        };
-        self.res.depth_pyramid_pool = Some(depth_pyramid_pool);
-
-        unsafe {
-            self.device.update_descriptor_set(
-                self.res.cull_desc,
-                &[
-                    self.res.cull_pool.create_binding(
-                        0,
-                        0,
-                        BindingRes::Image(Arc::clone(depth_pyramid_image), None, ImageLayout::GENERAL),
-                    ),
-                    self.res.cull_pool.create_binding(
-                        1,
-                        0,
-                        BindingRes::Buffer(self.res.per_frame_ub.handle()),
-                    ),
-                    self.res.cull_pool.create_binding(
-                        2,
-                        0,
-                        BindingRes::Buffer(self.res.cull_buffer.handle()),
-                    ),
-                    self.res.cull_pool.create_binding(
-                        3,
-                        0,
-                        BindingRes::Buffer(self.res.visibility_buffer.handle()),
-                    ),
-                ],
-            )
-        };
-
-        self.res.depth_framebuffer = Some(
-            self.res
-                .depth_render_pass
-                .create_framebuffer(
-                    new_size,
-                    &[(0, ImageMod::OverrideImage(Arc::clone(&depth_image)))],
-                )
-                .unwrap(),
-        );
-
-        self.res.g_framebuffer = Some(
-            self.res
-                .g_render_pass
-                .create_framebuffer(
-                    new_size,
-                    &[
-                        (
-                            0,
-                            ImageMod::AdditionalUsage(
-                                ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
-                            ),
-                        ),
-                        (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (2, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (3, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                        (4, ImageMod::OverrideImage(Arc::clone(&depth_image))),
-                    ],
-                )
-                .unwrap(),
-        );
-
-        // Note: use buffer instead of image because Metal (on macs) does not support atomic ops on images
-        self.res.translucency_depths_image = Some(
-            self.device
-                .create_device_buffer_named(
-                    BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_DST,
-                    mem::size_of::<u32>() as u64,
-                    (new_size.0 * new_size.1 * TRANSLUCENCY_N_DEPTH_LAYERS) as u64,
-                    "translucency_depths",
-                )
-                .unwrap(),
-        );
-        self.res.translucency_colors_image = Some(
-            self.device
-                .create_image_2d_array_named(
-                    Format::RGBA8_UNORM,
-                    1,
-                    ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
-                    (new_size.0, new_size.1, TRANSLUCENCY_N_DEPTH_LAYERS),
-                    "translucency_colors",
-                )
-                .unwrap(),
-        );
-
-        unsafe {
-            self.device.update_descriptor_set(
-                self.res.g_per_frame_in,
-                &[
-                    self.res.g_per_frame_pool.create_binding(
-                        shader_ids::BINDING_TRANSPARENCY_DEPTHS,
-                        0,
-                        BindingRes::Buffer(self.res.translucency_depths_image.as_ref().unwrap().handle()),
-                    ),
-                    self.res.g_per_frame_pool.create_binding(
-                        shader_ids::BINDING_TRANSPARENCY_COLORS,
-                        0,
-                        BindingRes::Image(
-                            Arc::clone(self.res.translucency_colors_image.as_ref().unwrap()),
-                            None,
-                            ImageLayout::GENERAL,
-                        ),
-                    ),
-                    self.res.g_per_frame_pool.create_binding(
-                        shader_ids::BINDING_SOLID_DEPTHS,
-                        0,
-                        BindingRes::Image(Arc::clone(&depth_image), None, ImageLayout::DEPTH_STENCIL_READ),
-                    ),
-                ],
-            );
-
-            let albedo = self.res.g_framebuffer.as_ref().unwrap().get_image(0).unwrap();
-            self.device.update_descriptor_set(
-                self.compose_desc,
-                &[
-                    self.compose_pool.create_binding(
-                        0,
-                        0,
-                        BindingRes::Image(
-                            Arc::clone(albedo),
-                            Some(Arc::clone(&self.compose_sampler)),
-                            ImageLayout::SHADER_READ,
-                        ),
-                    ),
-                    self.compose_pool.create_binding(
-                        1,
-                        0,
-                        BindingRes::Buffer(self.res.per_frame_ub.handle()),
-                    ),
-                    self.compose_pool.create_binding(
-                        5,
-                        0,
-                        BindingRes::Buffer(self.res.translucency_depths_image.as_ref().unwrap().handle()),
-                    ),
-                    self.compose_pool.create_binding(
-                        6,
-                        0,
-                        BindingRes::Image(
-                            Arc::clone(self.res.translucency_colors_image.as_ref().unwrap()),
-                            None,
-                            ImageLayout::GENERAL,
-                        ),
-                    ),
-                ],
-            );
-        }
-    }
-
-    fn create_output_framebuffers(&mut self) {
-        let images = self.swapchain.as_ref().unwrap().images();
-
-        self.sw_render_pass = Some(
-            self.device
-                .create_render_pass(
-                    &[Attachment {
-                        format: images[0].format(),
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::PRESENT,
-                        load_store: LoadStore::FinalSave,
-                    }],
-                    &[Subpass::new().with_color(vec![AttachmentRef {
-                        index: 0,
-                        layout: ImageLayout::COLOR_ATTACHMENT,
-                    }])],
-                    &[],
-                )
-                .unwrap(),
-        );
-
-        self.sw_framebuffers.clear();
-        for img in images {
-            self.sw_framebuffers.push(
-                self.sw_render_pass
-                    .as_ref()
-                    .unwrap()
-                    .create_framebuffer(
-                        images[0].size_2d(),
-                        &[(0, ImageMod::OverrideImage(Arc::clone(img)))],
-                    )
-                    .unwrap(),
-            );
-        }
-
-        self.compose_pipeline = Some(
-            self.device
-                .create_graphics_pipeline(
-                    self.sw_render_pass.as_ref().unwrap(),
-                    0,
-                    PrimitiveTopology::TRIANGLE_LIST,
-                    Default::default(),
-                    Default::default(),
-                    &[],
-                    &self.compose_signature,
-                )
-                .unwrap(),
-        );
     }
 }
 

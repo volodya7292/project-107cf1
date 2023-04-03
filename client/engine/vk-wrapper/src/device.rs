@@ -175,6 +175,9 @@ enum MemoryUsage {
     Device,
 }
 
+pub type SpecConstId = u32;
+pub type SpecConstValue = u32;
+
 impl Device {
     pub fn adapter(&self) -> &Arc<Adapter> {
         &self.wrapper.adapter
@@ -1282,8 +1285,29 @@ impl Device {
         rasterization: PipelineRasterization,
         attachment_blends: &[(u32, AttachmentColorBlend)],
         signature: &Arc<PipelineSignature>,
+        specialization_consts: &[(SpecConstId, SpecConstValue)],
     ) -> Result<Arc<Pipeline>, DeviceError> {
-        // Input assembly
+        let mut spec_consts = specialization_consts.to_vec();
+        spec_consts.sort_by_key(|v| v.0);
+        spec_consts.dedup_by_key(|v| v.0);
+
+        let spec_data: Vec<u32> = spec_consts.iter().map(|v| v.1).collect();
+        let spec_infos: Vec<_> = spec_consts
+            .iter()
+            .enumerate()
+            .map(|(i, v)| vk::SpecializationMapEntry {
+                constant_id: v.0,
+                offset: (i * 4) as u32,
+                size: 4,
+            })
+            .collect();
+        let spec_data_u8 =
+            unsafe { slice::from_raw_parts(spec_data.as_ptr() as *const u8, spec_data.len() * 4) };
+
+        let specialization = vk::SpecializationInfo::builder()
+            .map_entries(&spec_infos)
+            .data(spec_data_u8);
+
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(primitive_topology.0)
             .primitive_restart_enable(false);
@@ -1405,6 +1429,7 @@ impl Device {
                     .stage(stage.0)
                     .module(shader.native)
                     .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+                    .specialization_info(&specialization)
                     .build()
             })
             .collect();

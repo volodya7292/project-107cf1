@@ -133,7 +133,7 @@ impl DescriptorPool {
     }
 
     pub fn reset(&mut self) {
-        for set in self.allocated.drain(..) {
+        for set in &self.allocated {
             self.free_sets.insert(set.id as usize);
         }
     }

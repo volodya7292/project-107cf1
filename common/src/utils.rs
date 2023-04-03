@@ -3,10 +3,6 @@ use nalgebra_glm::{RealNumber, Vec3};
 use std::time::{Duration, Instant};
 use std::{mem, slice, thread};
 
-pub const fn is_pow_of_2(n: u64) -> bool {
-    n != 0 && ((n & (n - 1)) == 0)
-}
-
 pub const fn prev_power_of_two(mut n: u32) -> u32 {
     n = n | (n >> 1);
     n = n | (n >> 2);

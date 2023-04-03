@@ -7,7 +7,7 @@ use crate::module::main_renderer::resource_manager::{
     CmdListParams, DeviceBufferParams, HostBufferParams, ImageParams, ResourceManagementScope,
 };
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
-use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
+use crate::module::main_renderer::stage::{RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{calc_group_count, camera, compose_descriptor_sets};
 use crate::module::scene::N_MAX_OBJECTS;
@@ -15,11 +15,10 @@ use common::glm::{Vec2, Vec4};
 use common::parking_lot::Mutex;
 use common::rayon;
 use common::rayon::prelude::*;
-use common::types::HashMap;
 use common::utils::prev_power_of_two;
-use std::any::{Any, TypeId};
 use std::mem;
 use std::sync::Arc;
+use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList,
     DescriptorPool, DescriptorSet, Device, Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags,
@@ -42,6 +41,7 @@ pub struct DepthStage {
     depth_pyramid_signature: Arc<PipelineSignature>,
     depth_pyramid_pool: DescriptorPool,
     cull_pipeline: Arc<Pipeline>,
+    cull_pool: DescriptorPool,
     cull_descriptor: DescriptorSet,
 }
 
@@ -67,6 +67,7 @@ struct CullConstants {
 impl DepthStage {
     pub const RES_DEPTH_IMAGE: &'static str = "depth_image";
     pub const RES_VISIBILITY_HOST_BUFFER: &'static str = "visibility_host_buffer";
+    pub const RES_TRANSLUCENCY_DEPTHS_IMAGE: &'static str = "translucency_depths_image";
 
     pub fn new(device: &Arc<Device>) -> Self {
         let render_pass = device
@@ -147,6 +148,7 @@ impl DepthStage {
             depth_pyramid_signature,
             depth_pyramid_pool,
             cull_pipeline,
+            cull_pool,
             cull_descriptor,
         }
     }
@@ -314,6 +316,7 @@ impl RenderStage for DepthStage {
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,
+                spec_consts: &[(shader_ids::CONST_ID_PASS_TYPE, shader_ids::PASS_TYPE_DEPTH)],
             },
         );
         pipeline_set.prepare_pipeline(
@@ -326,6 +329,10 @@ impl RenderStage for DepthStage {
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
+                spec_consts: &[(
+                    shader_ids::CONST_ID_PASS_TYPE,
+                    shader_ids::PASS_TYPE_DEPTH_TRANSLUCENCY,
+                )],
             },
         );
     }
@@ -334,9 +341,8 @@ impl RenderStage for DepthStage {
         &mut self,
         cl: &mut CmdList,
         resources: &ResourceManagementScope,
-        ctx: &dyn Any,
+        ctx: &StageContext,
     ) -> StageRunResult {
-        let ctx = ctx.downcast_ref::<StageContext>().unwrap();
         let available_threads = rayon::current_num_threads();
 
         let depth_cmd_lists = resources.request_cmd_lists(
@@ -442,7 +448,7 @@ impl RenderStage for DepthStage {
         );
 
         let translucency_depths_image = resources.request_device_buffer(
-            "translucency_depths_image",
+            Self::RES_TRANSLUCENCY_DEPTHS_IMAGE,
             DeviceBufferParams::new(
                 BufferUsageFlags::STORAGE | BufferUsageFlags::TRANSFER_DST,
                 mem::size_of::<u32>() as u64,
@@ -496,6 +502,40 @@ impl RenderStage for DepthStage {
         );
 
         // ----------------------------------------------------------------------------------
+
+        unsafe {
+            self.device.update_descriptor_set(
+                ctx.g_per_frame_in,
+                &[
+                    ctx.g_per_frame_pool.create_binding(
+                        shader_ids::BINDING_TRANSPARENCY_DEPTHS,
+                        0,
+                        BindingRes::Buffer(translucency_depths_image.handle()),
+                    ),
+                    ctx.g_per_frame_pool.create_binding(
+                        shader_ids::BINDING_SOLID_DEPTHS,
+                        0,
+                        BindingRes::Image(Arc::clone(&depth_image), None, ImageLayout::DEPTH_STENCIL_READ),
+                    ),
+                ],
+            );
+            self.device.update_descriptor_set(
+                self.cull_descriptor,
+                &[
+                    self.cull_pool.create_binding(
+                        0,
+                        0,
+                        BindingRes::Image(Arc::clone(&depth_pyramid_image), None, ImageLayout::GENERAL),
+                    ),
+                    self.cull_pool
+                        .create_binding(1, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    self.cull_pool
+                        .create_binding(2, 0, BindingRes::Buffer(cull_buffer.handle())),
+                    self.cull_pool
+                        .create_binding(3, 0, BindingRes::Buffer(visibility_buffer.handle())),
+                ],
+            )
+        };
 
         let cull_objects = self.record_depth_cmd_lists(
             &mut depth_cmd_lists.lock(),
