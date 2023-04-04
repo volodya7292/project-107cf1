@@ -608,7 +608,7 @@ impl Device {
         preferred_size: (u32, u32),
         vsync: bool,
         preferred_n_images: u32,
-        old_swapchain: Option<Swapchain>,
+        old_swapchain: Option<Arc<Swapchain>>,
     ) -> Result<Swapchain, DeviceError> {
         let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
         let surface_formats = self.wrapper.adapter.get_surface_formats(&surface)?;
@@ -692,14 +692,6 @@ impl Device {
             .clipped(true);
 
         if let Some(old_swapchain) = &old_swapchain {
-            for img in &old_swapchain.images {
-                if Arc::strong_count(img) > 1 {
-                    return Err(DeviceError::SwapchainError(
-                        "old_swapchain images must not be used anywhere at the time of retire of old_swapchain!"
-                            .to_string(),
-                    ));
-                }
-            }
             create_info = create_info.old_swapchain(*old_swapchain.wrapper.native.lock());
         }
 

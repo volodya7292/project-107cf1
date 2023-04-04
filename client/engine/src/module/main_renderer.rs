@@ -1313,8 +1313,7 @@ impl MainRenderer {
                         } else {
                             2
                         },
-                        None,
-                        // self.swapchain.take(),
+                        self.swapchain.take(),
                     )
                     .unwrap(),
             ));

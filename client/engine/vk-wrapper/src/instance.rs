@@ -1,5 +1,6 @@
 use crate::adapter::{Adapter, QueueId};
 use crate::entry::VK_API_VERSION;
+#[cfg(target_os = "macos")]
 use crate::platform::metal;
 use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
