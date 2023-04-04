@@ -1302,6 +1302,10 @@ impl MainRenderer {
         self.stage_manager.wait_idle();
 
         if self.surface_changed {
+            unsafe {
+                Surface::update(&*ctx.window.borrow()).unwrap();
+            }
+
             self.swapchain = Some(Arc::new(
                 device
                     .create_swapchain(
@@ -1374,6 +1378,7 @@ impl MainRenderer {
 
         self.active_camera
             .set_aspect(self.render_size.x, self.render_size.y);
+        // dbg!(self.render_size, self.surface_size);
     }
 }
 

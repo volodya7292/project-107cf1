@@ -18,11 +18,12 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn create_surface<H>(self: &Arc<Self>, window_handle: &H) -> Result<Arc<Surface>, vk::Result>
+    pub fn create_surface<H>(self: &Arc<Self>, window: &H) -> Result<Arc<Surface>, vk::Result>
     where
         H: HasRawWindowHandle + HasRawDisplayHandle,
     {
-        let surface = match window_handle.raw_window_handle() {
+        let window_handle = window.raw_window_handle();
+        let surface = match window_handle {
             RawWindowHandle::Win32(handle) => {
                 let surface_desc = vk::Win32SurfaceCreateInfoKHR::builder()
                     .hinstance(handle.hinstance)
@@ -31,12 +32,11 @@ impl Instance {
                 unsafe { surface_fn.create_win32_surface(&surface_desc, None) }
             }
             RawWindowHandle::Wayland(handle) => {
-                let display =
-                    if let RawDisplayHandle::Wayland(display_handle) = window_handle.raw_display_handle() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Wayland(display_handle) = window.raw_display_handle() {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::WaylandSurfaceCreateInfoKHR::builder()
                     .display(display.display)
                     .surface(handle.surface);
@@ -45,12 +45,11 @@ impl Instance {
                 unsafe { surface_fn.create_wayland_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xlib(handle) => {
-                let display =
-                    if let RawDisplayHandle::Xlib(display_handle) = window_handle.raw_display_handle() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Xlib(display_handle) = window.raw_display_handle() {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::XlibSurfaceCreateInfoKHR::builder()
                     .dpy(display.display as *mut _)
                     .window(handle.window);
@@ -58,12 +57,11 @@ impl Instance {
                 unsafe { surface_fn.create_xlib_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xcb(handle) => {
-                let display =
-                    if let RawDisplayHandle::Xcb(display_handle) = window_handle.raw_display_handle() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Xcb(display_handle) = window.raw_display_handle() {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::XcbSurfaceCreateInfoKHR::builder()
                     .connection(display.connection)
                     .window(handle.window);

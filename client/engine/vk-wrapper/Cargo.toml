@@ -18,5 +18,6 @@ vma = { path = "vma" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22"
+core-foundation = "0.9"
 cocoa = "0.24"
 objc = "0.2"

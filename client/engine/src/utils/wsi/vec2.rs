@@ -12,7 +12,7 @@ impl WSINumber for f32 {}
 
 pub struct WSizingInfo {
     monitor_native_size: PhysicalSize<u32>,
-    // On macOS this may be larger than native width
+    // On macOS this may be larger than native size
     monitor_logical_size: PhysicalSize<u32>,
     scale_factor: f32,
 }

@@ -198,7 +198,7 @@ impl Application for Game {
             &*ctx.window(),
             main_renderer::Settings {
                 fps_limit: main_renderer::FPSLimit::VSync,
-                prefer_triple_buffering: false,
+                prefer_triple_buffering: true,
                 textures_mipmaps: true,
                 texture_quality: main_renderer::TextureQuality::STANDARD,
                 textures_max_anisotropy: 1.0,

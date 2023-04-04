@@ -16,6 +16,9 @@ use std::time::{Duration, Instant};
 
 pub const PROGRAM_NAME: &str = "project-107cf1";
 
+#[cfg(target_os = "macos")]
+embed_plist::embed_info_plist!("../Info.plist");
+
 fn parking_lot_deadlock_detection() {
     use common::parking_lot::deadlock;
     use std::thread;
