@@ -180,7 +180,7 @@ impl Adapter {
             (vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT).as_raw();
 
         let mut host_memory_type_index = 0;
-        unsafe {
+        let result = unsafe {
             vma::vmaFindMemoryTypeIndex(allocator, u32::MAX, &host_alloc_info, &mut host_memory_type_index)
         };
 
