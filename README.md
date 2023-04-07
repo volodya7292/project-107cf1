@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-- VulkanSDK 1.3+
+- VulkanSDK 1.+
 
 ### Windows
 - Visual Studio 2019
