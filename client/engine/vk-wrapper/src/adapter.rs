@@ -28,7 +28,7 @@ impl Default for QueueId {
 pub struct Adapter {
     pub(crate) instance: Arc<Instance>,
     pub(crate) native: vk::PhysicalDevice,
-    pub(crate) _props: vk::PhysicalDeviceProperties,
+    pub(crate) props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
     pub(crate) features: vk::PhysicalDeviceFeatures,
     pub(crate) scalar_features: vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT,

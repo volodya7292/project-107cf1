@@ -1,7 +1,7 @@
 use crate::module::scene::Scene;
 use crate::EngineContext;
 use common::glm::Vec2;
-use common::types::{IndexSet};
+use common::types::IndexSet;
 use entity_data::EntityId;
 use std::hash::{Hash, Hasher};
 
@@ -157,7 +157,6 @@ pub struct UILayoutC {
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
-    pub uniform_clip_rect_offset: Option<u32>,
 }
 
 impl UILayoutC {
@@ -218,11 +217,6 @@ impl UILayoutC {
         self.shader_inverted_y = enabled;
         self
     }
-
-    pub fn with_uniform_crop_rect_offset(mut self, uniform_crop_rect_offset: u32) -> Self {
-        self.uniform_clip_rect_offset = Some(uniform_crop_rect_offset);
-        self
-    }
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -252,6 +246,13 @@ impl Rect {
     }
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+pub struct RectUniformData {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+
 #[derive(Default, Copy, Clone)]
 pub struct UILayoutCacheC {
     pub(crate) final_min_size: Vec2,
@@ -259,6 +260,14 @@ pub struct UILayoutCacheC {
     pub(crate) relative_position: Vec2,
     pub(crate) global_position: Vec2,
     pub(crate) clip_rect: Rect,
+    pub(crate) calculated_clip_rect: RectUniformData,
+}
+
+impl UILayoutCacheC {
+    /// Returns final clipping rectangle in normalized coordinates.
+    pub fn calculated_clip_rect(&self) -> &RectUniformData {
+        &self.calculated_clip_rect
+    }
 }
 
 type BasicEventCallback = fn(&EntityId, &mut Scene, &EngineContext);

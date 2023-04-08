@@ -356,7 +356,7 @@ impl Instance {
             adapters.push(Arc::new(Adapter {
                 instance: Arc::clone(self),
                 native: p_device,
-                _props: props,
+                props,
                 enabled_extensions,
                 features: enabled_features,
                 scalar_features: enabled_scalar_features,

@@ -20,7 +20,6 @@ rusttype = "0.9"
 unicode-normalization = "0.1"
 bitvec = "1.0"
 bumpalo = "3.12"
-memoffset = "0.8"
 
 [build-dependencies]
 common = { path = "../../common" }

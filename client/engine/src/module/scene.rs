@@ -1,16 +1,16 @@
 pub mod change_manager;
 
 use crate::ecs::component::SceneEventHandler;
-use crate::module::scene::change_manager::{ChangeType};
+use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use change_manager::SceneChangeManager;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
 use common::scene::relation::Relation;
-use common::types::{HashSet};
+use common::types::{HashMap, HashSet};
 use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
 use std::any::TypeId;
-use std::cell::{RefMut};
+use std::cell::RefMut;
 use std::marker::PhantomData;
 
 pub const N_MAX_OBJECTS: usize = 65535;
@@ -28,6 +28,7 @@ pub struct Scene {
     object_count: usize,
     change_manager: Lrc<SceneChangeManager>,
     entities_to_update: HashSet<EntityId>,
+    component_changes: HashMap<TypeId, ComponentChangesHandle>,
 }
 
 impl Scene {
@@ -38,6 +39,7 @@ impl Scene {
             object_count: 0,
             change_manager: Lrc::wrap(change_manager),
             entities_to_update: HashSet::with_capacity(1024),
+            component_changes: Default::default(),
         }
     }
 
@@ -94,6 +96,16 @@ impl Scene {
         for comp_id in comp_ids {
             change_manager.record(comp_id, entity, ChangeType::Added);
         }
+
+        // Add new component change flows if necessary
+        if let Some(event_handler) = self.storage.get::<SceneEventHandler>(&entity) {
+            for comp_id in event_handler.on_component_update.keys() {
+                self.component_changes
+                    .entry(*comp_id)
+                    .or_insert_with(|| change_manager.register_component_flow_for_id(*comp_id));
+            }
+        }
+
         drop(change_manager);
 
         if let Some(parent) = parent {
@@ -173,6 +185,25 @@ impl Scene {
 impl EngineModule for Scene {
     fn on_update(&mut self, dt: f64, ctx: &EngineContext) {
         let to_update: Vec<_> = self.entities_to_update.drain().collect();
+        let comp_changes: HashMap<_, _> = self
+            .component_changes
+            .iter()
+            .map(|(comp_id, handle)| {
+                (
+                    *comp_id,
+                    self.change_manager.borrow_mut().take_new::<Vec<_>>(*handle),
+                )
+            })
+            .collect();
+
+        for (comp_id, changes) in comp_changes {
+            for entity in changes {
+                let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();
+                if let Some(on_update) = event_handler.on_component_update(&comp_id) {
+                    on_update(&entity, self, ctx);
+                }
+            }
+        }
 
         for entity in to_update {
             let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();

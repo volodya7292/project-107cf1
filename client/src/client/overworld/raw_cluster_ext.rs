@@ -8,7 +8,7 @@ use base::overworld::raw_cluster::BlockDataImpl;
 use base::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
 use base::registry::Registry;
 use common::glm;
-use common::glm::{I32Vec3, Vec2, Vec3, Vec4};
+use common::glm::{I32Vec3, Vec2, Vec3};
 use common::types::Bool;
 use engine::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use engine::module::main_renderer::VertexMesh;
@@ -591,14 +591,6 @@ fn gen_block_vertices(
 
 impl ClientRawCluster for RawCluster {
     fn build_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterMeshes {
-        #[inline]
-        fn add_vertices(out: &mut Vec<PackedVertex>, pos: Vec3, vertices: &[Vertex]) {
-            out.extend(vertices.iter().cloned().map(|mut v| {
-                v.position += pos;
-                v.pack()
-            }));
-        }
-
         let mut vertices = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
         let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
         let mut liquid_cache = LiquidHeightsCache::default();

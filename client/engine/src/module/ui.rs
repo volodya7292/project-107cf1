@@ -1,10 +1,9 @@
-pub mod element;
 pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, Sizing, UIEventHandlerC,
-    UILayoutC, UILayoutCacheC,
+    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData, Sizing,
+    UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
@@ -28,13 +27,6 @@ pub struct UIRenderer {
     root_element_size_dirty: bool,
     force_update_transforms: bool,
     ui_layout_changes: ComponentChangesHandle,
-}
-
-#[derive(Debug, Default, Copy, Clone)]
-#[repr(C)]
-pub(crate) struct RectUniformData {
-    pub min: Vec2,
-    pub max: Vec2,
 }
 
 #[derive(Archetype)]
@@ -491,11 +483,11 @@ impl UIRenderer {
 
             let mut entry = scene.entry(node);
 
-            let Some(transform) = entry.get_checked::<TransformC>() else {
+            let Some(layout) = entry.get_checked::<UILayoutC>() else {
                 continue;
             };
-            let layout = entry.get_checked::<UILayoutC>().unwrap();
-            let cache = entry.get_checked::<UILayoutCacheC>().unwrap();
+            let cache = entry.get::<UILayoutCacheC>();
+            let transform = entry.get::<TransformC>();
 
             let norm_pos = cache.global_position.component_mul(&root_size_inv);
             let norm_size = cache.final_size.component_mul(&root_size_inv);
@@ -512,16 +504,12 @@ impl UIRenderer {
             );
 
             if new_scale != transform.scale || new_position != transform.position {
-                if let Some(rect_offset) = layout.uniform_clip_rect_offset {
-                    let rect_offset = rect_offset as usize;
-                    let rect = cache.clip_rect;
-                    let rect_data = RectUniformData {
-                        min: rect.min.component_mul(&root_size_inv),
-                        max: rect.max.component_mul(&root_size_inv),
-                    };
-                    let uniform_data = entry.get_mut::<UniformDataC>();
-                    uniform_data.copy_from_with_offset(rect_offset, rect_data);
-                }
+                let cache = entry.get_mut::<UILayoutCacheC>();
+                let rect = cache.clip_rect;
+                cache.calculated_clip_rect = RectUniformData {
+                    min: rect.min.component_mul(&root_size_inv),
+                    max: rect.max.component_mul(&root_size_inv),
+                };
 
                 let transform = entry.get_mut::<TransformC>();
                 transform.scale = new_scale;
@@ -550,7 +538,9 @@ impl UIRenderer {
         // Iterate starting from children
         for node in linear_tree.iter().rev() {
             let entry = scene.entry(node);
-            let cache = entry.get::<UILayoutCacheC>();
+            let Some(cache) = entry.get_checked::<UILayoutCacheC>() else {
+                continue;
+            };
 
             if !cache.clip_rect.contains_point(point) {
                 continue;
@@ -594,7 +584,7 @@ impl EngineModule for UIRenderer {
             &mut scene,
             &self.root_element_size,
             &mut dirty_elements,
-            self.force_update_transforms
+            self.force_update_transforms,
         );
 
         self.force_update_transforms = false;

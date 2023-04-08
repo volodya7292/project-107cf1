@@ -1,4 +1,5 @@
 use crate::ecs::component::render_config::RenderType;
+use crate::module::main_renderer::MaterialPipelineId;
 use common::glm::U8Vec4;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -133,10 +134,11 @@ pub struct SimpleTextC {
     pub max_width: f32,
     pub max_height: f32,
     pub render_type: RenderType,
+    pub mat_pipeline: MaterialPipelineId,
 }
 
 impl SimpleTextC {
-    pub fn new() -> Self {
+    pub fn new(mat_pipeline_id: MaterialPipelineId) -> Self {
         Self {
             text: Default::default(),
             h_align: TextHAlign::LEFT,
@@ -144,6 +146,7 @@ impl SimpleTextC {
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
             render_type: RenderType::MAIN,
+            mat_pipeline: mat_pipeline_id,
         }
     }
 

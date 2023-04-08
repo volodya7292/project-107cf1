@@ -9,6 +9,10 @@ layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     vec4 color;
 };
 
+layout(location = 0) in Input {
+    vec2 texCoord;
+} vs_in;
+
 void main() {
     outAlbedo = color;
     outSpecular = vec4(0.0);

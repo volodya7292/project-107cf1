@@ -1,30 +1,18 @@
-use crate::rendering::ui::fancy_button;
-use common::nalgebra as na;
+use crate::rendering::ui::{fancy_button, text};
 use common::resource_file::ResourceFile;
-use engine::module::main_renderer::MainRenderer;
-use engine::vkw;
+use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
+use engine::module::text_renderer::TextRenderer;
 use engine::vkw::shader::VInputRate;
 use engine::vkw::PrimitiveTopology;
+use engine::{vkw, EngineContext};
 use std::sync::Arc;
 
 pub struct MaterialPipelines {
-    cluster: u32,
-    panel: u32,
-    fancy_button: u32,
-}
-
-impl MaterialPipelines {
-    pub fn cluster(&self) -> u32 {
-        self.cluster
-    }
-
-    pub fn panel(&self) -> u32 {
-        self.panel
-    }
-
-    pub fn fancy_button(&self) -> u32 {
-        self.fancy_button
-    }
+    pub cluster: MaterialPipelineId,
+    pub panel: MaterialPipelineId,
+    pub text_3d: MaterialPipelineId,
+    pub text_ui: MaterialPipelineId,
+    pub fancy_button: MaterialPipelineId,
 }
 
 fn create_vertex_shader(
@@ -44,7 +32,10 @@ fn create_vertex_shader(
     )
 }
 
-pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> MaterialPipelines {
+pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPipelines {
+    let mut renderer = ctx.module_mut::<MainRenderer>();
+    let mut text_renderer = ctx.module_mut::<TextRenderer>();
+
     let device = Arc::clone(renderer.device());
 
     let cluster = {
@@ -66,6 +57,22 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> Mat
             .unwrap();
 
         renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_LIST, true)
+    };
+
+    let text_3d = {
+        let pixel = device
+            .create_pixel_shader(
+                include_bytes!("../../res/shaders/text_char_3d.frag.spv"),
+                // &resources
+                //     .get("shaders/text_char_3d.frag.spv")
+                //     .unwrap()
+                //     .read()
+                //     .unwrap(),
+                "text_char_3d.frag",
+            )
+            .unwrap();
+
+        text_renderer.register_text_pipeline(&mut renderer, pixel)
     };
 
     let panel = {
@@ -96,11 +103,15 @@ pub fn create(resources: &Arc<ResourceFile>, renderer: &mut MainRenderer) -> Mat
         renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_STRIP, true)
     };
 
-    let fancy_button = fancy_button::load_pipeline(renderer);
+    let text_ui = text::load_pipeline(&mut renderer, &mut text_renderer);
+
+    let fancy_button = fancy_button::load_pipeline(&mut renderer);
 
     MaterialPipelines {
         cluster,
         panel,
+        text_3d,
+        text_ui,
         fancy_button,
     }
 }

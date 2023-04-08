@@ -24,6 +24,7 @@ async-executor = "1.5"
 async-channel = "1.8"
 futures-lite = "1.12"
 bumpalo = "3.12"
+memoffset = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos = { path = "../common/macos" }

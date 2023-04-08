@@ -1,3 +1,5 @@
+use crate::rendering::ui::text;
+use crate::rendering::ui::text::{TextImpl, UIText};
 use common::glm::{Mat4, U8Vec4, Vec4};
 use common::scene::relation::Relation;
 use engine::ecs::component::render_config::RenderType;
@@ -5,9 +7,8 @@ use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::transition::{TransValue, Transition};
 use engine::ecs::component::ui::{UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{transition, MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
-use engine::module::main_renderer::MainRenderer;
+use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, Scene};
-use engine::module::ui::element::{TextState, UIText};
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIRenderer};
 use engine::vkw::PrimitiveTopology;
@@ -28,7 +29,7 @@ struct UniformData {
     background_color: Vec4,
 }
 
-pub fn load_pipeline(renderer: &mut MainRenderer) -> u32 {
+pub fn load_pipeline(renderer: &mut MainRenderer) -> MaterialPipelineId {
     let device = renderer.device();
 
     let vertex = device
@@ -52,7 +53,12 @@ impl UIState for FancyButtonState {}
 
 pub type FancyButton = UIObject<FancyButtonState>;
 
-pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: u32) -> EntityId {
+pub fn new(
+    scene: &mut Scene,
+    parent: EntityId,
+    mat_pipeline: MaterialPipelineId,
+    text_mat_pipeline: MaterialPipelineId,
+) -> EntityId {
     let mut surface_obj = FancyButton::new_raw(
         UILayoutC::new(),
         FancyButtonState {
@@ -73,7 +79,7 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: u32) -> EntityId {
     );
 
     let btn_entity = scene.add_object(Some(parent), surface_obj).unwrap();
-    let text_entity = scene.add_object(Some(btn_entity), UIText::new()).unwrap();
+    let text_entity = text::new(scene, btn_entity, text_mat_pipeline);
 
     let mut surface_obj = scene.object::<FancyButton>(&btn_entity);
     surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;

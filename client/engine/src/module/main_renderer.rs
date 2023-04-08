@@ -245,6 +245,7 @@ struct FrameInfoUniforms {
     camera: CameraInfo,
     atlas_info: U32Vec4,
     frame_size: UVec2,
+    surface_size: UVec2,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -286,6 +287,8 @@ impl MaterialInfo {
         info
     }
 }
+
+pub type MaterialPipelineId = u32;
 
 pub(crate) struct BufferUpdate1 {
     pub buffer: BufferHandle,
@@ -821,7 +824,7 @@ impl MainRenderer {
         shaders: &[Arc<Shader>],
         topology: PrimitiveTopology,
         cull_back_faces: bool,
-    ) -> u32 {
+    ) -> MaterialPipelineId {
         let main_signature = self
             .device
             .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
@@ -1169,7 +1172,8 @@ impl MainRenderer {
                     },
 
                     atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
-                    frame_size: glm::convert_unchecked(self.render_size),
+                    frame_size: self.render_size,
+                    surface_size: self.surface_size,
                 }
             };
             per_frame_infos[RenderType::OVERLAY as usize] = {
@@ -1378,7 +1382,6 @@ impl MainRenderer {
 
         self.active_camera
             .set_aspect(self.render_size.x, self.render_size.y);
-        // dbg!(self.render_size, self.surface_size);
     }
 }
 

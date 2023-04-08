@@ -18,15 +18,15 @@ layout(set = SET_GENERAL_PER_FRAME, binding = 5, std430) coherent buffer Translu
 layout(set = SET_GENERAL_PER_FRAME, binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
  
 void main() {
-    ivec2 coord = ivec2(gl_FragCoord.xy);
+    ivec2 coord = ivec2(gl_FragCoord.xy / info.surface_size * info.frame_size);
     uint coordIdx = info.frame_size.x * coord.y + coord.x;
-    uint sliceSize = info.frame_size.x * info.frame_size.y;
+    uint depthSliceSize = info.frame_size.x * info.frame_size.y;
 
     vec4 currColor = vec4(0);
 
     // Collect translucency
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
-        if (depthsArray[coordIdx + i * sliceSize] == 0xFFFFFFFFu) {
+        if (depthsArray[coordIdx + i * depthSliceSize] == 0xFFFFFFFFu) {
             // The following layers do not contain any colors, stop the loop
             break;
         } else {

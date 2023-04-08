@@ -52,6 +52,7 @@ struct FrameInfo {
     Camera camera;
     uvec4 tex_atlas_info; // .x: tile size in pixels
     uvec2 frame_size;
+    uvec2 surface_size;
 };
 
 

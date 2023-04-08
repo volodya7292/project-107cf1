@@ -2,8 +2,9 @@ use crate::client::utils;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::fancy_button;
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
+use crate::rendering::ui::text::{TextImpl, UIText};
+use crate::rendering::ui::{fancy_button, text};
 use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
@@ -42,10 +43,9 @@ use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::module::input::Input;
 use engine::module::main_renderer;
-use engine::module::main_renderer::{camera, MainRenderer, SimpleObject};
+use engine::module::main_renderer::{camera, MainRenderer, SimpleObject, VertexMeshObject};
 use engine::module::scene::Scene;
-use engine::module::text_renderer::{FontSet, TextObject, TextRenderer};
-use engine::module::ui::element::{TextState, UIText};
+use engine::module::text_renderer::{FontSet, RawTextObject, TextRenderer};
 use engine::module::ui::{UIObject, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::utils::wsi::find_best_video_mode;
@@ -220,11 +220,12 @@ impl Application for Game {
         self.grab_cursor(&*ctx.window(), true, ctx);
 
         // ------------------------------------------------------------------------------------------------
-        let mut renderer = ctx.module_mut::<MainRenderer>();
 
         let mat_pipelines;
         {
-            mat_pipelines = material_pipelines::create(&self.resources, &mut renderer);
+            mat_pipelines = material_pipelines::create(&self.resources, &ctx);
+
+            let mut renderer = ctx.module_mut::<MainRenderer>();
 
             for (index, (ty, res_ref)) in self.res_map.storage().textures().iter().enumerate() {
                 renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
@@ -235,11 +236,12 @@ impl Application for Game {
             }
         }
 
+        let mut renderer = ctx.module_mut::<MainRenderer>();
         let state = self.main_state.lock();
 
         let overworld_renderer = OverworldRenderer::new(
             Arc::clone(renderer.device()),
-            mat_pipelines.cluster(),
+            mat_pipelines.cluster,
             Arc::clone(self.res_map.storage()),
             Arc::clone(state.overworld_orchestrator.lock().loaded_clusters()),
             self.root_entity,
@@ -276,9 +278,9 @@ impl Application for Game {
         let player_pos = self.main_state.lock().player_pos;
         let text = scene.add_object(
             Some(self.root_entity),
-            TextObject::new(
+            RawTextObject::new(
                 TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
-                SimpleTextC::new()
+                SimpleTextC::new(mat_pipelines.text_3d)
                     .with_text(StyledString::new(
                         "Govno, my is Gmine",
                         TextStyle::new().with_font(font_id).with_font_size(0.5),
@@ -287,19 +289,6 @@ impl Application for Game {
                     .with_h_align(TextHAlign::LEFT),
             ),
         );
-
-        // let panel = renderer.add_object(
-        //     Some(self.root_entity),
-        //     VertexMeshObject::new(
-        //         component::Transform::new()
-        //             .with_position(DVec3::new(0.0, 0.0, 1.0))
-        //             .with_scale(Vec3::new(0.5, 0.5, 1.0))
-        //             .with_use_parent_transform(false),
-        //         component::MeshRenderConfig::new(mat_pipelines.panel(), false)
-        //             .with_stage(RenderStage::OVERLAY),
-        //         component::VertexMesh::without_data(4, 1),
-        //     ),
-        // );
 
         let ui_renderer = ctx.module_mut::<UIRenderer>();
         let root_ui_entity = *ui_renderer.root_ui_entity();
@@ -315,36 +304,13 @@ impl Application for Game {
                     (),
                 )
                 .with_renderer(
-                    MeshRenderConfigC::new(mat_pipelines.panel(), true).with_stage(RenderType::OVERLAY),
+                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_stage(RenderType::OVERLAY),
                 )
                 .with_mesh(VertexMeshC::without_data(4, 1)),
             )
             .unwrap();
 
-        let text = scene
-            .add_object(
-                Some(panel),
-                UIText::new().add_event_handler(
-                    UIEventHandlerC::new()
-                        .add_on_cursor_enter(|entity, scene, _| {
-                            let mut entry = scene.entry(entity);
-                            let simple_text = entry.get_mut::<SimpleTextC>();
-                            simple_text
-                                .text
-                                .style_mut()
-                                .set_color(U8Vec4::new(255, 100, 50, 255));
-                        })
-                        .add_on_cursor_leave(|entity, scene, _| {
-                            let mut entry = scene.entry(entity);
-                            let simple_text = entry.get_mut::<SimpleTextC>();
-                            simple_text
-                                .text
-                                .style_mut()
-                                .set_color(U8Vec4::new(255, 255, 255, 255));
-                        }),
-                ),
-            )
-            .unwrap();
+        let text = text::new(&mut scene, panel, mat_pipelines.text_ui);
 
         let mut obj = scene.object::<UIText>(&text);
         obj.set_text(StyledString::new(
@@ -353,7 +319,12 @@ impl Application for Game {
         ));
         drop(obj);
 
-        let fb = fancy_button::new(&mut scene, panel, mat_pipelines.fancy_button());
+        let fb = fancy_button::new(
+            &mut scene,
+            panel,
+            mat_pipelines.fancy_button,
+            mat_pipelines.text_ui,
+        );
         let mut fb_obj = scene.object::<FancyButton>(&fb);
         fb_obj.set_text("GOV");
 

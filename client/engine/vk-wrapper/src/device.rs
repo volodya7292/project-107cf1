@@ -218,7 +218,20 @@ impl Device {
             return Err(DeviceError::ZeroBufferSize);
         }
 
-        let elem_align = 1;
+        assert_eq!(
+            usage.contains(BufferUsageFlags::UNIFORM | BufferUsageFlags::STORAGE),
+            false
+        );
+        let limits = &self.wrapper.adapter.props.limits;
+
+        let elem_align = if usage.contains(BufferUsageFlags::UNIFORM) {
+            limits.min_uniform_buffer_offset_alignment
+        } else if usage.contains(BufferUsageFlags::STORAGE) {
+            limits.min_storage_buffer_offset_alignment
+        } else {
+            1
+        };
+
         let aligned_elem_size = utils::make_mul_of_u64(elem_size, elem_align as u64);
         let bytesize = aligned_elem_size as u64 * len;
 

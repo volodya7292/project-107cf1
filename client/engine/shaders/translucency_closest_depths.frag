@@ -1,6 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "../../engine/shaders/common.glsl"
+#include "./common.glsl"
 
 layout(early_fragment_tests) in;
 

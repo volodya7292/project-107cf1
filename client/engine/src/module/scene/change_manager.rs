@@ -190,16 +190,20 @@ impl SceneChangeManager {
         self.by_component.entry(ty).or_default()
     }
 
-    /// Registers new change receiver for component `C`.
-    pub fn register_component_flow<C: Component>(&mut self) -> ComponentChangesHandle {
-        let ty = TypeId::of::<C>();
-        let changes = self.get_component_changes(ty);
+    /// Registers new change receiver for the specified component id.
+    pub fn register_component_flow_for_id(&mut self, comp_id: TypeId) -> ComponentChangesHandle {
+        let changes = self.get_component_changes(comp_id);
         let new_flow_idx = changes.register_flow();
 
         ComponentChangesHandle {
             flow_idx: new_flow_idx,
-            ty,
+            ty: comp_id,
         }
+    }
+
+    /// Registers new change receiver for component `C`.
+    pub fn register_component_flow<C: Component>(&mut self) -> ComponentChangesHandle {
+        self.register_component_flow_for_id(TypeId::of::<C>())
     }
 
     /// Marks component of type `ty` of `entity` with `change` mark.
