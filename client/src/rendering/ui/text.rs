@@ -34,12 +34,14 @@ struct UniformData {
 #[repr(C)]
 pub struct ObjectUniformData {
     clip_rect: RectUniformData,
+    inner_shadow_intensity: f32,
 }
 
 #[derive(Clone)]
 pub struct TextState {
     raw_text_entity: EntityId,
     text: StyledString,
+    inner_shadow_intensity: f32,
 }
 
 impl UIState for TextState {}
@@ -52,6 +54,7 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId
         TextState {
             raw_text_entity: Default::default(),
             text: Default::default(),
+            inner_shadow_intensity: 0.0,
         },
     )
     .with_scene_event_handler(

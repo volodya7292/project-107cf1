@@ -68,10 +68,11 @@ lazy_static! {
     pub static ref IMAGE_FORMATS: HashMap<Format, FormatFeatureFlags> = [
         (Format::R32_UINT, *DEFAULT_IMAGE_FEATURES),
         (Format::R32_FLOAT, *DEFAULT_IMAGE_FEATURES),
-        (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
         (Format::RG8_UNORM, *DEFAULT_IMAGE_FEATURES),
         (Format::RG16_UNORM, *DEFAULT_IMAGE_FEATURES),
-        (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES)
+        (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA16_FLOAT, *DEFAULT_IMAGE_FEATURES),
     ]
     .into_iter()
     .collect();

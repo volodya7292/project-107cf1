@@ -264,14 +264,14 @@ impl CmdList {
         &mut self,
         signature: &Arc<PipelineSignature>,
         first_set_id: u32,
-        descriptor_set: &[DescriptorSet],
+        descriptor_sets: &[DescriptorSet],
         dynamic_offsets: &[u32],
     ) {
         self.bind_pipeline_inputs(
             signature,
             vk::PipelineBindPoint::GRAPHICS,
             first_set_id,
-            descriptor_set,
+            descriptor_sets,
             dynamic_offsets,
         );
     }

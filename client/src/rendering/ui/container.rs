@@ -1,5 +1,5 @@
 use engine::module::ui::UIObject;
 
-struct State {}
+pub struct ContainerState {}
 
-pub type Container = UIObject<State>;
+pub type Container = UIObject<ContainerState>;

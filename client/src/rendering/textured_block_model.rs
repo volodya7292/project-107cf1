@@ -234,8 +234,8 @@ impl TexturedBlockModel {
                 pos_quads.iter().any(|q1| {
                     let mut q0 = *q0;
                     let mut q1 = *q1;
-                    let mut v0 = q0.vertices_mut();
-                    let mut v1 = q1.vertices_mut();
+                    let v0 = q0.vertices_mut();
+                    let v1 = q1.vertices_mut();
 
                     for v in v0.iter_mut().chain(v1) {
                         *v = v.component_mul(&dir_mask);

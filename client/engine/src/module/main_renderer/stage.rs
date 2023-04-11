@@ -16,6 +16,7 @@ use vk_wrapper::{
 pub mod compose;
 pub mod depth;
 pub mod g_buffer;
+pub mod post_process;
 pub mod present_queue_transition;
 
 pub struct StageContext<'a> {

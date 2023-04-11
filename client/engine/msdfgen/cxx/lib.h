@@ -36,8 +36,8 @@ void shape_check_last_contour(msdfgen::Shape& shape) {
     }
 }
 
-void generateMSDF(float* data, uint32_t width, uint32_t height, Vector2 offset, msdfgen::Shape const& shape, double range) {
-    msdfgen::BitmapRef<float, 3> ref(data, width, height);
+void generateMTSDF(float* data, uint32_t width, uint32_t height, Vector2 offset, msdfgen::Shape const& shape, double range) {
+    msdfgen::BitmapRef<float, 4> ref(data, width, height);
     msdfgen::Projection proj(msdfgen::Vector2(1.0), msdfgen::Vector2(offset.x, offset.y));
-    msdfgen::generateMSDF(ref, shape, proj, range);
+    msdfgen::generateMTSDF(ref, shape, proj, range);
 }

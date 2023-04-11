@@ -59,3 +59,9 @@ impl Drop for PipelineSignature {
         }
     }
 }
+
+impl PartialEq for PipelineSignature {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+    }
+}

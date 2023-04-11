@@ -18,7 +18,6 @@ use vk_wrapper::{
     SubpassDependency,
 };
 
-const ALBEDO_ATTACHMENT_ID: u32 = 0;
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 
 pub struct GBufferStage {
@@ -30,6 +29,7 @@ pub struct GBufferStage {
 }
 
 impl GBufferStage {
+    pub const ALBEDO_ATTACHMENT_ID: u32 = 0;
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
     pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
 
@@ -330,7 +330,7 @@ impl RenderStage for GBufferStage {
                 signature: &params.main_signature,
                 subpass_index: 0,
                 cull_back_faces: params.cull_back_faces,
-                blend_attachments: &[ALBEDO_ATTACHMENT_ID],
+                blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: false,
                 spec_consts: &[(
@@ -346,7 +346,7 @@ impl RenderStage for GBufferStage {
                 signature: &params.main_signature,
                 subpass_index: 1,
                 cull_back_faces: params.cull_back_faces,
-                blend_attachments: &[ALBEDO_ATTACHMENT_ID],
+                blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: true,
                 spec_consts: &[(

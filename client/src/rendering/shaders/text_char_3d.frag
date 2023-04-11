@@ -4,7 +4,7 @@
 #include "../../../engine/shaders/text_char_frag_template.glsl"
 
 void main() {
-    float opacity = calculateOpacity();
-
+    float opacity, sd;
+    calculateCharShading(opacity, sd);
     writeOutputAlbedo(vec4(vs_in.color.rgb, vs_in.color.a * opacity));
 }

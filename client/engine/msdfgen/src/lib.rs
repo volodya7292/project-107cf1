@@ -42,7 +42,7 @@ mod sys {
             p2: Vector2,
             p3: Vector2,
         );
-        pub unsafe fn generateMSDF(
+        pub unsafe fn generateMTSDF(
             output: *mut f32,
             width: u32,
             height: u32,
@@ -155,19 +155,24 @@ pub fn generate_msdf(
     shape.pin_mut().normalize();
     sys::edgeColoringSimple(shape.pin_mut(), 3.0, 0);
 
-    let data_f_len = (size * size * 3) as usize;
+    let data_f_len = (size * size * 4) as usize;
     let mut data_f = Vec::<f32>::with_capacity(data_f_len);
     unsafe {
-        sys::generateMSDF(data_f.as_mut_ptr(), size, size, offset, &shape, px_range as f64);
+        sys::generateMTSDF(data_f.as_mut_ptr(), size, size, offset, &shape, px_range as f64);
         data_f.set_len(data_f_len);
     };
 
-    for (b, f) in output.chunks_exact_mut(4).zip(data_f.chunks_exact_mut(3)) {
-        for (b, f) in b[0..3].iter_mut().zip(f) {
-            *b = 255 - (*f * 256.0).clamp(0.0, 255.0) as u8;
-        }
-        b[3] = 255;
+    for (b, f) in output.iter_mut().zip(data_f) {
+        *b = 255 - (f * 256.0).clamp(0.0, 255.0) as u8;
     }
+
+    // for (b, f) in output.chunks_exact_mut(4).zip(data_f.chunks_exact_mut(4)) {
+    //     b[3] = ((f[3] + 1.0) / 2.0 * 255.0) as u8;
+    //     for (b, f) in b[0..3].iter_mut().zip(f) {
+    //         *b = 255 - (*f * 256.0).clamp(0.0, 255.0) as u8;
+    //     }
+    //     // b[3] = 255;
+    // }
 
     Ok(())
 }

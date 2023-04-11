@@ -117,6 +117,26 @@ impl Default for PipelineRasterization {
 pub struct AttachmentColorBlend(pub(crate) vk::PipelineColorBlendAttachmentState);
 
 impl AttachmentColorBlend {
+    pub fn additive() -> Self {
+        Self(
+            vk::PipelineColorBlendAttachmentState::builder()
+                .blend_enable(true)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_color_blend_factor(vk::BlendFactor::ONE)
+                .dst_color_blend_factor(vk::BlendFactor::ONE)
+                .alpha_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ONE)
+                .color_write_mask(
+                    vk::ColorComponentFlags::R
+                        | vk::ColorComponentFlags::G
+                        | vk::ColorComponentFlags::B
+                        | vk::ColorComponentFlags::A,
+                )
+                .build(),
+        )
+    }
+
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.0.blend_enable = enabled as u32;
         self

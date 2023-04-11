@@ -22,10 +22,10 @@ float screenPxRange() {
     return max(0.5 * dot(unitRange, screenTexSize), 1.0);
 }
 
-float calculateOpacity() {
-    vec3 msd = texture(msdfArray, vec3(vs_in.texCoord, vs_in.glyphIndex)).rgb;
-    float sd = median(msd.r, msd.g, msd.b);
+void calculateCharShading(out float opacity, out float signed_distance) {
+    vec4 msdt = texture(msdfArray, vec3(vs_in.texCoord, vs_in.glyphIndex));
+    float sd = median(msdt.r, msdt.g, msdt.b);
     float screenPxDistance = screenPxRange() * (sd - 0.5);
-    float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-    return opacity;
+    opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
+    signed_distance = msdt.a;
 }

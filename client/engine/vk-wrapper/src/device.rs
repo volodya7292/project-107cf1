@@ -355,7 +355,7 @@ impl Device {
         image_type: ImageType,
         is_array: bool,
         format: Format,
-        max_mip_levels: u32,
+        preferred_mip_levels: u32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
         name: &str,
@@ -379,8 +379,8 @@ impl Device {
         )?;
 
         let mut size = preferred_size;
-        size.0 = size.0.min(format_props.max_extent.width);
-        size.1 = size.1.min(format_props.max_extent.height);
+        size.0 = size.0.clamp(1, format_props.max_extent.width);
+        size.1 = size.1.clamp(1, format_props.max_extent.height);
 
         let (extent, array_layers) = if image_type == Image::TYPE_2D {
             size.2 = size.2.min(format_props.max_array_layers);
@@ -403,11 +403,12 @@ impl Device {
                 1,
             )
         };
-        let mip_levels = if max_mip_levels == 0 {
+        let mut mip_levels = if preferred_mip_levels == 0 {
             utils::log2(size.0.max(size.1).max(size.2)) + 1
         } else {
-            max_mip_levels.min(format_props.max_mip_levels)
+            preferred_mip_levels
         };
+        mip_levels = mip_levels.min(format_props.max_mip_levels);
 
         let tiling = vk::ImageTiling::OPTIMAL;
         let image_info = vk::ImageCreateInfo::builder()
@@ -532,18 +533,18 @@ impl Device {
     pub fn create_image_2d(
         self: &Arc<Self>,
         format: Format,
-        max_mip_levels: u32,
+        preferred_mip_levels: u32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_named(format, max_mip_levels, usage, preferred_size, "")
+        self.create_image_2d_named(format, preferred_mip_levels, usage, preferred_size, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
     pub fn create_image_2d_named(
         self: &Arc<Self>,
         format: Format,
-        max_mip_levels: u32,
+        preferred_mip_levels: u32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32),
         name: &str,
@@ -552,7 +553,7 @@ impl Device {
             Image::TYPE_2D,
             false,
             format,
-            max_mip_levels,
+            preferred_mip_levels,
             usage,
             (preferred_size.0, preferred_size.1, 1),
             name,
@@ -563,18 +564,18 @@ impl Device {
     pub fn create_image_2d_array(
         self: &Arc<Self>,
         format: Format,
-        max_mip_levels: u32,
+        preferred_mip_levels: u32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
     ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_array_named(format, max_mip_levels, usage, preferred_size, "")
+        self.create_image_2d_array_named(format, preferred_mip_levels, usage, preferred_size, "")
     }
 
     /// If max_mip_levels = 0, mip level count is calculated automatically.
     pub fn create_image_2d_array_named(
         self: &Arc<Self>,
         format: Format,
-        max_mip_levels: u32,
+        preferred_mip_levels: u32,
         usage: ImageUsageFlags,
         preferred_size: (u32, u32, u32),
         name: &str,
@@ -583,7 +584,7 @@ impl Device {
             Image::TYPE_2D,
             true,
             format,
-            max_mip_levels,
+            preferred_mip_levels,
             usage,
             preferred_size,
             name,

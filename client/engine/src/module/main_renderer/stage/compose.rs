@@ -1,6 +1,6 @@
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::stage::depth::DepthStage;
-use crate::module::main_renderer::stage::g_buffer::GBufferStage;
+use crate::module::main_renderer::stage::post_process::PostProcessStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
@@ -15,8 +15,6 @@ use vk_wrapper::{
 pub struct ComposeStage {
     device: Arc<Device>,
     compose_signature: Arc<PipelineSignature>,
-    compose_pool: DescriptorPool,
-    compose_desc: DescriptorSet,
     compose_sampler: Arc<Sampler>,
 }
 
@@ -39,9 +37,6 @@ impl ComposeStage {
             .create_pipeline_signature(&[quad_vert_shader, compose_pixel_shader], &[])
             .unwrap();
 
-        let mut compose_pool = compose_signature.create_pool(0, 1).unwrap();
-        let compose_desc = compose_pool.alloc().unwrap();
-
         let compose_sampler = device
             .create_sampler(
                 SamplerFilter::LINEAR,
@@ -55,8 +50,6 @@ impl ComposeStage {
         Self {
             device: Arc::clone(device),
             compose_signature,
-            compose_pool,
-            compose_desc,
             compose_sampler,
         }
     }
@@ -68,7 +61,7 @@ impl RenderStage for ComposeStage {
     }
 
     fn execution_dependencies(&self) -> Vec<RenderStageId> {
-        vec![RenderStageId::of::<GBufferStage>()]
+        vec![RenderStageId::of::<PostProcessStage>()]
     }
 
     fn run(
@@ -138,41 +131,25 @@ impl RenderStage for ComposeStage {
             },
         );
 
-        let g_framebuffer: Arc<Framebuffer> = resources.get(GBufferStage::RES_FRAMEBUFFER);
-        let translucency_depths_image: Arc<DeviceBuffer> =
-            resources.get(DepthStage::RES_TRANSLUCENCY_DEPTHS_IMAGE);
-        let translucency_colors_image: Arc<Image> =
-            resources.get(GBufferStage::RES_TRANSLUCENCY_COLORS_IMAGE);
-        let albedo = g_framebuffer.get_image(0).unwrap();
+        let post_framebuffer: Arc<Framebuffer> = resources.get(PostProcessStage::RES_OUTPUT_FRAMEBUFFER);
+        let source_image = post_framebuffer.get_image(0).unwrap();
+
+        let compose_desc = resources.request_descriptors("compose-desc", compose_pipeline.signature(), 0, 1);
 
         // -----------------------------------------------------------------------------
 
         unsafe {
             self.device.update_descriptor_set(
-                self.compose_desc,
-                &[
-                    self.compose_pool.create_binding(
-                        0,
-                        0,
-                        BindingRes::Image(
-                            Arc::clone(albedo),
-                            Some(Arc::clone(&self.compose_sampler)),
-                            ImageLayout::SHADER_READ,
-                        ),
+                compose_desc.get(0),
+                &[compose_desc.create_binding(
+                    0,
+                    0,
+                    BindingRes::Image(
+                        Arc::clone(source_image),
+                        Some(Arc::clone(&self.compose_sampler)),
+                        ImageLayout::SHADER_READ,
                     ),
-                    self.compose_pool
-                        .create_binding(1, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
-                    self.compose_pool.create_binding(
-                        5,
-                        0,
-                        BindingRes::Buffer(translucency_depths_image.handle()),
-                    ),
-                    self.compose_pool.create_binding(
-                        6,
-                        0,
-                        BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
-                    ),
-                ],
+                )],
             );
         }
 
@@ -191,7 +168,7 @@ impl RenderStage for ComposeStage {
             false,
         );
         cl.bind_pipeline(&compose_pipeline);
-        cl.bind_graphics_inputs(&self.compose_signature, 0, &[self.compose_desc], &[]);
+        cl.bind_graphics_inputs(&self.compose_signature, 0, &[compose_desc.get(0)], &[]);
         cl.draw(3, 0);
         cl.end_render_pass();
 

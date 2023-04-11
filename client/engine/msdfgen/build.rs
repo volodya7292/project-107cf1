@@ -1,6 +1,7 @@
 use std::path::Path;
 
 fn main() {
+    println!("cargo:rerun-if-changed=cxx");
     println!("cargo:rustc-link-lib=msdfgen");
 
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();

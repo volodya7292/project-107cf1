@@ -48,6 +48,7 @@ use crate::module::main_renderer::resources::{MaterialPipelineParams, RendererRe
 use crate::module::main_renderer::stage::compose::ComposeStage;
 use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
+use crate::module::main_renderer::stage::post_process::PostProcessStage;
 use crate::module::main_renderer::stage::present_queue_transition::PresentQueueTransitionStage;
 use crate::module::main_renderer::stage::{RenderStage, StageContext};
 use crate::module::main_renderer::stage_manager::StageManager;
@@ -694,6 +695,7 @@ impl MainRenderer {
         let mut stages: Vec<Box<dyn RenderStage>> = vec![
             Box::new(DepthStage::new(&device)),
             Box::new(GBufferStage::new(&device)),
+            Box::new(PostProcessStage::new(&device)),
             Box::new(ComposeStage::new(&device)),
         ];
         if graphics_queue != present_queue {

@@ -100,6 +100,10 @@ impl DepthStage {
                     dst_stage_mask: PipelineStageFlags::DS_LOAD_AND_EARLY_TESTS,
                     src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                     dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                    // src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                    // dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                    // src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    // dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
                 }],
             )
             .unwrap();
@@ -376,7 +380,7 @@ impl RenderStage for DepthStage {
                     prev_power_of_two(ctx.render_size.1),
                 ),
             )
-            .with_max_mip_levels(0),
+            .with_preferred_mip_levels(0),
         );
 
         let depth_pyramid_views = resources.request(

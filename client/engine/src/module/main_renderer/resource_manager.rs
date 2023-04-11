@@ -3,11 +3,31 @@ use common::types::{HashMap, HashSet};
 use std::any::Any;
 use std::collections::hash_map;
 use std::hash::Hash;
+use std::ops::Deref;
 use std::sync::Arc;
 use vk_wrapper::{
-    BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image, ImageType, ImageUsageFlags,
-    QueueType,
+    Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer,
+    Format, HostBuffer, Image, ImageType, ImageUsageFlags, PipelineSignature, QueueType,
 };
+
+pub struct OwnedDescriptorSets {
+    pool: DescriptorPool,
+    sets: Vec<DescriptorSet>,
+}
+
+impl OwnedDescriptorSets {
+    pub fn create_binding(&self, id: u32, array_index: u32, res: BindingRes) -> Binding {
+        self.pool.create_binding(id, array_index, res)
+    }
+
+    pub fn sets(&self) -> &[DescriptorSet] {
+        &self.sets
+    }
+
+    pub fn get(&self, idx: usize) -> DescriptorSet {
+        self.sets[idx]
+    }
+}
 
 type Name = String;
 
@@ -164,13 +184,34 @@ impl ResourceManagementScope<'_> {
                     params.ty,
                     params.is_array,
                     params.format,
-                    params.max_mip_levels,
+                    params.preferred_mip_levels,
                     params.usage,
                     params.preferred_size,
                     name,
                 )
                 .unwrap()
         })
+    }
+
+    pub fn request_descriptors(
+        &self,
+        name: &str,
+        signature: &Arc<PipelineSignature>,
+        set_layout_id: u32,
+        num_descriptors: usize,
+    ) -> Arc<OwnedDescriptorSets> {
+        self.request(
+            name,
+            (Arc::clone(signature), set_layout_id, num_descriptors),
+            |(signature, set_layout_id, num_descriptors), name| {
+                let mut pool = signature.create_pool(*set_layout_id, 1).unwrap();
+                let sets = (0..*num_descriptors)
+                    .map(|_| pool.alloc().unwrap())
+                    .collect::<Vec<_>>();
+
+                Arc::new(OwnedDescriptorSets { pool, sets })
+            },
+        )
     }
 }
 
@@ -241,7 +282,7 @@ pub struct ImageParams {
     format: Format,
     usage: ImageUsageFlags,
     preferred_size: (u32, u32, u32),
-    max_mip_levels: u32,
+    preferred_mip_levels: u32,
     is_array: bool,
 }
 
@@ -252,7 +293,7 @@ impl ImageParams {
             format,
             usage,
             preferred_size: (preferred_size.0, preferred_size.1, 1),
-            max_mip_levels: 1,
+            preferred_mip_levels: 1,
             is_array: false,
         }
     }
@@ -263,7 +304,7 @@ impl ImageParams {
             format,
             usage,
             preferred_size,
-            max_mip_levels: 1,
+            preferred_mip_levels: 1,
             is_array: true,
         }
     }
@@ -274,13 +315,13 @@ impl ImageParams {
             format,
             usage,
             preferred_size,
-            max_mip_levels: 1,
+            preferred_mip_levels: 1,
             is_array: false,
         }
     }
 
-    pub fn with_max_mip_levels(mut self, max_mip_levels: u32) -> Self {
-        self.max_mip_levels = max_mip_levels;
+    pub fn with_preferred_mip_levels(mut self, max_mip_levels: u32) -> Self {
+        self.preferred_mip_levels = max_mip_levels;
         self
     }
 }

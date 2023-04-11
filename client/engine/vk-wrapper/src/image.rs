@@ -237,6 +237,10 @@ impl Image {
         self.size
     }
 
+    pub fn mip_size(&self, level: u32) -> (u32, u32) {
+        ((self.size.0 >> level).max(1), (self.size.1 >> level).max(1))
+    }
+
     pub fn format(&self) -> Format {
         self.wrapper.format
     }
@@ -250,7 +254,7 @@ impl Image {
     }
 
     pub fn create_view(&self) -> ImageViewBuilder {
-        self.wrapper.create_view(&self.wrapper.name)
+        self.wrapper.create_view("view")
     }
 
     pub fn create_view_named(&self, name: &str) -> ImageViewBuilder {
