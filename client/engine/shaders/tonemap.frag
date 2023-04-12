@@ -16,5 +16,5 @@ void main() {
     vec3 src = texture(srcTexture, texCoord).rgb;
     vec3 bloom = texture(bloomTexture, texCoord).rgb;
 
-    outColor = mix(src, bloom, 0.05);
+    outColor = mix(src, bloom, 0.02);
 }

@@ -13,5 +13,5 @@
 - sudo apt install xorg-dev
 - sudo apt install llvm-dev libclang-dev clang
 
-### MacOS
+### macOS
 - brew install llvm
