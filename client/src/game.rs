@@ -369,7 +369,7 @@ impl Application for Game {
             if !curr_state.player_collision_enabled {
                 vel_up_down += 1;
             }
-            curr_state.curr_jump_force = 14.0;
+            curr_state.curr_jump_force = 8.0;
         }
         if kb.is_key_pressed(VirtualKeyCode::LShift) {
             vel_up_down -= 1;
@@ -400,7 +400,7 @@ impl Application for Game {
                 motion_delta.y -= (base::physics::G_ACCEL * curr_state.fall_time) * delta_time;
 
                 // Jump force
-                motion_delta.y += curr_state.curr_jump_force * delta_time;
+                motion_delta.y += new_jump_force * delta_time;
             }
             drop(blocks);
 
@@ -421,6 +421,8 @@ impl Application for Game {
         } else {
             curr_state.player_pos += motion_delta;
         }
+        curr_state.fall_time = new_fall_time;
+        curr_state.curr_jump_force = new_jump_force;
 
         {
             let camera = renderer.active_camera_mut();
