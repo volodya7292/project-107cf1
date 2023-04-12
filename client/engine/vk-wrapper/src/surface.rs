@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use crate::platform::metal;
 use crate::{DeviceError, Instance};
 use ash::vk;
@@ -15,7 +16,7 @@ impl Surface {
         match window.raw_window_handle() {
             #[cfg(any(target_os = "macos"))]
             RawWindowHandle::AppKit(handle) => metal::metal_layer_update(handle),
-            _ => return Err(DeviceError::VkError(vk::Result::ERROR_EXTENSION_NOT_PRESENT)), // not supported
+            _ => {}
         }
         Ok(())
     }
