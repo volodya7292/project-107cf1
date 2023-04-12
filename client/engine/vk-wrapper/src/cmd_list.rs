@@ -414,9 +414,9 @@ impl CmdList {
         }
 
         let region = vk::BufferCopy {
-            src_offset: src_element_index * src_buffer.buffer.aligned_elem_size,
-            dst_offset: dst_element_index * src_buffer.buffer.aligned_elem_size,
-            size: size * src_buffer.buffer.aligned_elem_size,
+            src_offset: src_element_index * src_buffer.buffer.elem_size,
+            dst_offset: dst_element_index * src_buffer.buffer.elem_size,
+            size: size * src_buffer.buffer.elem_size,
         };
         unsafe {
             self.device_wrapper.native.cmd_copy_buffer(
@@ -437,9 +437,9 @@ impl CmdList {
         let regions: SmallVec<[vk::BufferCopy; 128]> = regions
             .iter()
             .map(|region| vk::BufferCopy {
-                src_offset: region.0.src_offset * src_buffer.buffer.aligned_elem_size,
-                dst_offset: region.0.dst_offset * src_buffer.buffer.aligned_elem_size,
-                size: region.0.size * src_buffer.buffer.aligned_elem_size,
+                src_offset: region.0.src_offset * src_buffer.buffer.elem_size,
+                dst_offset: region.0.dst_offset * src_buffer.buffer.elem_size,
+                size: region.0.size * src_buffer.buffer.elem_size,
             })
             .collect();
 
@@ -493,9 +493,9 @@ impl CmdList {
         }
 
         let region = vk::BufferCopy {
-            src_offset: src_element_index * src_buffer.0.aligned_elem_size,
-            dst_offset: dst_element_index * src_buffer.0.aligned_elem_size,
-            size: size * src_buffer.0.aligned_elem_size,
+            src_offset: src_element_index * src_buffer.0.elem_size,
+            dst_offset: dst_element_index * src_buffer.0.elem_size,
+            size: size * src_buffer.0.elem_size,
         };
         unsafe {
             self.device_wrapper.native.cmd_copy_buffer(
@@ -520,9 +520,9 @@ impl CmdList {
         }
 
         let region = vk::BufferCopy {
-            src_offset: src_element_index * dst_buffer.buffer.aligned_elem_size,
-            dst_offset: dst_element_index * dst_buffer.buffer.aligned_elem_size,
-            size: size * dst_buffer.buffer.aligned_elem_size,
+            src_offset: src_element_index * dst_buffer.buffer.elem_size,
+            dst_offset: dst_element_index * dst_buffer.buffer.elem_size,
+            size: size * dst_buffer.buffer.elem_size,
         };
         unsafe {
             self.device_wrapper.native.cmd_copy_buffer(

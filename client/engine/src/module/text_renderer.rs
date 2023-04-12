@@ -464,6 +464,7 @@ struct GlyphInstance {
 }
 attributes_impl!(GlyphInstance, glyph_index, glyph_size, color, offset, scale);
 
+#[derive(Copy, Clone)]
 #[repr(C)]
 struct FrameUniformData {
     px_range: f32,

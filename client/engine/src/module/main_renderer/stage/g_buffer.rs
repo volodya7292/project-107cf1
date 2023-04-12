@@ -230,7 +230,7 @@ impl GBufferStage {
                         0,
                         &descriptors,
                         &[
-                            render_config.render_ty as u32 * ctx.per_frame_ub.aligned_element_size() as u32,
+                            render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
                             renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
@@ -278,7 +278,7 @@ impl GBufferStage {
                 0,
                 &descriptors,
                 &[
-                    render_config.render_ty as u32 * ctx.per_frame_ub.aligned_element_size() as u32,
+                    render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
                     renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );

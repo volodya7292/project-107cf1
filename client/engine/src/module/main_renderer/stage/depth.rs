@@ -20,10 +20,9 @@ use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
-    AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList,
-    DescriptorPool, DescriptorSet, Device, Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags,
-    LoadStore, Pipeline, PipelineSignature, PipelineStageFlags, QueueType, RenderPass, Shader,
-    ShaderStageFlags, Subpass, SubpassDependency,
+    AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList, Device,
+    Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline, PipelineStageFlags,
+    QueueType, RenderPass, Shader, ShaderStageFlags, Subpass, SubpassDependency,
 };
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
@@ -38,11 +37,7 @@ pub struct DepthStage {
     translucency_depths_pixel_shader: Arc<Shader>,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
-    depth_pyramid_signature: Arc<PipelineSignature>,
-    depth_pyramid_pool: DescriptorPool,
     cull_pipeline: Arc<Pipeline>,
-    cull_pool: DescriptorPool,
-    cull_descriptor: DescriptorSet,
 }
 
 #[derive(Copy, Clone)]
@@ -128,10 +123,6 @@ impl DepthStage {
             .unwrap();
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
         let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
-        let mut cull_pool = cull_signature.create_pool(0, 1).unwrap();
-        let cull_descriptor = cull_pool.alloc().unwrap();
-
-        let depth_pyramid_pool = depth_pyramid_signature.create_pool(0, 1).unwrap();
 
         // Translucency depth pipeline
         // -----------------------------------------------------------------------------------------------------------------
@@ -149,11 +140,7 @@ impl DepthStage {
             translucency_depths_pipe: u32::MAX,
             translucency_depths_pixel_shader,
             depth_pyramid_pipeline,
-            depth_pyramid_signature,
-            depth_pyramid_pool,
             cull_pipeline,
-            cull_pool,
-            cull_descriptor,
         }
     }
 
@@ -252,8 +239,8 @@ impl DepthStage {
                     );
 
                     cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        render_config.render_ty as u32 * ctx.per_frame_ub.aligned_element_size() as u32,
-                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.aligned_element_size() as u32
+                        render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
+                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32
                     ]);
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
@@ -402,53 +389,11 @@ impl RenderStage for DepthStage {
         );
         let depth_pyramid_levels = depth_pyramid_image.mip_levels();
 
-        let depth_pyramid_descs = resources.request(
-            "depth_pyramid_descriptors",
-            (Arc::clone(&depth_image), Arc::clone(&depth_pyramid_views)),
-            |(depth_image, depth_pyramid_views), _| {
-                self.depth_pyramid_pool.reset();
-
-                let sets: Vec<_> = (0..depth_pyramid_levels as usize)
-                    .map(|i| {
-                        let set = self.depth_pyramid_pool.alloc().unwrap();
-                        unsafe {
-                            self.device.update_descriptor_set(
-                                set,
-                                &[
-                                    self.depth_pyramid_pool.create_binding(
-                                        0,
-                                        0,
-                                        if i == 0 {
-                                            BindingRes::ImageView(
-                                                Arc::clone(depth_image.view()),
-                                                None,
-                                                ImageLayout::SHADER_READ,
-                                            )
-                                        } else {
-                                            BindingRes::ImageView(
-                                                Arc::clone(&depth_pyramid_views[i - 1]),
-                                                None,
-                                                ImageLayout::GENERAL,
-                                            )
-                                        },
-                                    ),
-                                    self.depth_pyramid_pool.create_binding(
-                                        1,
-                                        0,
-                                        BindingRes::ImageView(
-                                            Arc::clone(&depth_pyramid_views[i]),
-                                            None,
-                                            ImageLayout::GENERAL,
-                                        ),
-                                    ),
-                                ],
-                            )
-                        };
-                        set
-                    })
-                    .collect();
-                Arc::new(sets)
-            },
+        let depth_pyramid_descs = resources.request_descriptors(
+            "depth-pyramid-descs",
+            self.depth_pyramid_pipeline.signature(),
+            0,
+            depth_pyramid_levels as usize,
         );
 
         let translucency_depths_image = resources.request_device_buffer(
@@ -505,6 +450,9 @@ impl RenderStage for DepthStage {
             HostBufferParams::new(BufferUsageFlags::TRANSFER_DST, N_MAX_OBJECTS as u64),
         );
 
+        let cull_descriptor =
+            resources.request_descriptors("depth-cull-desc", self.cull_pipeline.signature(), 0, 1);
+
         // ----------------------------------------------------------------------------------
 
         unsafe {
@@ -523,20 +471,52 @@ impl RenderStage for DepthStage {
                     ),
                 ],
             );
+
+            for (i, set) in depth_pyramid_descs.sets().iter().enumerate() {
+                self.device.update_descriptor_set(
+                    *set,
+                    &[
+                        depth_pyramid_descs.create_binding(
+                            0,
+                            0,
+                            if i == 0 {
+                                BindingRes::ImageView(
+                                    Arc::clone(depth_image.view()),
+                                    None,
+                                    ImageLayout::SHADER_READ,
+                                )
+                            } else {
+                                BindingRes::ImageView(
+                                    Arc::clone(&depth_pyramid_views[i - 1]),
+                                    None,
+                                    ImageLayout::GENERAL,
+                                )
+                            },
+                        ),
+                        depth_pyramid_descs.create_binding(
+                            1,
+                            0,
+                            BindingRes::ImageView(
+                                Arc::clone(&depth_pyramid_views[i]),
+                                None,
+                                ImageLayout::GENERAL,
+                            ),
+                        ),
+                    ],
+                );
+            }
+
             self.device.update_descriptor_set(
-                self.cull_descriptor,
+                cull_descriptor.get(0),
                 &[
-                    self.cull_pool.create_binding(
+                    cull_descriptor.create_binding(
                         0,
                         0,
                         BindingRes::Image(Arc::clone(&depth_pyramid_image), None, ImageLayout::GENERAL),
                     ),
-                    self.cull_pool
-                        .create_binding(1, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
-                    self.cull_pool
-                        .create_binding(2, 0, BindingRes::Buffer(cull_buffer.handle())),
-                    self.cull_pool
-                        .create_binding(3, 0, BindingRes::Buffer(visibility_buffer.handle())),
+                    cull_descriptor.create_binding(1, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    cull_descriptor.create_binding(2, 0, BindingRes::Buffer(cull_buffer.handle())),
+                    cull_descriptor.create_binding(3, 0, BindingRes::Buffer(visibility_buffer.handle())),
                 ],
             )
         };
@@ -600,12 +580,17 @@ impl RenderStage for DepthStage {
         let mut out_size = depth_pyramid_image.size_2d();
 
         for i in 0..(depth_pyramid_image.mip_levels() as usize) {
-            cl.bind_compute_inputs(&self.depth_pyramid_signature, 0, &[depth_pyramid_descs[i]], &[]);
+            cl.bind_compute_inputs(
+                self.depth_pyramid_pipeline.signature(),
+                0,
+                &[depth_pyramid_descs.get(i)],
+                &[],
+            );
 
             let constants = DepthPyramidConstants {
                 out_size: Vec2::new(out_size.0 as f32, out_size.1 as f32),
             };
-            cl.push_constants(&self.depth_pyramid_signature, &constants);
+            cl.push_constants(self.depth_pyramid_pipeline.signature(), &constants);
 
             cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
 
@@ -663,7 +648,7 @@ impl RenderStage for DepthStage {
         );
 
         cl.bind_pipeline(&self.cull_pipeline);
-        cl.bind_compute_inputs(self.cull_pipeline.signature(), 0, &[self.cull_descriptor], &[]);
+        cl.bind_compute_inputs(self.cull_pipeline.signature(), 0, &[cull_descriptor.get(0)], &[]);
 
         let pyramid_size = depth_pyramid_image.size_2d();
         let constants = CullConstants {

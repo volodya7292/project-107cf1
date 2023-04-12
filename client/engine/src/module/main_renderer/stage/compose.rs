@@ -1,15 +1,12 @@
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
-use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::post_process::PostProcessStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use std::sync::Arc;
-use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
-    AccessFlags, Attachment, AttachmentRef, BindingRes, CmdList, DescriptorPool, DescriptorSet, Device,
-    DeviceBuffer, Framebuffer, Image, ImageLayout, ImageMod, LoadStore, PipelineSignature,
-    PipelineStageFlags, PrimitiveTopology, QueueType, Sampler, SamplerFilter, SamplerMipmap, SignalSemaphore,
-    Subpass, WaitSemaphore,
+    AccessFlags, Attachment, AttachmentRef, BindingRes, CmdList, Device, Framebuffer, ImageLayout, ImageMod,
+    LoadStore, PipelineSignature, PipelineStageFlags, PrimitiveTopology, QueueType, Sampler, SamplerFilter,
+    SamplerMipmap, SignalSemaphore, Subpass, WaitSemaphore,
 };
 
 pub struct ComposeStage {

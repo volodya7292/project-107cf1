@@ -20,10 +20,12 @@ impl PipelineSignature {
         self: &Arc<Self>,
         set_layout_id: u32,
         base_reserve: u32,
+        name: &str,
     ) -> Result<DescriptorPool, vk::Result> {
         let mut pool = DescriptorPool {
             device: Arc::clone(&self.device),
             signature: Arc::clone(&self),
+            name: name.to_owned(),
             set_layout_id,
             native: Default::default(),
             allocated: vec![],

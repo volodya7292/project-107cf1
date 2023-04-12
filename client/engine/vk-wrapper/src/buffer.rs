@@ -25,7 +25,6 @@ pub(crate) struct Buffer {
     pub(crate) allocation: vma::VmaAllocation,
     pub(crate) used_dev_memory: u64,
     pub(crate) elem_size: u64,
-    pub(crate) aligned_elem_size: u64,
     pub(crate) len: u64,
     pub(crate) _bytesize: u64,
 }
@@ -94,50 +93,13 @@ impl BufferBarrier {
     }
 }
 
-pub struct HostBuffer<T> {
+pub struct HostBuffer<T: Copy> {
     pub(crate) _type_marker: PhantomData<T>,
     pub(crate) buffer: Arc<Buffer>,
     pub(crate) p_data: *mut u8,
 }
 
-impl<'a, T> IntoIterator for &'a HostBuffer<T> {
-    type Item = &'a mut T;
-    type IntoIter = HostBufferIterator<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        HostBufferIterator {
-            p_data: self.p_data,
-            stride: self.buffer.aligned_elem_size as usize,
-            size: self.buffer.len as usize,
-            _marker: PhantomData,
-            index: 0,
-        }
-    }
-}
-
-pub struct HostBufferIterator<'a, T> {
-    p_data: *mut u8,
-    stride: usize,
-    size: usize,
-    index: usize,
-    _marker: PhantomData<&'a T>,
-}
-
-impl<'a, T> Iterator for HostBufferIterator<'a, T> {
-    type Item = &'a mut T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.size {
-            let curr_index = self.index;
-            self.index += 1;
-            Some(unsafe { &mut *(self.p_data.offset((self.stride * curr_index) as isize) as *mut T) })
-        } else {
-            None
-        }
-    }
-}
-
-impl<T> Index<usize> for HostBuffer<T> {
+impl<T: Copy> Index<usize> for HostBuffer<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -148,15 +110,11 @@ impl<T> Index<usize> for HostBuffer<T> {
             );
         }
 
-        unsafe {
-            &*(self
-                .p_data
-                .offset(self.buffer.aligned_elem_size as isize * index as isize) as *const T)
-        }
+        unsafe { &*(self.p_data.add(self.buffer.elem_size as usize * index) as *const T) }
     }
 }
 
-impl<T> IndexMut<usize> for HostBuffer<T> {
+impl<T: Copy> IndexMut<usize> for HostBuffer<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         if index as u64 >= self.buffer.len {
             panic!(
@@ -164,15 +122,11 @@ impl<T> IndexMut<usize> for HostBuffer<T> {
                 self.buffer.len, index
             );
         }
-        unsafe {
-            &mut *(self
-                .p_data
-                .offset(self.buffer.aligned_elem_size as isize * index as isize) as *mut T)
-        }
+        unsafe { &mut *(self.p_data.add(self.buffer.elem_size as usize * index) as *mut T) }
     }
 }
 
-impl<T> HostBuffer<T> {
+impl<T: Copy> HostBuffer<T> {
     pub fn raw(&self) -> RawHostBuffer {
         RawHostBuffer(Arc::clone(&self.buffer))
     }
@@ -190,12 +144,12 @@ impl<T> HostBuffer<T> {
     }
 
     pub fn as_slice(&self) -> &[T] {
-        assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
+        assert_eq!(mem::size_of::<T>(), self.buffer.elem_size as usize);
         unsafe { slice::from_raw_parts(self.p_data as *const T, self.buffer.len as usize) }
     }
 
     pub fn as_mut_slice(&self) -> &mut [T] {
-        assert_eq!(self.buffer.aligned_elem_size, self.buffer.elem_size);
+        assert_eq!(mem::size_of::<T>(), self.buffer.elem_size as usize);
         unsafe { slice::from_raw_parts_mut(self.p_data as *mut T, self.buffer.len as usize) }
     }
 
@@ -208,7 +162,7 @@ impl<T> HostBuffer<T> {
             );
         }
 
-        if mem::size_of::<T>() == self.buffer.aligned_elem_size as usize {
+        if mem::size_of::<T>() == self.buffer.elem_size as usize {
             unsafe {
                 ptr::copy_nonoverlapping(
                     (self.p_data as *const T).offset(first_element as isize),
@@ -220,9 +174,8 @@ impl<T> HostBuffer<T> {
             for i in 0..elements.len() {
                 unsafe {
                     ptr::copy_nonoverlapping(
-                        (self.p_data as *const u8).offset(
-                            (first_element as isize + i as isize) * self.buffer.aligned_elem_size as isize,
-                        ),
+                        (self.p_data as *const u8)
+                            .offset((first_element as isize + i as isize) * self.buffer.elem_size as isize),
                         (elements.as_mut_ptr()).offset(first_element as isize + i as isize) as *mut u8,
                         1,
                     );
@@ -240,7 +193,7 @@ impl<T> HostBuffer<T> {
             );
         }
 
-        if mem::size_of::<T>() == self.buffer.aligned_elem_size as usize {
+        if mem::size_of::<T>() == self.buffer.elem_size as usize {
             unsafe {
                 ptr::copy_nonoverlapping(
                     elements.as_ptr(),
@@ -253,9 +206,8 @@ impl<T> HostBuffer<T> {
                 unsafe {
                     ptr::copy_nonoverlapping(
                         (elements.as_ptr()).offset(first_element as isize + i as isize) as *mut u8,
-                        (self.p_data as *mut u8).offset(
-                            (first_element as isize + i as isize) * self.buffer.aligned_elem_size as isize,
-                        ),
+                        (self.p_data as *mut u8)
+                            .offset((first_element as isize + i as isize) * self.buffer.elem_size as isize),
                         1,
                     );
                 }
@@ -276,15 +228,15 @@ impl<T> HostBuffer<T> {
     }
 }
 
-impl<T> BufferHandleImpl for HostBuffer<T> {
+impl<T: Copy> BufferHandleImpl for HostBuffer<T> {
     fn handle(&self) -> BufferHandle {
         BufferHandle(self.buffer.native)
     }
 }
 
-unsafe impl<T> Send for HostBuffer<T> {}
+unsafe impl<T: Copy> Send for HostBuffer<T> {}
 
-unsafe impl<T> Sync for HostBuffer<T> {}
+unsafe impl<T: Copy> Sync for HostBuffer<T> {}
 
 pub struct DeviceBuffer {
     pub(crate) buffer: Arc<Buffer>,
@@ -295,8 +247,8 @@ impl DeviceBuffer {
         self.buffer.len
     }
 
-    pub fn aligned_element_size(&self) -> u64 {
-        self.buffer.aligned_elem_size
+    pub fn element_size(&self) -> u64 {
+        self.buffer.elem_size
     }
 
     pub fn barrier(&self) -> BufferBarrier {

@@ -527,7 +527,7 @@ impl MainRenderer {
         let per_frame_ub = device
             .create_device_buffer(
                 BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
-                mem::size_of::<FrameInfoUniforms>() as u64,
+                device.align_for_uniform_dynamic_offset(mem::size_of::<FrameInfoUniforms>() as u64),
                 2, // For two different RenderStages
             )
             .unwrap();
@@ -540,7 +540,7 @@ impl MainRenderer {
             .unwrap();
         // TODO: allow different alignments
         assert_eq!(
-            uniform_buffer_basic.aligned_element_size(),
+            uniform_buffer_basic.element_size(),
             BASIC_UNIFORM_BLOCK_MAX_SIZE as u64
         );
         // let uniform_buffer1 = device
@@ -562,7 +562,7 @@ impl MainRenderer {
             .create_pipeline_signature(&[], &*ADDITIONAL_PIPELINE_BINDINGS)
             .unwrap();
         let mut g_per_frame_pool = g_signature
-            .create_pool(shader_ids::SET_GENERAL_PER_FRAME, 1)
+            .create_pool(shader_ids::SET_GENERAL_PER_FRAME, 1, "per-frame")
             .unwrap();
         let g_per_frame_in = g_per_frame_pool.alloc().unwrap();
 
@@ -835,11 +835,11 @@ impl MainRenderer {
         let stages = self.stage_manager.stages();
 
         let mut per_frame_desc_pool = main_signature
-            .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1)
+            .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1, "per-frame-custom")
             .unwrap();
         let per_frame_desc = per_frame_desc_pool.alloc().unwrap();
         let per_object_desc_pool = main_signature
-            .create_pool(shader_ids::SET_PER_OBJECT, 16)
+            .create_pool(shader_ids::SET_PER_OBJECT, 16, "per-object")
             .unwrap();
         let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
@@ -1203,7 +1203,7 @@ impl MainRenderer {
             buffer_updates.extend(per_frame_infos.iter().enumerate().map(|(idx, info)| {
                 BufferUpdate::WithOffset(BufferUpdate1 {
                     buffer: self.res.per_frame_ub.handle(),
-                    dst_offset: idx as u64 * self.res.per_frame_ub.aligned_element_size(),
+                    dst_offset: idx as u64 * self.res.per_frame_ub.element_size(),
                     data: unsafe {
                         slice::from_raw_parts(info as *const _ as *const u8, mem::size_of_val(info))
                             .to_smallvec()

@@ -3,7 +3,6 @@ use common::types::{HashMap, HashSet};
 use std::any::Any;
 use std::collections::hash_map;
 use std::hash::Hash;
-use std::ops::Deref;
 use std::sync::Arc;
 use vk_wrapper::{
     Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer,
@@ -74,7 +73,7 @@ impl ResourceManagementScope<'_> {
         Arc::clone(res)
     }
 
-    pub fn get_host_buffer<T: 'static>(&self, name: &str) -> Arc<Mutex<HostBuffer<T>>> {
+    pub fn get_host_buffer<T: Copy + 'static>(&self, name: &str) -> Arc<Mutex<HostBuffer<T>>> {
         self.get(name)
     }
 
@@ -150,7 +149,7 @@ impl ResourceManagementScope<'_> {
         })
     }
 
-    pub fn request_host_buffer<T: 'static>(
+    pub fn request_host_buffer<T: Copy + 'static>(
         &self,
         name: &str,
         params: HostBufferParams,
@@ -204,7 +203,7 @@ impl ResourceManagementScope<'_> {
             name,
             (Arc::clone(signature), set_layout_id, num_descriptors),
             |(signature, set_layout_id, num_descriptors), name| {
-                let mut pool = signature.create_pool(*set_layout_id, 1).unwrap();
+                let mut pool = signature.create_pool(*set_layout_id, 1, name).unwrap();
                 let sets = (0..*num_descriptors)
                     .map(|_| pool.alloc().unwrap())
                     .collect::<Vec<_>>();

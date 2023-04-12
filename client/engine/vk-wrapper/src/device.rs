@@ -203,6 +203,12 @@ impl Device {
         Ok(create_timeline_semaphore(&self.wrapper)?)
     }
 
+    pub fn align_for_uniform_dynamic_offset(&self, size: u64) -> u64 {
+        let limits = &self.wrapper.adapter.props.limits;
+        let aligned_elem_size = utils::make_mul_of_u64(size, limits.min_uniform_buffer_offset_alignment);
+        aligned_elem_size
+    }
+
     fn create_buffer(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
@@ -218,22 +224,7 @@ impl Device {
             return Err(DeviceError::ZeroBufferSize);
         }
 
-        assert_eq!(
-            usage.contains(BufferUsageFlags::UNIFORM | BufferUsageFlags::STORAGE),
-            false
-        );
-        let limits = &self.wrapper.adapter.props.limits;
-
-        let elem_align = if usage.contains(BufferUsageFlags::UNIFORM) {
-            limits.min_uniform_buffer_offset_alignment
-        } else if usage.contains(BufferUsageFlags::STORAGE) {
-            limits.min_storage_buffer_offset_alignment
-        } else {
-            1
-        };
-
-        let aligned_elem_size = utils::make_mul_of_u64(elem_size, elem_align as u64);
-        let bytesize = aligned_elem_size as u64 * len;
+        let bytesize = elem_size as u64 * len;
 
         let buffer_info = vk::BufferCreateInfo::builder()
             .usage(usage.0)
@@ -293,7 +284,6 @@ impl Device {
                 allocation,
                 used_dev_memory,
                 elem_size,
-                aligned_elem_size: aligned_elem_size as u64,
                 len,
                 _bytesize: bytesize as u64,
             },
@@ -301,7 +291,7 @@ impl Device {
         ))
     }
 
-    pub fn create_host_buffer_named<T>(
+    pub fn create_host_buffer_named<T: Copy>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         len: u64,
@@ -319,7 +309,7 @@ impl Device {
         })
     }
 
-    pub fn create_host_buffer<T>(
+    pub fn create_host_buffer<T: Copy>(
         self: &Arc<Self>,
         usage: BufferUsageFlags,
         len: u64,
@@ -443,38 +433,12 @@ impl Device {
                 return Err(vk::Result::from_raw(result).into());
             }
 
-            // let memory_block = self.allocator.lock().alloc(
-            //     AshMemoryDevice::wrap(&self.wrapper.native),
-            //     gpu_alloc::Request {
-            //         size: req.size,
-            //         align_mask: req.alignment,
-            //         usage: mem_usage,
-            //         memory_types: self.allowed_memory_types & req.memory_type_bits,
-            //     },
-            // )?;
-
             let result =
                 vma::vmaBindImageMemory(self.allocator, allocation, native_image.as_raw() as vma::VkImage);
 
             if result != vma::VK_SUCCESS {
                 return Err(vk::Result::from_raw(result).into());
             }
-
-            // let memory_block = self.allocator.lock().alloc(
-            //     AshMemoryDevice::wrap(&self.wrapper.native),
-            //     gpu_alloc::Request {
-            //         size: req.size,
-            //         align_mask: req.alignment,
-            //         usage: gpu_alloc::UsageFlags::FAST_DEVICE_ACCESS,
-            //         memory_types: self.allowed_memory_types & req.memory_type_bits,
-            //     },
-            // )?;
-
-            // self.wrapper.native.bind_image_memory(
-            //     native_image,
-            //     *memory_block.memory(),
-            //     memory_block.offset(),
-            // )?;
 
             self.wrapper
                 .debug_set_object_name(vk::ObjectType::IMAGE, native_image.as_raw(), name)?;

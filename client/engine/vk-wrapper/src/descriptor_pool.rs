@@ -1,13 +1,12 @@
+use crate::sampler::SamplerFilter;
+use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler, SamplerMipmap};
+use ash::vk;
+use ash::vk::Handle;
+use fixedbitset::FixedBitSet;
+use smallvec::SmallVec;
 use std::ops::Range;
 use std::slice;
 use std::sync::Arc;
-
-use ash::vk;
-use fixedbitset::FixedBitSet;
-use smallvec::SmallVec;
-
-use crate::sampler::SamplerFilter;
-use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler, SamplerMipmap};
 
 pub enum BindingRes {
     Buffer(BufferHandle),
@@ -57,6 +56,7 @@ pub struct NativeDescriptorPool {
 pub struct DescriptorPool {
     pub(crate) device: Arc<Device>,
     pub(crate) signature: Arc<PipelineSignature>,
+    pub(crate) name: String,
     pub(crate) set_layout_id: u32,
     pub(crate) native: SmallVec<[NativeDescriptorPool; 16]>,
     pub(crate) allocated: Vec<DescriptorSet>,
@@ -68,6 +68,7 @@ impl DescriptorPool {
         &self,
         set_layout_id: u32,
         max_sets: u32,
+        name: &str,
     ) -> Result<vk::DescriptorPool, vk::Result> {
         let mut pool_sizes = self.signature.descriptor_sizes[set_layout_id as usize].clone();
         for mut pool_size in &mut pool_sizes {
@@ -78,16 +79,31 @@ impl DescriptorPool {
             .max_sets(max_sets)
             .pool_sizes(&pool_sizes);
 
-        Ok(unsafe {
+        let native_pool = unsafe {
             self.device
                 .wrapper
                 .native
                 .create_descriptor_pool(&pool_info, None)?
-        })
+        };
+
+        unsafe {
+            self.device.wrapper.debug_set_object_name(
+                vk::ObjectType::DESCRIPTOR_POOL,
+                native_pool.as_raw(),
+                name,
+            )?;
+        }
+
+        Ok(native_pool)
     }
 
     pub(crate) fn alloc_next_pool(&mut self, size: u32) -> Result<(), vk::Result> {
-        let new_pool = self.create_native_pool(self.set_layout_id, size)?;
+        let new_pool_id = self.native.len();
+        let new_pool = self.create_native_pool(
+            self.set_layout_id,
+            size,
+            &format!("{}-{}", &self.name, new_pool_id),
+        )?;
 
         let next_pool = NativeDescriptorPool {
             handle: new_pool,
