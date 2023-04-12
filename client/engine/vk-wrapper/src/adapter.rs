@@ -190,7 +190,6 @@ impl Adapter {
 
         let mut host_pool_info: vma::VmaPoolCreateInfo = unsafe { mem::zeroed() };
         host_pool_info.memoryTypeIndex = host_memory_type_index;
-        host_pool_info.blockSize = 1 << 28; // 256 MB
         host_pool_info.minBlockCount = 2;
 
         let mut host_mem_pool: vma::VmaPool = ptr::null_mut();

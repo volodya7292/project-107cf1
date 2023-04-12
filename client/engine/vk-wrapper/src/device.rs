@@ -191,7 +191,7 @@ impl Device {
         &self.queues[queue_type as usize]
     }
 
-    pub fn calc_real_device_mem_usage(&self) -> u64 {
+    pub fn real_device_mem_usage(&self) -> u64 {
         self.total_used_dev_memory.load(atomic::Ordering::Relaxed) as u64
     }
 
