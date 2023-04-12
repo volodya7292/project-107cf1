@@ -18,7 +18,7 @@ layout(location = 0) in vec2 texCoord;
 
 layout(location = 0) out vec3 out_color;
 
-void main2() {
+void main() {
     vec2 srcTexelSize = 1.0 / src_resolution;
     float x = srcTexelSize.x;
     float y = srcTexelSize.y;
@@ -65,14 +65,5 @@ void main2() {
     out_color += (b+d+f+h)*0.0625;
     out_color += (j+k+l+m)*0.125;
 
-    out_color = max(out_color, 0.0001f);
-}
-
-void main() {
-//    vec2 srcTexelSize = 1.0 / srcResolution;
-//    float x = srcTexelSize.x;
-//    float y = srcTexelSize.y;
-
-    out_color = texture(srcTexture, texCoord).rgb;
     out_color = max(out_color, 0.0001f);
 }

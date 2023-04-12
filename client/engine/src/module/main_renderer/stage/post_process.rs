@@ -2,6 +2,8 @@ use crate::module::main_renderer::resource_manager::{ImageParams, ResourceManage
 use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
+use common::glm;
+use common::glm::{UVec2, Vec2};
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
@@ -26,6 +28,11 @@ pub struct PostProcessStage {
 
     tonemap_render_pass: Arc<RenderPass>,
     tonemap_pipeline: Arc<Pipeline>,
+}
+
+#[repr(C)]
+struct DownscalePushConstants {
+    src_resolution: Vec2,
 }
 
 #[repr(C)]
@@ -338,7 +345,7 @@ impl PostProcessStage {
         let source_image = merge_fb.get_image(0).unwrap();
 
         const BLURRED_MAX_SIZE: u32 = 2_u32.pow(9);
-        const BLURRED_MAX_MIPS: u32 = 5;
+        const BLURRED_MAX_MIPS: u32 = 6;
 
         let render_size_min = ctx.render_size.0.min(ctx.render_size.1);
         let blur_img_scale_factor = (BLURRED_MAX_SIZE as f32 / render_size_min as f32).min(1.0);
@@ -482,9 +489,22 @@ impl PostProcessStage {
         // Do downscaling
         cl.bind_pipeline(&self.bloom_downscale_pipeline);
 
-        for (fb, desc) in bloom_framebuffers.iter().zip(downscale_descs.sets()) {
+        for (i, (fb, desc)) in bloom_framebuffers.iter().zip(downscale_descs.sets()).enumerate() {
             cl.begin_render_pass(&self.bloom_downscale_render_pass, fb, &[], false);
             cl.bind_graphics_inputs(self.bloom_downscale_pipeline.signature(), 0, &[*desc], &[]);
+
+            let src_size = if i == 0 {
+                source_image.size_2d()
+            } else {
+                bloom_image.mip_size((i - 1) as u32)
+            };
+
+            cl.push_constants(
+                self.bloom_downscale_pipeline.signature(),
+                &DownscalePushConstants {
+                    src_resolution: glm::vec2(src_size.0 as f32, src_size.1 as f32),
+                },
+            );
             cl.draw(3, 0);
             cl.end_render_pass();
         }
