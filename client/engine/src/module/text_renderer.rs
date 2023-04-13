@@ -39,7 +39,7 @@ const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
 const PREFERRED_MAX_GLYPHS: u32 = 1024;
 const MSDF_PX_RANGE: u32 = 4;
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphUID(u64);
 
 impl GlyphUID {
@@ -265,6 +265,7 @@ fn calculate_string_width(string: &str, font: &Font) -> f32 {
 
 pub type BlockSize = Vec2;
 
+#[derive(Debug)]
 struct PositioningInfo {
     uid: GlyphUID,
     offset: Vec2,
@@ -343,41 +344,36 @@ fn layout_glyphs(
             continue;
         }
 
-        let start_x = curr_word[0].offset.x;
+        let word_start_x = curr_word[0].offset.x;
 
         // Put the word inside the global layout
-        if start_x + curr_word_width >= max_width {
-            if curr_word_offset_x > 0.0 {
-                // Put the word onto new line
-                // TODO: remove space before the word (or after)
-                line_widths.push(curr_offset.x - curr_word_width);
+
+        if (word_start_x + curr_word_width >= max_width) && curr_word_offset_x > 0.0 {
+            // Put the word onto a new line
+            // TODO: remove space before the word (or after)
+            line_widths.push(curr_offset.x - curr_word_width);
+            curr_offset.x = 0.0;
+            curr_offset.y += line_height;
+        }
+
+        for (i, (glyph_width, mut pos_info)) in curr_word_glyph_widths
+            .drain(..)
+            .zip(curr_word.drain(..))
+            .enumerate()
+        {
+            if long_word_breaking && i > 0 && (curr_offset.x + glyph_width) > max_width {
+                // The width of the word exceeds the maximum line width => break it into two parts.
+                line_widths.push(curr_offset.x);
                 curr_offset.x = 0.0;
                 curr_offset.y += line_height;
+            } else {
+                final_size.x = final_size.x.max(curr_offset.x + glyph_width);
             }
 
-            for (i, (glyph_width, mut pos_info)) in curr_word_glyph_widths
-                .drain(..)
-                .zip(curr_word.drain(..))
-                .enumerate()
-            {
-                if long_word_breaking && i > 0 && (curr_offset.x + glyph_width) > max_width {
-                    // The width of the word exceeds the maximum line width => break it into two parts.
-                    line_widths.push(curr_offset.x);
-                    curr_offset.x = 0.0;
-                    curr_offset.y += line_height;
-                } else {
-                    final_size.x = final_size.x.max(curr_offset.x + glyph_width);
-                }
+            pos_info.offset = curr_offset;
+            glyph_positions.push(pos_info);
 
-                pos_info.offset = curr_offset;
-                glyph_positions.push(pos_info);
-
-                curr_offset.x += glyph_width;
-            }
-        } else {
-            curr_offset.x += curr_word_width;
-            final_size.x = final_size.x.max(start_x + curr_word_width);
-            glyph_positions.extend(curr_word.drain(..));
+            curr_offset.x += glyph_width;
         }
     }
 
