@@ -13,8 +13,6 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std43
     uint transparencyDepthsArray[];
 };
 
-layout(location = 0) out vec4 outColor;
-
 void main() {
     // Prevent Z-fighting
     {
