@@ -30,6 +30,9 @@ pub struct GBufferStage {
 
 impl GBufferStage {
     pub const ALBEDO_ATTACHMENT_ID: u32 = 0;
+    pub const SPECULAR_ATTACHMENT_ID: u32 = 1;
+    pub const EMISSIVE_ATTACHMENT_ID: u32 = 2;
+    pub const NORMAL_ATTACHMENT_ID: u32 = 3;
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
     pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
 
@@ -51,21 +54,21 @@ impl GBufferStage {
                         format: Format::RGBA8_UNORM,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
+                        load_store: LoadStore::InitClearFinalSave,
                     },
                     // Emission
                     Attachment {
-                        format: Format::RGBA8_UNORM,
+                        format: Format::RGBA16_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
+                        load_store: LoadStore::InitClearFinalSave,
                     },
                     // Normal
                     Attachment {
                         format: Format::RG16_UNORM,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::FinalSave,
+                        load_store: LoadStore::InitClearFinalSave,
                     },
                     // Depth (read)
                     Attachment {
@@ -398,9 +401,24 @@ impl RenderStage for GBufferStage {
                                     ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
                                 ),
                             ),
-                            (1, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                            (2, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
-                            (3, ImageMod::AdditionalUsage(ImageUsageFlags::INPUT_ATTACHMENT)),
+                            (
+                                1,
+                                ImageMod::AdditionalUsage(
+                                    ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ),
+                            ),
+                            (
+                                2,
+                                ImageMod::AdditionalUsage(
+                                    ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ),
+                            ),
+                            (
+                                3,
+                                ImageMod::AdditionalUsage(
+                                    ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ),
+                            ),
                             (4, ImageMod::OverrideImage(Arc::clone(&depth_image))),
                         ],
                     )
@@ -472,10 +490,10 @@ impl RenderStage for GBufferStage {
             &self.render_pass,
             &framebuffer,
             &[
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Undefined,
-                ClearValue::Undefined,
+                ClearValue::ColorU32([0; 4]),
+                ClearValue::ColorU32([0; 4]),
+                ClearValue::ColorU32([0; 4]),
+                ClearValue::ColorU32([0; 4]),
                 ClearValue::Undefined,
                 ClearValue::Depth(1.0),
             ],

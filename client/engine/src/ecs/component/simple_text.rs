@@ -115,7 +115,7 @@ impl StyledString {
 
 #[repr(u8)]
 pub enum TextOverflow {
-    WRAP,
+    Wrap,
 }
 
 #[derive(Copy, Clone)]

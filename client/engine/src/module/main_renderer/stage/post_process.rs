@@ -286,8 +286,17 @@ impl PostProcessStage {
             resources.get(DepthStage::RES_TRANSLUCENCY_DEPTHS_IMAGE);
         let translucency_colors_image: Arc<Image> =
             resources.get(GBufferStage::RES_TRANSLUCENCY_COLORS_IMAGE);
-        let albedo = g_framebuffer
+        let g_albedo = g_framebuffer
             .get_image(GBufferStage::ALBEDO_ATTACHMENT_ID)
+            .unwrap();
+        let g_specular = g_framebuffer
+            .get_image(GBufferStage::SPECULAR_ATTACHMENT_ID)
+            .unwrap();
+        let g_emissive = g_framebuffer
+            .get_image(GBufferStage::EMISSIVE_ATTACHMENT_ID)
+            .unwrap();
+        let g_normal = g_framebuffer
+            .get_image(GBufferStage::NORMAL_ATTACHMENT_ID)
             .unwrap();
 
         unsafe {
@@ -297,16 +306,31 @@ impl PostProcessStage {
                     merge_descriptor.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(albedo), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_albedo), None, ImageLayout::SHADER_READ),
                     ),
-                    merge_descriptor.create_binding(1, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    merge_descriptor.create_binding(
+                        1,
+                        0,
+                        BindingRes::Image(Arc::clone(g_specular), None, ImageLayout::SHADER_READ),
+                    ),
                     merge_descriptor.create_binding(
                         2,
+                        0,
+                        BindingRes::Image(Arc::clone(g_emissive), None, ImageLayout::SHADER_READ),
+                    ),
+                    merge_descriptor.create_binding(
+                        3,
+                        0,
+                        BindingRes::Image(Arc::clone(g_normal), None, ImageLayout::SHADER_READ),
+                    ),
+                    merge_descriptor.create_binding(4, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    merge_descriptor.create_binding(
+                        5,
                         0,
                         BindingRes::Buffer(translucency_depths_image.handle()),
                     ),
                     merge_descriptor.create_binding(
-                        3,
+                        6,
                         0,
                         BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
                     ),

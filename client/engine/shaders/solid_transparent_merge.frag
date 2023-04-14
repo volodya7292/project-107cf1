@@ -6,16 +6,19 @@ layout(location = 0) in vec2 inUV;
 
 layout(location = 0) out vec4 outColor;
 
-layout(binding = 0) uniform sampler2D albedo;
+layout(binding = 0) uniform sampler2D gAlbedo;
+layout(binding = 1) uniform sampler2D gSpecular;
+layout(binding = 2) uniform sampler2D gEmissive;
+layout(binding = 3) uniform sampler2D gNormal;
 
-layout(binding = 1, scalar) uniform FrameData {
+layout(binding = 4, scalar) uniform FrameData {
     FrameInfo info;
 };
 
-layout(binding = 2, std430) coherent buffer TranslucentDepthsArray {
+layout(binding = 5, std430) coherent buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
-layout(binding = 3, rgba8) uniform image2DArray translucencyColorsArray;
+layout(binding = 6, rgba8) uniform image2DArray translucencyColorsArray;
  
 void main() {
     ivec2 coord = ivec2(gl_FragCoord.xy);
@@ -38,9 +41,11 @@ void main() {
     }
 
     // Blend with solid colors
-    vec4 solidColor = texture(albedo, inUV);
+    vec4 solidColor = texture(gAlbedo, inUV);
     currColor = mix(solidColor, currColor, currColor.a);
 
-    // outColor = texture(albedo, inUV);//  vec4(0, 0.5, 0.1, 1.0);
+    vec4 emission = texture(gEmissive, inUV);
+    currColor.rgb += emission.rgb;
+
     outColor = vec4(currColor.rgb, 1);
 }

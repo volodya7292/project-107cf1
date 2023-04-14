@@ -30,5 +30,15 @@ void main() {
        color *= innerShadow;
     }
 
-    writeOutputAlbedo(vec4(color, vs_in.color.a * opacity));
+    if (opacity < ALPHA_BIAS) {
+        discard;
+    }
+
+    if (opacity == 1.0) {
+        outEmission = vec4(10) * opacity;
+    } else {
+        outEmission = vec4(vec3(opacity), 1);
+    }
+
+//    writeOutputAlbedo(vec4(color, vs_in.color.a * opacity));
 }
