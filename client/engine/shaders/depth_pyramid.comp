@@ -13,8 +13,9 @@ void main() {
     ivec2 out_ooord = ivec2(gl_GlobalInvocationID.xy);
     vec2 in_uv = (vec2(out_ooord) + 0.5) / outSize;
 
-    vec4 depths = textureGather(inDepth, in_uv);
-    float max_depth = max(max(depths[0], depths[1]), max(depths[2], depths[3]));
+    vec4 depths = textureGather(inDepth, in_uv, 0);
+    // note: using reversed-z
+    float min_depth = min(min(depths[0], depths[1]), min(depths[2], depths[3]));
 
-    imageStore(outDepth, out_ooord, vec4(max_depth));
+    imageStore(outDepth, out_ooord, vec4(min_depth));
 }

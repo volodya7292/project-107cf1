@@ -6,7 +6,7 @@ pub struct PerspectiveCamera {
     position: DVec3,
     rotation: Vec3,
     aspect: f32,
-    fovy: f32,
+    fov_y: f32,
     z_near: f32,
 }
 
@@ -31,18 +31,18 @@ pub fn rotation_to_direction(rotation: &Vec3) -> Vec3 {
 }
 
 impl PerspectiveCamera {
-    pub fn new(aspect: f32, fovy: f32, near: f32) -> Self {
+    pub fn new(aspect: f32, fov_y: f32, z_near: f32) -> Self {
         Self {
             position: DVec3::default(),
             rotation: Vec3::new(0.0, 0.0, 0.0),
             aspect,
-            fovy,
-            z_near: near,
+            fov_y,
+            z_near,
         }
     }
 
     pub fn projection(&self) -> Mat4 {
-        glm::infinite_perspective_rh_zo(self.aspect, self.fovy, self.z_near)
+        glm::reversed_infinite_perspective_rh_zo(self.aspect, self.fov_y, self.z_near)
     }
 
     pub fn z_near(&self) -> f32 {
@@ -78,7 +78,7 @@ impl PerspectiveCamera {
     }
 
     pub fn fovy(&self) -> f32 {
-        self.fovy
+        self.fov_y
     }
 
     pub fn move2(&mut self, front_back: f64, left_right: f64) {

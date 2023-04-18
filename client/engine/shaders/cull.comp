@@ -29,6 +29,8 @@ layout(push_constant) uniform PushConstants {
     uint object_count;
 } data;
 
+// Note: using reversed-Z
+
 // 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere. Michael Mara, Morgan McGuire. 2013
 bool project_sphere(vec3 C, float r, float znear, float P00, float P11, out vec4 aabb) {
     if (C.z < r + znear)
@@ -67,7 +69,7 @@ void main() {
         bool visible = true;
 
         if (project_sphere(center, radius, z_near, p00, p11, proj_aabb)) {
-            float depth_sphere = 1.0 - z_near / (center.z - radius);
+            float depth_sphere = z_near / (center.z - radius);
             vec2 aabb_size = (proj_aabb.zw - proj_aabb.xy) * data.pyramid_size;
 
             int level = int(ceil(log2(max(aabb_size.x, aabb_size.y))));
@@ -83,9 +85,9 @@ void main() {
             float depth10 = texelFetch(depthPyramid, depth_coord + ivec2(1, 0), level).r;
             float depth11 = texelFetch(depthPyramid, depth_coord + ivec2(1, 1), level).r;
 
-            float max_depth = max(max(depth00, depth11), max(depth10, depth01));
+            float min_depth = min(min(depth00, depth11), min(depth10, depth01));
 
-            visible = depth_sphere <= max_depth;
+            visible = depth_sphere >= min_depth;
         }
 
         visibility[object.id] = uint(visible);

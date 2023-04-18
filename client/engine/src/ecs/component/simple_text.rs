@@ -145,7 +145,7 @@ impl SimpleTextC {
             long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,
-            render_type: RenderType::MAIN,
+            render_type: RenderType::Main,
             mat_pipeline: mat_pipeline_id,
         }
     }

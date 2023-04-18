@@ -69,7 +69,7 @@ pub fn new(
         },
     )
     .with_scene_event_handler(SceneEventHandler::new())
-    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_stage(RenderType::OVERLAY))
+    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_stage(RenderType::Overlay))
     .with_mesh(VertexMeshC::without_data(4, 1))
     .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update))
     .add_event_handler(

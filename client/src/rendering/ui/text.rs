@@ -68,7 +68,7 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId
         TransformC::new(),
         SimpleTextC::new(mat_pipeline)
             .with_max_width(0.0)
-            .with_render_type(RenderType::OVERLAY),
+            .with_render_type(RenderType::Overlay),
     );
 
     let text_entity = scene.add_object(Some(parent), main_obj).unwrap();

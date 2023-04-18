@@ -14,8 +14,8 @@ pub enum LoadStore {
     InitLoad,
     InitClear,
     FinalSave,
-    InitClearFinalSave,
-    InitLoadFinalSave,
+    InitClearFinalStore,
+    InitLoadFinalStore,
 }
 
 #[derive(Copy, Clone)]
@@ -141,15 +141,18 @@ impl RenderPass {
 
             if let Some(attachment_mod) = attachment_mods.get(&(i as u32)) {
                 match attachment_mod {
-                    ImageMod::OverrideImage(i) => {
-                        override_image = Some(Arc::clone(&i));
-                        override_image_view = Some(Arc::clone(&i.view));
+                    ImageMod::OverrideImage(img) => {
+                        assert_eq!(img.size_2d(), size);
+                        assert_eq!(img.format(), attachment.format);
+                        override_image = Some(Arc::clone(&img));
+                        override_image_view = Some(Arc::clone(&img.view));
                     }
-                    ImageMod::OverrideImageView(v) => {
-                        override_image_view = Some(Arc::clone(v));
+                    ImageMod::OverrideImageView(view) => {
+                        assert_eq!(view.format(), attachment.format);
+                        override_image_view = Some(Arc::clone(view));
                     }
-                    ImageMod::AdditionalUsage(u) => {
-                        usage |= *u;
+                    ImageMod::AdditionalUsage(flags) => {
+                        usage |= *flags;
                     }
                 }
             }
@@ -176,7 +179,7 @@ impl RenderPass {
 
         Ok(Arc::new(Framebuffer {
             device: Arc::clone(&self.device),
-            _render_pass: Arc::clone(self),
+            render_pass: Arc::clone(self),
             native: unsafe {
                 self.device
                     .wrapper

@@ -13,6 +13,8 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std43
     uint transparencyDepthsArray[];
 };
 
+// Note: using reversed-Z
+
 void main() {
     // Prevent Z-fighting
     {
@@ -21,7 +23,7 @@ void main() {
         float fragDepth = linearize_depth(gl_FragCoord.z, info.camera.z_near);
 
         // Do not render transparency where depth is uncertain
-        if (fragDepth > solidDepth - 0.001 * solidDepth) {
+        if (fragDepth < solidDepth - 0.001 * solidDepth) {
             return;
         }
     }
@@ -34,16 +36,16 @@ void main() {
     // Early transparency depth test (check farthest layer)
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;
     uint lastDepth = transparencyDepthsArray[coordIdx + lastLayerIdx * sliceSize];
-    if (currDepth > lastDepth) {
+    if (currDepth < lastDepth) {
         return;
     }
 
-    // Find OIT_N_CLOSEST_LAYERS minimum depths
+    // Find OIT_N_CLOSEST_LAYERS closest depths
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
-        uint prev = atomicMin(transparencyDepthsArray[coordIdx + i * sliceSize], currDepth);
+        uint prev = atomicMax(transparencyDepthsArray[coordIdx + i * sliceSize], currDepth);
         if (prev == 0xFFFFFFFFu || prev == currDepth) {
             break;
         }
-        currDepth = max(prev, currDepth);
+        currDepth = min(prev, currDepth);
     }
 }

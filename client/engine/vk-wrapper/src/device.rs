@@ -956,11 +956,11 @@ impl Device {
                         native_info.load_op = vk::AttachmentLoadOp::DONT_CARE;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }
-                    LoadStore::InitClearFinalSave => {
+                    LoadStore::InitClearFinalStore => {
                         native_info.load_op = vk::AttachmentLoadOp::CLEAR;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }
-                    LoadStore::InitLoadFinalSave => {
+                    LoadStore::InitLoadFinalStore => {
                         native_info.load_op = vk::AttachmentLoadOp::LOAD;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }
@@ -1344,7 +1344,7 @@ impl Device {
         let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(depth_stencil.depth_test)
             .depth_write_enable(depth_stencil.depth_write)
-            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+            .depth_compare_op(depth_stencil.depth_compare_op.0)
             .depth_bounds_test_enable(false)
             .stencil_test_enable(depth_stencil.stencil_test);
 

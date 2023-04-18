@@ -73,6 +73,7 @@ lazy_static! {
         (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA16_FLOAT, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA32_FLOAT, *DEFAULT_IMAGE_FEATURES),
     ]
     .into_iter()
     .collect();

@@ -743,7 +743,7 @@ impl TextRenderer {
             let simple_text = entry.get::<SimpleTextC>();
             let stage = simple_text.render_type;
             let mat_pipeline = simple_text.mat_pipeline;
-            let normalize_transforms = stage == RenderType::OVERLAY;
+            let normalize_transforms = stage == RenderType::Overlay;
 
             let seq = self.allocator.alloc_for(&simple_text.text);
 

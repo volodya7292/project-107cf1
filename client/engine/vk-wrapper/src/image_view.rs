@@ -2,11 +2,17 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::ImageWrapper;
+use crate::{Format, ImageWrapper};
 
 pub struct ImageView {
     pub(crate) image_wrapper: Arc<ImageWrapper>,
     pub(crate) native: vk::ImageView,
+}
+
+impl ImageView {
+    pub fn format(&self) -> Format {
+        self.image_wrapper.format
+    }
 }
 
 impl PartialEq for ImageView {

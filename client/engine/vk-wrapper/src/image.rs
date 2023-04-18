@@ -195,6 +195,16 @@ impl ImageViewBuilder {
         self
     }
 
+    pub fn base_array_layer(mut self, level: u32) -> Self {
+        self.info.subresource_range.base_array_layer = level;
+        self
+    }
+
+    pub fn array_layer_count(mut self, count: u32) -> Self {
+        self.info.subresource_range.layer_count = count;
+        self
+    }
+
     pub fn format(mut self, format: Format) -> Self {
         self.info.format = format.0;
         self

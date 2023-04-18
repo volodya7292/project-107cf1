@@ -129,8 +129,6 @@ void main() {
     // diffuse = vs_in.surface_normal;
 
     // outDiffuse = vec4(color, 1);
-    writeOutputAlbedo(vec4(diffuse.rgb, mat.diffuse.a));
-    outSpecular = vec4(0.0);
-    outEmission = vec4(0.0);
-    outNormal = vec4(0.0);
+
+    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), vec3(0.0), vec3(0.0));
 }

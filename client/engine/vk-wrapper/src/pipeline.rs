@@ -53,39 +53,53 @@ impl PrimitiveTopology {
     pub const TRIANGLE_STRIP: Self = Self(vk::PrimitiveTopology::TRIANGLE_STRIP);
 }
 
+pub struct CompareOp(pub(crate) vk::CompareOp);
+
+impl CompareOp {
+    pub const LESS_OR_EQUAL: Self = Self(vk::CompareOp::LESS_OR_EQUAL);
+    pub const GREATER_OR_EQUAL: Self = Self(vk::CompareOp::GREATER_OR_EQUAL);
+}
+
 pub struct PipelineDepthStencil {
     pub depth_test: bool,
     pub depth_write: bool,
     pub stencil_test: bool,
+    pub depth_compare_op: CompareOp,
 }
 
 impl PipelineDepthStencil {
-    pub fn new() -> PipelineDepthStencil {
+    pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn depth_test(mut self, enabled: bool) -> PipelineDepthStencil {
+    pub fn depth_test(mut self, enabled: bool) -> Self {
         self.depth_test = enabled;
         self
     }
 
-    pub fn depth_write(mut self, enabled: bool) -> PipelineDepthStencil {
+    pub fn depth_write(mut self, enabled: bool) -> Self {
         self.depth_write = enabled;
         self
     }
 
-    pub fn stencil_test(mut self, enabled: bool) -> PipelineDepthStencil {
+    pub fn stencil_test(mut self, enabled: bool) -> Self {
         self.stencil_test = enabled;
+        self
+    }
+
+    pub fn depth_compare_op(mut self, op: CompareOp) -> Self {
+        self.depth_compare_op = op;
         self
     }
 }
 
 impl Default for PipelineDepthStencil {
     fn default() -> Self {
-        PipelineDepthStencil {
+        Self {
             depth_test: false,
             depth_write: false,
             stencil_test: false,
+            depth_compare_op: CompareOp::LESS_OR_EQUAL,
         }
     }
 }

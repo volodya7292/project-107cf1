@@ -64,7 +64,6 @@ use common::glm;
 use common::glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec3, Vec4};
 use common::lrc::Lrc;
 use common::lrc::LrcExt;
-use common::nalgebra::{Matrix4, Vector4};
 use common::resource_file::ResourceRef;
 use common::scene::relation::Relation;
 use common::types::HashMap;
@@ -228,22 +227,30 @@ impl TextureAtlasType {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 #[repr(C)]
 struct CameraInfo {
-    pos: Vector4<f32>,
-    dir: Vector4<f32>,
-    proj: Matrix4<f32>,
-    view: Matrix4<f32>,
-    proj_view: Matrix4<f32>,
+    pos: Vec4,
+    dir: Vec4,
+    proj: Mat4,
+    view: Mat4,
+    proj_view: Mat4,
     z_near: f32,
     fovy: f32,
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+struct LightInfo {
+    proj_view: Mat4,
+    dir: Vec4,
+}
+
 #[derive(Debug, Default)]
 #[repr(C)]
-struct FrameInfoUniforms {
+struct FrameInfo {
     camera: CameraInfo,
+    main_light: LightInfo,
     atlas_info: U32Vec4,
     frame_size: UVec2,
     surface_size: UVec2,
@@ -527,8 +534,8 @@ impl MainRenderer {
         let per_frame_ub = device
             .create_device_buffer(
                 BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
-                device.align_for_uniform_dynamic_offset(mem::size_of::<FrameInfoUniforms>() as u64),
-                2, // For two different RenderStages
+                device.align_for_uniform_dynamic_offset(mem::size_of::<FrameInfo>() as u64),
+                3, // MAIN, OVERLAY, MAIN_SHADOW_MAP
             )
             .unwrap();
         let uniform_buffer_basic = device
@@ -623,10 +630,7 @@ impl MainRenderer {
                     g_per_frame_pool.create_binding(
                         shader_ids::BINDING_FRAME_INFO,
                         0,
-                        BindingRes::BufferRange(
-                            per_frame_ub.handle(),
-                            0..mem::size_of::<FrameInfoUniforms>() as u64,
-                        ),
+                        BindingRes::BufferRange(per_frame_ub.handle(), 0..mem::size_of::<FrameInfo>() as u64),
                     ),
                     g_per_frame_pool.create_binding(
                         shader_ids::BINDING_MATERIAL_BUFFER,
@@ -1151,9 +1155,22 @@ impl MainRenderer {
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
-            let mut per_frame_infos: [FrameInfoUniforms; 2] = Default::default();
+            let mut per_frame_infos: [FrameInfo; 3] = Default::default();
 
-            per_frame_infos[RenderType::MAIN as usize] = {
+            let main_light_pos = Vec3::new(
+                self.relative_camera_pos.x as f32,
+                self.relative_camera_pos.y as f32 + 512.0,
+                self.relative_camera_pos.z as f32,
+            );
+            let main_light_dir = Vec3::new(0.0, -1.0, 0.0);
+            let main_light_proj: Mat4 = glm::ortho_rh_zo(-512.0, 512.0, -512.0, 512.0, 1.0, 1000.0);
+            let main_light_view = glm::look_at_rh(
+                &main_light_pos,
+                &Vec3::new(main_light_pos.x, 0.0, main_light_pos.z),
+                &Vec3::new(1.0, 0.0, 0.0),
+            );
+
+            per_frame_infos[RenderType::Main as usize] = {
                 let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
                 let cam_dir = camera.direction();
                 let proj = camera.projection();
@@ -1162,7 +1179,7 @@ impl MainRenderer {
                     &camera.rotation(),
                 ));
 
-                FrameInfoUniforms {
+                FrameInfo {
                     camera: CameraInfo {
                         pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
                         dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
@@ -1172,13 +1189,16 @@ impl MainRenderer {
                         z_near: camera.z_near(),
                         fovy: camera.fovy(),
                     },
-
+                    main_light: LightInfo {
+                        proj_view: main_light_proj * main_light_view,
+                        dir: main_light_dir.push(0.0),
+                    },
                     atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
                     frame_size: self.render_size,
                     surface_size: self.surface_size,
                 }
             };
-            per_frame_infos[RenderType::OVERLAY as usize] = {
+            per_frame_infos[RenderType::Overlay as usize] = {
                 let cam_dir = self.overlay_camera.direction();
                 let proj = self.overlay_camera.projection();
                 let view = camera::create_view_matrix(
@@ -1186,7 +1206,7 @@ impl MainRenderer {
                     self.overlay_camera.rotation(),
                 );
 
-                FrameInfoUniforms {
+                FrameInfo {
                     camera: CameraInfo {
                         pos: Vec4::new(0.0, 0.0, 0.0, 0.0),
                         dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
@@ -1196,7 +1216,22 @@ impl MainRenderer {
                         z_near: camera.z_near(),
                         fovy: camera.fovy(),
                     },
-                    ..per_frame_infos[RenderType::MAIN as usize]
+                    ..per_frame_infos[RenderType::Main as usize]
+                }
+            };
+            per_frame_infos[RenderType::MainShadowMap as usize] = {
+                FrameInfo {
+                    camera: CameraInfo {
+                        pos: main_light_pos.push(0.0),
+                        dir: main_light_dir.push(1.0),
+                        proj: main_light_proj,
+                        view: main_light_view,
+                        proj_view: main_light_proj * main_light_view,
+                        z_near: 0.0,
+                        fovy: 0.0,
+                    },
+                    frame_size: glm::vec2(1024, 1024),
+                    ..per_frame_infos[RenderType::Main as usize]
                 }
             };
 

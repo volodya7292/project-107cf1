@@ -48,8 +48,14 @@ struct Camera {
     float fovy;
 };
 
+struct LightInfo {
+    mat4 proj_view;
+    vec4 dir;
+};
+
 struct FrameInfo {
     Camera camera;
+    LightInfo main_light;
     uvec4 tex_atlas_info; // .x: tile size in pixels
     uvec2 frame_size;
     uvec2 surface_size;
@@ -59,10 +65,11 @@ struct FrameInfo {
 #ifdef ENGINE_PIXEL_SHADER
 layout(constant_id = CONST_ID_PASS_TYPE) const uint PASS_TYPE = 0;
 
-layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec4 outSpecular;
-layout(location = 2) out vec4 outEmission;
-layout(location = 3) out vec4 outNormal;
+layout(location = 0) out vec4 outPosition;
+layout(location = 1) out vec4 outAlbedo;
+layout(location = 2) out vec4 outSpecular;
+layout(location = 3) out vec4 outEmission;
+layout(location = 4) out vec4 outNormal;
 
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
@@ -119,7 +126,8 @@ void writeOutputAlbedo(vec4 albedo) {
     uint sliceSize = info.frame_size.x * info.frame_size.y;
     uint lastLayerIdx = OIT_N_CLOSEST_LAYERS - 1;
 
-    if (currDepth > depthsArray[coordIdx + lastLayerIdx * sliceSize]) {
+    // note: z is reversed
+    if (currDepth < depthsArray[coordIdx + lastLayerIdx * sliceSize]) {
         // The fragment falls behind closest depths => perform tail-blending
         outAlbedo = albedo;
         return;
@@ -132,7 +140,7 @@ void writeOutputAlbedo(vec4 albedo) {
     while (start < end) {
         uint mid = (start + end) / 2;
         uint depth = depthsArray[coordIdx + mid * sliceSize];
-        if (currDepth <= depth) {
+        if (currDepth >= depth) {
             end = mid;
         } else {
             start = mid + 1;
@@ -145,7 +153,36 @@ void writeOutputAlbedo(vec4 albedo) {
     outAlbedo = vec4(0);
 }
 
+void writeOutput(vec3 position, vec4 albedo, vec4 specular, vec3 emission, vec3 normal) {
+    outPosition.rgb = position;
+    outSpecular = specular;
+    outEmission.rgb = emission;
+    outNormal.rgb = normal;
+    writeOutputAlbedo(albedo);
+}
+
 #endif // ENGINE_PIXEL_SHADER
+
+//#ifdef ENGINE_VERTEX_SHADER
+//layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
+//    FrameInfo info;
+//};
+//layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
+//    mat4 model;
+//};
+//
+//struct VertexOuts {
+//    vec2 tex_uv;
+//    vec3 local_pos;
+//    vec3 world_pos;
+//    vec3 world_pos_from_main_light;
+//    vec3 surface_normal;
+//    uint material_id;
+//};
+//
+//
+//
+//#endif // ENGINE_VERTEX_SHADER
 
 
 // R2 low discrepancy sequence

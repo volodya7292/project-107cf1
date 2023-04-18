@@ -3,6 +3,7 @@ use std::collections::hash_map;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::device::{SpecConstId, SpecConstValue};
+use vk_wrapper::pipeline::CompareOp;
 use vk_wrapper::{AttachmentColorBlend, PrimitiveTopology};
 
 pub struct PipelineConfig<'a> {
@@ -40,7 +41,9 @@ impl MaterialPipelineSet {
                         self.topology,
                         vkw::PipelineDepthStencil::new()
                             .depth_test(params.depth_test)
-                            .depth_write(params.depth_write),
+                            .depth_write(params.depth_write)
+                            // Reversed-Z
+                            .depth_compare_op(CompareOp::GREATER_OR_EQUAL),
                         vkw::PipelineRasterization::new().cull_back_faces(params.cull_back_faces),
                         &params
                             .blend_attachments

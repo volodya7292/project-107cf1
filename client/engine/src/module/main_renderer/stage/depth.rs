@@ -26,18 +26,23 @@ use vk_wrapper::{
 };
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
+const MAIN_SHADOW_MAP_CASCADES: u32 = 3;
 
 pub type VisibilityType = u32;
 
 pub struct DepthStage {
     device: Arc<Device>,
-    render_pass: Arc<RenderPass>,
-    depth_write_pipe: PipelineKindId,
-    translucency_depths_pipe: PipelineKindId,
+    depth_render_pass: Arc<RenderPass>,
     translucency_depths_pixel_shader: Arc<Shader>,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     cull_pipeline: Arc<Pipeline>,
+
+    shadow_map_render_pass: Arc<RenderPass>,
+
+    depth_write_pipe: PipelineKindId,
+    translucency_depths_pipe: PipelineKindId,
+    shadow_map_pipe: PipelineKindId,
 }
 
 #[derive(Copy, Clone)]
@@ -63,15 +68,16 @@ impl DepthStage {
     pub const RES_DEPTH_IMAGE: &'static str = "depth_image";
     pub const RES_VISIBILITY_HOST_BUFFER: &'static str = "visibility_host_buffer";
     pub const RES_TRANSLUCENCY_DEPTHS_IMAGE: &'static str = "translucency_depths_image";
+    pub const RES_MAIN_SHADOW_MAP: &'static str = "main_shadow_map";
 
     pub fn new(device: &Arc<Device>) -> Self {
-        let render_pass = device
+        let depth_render_pass = device
             .create_render_pass(
                 &[Attachment {
                     format: Format::D32_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::InitClearFinalSave,
+                    load_store: LoadStore::InitClearFinalStore,
                 }],
                 &[
                     Subpass::new().with_depth(AttachmentRef {
@@ -100,6 +106,24 @@ impl DepthStage {
                     // src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
                     // dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
                 }],
+            )
+            .unwrap();
+
+        let shadow_map_render_pass = device
+            .create_render_pass(
+                &(0..MAIN_SHADOW_MAP_CASCADES)
+                    .map(|_| Attachment {
+                        format: Format::D32_FLOAT,
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::SHADER_READ,
+                        load_store: LoadStore::InitClearFinalStore,
+                    })
+                    .collect::<Vec<_>>(),
+                &[Subpass::new().with_depth(AttachmentRef {
+                    index: 0,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                })],
+                &[],
             )
             .unwrap();
 
@@ -135,12 +159,14 @@ impl DepthStage {
 
         Self {
             device: Arc::clone(device),
-            render_pass,
-            depth_write_pipe: u32::MAX,
-            translucency_depths_pipe: u32::MAX,
+            depth_render_pass,
             translucency_depths_pixel_shader,
             depth_pyramid_pipeline,
             cull_pipeline,
+            shadow_map_render_pass,
+            depth_write_pipe: u32::MAX,
+            translucency_depths_pipe: u32::MAX,
+            shadow_map_pipe: u32::MAX,
         }
     }
 
@@ -168,16 +194,16 @@ impl DepthStage {
 
                 cl_sol
                     .begin_secondary_graphics(
-                        true,
-                        &self.render_pass,
+                        false,
+                        &self.depth_render_pass,
                         0,
                         Some(framebuffer),
                     )
                     .unwrap();
                 cl_trans
                     .begin_secondary_graphics(
-                        true,
-                        &self.render_pass,
+                        false,
+                        &self.depth_render_pass,
                         1,
                         Some(framebuffer),
                     )
@@ -197,7 +223,7 @@ impl DepthStage {
                         continue;
                     };
 
-                    if render_config.render_ty != RenderType::MAIN || !render_config.visible || vertex_mesh.is_empty() {
+                    if render_config.render_ty != RenderType::Main || !render_config.visible || vertex_mesh.is_empty() {
                         continue;
                     }
 
@@ -254,6 +280,156 @@ impl DepthStage {
 
         cull_objects.into_inner()
     }
+
+    fn record_main_shadow_map_cmd_lists(
+        &mut self,
+        depth_cls: &mut [CmdList],
+        framebuffer: &Framebuffer,
+        ctx: &StageContext,
+    ) {
+        let mat_pipelines = ctx.material_pipelines;
+        let object_count = ctx.ordered_entities.len();
+        let draw_count_step = object_count / depth_cls.len() + 1;
+
+        // let proj_mat = ctx.active_camera.projection();
+        // let view_mat = camera::create_view_matrix(&ctx.relative_camera_pos, &ctx.active_camera.rotation());
+        // let frustum = Frustum::new(proj_mat * view_mat);
+
+        depth_cls.par_iter_mut()
+            .enumerate()
+            .for_each(|(i, cl)| {
+                cl
+                    .begin_secondary_graphics(
+                        false,
+                        framebuffer.render_pass(),
+                        0,
+                        Some(framebuffer),
+                    )
+                    .unwrap();
+
+                for j in 0..draw_count_step {
+                    let entity_index = i * draw_count_step + j;
+                    if entity_index >= object_count {
+                        break;
+                    }
+
+                    let renderable_id = ctx.ordered_entities[entity_index];
+                    let entry = ctx.storage.entry(&renderable_id).unwrap();
+
+                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
+                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
+                        continue;
+                    };
+
+                    if render_config.render_ty != RenderType::Main || !render_config.visible || render_config.translucent || vertex_mesh.is_empty() {
+                        continue;
+                    }
+
+                    // TODO: implement frustum culling
+                    // if let Some(sphere) = vertex_mesh.sphere() {
+                    //     let center = sphere.center() + global_transform.position_f32();
+                    //     let radius = sphere.radius() * global_transform.scale.max();
+                    //
+                    //     // TODO: change frustum
+                    //     if !frustum.is_sphere_visible(&center, radius) {
+                    //         continue;
+                    //     }
+                    // }
+
+                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
+                    let renderable = &ctx.renderables[&renderable_id];
+
+                    let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();
+                    let signature = pipeline.signature();
+                    cl.bind_pipeline(pipeline);
+
+                    let descriptors = compose_descriptor_sets(
+                        ctx.g_per_frame_in,
+                        mat_pipeline.per_frame_desc,
+                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+                    );
+
+                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[
+                        RenderType::MainShadowMap as u32 * ctx.per_frame_ub.element_size() as u32,
+                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32
+                    ]);
+
+                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                }
+
+                cl.end().unwrap();
+            });
+    }
+
+    fn gen_shadow_maps(&mut self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {
+        let available_threads = rayon::current_num_threads();
+        let cmd_lists = resources.request_cmd_lists(
+            "depth-main_shadow_map_cl",
+            CmdListParams::secondary(QueueType::Graphics).with_count(available_threads),
+        );
+
+        // TODO: may be extract this to renderer settings
+        let shadow_map_size = (512, 512, MAIN_SHADOW_MAP_CASCADES);
+
+        let main_shadow_maps = resources.request_image(
+            Self::RES_MAIN_SHADOW_MAP,
+            ImageParams::d2_array(
+                Format::D32_FLOAT,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                shadow_map_size,
+            ),
+        );
+        let main_shadow_map_views = resources.request(
+            "main_shadow_map_views",
+            (Arc::clone(&main_shadow_maps),),
+            |(main_shadow_map,), _| {
+                let views: Vec<_> = (0..main_shadow_map.size().2)
+                    .map(|i| {
+                        main_shadow_map
+                            .create_view_named(&format!("{i}"))
+                            .mip_level_count(i)
+                            .mip_level_count(1)
+                            .build()
+                            .unwrap()
+                    })
+                    .collect();
+                Arc::new(views)
+            },
+        );
+
+        let main_shadow_framebuffer = resources.request(
+            "depth-main_shadow_fb",
+            (main_shadow_map_views, shadow_map_size),
+            |(main_shadow_map_views, shadow_map_size), _| {
+                let mods: Vec<_> = main_shadow_map_views
+                    .iter()
+                    .enumerate()
+                    .map(|(i, view)| (i as u32, ImageMod::OverrideImageView(Arc::clone(view))))
+                    .collect();
+                self.shadow_map_render_pass
+                    .create_framebuffer((shadow_map_size.0, shadow_map_size.1), &mods)
+                    .unwrap()
+            },
+        );
+
+        self.record_main_shadow_map_cmd_lists(&mut cmd_lists.lock(), &main_shadow_framebuffer, ctx);
+
+        // TODO: cascaded shadow mapping
+        //   render the scene N_CASCADES times
+        //    (run secondary cmd list for each cascade with frustum culling).
+
+        // Render solid objects
+        cl.begin_render_pass(
+            &self.shadow_map_render_pass,
+            &main_shadow_framebuffer,
+            &(0..MAIN_SHADOW_MAP_CASCADES)
+                .map(|_| ClearValue::Depth(1.0))
+                .collect::<Vec<_>>(),
+            true,
+        );
+        cl.execute_secondary(cmd_lists.lock().iter());
+        cl.end_render_pass();
+    }
 }
 
 impl RenderStage for DepthStage {
@@ -262,12 +438,13 @@ impl RenderStage for DepthStage {
     }
 
     fn num_pipeline_kinds(&self) -> u32 {
-        2
+        3
     }
 
     fn setup(&mut self, pipeline_kinds: &[PipelineKindId]) {
         self.depth_write_pipe = pipeline_kinds[0];
         self.translucency_depths_pipe = pipeline_kinds[1];
+        self.shadow_map_pipe = pipeline_kinds[2];
     }
 
     fn register_pipeline_kind(&self, params: MaterialPipelineParams, pipeline_set: &mut MaterialPipelineSet) {
@@ -300,7 +477,7 @@ impl RenderStage for DepthStage {
         pipeline_set.prepare_pipeline(
             self.depth_write_pipe,
             &PipelineConfig {
-                render_pass: &self.render_pass,
+                render_pass: &self.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
                 cull_back_faces: params.cull_back_faces,
@@ -313,7 +490,7 @@ impl RenderStage for DepthStage {
         pipeline_set.prepare_pipeline(
             self.translucency_depths_pipe,
             &PipelineConfig {
-                render_pass: &self.render_pass,
+                render_pass: &self.depth_render_pass,
                 signature: &translucency_depth_signature,
                 subpass_index: 1,
                 cull_back_faces: params.cull_back_faces,
@@ -324,6 +501,19 @@ impl RenderStage for DepthStage {
                     shader_ids::CONST_ID_PASS_TYPE,
                     shader_ids::PASS_TYPE_DEPTH_TRANSLUCENCY,
                 )],
+            },
+        );
+        pipeline_set.prepare_pipeline(
+            self.shadow_map_pipe,
+            &PipelineConfig {
+                render_pass: &self.shadow_map_render_pass,
+                signature: &depth_signature,
+                subpass_index: 0,
+                cull_back_faces: params.cull_back_faces,
+                blend_attachments: &[],
+                depth_test: true,
+                depth_write: true,
+                spec_consts: &[(shader_ids::CONST_ID_PASS_TYPE, shader_ids::PASS_TYPE_DEPTH)],
             },
         );
     }
@@ -409,7 +599,7 @@ impl RenderStage for DepthStage {
             "depth-framebuffer",
             (
                 ctx.render_size,
-                Arc::clone(&self.render_pass),
+                Arc::clone(&self.depth_render_pass),
                 Arc::clone(&depth_image),
             ),
             |(render_size, render_pass, depth_image), _| {
@@ -547,13 +737,24 @@ impl RenderStage for DepthStage {
         );
 
         // Render solid objects
-        cl.begin_render_pass(&self.render_pass, &framebuffer, &[ClearValue::Depth(1.0)], true);
+        cl.begin_render_pass(
+            &self.depth_render_pass,
+            &framebuffer,
+            // 0.0 due to reversed-z
+            &[ClearValue::Depth(0.0)],
+            true,
+        );
         cl.execute_secondary(depth_cmd_lists.lock().iter());
 
         // Find closest depths of translucent objects
         cl.next_subpass(true);
         cl.execute_secondary(translucency_depths_cmd_lists.lock().iter());
         cl.end_render_pass();
+
+        // Render main shadow map
+        // ----------------------------------------------------------------------------------------
+
+        self.gen_shadow_maps(cl, resources, ctx);
 
         // Build depth pyramid
         // ----------------------------------------------------------------------------------------

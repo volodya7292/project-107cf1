@@ -129,6 +129,11 @@ impl Game {
 
         // TODO: save tick_count_state to disk
 
+        // TODO: render sunlight:
+        //   when there's no visible blocks above the viewer to form a shadow
+        //      height < 0 => do not pass the sunlight
+        //      height >= 0 => pass the sunlight
+
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),
@@ -304,7 +309,7 @@ impl Application for Game {
                     (),
                 )
                 .with_renderer(
-                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_stage(RenderType::OVERLAY),
+                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_stage(RenderType::Overlay),
                 )
                 .with_mesh(VertexMeshC::without_data(4, 1)),
             )

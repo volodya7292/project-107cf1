@@ -28,6 +28,8 @@ pub struct PostProcessStage {
 
     tonemap_render_pass: Arc<RenderPass>,
     tonemap_pipeline: Arc<Pipeline>,
+
+    shadow_map_sampler: Arc<Sampler>,
 }
 
 #[repr(C)]
@@ -80,8 +82,8 @@ impl PostProcessStage {
             .unwrap();
         let merge_pixel_shader = device
             .create_pixel_shader(
-                include_bytes!("../../../../shaders/build/solid_transparent_merge.frag.spv"),
-                "solid_transparent_merge.frag",
+                include_bytes!("../../../../shaders/build/g_buffer_merge.frag.spv"),
+                "g_buffer_merge.frag",
             )
             .unwrap();
         let merge_signature = device
@@ -134,7 +136,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::SHADER_READ,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::InitLoadFinalSave,
+                    load_store: LoadStore::InitLoadFinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -246,6 +248,16 @@ impl PostProcessStage {
             )
             .unwrap();
 
+        let shadow_map_sampler = device
+            .create_sampler(
+                SamplerFilter::LINEAR,
+                SamplerFilter::NEAREST,
+                SamplerMipmap::NEAREST,
+                SamplerClamp::CLAMP_TO_EDGE,
+                1.0,
+            )
+            .unwrap();
+
         Self {
             device: Arc::clone(device),
             merge_render_pass,
@@ -257,10 +269,11 @@ impl PostProcessStage {
             bloom_sampler,
             tonemap_render_pass,
             tonemap_pipeline,
+            shadow_map_sampler,
         }
     }
 
-    pub fn solid_transparent_merge_stage(
+    pub fn g_buffer_merge_stage(
         &self,
         cl: &mut CmdList,
         resources: &ResourceManagementScope,
@@ -286,6 +299,9 @@ impl PostProcessStage {
             resources.get(DepthStage::RES_TRANSLUCENCY_DEPTHS_IMAGE);
         let translucency_colors_image: Arc<Image> =
             resources.get(GBufferStage::RES_TRANSLUCENCY_COLORS_IMAGE);
+        let g_position = g_framebuffer
+            .get_image(GBufferStage::POSITION_ATTACHMENT_ID)
+            .unwrap();
         let g_albedo = g_framebuffer
             .get_image(GBufferStage::ALBEDO_ATTACHMENT_ID)
             .unwrap();
@@ -298,6 +314,11 @@ impl PostProcessStage {
         let g_normal = g_framebuffer
             .get_image(GBufferStage::NORMAL_ATTACHMENT_ID)
             .unwrap();
+        let g_depth = g_framebuffer
+            .get_image(GBufferStage::DEPTH_ATTACHMENT_ID)
+            .unwrap();
+
+        let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
 
         unsafe {
             self.device.update_descriptor_set(
@@ -306,33 +327,53 @@ impl PostProcessStage {
                     merge_descriptor.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(g_albedo), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_position), None, ImageLayout::SHADER_READ),
                     ),
                     merge_descriptor.create_binding(
                         1,
                         0,
-                        BindingRes::Image(Arc::clone(g_specular), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_albedo), None, ImageLayout::SHADER_READ),
                     ),
                     merge_descriptor.create_binding(
                         2,
                         0,
-                        BindingRes::Image(Arc::clone(g_emissive), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_specular), None, ImageLayout::SHADER_READ),
                     ),
                     merge_descriptor.create_binding(
                         3,
                         0,
+                        BindingRes::Image(Arc::clone(g_emissive), None, ImageLayout::SHADER_READ),
+                    ),
+                    merge_descriptor.create_binding(
+                        4,
+                        0,
                         BindingRes::Image(Arc::clone(g_normal), None, ImageLayout::SHADER_READ),
                     ),
-                    merge_descriptor.create_binding(4, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
                     merge_descriptor.create_binding(
                         5,
+                        0,
+                        BindingRes::Image(Arc::clone(g_depth), None, ImageLayout::DEPTH_STENCIL_READ),
+                    ),
+                    merge_descriptor.create_binding(6, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    merge_descriptor.create_binding(
+                        7,
                         0,
                         BindingRes::Buffer(translucency_depths_image.handle()),
                     ),
                     merge_descriptor.create_binding(
-                        6,
+                        8,
                         0,
                         BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
+                    ),
+                    merge_descriptor.create_binding(
+                        9,
+                        0,
+                        BindingRes::Image(
+                            Arc::clone(&main_shadow_map),
+                            None,
+                            // Some(Arc::clone(&self.shadow_map_sampler)),
+                            ImageLayout::SHADER_READ,
+                        ),
                     ),
                 ],
             )
@@ -577,7 +618,7 @@ impl RenderStage for PostProcessStage {
     ) -> StageRunResult {
         cl.begin(true).unwrap();
 
-        self.solid_transparent_merge_stage(cl, resources, ctx);
+        self.g_buffer_merge_stage(cl, resources, ctx);
         self.bloom_stage(cl, resources, ctx);
 
         cl.end().unwrap();

@@ -56,9 +56,10 @@ impl Resource {
 #[repr(u8)]
 pub enum RenderType {
     /// Renders regular 3D objects.
-    MAIN = 0,
+    Main = 0,
     /// Renders objects after the `MAIN` stage.
-    OVERLAY = 1,
+    Overlay = 1,
+    MainShadowMap = 2,
 }
 
 pub struct MeshRenderConfigC {
@@ -73,7 +74,7 @@ pub struct MeshRenderConfigC {
 impl Default for MeshRenderConfigC {
     fn default() -> Self {
         Self {
-            render_ty: RenderType::MAIN,
+            render_ty: RenderType::Main,
             mat_pipeline: u32::MAX,
             resources: Default::default(),
             translucent: false,
@@ -85,7 +86,7 @@ impl Default for MeshRenderConfigC {
 impl MeshRenderConfigC {
     pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfigC {
         MeshRenderConfigC {
-            render_ty: RenderType::MAIN,
+            render_ty: RenderType::Main,
             mat_pipeline,
             resources: Default::default(),
             translucent,

@@ -29,10 +29,12 @@ pub struct GBufferStage {
 }
 
 impl GBufferStage {
-    pub const ALBEDO_ATTACHMENT_ID: u32 = 0;
-    pub const SPECULAR_ATTACHMENT_ID: u32 = 1;
-    pub const EMISSIVE_ATTACHMENT_ID: u32 = 2;
-    pub const NORMAL_ATTACHMENT_ID: u32 = 3;
+    pub const POSITION_ATTACHMENT_ID: u32 = 0;
+    pub const ALBEDO_ATTACHMENT_ID: u32 = 1;
+    pub const SPECULAR_ATTACHMENT_ID: u32 = 2;
+    pub const EMISSIVE_ATTACHMENT_ID: u32 = 3;
+    pub const NORMAL_ATTACHMENT_ID: u32 = 4;
+    pub const DEPTH_ATTACHMENT_ID: u32 = 5;
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
     pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
 
@@ -42,40 +44,47 @@ impl GBufferStage {
         let render_pass = device
             .create_render_pass(
                 &[
+                    // Position
+                    Attachment {
+                        format: Format::RGBA16_FLOAT,
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::SHADER_READ,
+                        load_store: LoadStore::InitClearFinalStore,
+                    },
                     // Albedo
                     Attachment {
                         format: Format::RGBA8_UNORM,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalSave,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                     // Specular
                     Attachment {
                         format: Format::RGBA8_UNORM,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalSave,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                     // Emission
                     Attachment {
                         format: Format::RGBA16_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalSave,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                     // Normal
                     Attachment {
                         format: Format::RG16_UNORM,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalSave,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                     // Depth (read)
                     Attachment {
                         format: Format::D32_FLOAT,
                         init_layout: ImageLayout::DEPTH_STENCIL_READ,
                         final_layout: ImageLayout::DEPTH_STENCIL_READ,
-                        load_store: LoadStore::InitLoad,
+                        load_store: LoadStore::InitLoadFinalStore,
                     },
                     // Overlay depth (read/write)
                     Attachment {
@@ -105,10 +114,14 @@ impl GBufferStage {
                                 index: 3,
                                 layout: ImageLayout::COLOR_ATTACHMENT,
                             },
+                            AttachmentRef {
+                                index: 4,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
                         ])
                         .with_depth(AttachmentRef {
-                            index: 4,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                            index: 5,
+                            layout: ImageLayout::DEPTH_STENCIL_READ,
                         }),
                     // Overlay pass
                     Subpass::new()
@@ -129,9 +142,13 @@ impl GBufferStage {
                                 index: 3,
                                 layout: ImageLayout::COLOR_ATTACHMENT,
                             },
+                            AttachmentRef {
+                                index: 4,
+                                layout: ImageLayout::COLOR_ATTACHMENT,
+                            },
                         ])
                         .with_depth(AttachmentRef {
-                            index: 5,
+                            index: 6,
                             layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
                         }),
                 ],
@@ -197,15 +214,13 @@ impl GBufferStage {
                     let Some(render_config) = ctx.storage.get::<MeshRenderConfigC>(&renderable_id) else {
                         continue;
                     };
-                    if render_config.render_ty != RenderType::MAIN {
+                    if render_config.render_ty != RenderType::Main {
                         continue;
                     }
-
                     let Some(vertex_mesh) = ctx.curr_vertex_meshes.get(&renderable_id) else {
                         continue;
                     };
-
-                    if visibility_host_buffer[entity_index] == 0 && vertex_mesh.is_empty() {
+                    if visibility_host_buffer[entity_index] == 0 || vertex_mesh.is_empty() {
                         continue;
                     }
 
@@ -256,7 +271,7 @@ impl GBufferStage {
             let Some(render_config) = ctx.storage.get::<MeshRenderConfigC>(renderable_id) else {
                 continue;
             };
-            if render_config.render_ty != RenderType::OVERLAY {
+            if render_config.render_ty != RenderType::Overlay {
                 continue;
             }
 
@@ -419,7 +434,13 @@ impl RenderStage for GBufferStage {
                                     ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
                                 ),
                             ),
-                            (4, ImageMod::OverrideImage(Arc::clone(&depth_image))),
+                            (
+                                4,
+                                ImageMod::AdditionalUsage(
+                                    ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ),
+                            ),
+                            (5, ImageMod::OverrideImage(Arc::clone(&depth_image))),
                         ],
                     )
                     .unwrap()
@@ -490,6 +511,7 @@ impl RenderStage for GBufferStage {
             &self.render_pass,
             &framebuffer,
             &[
+                ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),
