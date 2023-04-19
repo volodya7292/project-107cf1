@@ -517,7 +517,7 @@ impl RenderStage for GBufferStage {
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::Undefined,
-                ClearValue::Depth(1.0),
+                ClearValue::Depth(0.0),
             ],
             true,
         );

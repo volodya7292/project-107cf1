@@ -107,7 +107,8 @@ impl OrthoCamera {
     }
 
     pub fn projection(&self) -> Mat4 {
-        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, 0.0, 1024.0)
+        // Note: using reversed-z
+        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, 1024.0, 0.0)
     }
 
     pub fn position(&self) -> &DVec3 {
