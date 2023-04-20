@@ -1,15 +1,18 @@
-use crate::ecs::component::render_config::RenderType;
+use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
-use crate::module::main_renderer::compose_descriptor_sets;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
 use crate::module::main_renderer::resource_manager::{CmdListParams, ImageParams, ResourceManagementScope};
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::module::main_renderer::stage::depth::{DepthStage, VisibilityType};
-use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
+use crate::module::main_renderer::stage::{
+    FrameContext, RenderStage, RenderStageId, StageContext, StageRunResult,
+};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
-use common::rayon;
+use crate::module::main_renderer::{camera, compose_descriptor_sets, CameraInfo, FrameInfo};
+use common::glm::Vec4;
 use common::rayon::prelude::*;
+use common::{glm, rayon};
 use std::iter;
 use std::sync::Arc;
 use vk_wrapper::{
@@ -26,6 +29,7 @@ pub struct GBufferStage {
     color_with_blending_pipe: PipelineKindId,
     overlay_pipe: PipelineKindId,
     render_pass: Arc<RenderPass>,
+    frame_infos_indices: Vec<usize>,
 }
 
 impl GBufferStage {
@@ -169,6 +173,7 @@ impl GBufferStage {
             color_with_blending_pipe: u32::MAX,
             overlay_pipe: u32::MAX,
             render_pass,
+            frame_infos_indices: vec![],
         }
     }
 
@@ -214,7 +219,7 @@ impl GBufferStage {
                     let Some(render_config) = ctx.storage.get::<MeshRenderConfigC>(&renderable_id) else {
                         continue;
                     };
-                    if render_config.render_ty != RenderType::Main {
+                    if render_config.render_layer != RenderLayer::Main {
                         continue;
                     }
                     let Some(vertex_mesh) = ctx.curr_vertex_meshes.get(&renderable_id) else {
@@ -248,7 +253,7 @@ impl GBufferStage {
                         0,
                         &descriptors,
                         &[
-                            render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
+                            self.frame_infos_indices[0] as u32 * ctx.per_frame_ub.element_size() as u32,
                             renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                         ],
                     );
@@ -271,7 +276,7 @@ impl GBufferStage {
             let Some(render_config) = ctx.storage.get::<MeshRenderConfigC>(renderable_id) else {
                 continue;
             };
-            if render_config.render_ty != RenderType::Overlay {
+            if render_config.render_layer != RenderLayer::Overlay {
                 continue;
             }
 
@@ -296,7 +301,7 @@ impl GBufferStage {
                 0,
                 &descriptors,
                 &[
-                    render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
+                    self.frame_infos_indices[1] as u32 * ctx.per_frame_ub.element_size() as u32,
                     renderable.uniform_buf_index as u32 * BASIC_UNIFORM_BLOCK_MAX_SIZE as u32,
                 ],
             );
@@ -315,6 +320,10 @@ impl RenderStage for GBufferStage {
 
     fn num_pipeline_kinds(&self) -> u32 {
         3
+    }
+
+    fn num_per_frame_infos(&self) -> u32 {
+        2
     }
 
     fn record_dependencies(&self) -> Vec<RenderStageId> {
@@ -373,6 +382,33 @@ impl RenderStage for GBufferStage {
                 )],
             },
         );
+    }
+
+    fn update_frame_infos(
+        &mut self,
+        infos: &mut [FrameInfo],
+        frame_infos_indices: &[usize],
+        ctx: &FrameContext,
+    ) {
+        self.frame_infos_indices = frame_infos_indices.to_vec();
+        let overlay = &mut infos[frame_infos_indices[1]];
+
+        let overlay_cam_dir = ctx.overlay_camera.direction();
+        let overlay_proj = ctx.overlay_camera.projection();
+        let overlay_view = camera::create_view_matrix(
+            &glm::convert(*ctx.overlay_camera.position()),
+            ctx.overlay_camera.rotation(),
+        );
+
+        overlay.camera = CameraInfo {
+            pos: Vec4::from_element(0.0),
+            dir: overlay_cam_dir.push(0.0),
+            proj: overlay_proj,
+            view: overlay_view,
+            proj_view: overlay_proj * overlay_view,
+            z_near: ctx.overlay_camera.z_near(),
+            fovy: 0.0,
+        };
     }
 
     fn run(

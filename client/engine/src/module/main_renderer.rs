@@ -35,7 +35,7 @@ mod stage_manager;
 //
 
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderType;
+use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::system;
@@ -50,7 +50,7 @@ use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::post_process::PostProcessStage;
 use crate::module::main_renderer::stage::present_queue_transition::PresentQueueTransitionStage;
-use crate::module::main_renderer::stage::{RenderStage, StageContext};
+use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext};
 use crate::module::main_renderer::stage_manager::StageManager;
 use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::SceneObject;
@@ -246,9 +246,9 @@ struct LightInfo {
     dir: Vec4,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 #[repr(C)]
-struct FrameInfo {
+pub(crate) struct FrameInfo {
     camera: CameraInfo,
     main_light: LightInfo,
     atlas_info: U32Vec4,
@@ -535,7 +535,7 @@ impl MainRenderer {
             .create_device_buffer(
                 BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
                 device.align_for_uniform_dynamic_offset(mem::size_of::<FrameInfo>() as u64),
-                3, // MAIN, OVERLAY, MAIN_SHADOW_MAP
+                64,
             )
             .unwrap();
         let uniform_buffer_basic = device
@@ -1155,7 +1155,15 @@ impl MainRenderer {
         // Update camera uniform buffers
         // -------------------------------------------------------------------------------------------------------------
         {
-            let mut per_frame_infos: [FrameInfo; 3] = Default::default();
+            let mut per_frame_infos = Vec::with_capacity(64);
+
+            let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
+            let cam_dir = camera.direction();
+            let cam_proj = camera.projection();
+            let cam_view: Mat4 = glm::convert(camera::create_view_matrix(
+                &glm::convert(cam_pos),
+                &camera.rotation(),
+            ));
 
             let main_light_pos = Vec3::new(
                 self.relative_camera_pos.x as f32,
@@ -1170,70 +1178,42 @@ impl MainRenderer {
                 &Vec3::new(1.0, 0.0, 0.0),
             );
 
-            per_frame_infos[RenderType::Main as usize] = {
-                let cam_pos: Vec3 = glm::convert(self.relative_camera_pos);
-                let cam_dir = camera.direction();
-                let proj = camera.projection();
-                let view: Mat4 = glm::convert(camera::create_view_matrix(
-                    &glm::convert(cam_pos),
-                    &camera.rotation(),
-                ));
+            let default_frame_info = FrameInfo {
+                camera: CameraInfo {
+                    pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
+                    dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
+                    proj: cam_proj,
+                    view: cam_view,
+                    proj_view: cam_proj * cam_view,
+                    z_near: camera.z_near(),
+                    fovy: camera.fovy(),
+                },
+                main_light: LightInfo {
+                    proj_view: main_light_proj * main_light_view,
+                    dir: main_light_dir.push(0.0),
+                },
+                atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
+                frame_size: self.render_size,
+                surface_size: self.surface_size,
+            };
 
-                FrameInfo {
-                    camera: CameraInfo {
-                        pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
-                        dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
-                        proj,
-                        view,
-                        proj_view: proj * view,
-                        z_near: camera.z_near(),
-                        fovy: camera.fovy(),
-                    },
-                    main_light: LightInfo {
-                        proj_view: main_light_proj * main_light_view,
-                        dir: main_light_dir.push(0.0),
-                    },
-                    atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
-                    frame_size: self.render_size,
-                    surface_size: self.surface_size,
-                }
+            let frame_ctx = FrameContext {
+                active_camera: &self.active_camera,
+                overlay_camera: &self.overlay_camera,
+                relative_camera_pos: self.relative_camera_pos,
             };
-            per_frame_infos[RenderType::Overlay as usize] = {
-                let cam_dir = self.overlay_camera.direction();
-                let proj = self.overlay_camera.projection();
-                let view = camera::create_view_matrix(
-                    &glm::convert(*self.overlay_camera.position()),
-                    self.overlay_camera.rotation(),
-                );
 
-                FrameInfo {
-                    camera: CameraInfo {
-                        pos: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                        dir: Vec4::new(cam_dir.x, cam_dir.y, cam_dir.z, 0.0),
-                        proj,
-                        view,
-                        proj_view: proj * view,
-                        z_near: camera.z_near(),
-                        fovy: camera.fovy(),
-                    },
-                    ..per_frame_infos[RenderType::Main as usize]
-                }
-            };
-            per_frame_infos[RenderType::MainShadowMap as usize] = {
-                FrameInfo {
-                    camera: CameraInfo {
-                        pos: main_light_pos.push(0.0),
-                        dir: main_light_dir.push(1.0),
-                        proj: main_light_proj,
-                        view: main_light_view,
-                        proj_view: main_light_proj * main_light_view,
-                        z_near: 0.0,
-                        fovy: 0.0,
-                    },
-                    frame_size: glm::vec2(1024, 1024),
-                    ..per_frame_infos[RenderType::Main as usize]
-                }
-            };
+            for (_, stage) in self.stage_manager.stages() {
+                let mut stage = stage.lock();
+                let num_frame_infos = stage.num_per_frame_infos() as usize;
+                let indices = per_frame_infos.len()..(per_frame_infos.len() + num_frame_infos);
+
+                per_frame_infos.resize_with(per_frame_infos.len() + num_frame_infos, || {
+                    default_frame_info.clone()
+                });
+
+                stage.update_frame_infos(&mut per_frame_infos, &indices.collect::<Vec<_>>(), &frame_ctx);
+            }
 
             buffer_updates.extend(per_frame_infos.iter().enumerate().map(|(idx, info)| {
                 BufferUpdate::WithOffset(BufferUpdate1 {

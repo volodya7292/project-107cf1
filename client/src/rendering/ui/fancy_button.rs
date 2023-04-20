@@ -2,7 +2,7 @@ use crate::rendering::ui::text;
 use crate::rendering::ui::text::{TextImpl, UIText};
 use common::glm::{Mat4, U8Vec4, Vec4};
 use common::scene::relation::Relation;
-use engine::ecs::component::render_config::RenderType;
+use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::transition::{TransValue, Transition};
 use engine::ecs::component::ui::{UIEventHandlerC, UILayoutC};
@@ -69,7 +69,7 @@ pub fn new(
         },
     )
     .with_scene_event_handler(SceneEventHandler::new())
-    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_stage(RenderType::Overlay))
+    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_render_layer(RenderLayer::Overlay))
     .with_mesh(VertexMeshC::without_data(4, 1))
     .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update))
     .add_event_handler(

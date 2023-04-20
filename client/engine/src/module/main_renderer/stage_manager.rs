@@ -17,7 +17,7 @@ struct SubmitStages {
     stages: Vec<RenderStageId>,
 }
 
-pub struct StageManager {
+pub(crate) struct StageManager {
     device: Arc<Device>,
     res_manager: ResourceManager,
     stages: HashMap<RenderStageId, Mutex<Box<dyn RenderStage>>>,
@@ -61,7 +61,7 @@ fn partition_dependencies(
 
 impl StageManager {
     /// Valid usage: Later stages must not be dependencies of previous stages.
-    pub fn new(device: &Arc<Device>, stages: Vec<Box<dyn RenderStage>>) -> Self {
+    pub(super) fn new(device: &Arc<Device>, stages: Vec<Box<dyn RenderStage>>) -> Self {
         let stages: HashMap<_, _> = stages
             .into_iter()
             .map(|v| (v.as_ref().type_id(), Mutex::new(v)))

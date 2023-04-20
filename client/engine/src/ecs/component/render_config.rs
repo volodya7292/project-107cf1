@@ -53,17 +53,15 @@ impl Resource {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-pub enum RenderType {
+pub enum RenderLayer {
     /// Renders regular 3D objects.
-    Main = 0,
+    Main,
     /// Renders objects after the `MAIN` stage.
-    Overlay = 1,
-    MainShadowMap = 2,
+    Overlay,
 }
 
 pub struct MeshRenderConfigC {
-    pub(crate) render_ty: RenderType,
+    pub(crate) render_layer: RenderLayer,
     pub(crate) mat_pipeline: u32,
     /// binding id -> Resource
     pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
@@ -74,7 +72,7 @@ pub struct MeshRenderConfigC {
 impl Default for MeshRenderConfigC {
     fn default() -> Self {
         Self {
-            render_ty: RenderType::Main,
+            render_layer: RenderLayer::Main,
             mat_pipeline: u32::MAX,
             resources: Default::default(),
             translucent: false,
@@ -86,7 +84,7 @@ impl Default for MeshRenderConfigC {
 impl MeshRenderConfigC {
     pub fn new(mat_pipeline: u32, translucent: bool) -> MeshRenderConfigC {
         MeshRenderConfigC {
-            render_ty: RenderType::Main,
+            render_layer: RenderLayer::Main,
             mat_pipeline,
             resources: Default::default(),
             translucent,
@@ -94,8 +92,8 @@ impl MeshRenderConfigC {
         }
     }
 
-    pub fn with_stage(mut self, stage: RenderType) -> Self {
-        self.render_ty = stage;
+    pub fn with_render_layer(mut self, layer: RenderLayer) -> Self {
+        self.render_layer = layer;
         self
     }
 

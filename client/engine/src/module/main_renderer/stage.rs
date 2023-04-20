@@ -1,8 +1,9 @@
-use crate::module::main_renderer::camera::PerspectiveCamera;
+use crate::module::main_renderer::camera::{OrthoCamera, PerspectiveCamera};
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineKindId};
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::resources::{MaterialPipelineParams, Renderable};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
+use crate::module::main_renderer::FrameInfo;
 use common::glm::Vec3;
 use common::types::HashMap;
 use entity_data::{EntityId, EntityStorage};
@@ -19,7 +20,7 @@ pub mod g_buffer;
 pub mod post_process;
 pub mod present_queue_transition;
 
-pub struct StageContext<'a> {
+pub(crate) struct StageContext<'a> {
     pub storage: &'a EntityStorage,
     pub material_pipelines: &'a [MaterialPipelineSet],
     pub ordered_entities: &'a [EntityId],
@@ -35,6 +36,12 @@ pub struct StageContext<'a> {
     pub swapchain: &'a Arc<Swapchain>,
     pub render_sw_image: &'a SwapchainImage,
     pub frame_completion_semaphore: &'a Arc<Semaphore>,
+}
+
+pub(crate) struct FrameContext<'a> {
+    pub active_camera: &'a PerspectiveCamera,
+    pub overlay_camera: &'a OrthoCamera,
+    pub relative_camera_pos: Vec3,
 }
 
 pub struct StageRunResult {
@@ -64,9 +71,12 @@ impl StageRunResult {
 
 pub type RenderStageId = TypeId;
 
-pub trait RenderStage: Any + Send + Sync + 'static {
+pub(crate) trait RenderStage: Any + Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn num_pipeline_kinds(&self) -> u32 {
+        0
+    }
+    fn num_per_frame_infos(&self) -> u32 {
         0
     }
 
@@ -86,6 +96,14 @@ pub trait RenderStage: Any + Send + Sync + 'static {
         &self,
         _params: MaterialPipelineParams,
         _material_pipeline_set: &mut MaterialPipelineSet,
+    ) {
+    }
+    /// Updates requested ([Self::num_per_frame_infos]) frame infos.
+    fn update_frame_infos(
+        &mut self,
+        _infos: &mut [FrameInfo],
+        _frame_infos_indices: &[usize],
+        ctx: &FrameContext,
     ) {
     }
 

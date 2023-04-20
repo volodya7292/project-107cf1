@@ -1,6 +1,6 @@
 use common::glm::Vec4;
 use common::memoffset::offset_of;
-use engine::ecs::component::render_config::RenderType;
+use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::StyledString;
 use engine::ecs::component::ui::{RectUniformData, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{SceneEventHandler, SimpleTextC, TransformC, UniformDataC};
@@ -68,7 +68,7 @@ pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId
         TransformC::new(),
         SimpleTextC::new(mat_pipeline)
             .with_max_width(0.0)
-            .with_render_type(RenderType::Overlay),
+            .with_render_type(RenderLayer::Overlay),
     );
 
     let text_entity = scene.add_object(Some(parent), main_obj).unwrap();

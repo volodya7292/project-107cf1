@@ -37,7 +37,7 @@ use common::timer::IntervalTimer;
 use common::types::{HashMap, HashSet};
 use common::{glm, MO_RELAXED};
 use engine::ecs::component;
-use engine::ecs::component::render_config::RenderType;
+use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
@@ -309,7 +309,7 @@ impl Application for Game {
                     (),
                 )
                 .with_renderer(
-                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_stage(RenderType::Overlay),
+                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_render_layer(RenderLayer::Overlay),
                 )
                 .with_mesh(VertexMeshC::without_data(4, 1)),
             )

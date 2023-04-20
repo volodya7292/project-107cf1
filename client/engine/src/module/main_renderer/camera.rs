@@ -96,6 +96,8 @@ impl PerspectiveCamera {
 pub struct OrthoCamera {
     position: DVec3,
     rotation: Vec3,
+    z_near: f32,
+    z_far: f32,
 }
 
 impl OrthoCamera {
@@ -103,16 +105,22 @@ impl OrthoCamera {
         Self {
             position: Default::default(),
             rotation: Default::default(),
+            z_near: 0.0,
+            z_far: 1024.0,
         }
     }
 
     pub fn projection(&self) -> Mat4 {
         // Note: using reversed-z
-        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, 1024.0, 0.0)
+        glm::ortho_lh_zo(0.0, 1.0, 0.0, 1.0, self.z_far, self.z_near)
     }
 
     pub fn position(&self) -> &DVec3 {
         &self.position
+    }
+
+    pub fn z_near(&self) -> f32 {
+        self.z_near
     }
 
     pub fn set_position(&mut self, position: DVec3) {
@@ -137,7 +145,7 @@ pub struct Frustum {
 }
 
 impl Frustum {
-    pub fn new(proj_view_mat: Mat4) -> Self {
+    pub fn new(proj_view_mat: &Mat4) -> Self {
         let mut frustum = Self {
             planes: [Vec4::default(); 6],
         };

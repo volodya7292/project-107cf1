@@ -1,5 +1,5 @@
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderType;
+use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::camera::Frustum;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
@@ -7,26 +7,29 @@ use crate::module::main_renderer::resource_manager::{
     CmdListParams, DeviceBufferParams, HostBufferParams, ImageParams, ResourceManagementScope,
 };
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
-use crate::module::main_renderer::stage::{RenderStage, StageContext, StageRunResult};
+use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
-use crate::module::main_renderer::{calc_group_count, camera, compose_descriptor_sets};
+use crate::module::main_renderer::{
+    calc_group_count, camera, compose_descriptor_sets, CameraInfo, FrameInfo,
+};
 use crate::module::scene::N_MAX_OBJECTS;
-use common::glm::{Vec2, Vec4};
+use common::glm::{Mat4, Vec2, Vec3, Vec4};
 use common::parking_lot::Mutex;
-use common::rayon;
 use common::rayon::prelude::*;
 use common::utils::prev_power_of_two;
-use std::mem;
+use common::{glm, rayon};
 use std::sync::Arc;
+use std::{iter, mem};
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList, Device,
     Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline, PipelineStageFlags,
     QueueType, RenderPass, Shader, ShaderStageFlags, Subpass, SubpassDependency,
 };
+use winit::event::VirtualKeyCode::M;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
-const MAIN_SHADOW_MAP_CASCADES: u32 = 3;
+const MAIN_SHADOW_MAP_N_CASCADES: u32 = 3;
 
 pub type VisibilityType = u32;
 
@@ -43,6 +46,8 @@ pub struct DepthStage {
     depth_write_pipe: PipelineKindId,
     translucency_depths_pipe: PipelineKindId,
     shadow_map_pipe: PipelineKindId,
+    frame_infos_indices: Vec<usize>,
+    last_cascades: Vec<Cascade>,
 }
 
 #[derive(Copy, Clone)]
@@ -62,6 +67,101 @@ struct CullConstants {
     pyramid_size: Vec2,
     max_pyramid_levels: u32,
     object_count: u32,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+struct Cascade {
+    split_depth: f32,
+    proj_view: Mat4,
+}
+
+fn calc_direct_light_cascade_shadow_projections(
+    cam_proj_view: &Mat4,
+    z_near: f32,
+    z_far: f32,
+    n_cascades: u32,
+    split_lambda: f32,
+    light_dir: &Vec3,
+) -> Vec<Cascade> {
+    let z_range = z_far - z_near;
+    let z_ratio = z_far / z_near;
+
+    let mut cascades = vec![Cascade::default(); n_cascades as usize];
+    let mut last_split_dist = 0.0;
+
+    for (i, cascade) in cascades.iter_mut().enumerate() {
+        let p = (i + 1) as f32 / n_cascades as f32;
+        let log = z_near * z_ratio.powf(p);
+        let uniform = z_near + z_range * p;
+        let split_depth = split_lambda * log + (1.0 - split_lambda) * uniform;
+        let split_dist = (split_depth - z_near) / z_range;
+
+        let mut frustum_corners = [
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
+        ];
+
+        let inv_cam = cam_proj_view.try_inverse().unwrap();
+
+        // Project frustum corners into world space
+        for corner in &mut frustum_corners {
+            let inv_corner = inv_cam * corner.push(1.0);
+            *corner = inv_corner.xyz() / inv_corner.w;
+        }
+
+        for i in 0..4 {
+            let dist = frustum_corners[i + 4] - frustum_corners[i];
+            frustum_corners[i + 4] = frustum_corners[i] + dist * split_dist;
+            frustum_corners[i] = frustum_corners[i] + dist * last_split_dist;
+        }
+
+        let frustum_center = frustum_corners
+            .iter()
+            .cloned()
+            .reduce(|acc, corner| acc + corner)
+            .unwrap()
+            / 8.0;
+
+        let radius = frustum_corners
+            .iter()
+            .map(|corner| (corner - frustum_center).magnitude())
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap();
+        let radius_rounded = (radius * 16.0).ceil() / 16.0;
+
+        let max_extents = Vec3::from_element(radius_rounded);
+        let min_extents = -max_extents;
+
+        let light_proj = glm::ortho_rh_zo(
+            min_extents.x,
+            max_extents.x,
+            min_extents.y,
+            max_extents.y,
+            0.0,
+            max_extents.z - min_extents.z,
+        );
+        let light_view = glm::look_at_rh(
+            &(frustum_center - light_dir * -min_extents.z),
+            &frustum_center,
+            &Vec3::new(0.0002324, 0.999224523453, 0.0006574),
+        );
+
+        *cascade = Cascade {
+            split_depth: -split_depth,
+            proj_view: light_proj * light_view,
+        };
+
+        last_split_dist = split_dist;
+    }
+
+    cascades
 }
 
 impl DepthStage {
@@ -111,14 +211,12 @@ impl DepthStage {
 
         let shadow_map_render_pass = device
             .create_render_pass(
-                &(0..MAIN_SHADOW_MAP_CASCADES)
-                    .map(|_| Attachment {
-                        format: Format::D32_FLOAT,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::SHADER_READ,
-                        load_store: LoadStore::InitClearFinalStore,
-                    })
-                    .collect::<Vec<_>>(),
+                &[Attachment {
+                    format: Format::D32_FLOAT,
+                    init_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::SHADER_READ,
+                    load_store: LoadStore::InitClearFinalStore,
+                }],
                 &[Subpass::new().with_depth(AttachmentRef {
                     index: 0,
                     layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
@@ -167,6 +265,8 @@ impl DepthStage {
             depth_write_pipe: u32::MAX,
             translucency_depths_pipe: u32::MAX,
             shadow_map_pipe: u32::MAX,
+            frame_infos_indices: vec![],
+            last_cascades: vec![],
         }
     }
 
@@ -184,7 +284,7 @@ impl DepthStage {
 
         let proj_mat = ctx.active_camera.projection();
         let view_mat = camera::create_view_matrix(&ctx.relative_camera_pos, &ctx.active_camera.rotation());
-        let frustum = Frustum::new(proj_mat * view_mat);
+        let frustum = Frustum::new(&(proj_mat * view_mat));
 
         depth_cls.par_iter_mut()
             .zip(depth_translucency_cls)
@@ -223,7 +323,7 @@ impl DepthStage {
                         continue;
                     };
 
-                    if render_config.render_ty != RenderType::Main || !render_config.visible || vertex_mesh.is_empty() {
+                    if render_config.render_layer != RenderLayer::Main || !render_config.visible || vertex_mesh.is_empty() {
                         continue;
                     }
 
@@ -265,7 +365,7 @@ impl DepthStage {
                     );
 
                     cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        render_config.render_ty as u32 * ctx.per_frame_ub.element_size() as u32,
+                        self.frame_infos_indices[0] as u32 * ctx.per_frame_ub.element_size() as u32,
                         renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32
                     ]);
 
@@ -282,94 +382,83 @@ impl DepthStage {
     }
 
     fn record_main_shadow_map_cmd_lists(
-        &mut self,
-        depth_cls: &mut [CmdList],
+        &self,
+        cl: &mut CmdList,
         framebuffer: &Framebuffer,
         ctx: &StageContext,
+        cascade: &Cascade,
+        cascade_idx: usize,
     ) {
         let mat_pipelines = ctx.material_pipelines;
         let object_count = ctx.ordered_entities.len();
-        let draw_count_step = object_count / depth_cls.len() + 1;
+        let frustum = Frustum::new(&cascade.proj_view);
 
-        // let proj_mat = ctx.active_camera.projection();
-        // let view_mat = camera::create_view_matrix(&ctx.relative_camera_pos, &ctx.active_camera.rotation());
-        // let frustum = Frustum::new(proj_mat * view_mat);
+        cl.begin_secondary_graphics(false, framebuffer.render_pass(), 0, Some(framebuffer))
+            .unwrap();
 
-        depth_cls.par_iter_mut()
-            .enumerate()
-            .for_each(|(i, cl)| {
-                cl
-                    .begin_secondary_graphics(
-                        false,
-                        framebuffer.render_pass(),
-                        0,
-                        Some(framebuffer),
-                    )
-                    .unwrap();
+        for entity_index in 0..object_count {
+            let renderable_id = ctx.ordered_entities[entity_index];
+            let entry = ctx.storage.entry(&renderable_id).unwrap();
 
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
-                    }
+            let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
+                (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
+                continue;
+            };
 
-                    let renderable_id = ctx.ordered_entities[entity_index];
-                    let entry = ctx.storage.entry(&renderable_id).unwrap();
+            if render_config.render_layer != RenderLayer::Main
+                || !render_config.visible
+                || render_config.translucent
+                || vertex_mesh.is_empty()
+            {
+                continue;
+            }
 
-                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
-                        continue;
-                    };
+            if let Some(sphere) = vertex_mesh.sphere() {
+                let center = sphere.center() + global_transform.position_f32();
+                let radius = sphere.radius() * global_transform.scale.max();
 
-                    if render_config.render_ty != RenderType::Main || !render_config.visible || render_config.translucent || vertex_mesh.is_empty() {
-                        continue;
-                    }
-
-                    // TODO: implement frustum culling
-                    // if let Some(sphere) = vertex_mesh.sphere() {
-                    //     let center = sphere.center() + global_transform.position_f32();
-                    //     let radius = sphere.radius() * global_transform.scale.max();
-                    //
-                    //     // TODO: change frustum
-                    //     if !frustum.is_sphere_visible(&center, radius) {
-                    //         continue;
-                    //     }
-                    // }
-
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
-                    let renderable = &ctx.renderables[&renderable_id];
-
-                    let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();
-                    let signature = pipeline.signature();
-                    cl.bind_pipeline(pipeline);
-
-                    let descriptors = compose_descriptor_sets(
-                        ctx.g_per_frame_in,
-                        mat_pipeline.per_frame_desc,
-                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
-                    );
-
-                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        RenderType::MainShadowMap as u32 * ctx.per_frame_ub.element_size() as u32,
-                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32
-                    ]);
-
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+                if !frustum.is_sphere_visible(&center, radius) {
+                    continue;
                 }
+            }
 
-                cl.end().unwrap();
-            });
+            let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
+            let renderable = &ctx.renderables[&renderable_id];
+
+            let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();
+            let signature = pipeline.signature();
+            cl.bind_pipeline(pipeline);
+
+            let descriptors = compose_descriptor_sets(
+                ctx.g_per_frame_in,
+                mat_pipeline.per_frame_desc,
+                renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+            );
+
+            cl.bind_graphics_inputs(
+                signature,
+                0,
+                &descriptors,
+                &[
+                    self.frame_infos_indices[1 + cascade_idx] as u32 * ctx.per_frame_ub.element_size() as u32,
+                    renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32,
+                ],
+            );
+
+            cl.bind_and_draw_vertex_mesh(vertex_mesh);
+        }
+
+        cl.end().unwrap();
     }
 
     fn gen_shadow_maps(&mut self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {
-        let available_threads = rayon::current_num_threads();
         let cmd_lists = resources.request_cmd_lists(
             "depth-main_shadow_map_cl",
-            CmdListParams::secondary(QueueType::Graphics).with_count(available_threads),
+            CmdListParams::secondary(QueueType::Graphics).with_count(MAIN_SHADOW_MAP_N_CASCADES as usize),
         );
 
         // TODO: may be extract this to renderer settings
-        let shadow_map_size = (512, 512, MAIN_SHADOW_MAP_CASCADES);
+        let shadow_map_size = (512, 512, MAIN_SHADOW_MAP_N_CASCADES);
 
         let main_shadow_maps = resources.request_image(
             Self::RES_MAIN_SHADOW_MAP,
@@ -387,8 +476,8 @@ impl DepthStage {
                     .map(|i| {
                         main_shadow_map
                             .create_view_named(&format!("{i}"))
-                            .mip_level_count(i)
-                            .mip_level_count(1)
+                            .base_array_layer(i)
+                            .array_layer_count(1)
                             .build()
                             .unwrap()
                     })
@@ -397,38 +486,47 @@ impl DepthStage {
             },
         );
 
-        let main_shadow_framebuffer = resources.request(
+        let main_shadow_framebuffers = resources.request(
             "depth-main_shadow_fb",
             (main_shadow_map_views, shadow_map_size),
             |(main_shadow_map_views, shadow_map_size), _| {
-                let mods: Vec<_> = main_shadow_map_views
+                let fbs: Vec<_> = main_shadow_map_views
                     .iter()
-                    .enumerate()
-                    .map(|(i, view)| (i as u32, ImageMod::OverrideImageView(Arc::clone(view))))
+                    .map(|view| {
+                        self.shadow_map_render_pass
+                            .create_framebuffer(
+                                (shadow_map_size.0, shadow_map_size.1),
+                                &[(0, ImageMod::OverrideImageView(Arc::clone(view)))],
+                            )
+                            .unwrap()
+                    })
                     .collect();
-                self.shadow_map_render_pass
-                    .create_framebuffer((shadow_map_size.0, shadow_map_size.1), &mods)
-                    .unwrap()
+
+                Arc::new(fbs)
             },
         );
 
-        self.record_main_shadow_map_cmd_lists(&mut cmd_lists.lock(), &main_shadow_framebuffer, ctx);
+        cmd_lists
+            .lock()
+            .par_iter_mut()
+            .zip(&self.last_cascades)
+            .zip(&*main_shadow_framebuffers)
+            .enumerate()
+            .for_each(|(i, ((cl, cascade), fb))| {
+                self.record_main_shadow_map_cmd_lists(cl, fb, ctx, cascade, i);
+            });
 
-        // TODO: cascaded shadow mapping
-        //   render the scene N_CASCADES times
-        //    (run secondary cmd list for each cascade with frustum culling).
-
-        // Render solid objects
-        cl.begin_render_pass(
-            &self.shadow_map_render_pass,
-            &main_shadow_framebuffer,
-            &(0..MAIN_SHADOW_MAP_CASCADES)
-                .map(|_| ClearValue::Depth(1.0))
-                .collect::<Vec<_>>(),
-            true,
-        );
-        cl.execute_secondary(cmd_lists.lock().iter());
-        cl.end_render_pass();
+        // Render solid objects for each cascade
+        for (secondary_cl, framebuffer) in cmd_lists.lock().iter().zip(&*main_shadow_framebuffers) {
+            cl.begin_render_pass(
+                &self.shadow_map_render_pass,
+                framebuffer,
+                &[ClearValue::Depth(0.0)],
+                true,
+            );
+            cl.execute_secondary(iter::once(secondary_cl));
+            cl.end_render_pass();
+        }
     }
 }
 
@@ -441,10 +539,58 @@ impl RenderStage for DepthStage {
         3
     }
 
+    fn num_per_frame_infos(&self) -> u32 {
+        1 + MAIN_SHADOW_MAP_N_CASCADES // 1 for main depth rendering
+    }
+
     fn setup(&mut self, pipeline_kinds: &[PipelineKindId]) {
         self.depth_write_pipe = pipeline_kinds[0];
         self.translucency_depths_pipe = pipeline_kinds[1];
         self.shadow_map_pipe = pipeline_kinds[2];
+    }
+
+    fn update_frame_infos(
+        &mut self,
+        infos: &mut [FrameInfo],
+        frame_infos_indices: &[usize],
+        ctx: &FrameContext,
+    ) {
+        self.frame_infos_indices = frame_infos_indices.to_vec();
+
+        let z_far = 1000.0;
+        let camera = ctx.active_camera;
+        let cam_pos: Vec3 = glm::convert(ctx.relative_camera_pos);
+        let cam_proj = glm::perspective_rh_zo(camera.aspect(), camera.fovy(), camera.z_near(), z_far);
+        let cam_view: Mat4 = glm::convert(camera::create_view_matrix(
+            &glm::convert(cam_pos),
+            &camera.rotation(),
+        ));
+        let light_dir = Vec3::new(0.0, -1.0, 0.0);
+        let cascades = calc_direct_light_cascade_shadow_projections(
+            &(cam_proj * cam_view),
+            camera.z_near(),
+            z_far,
+            MAIN_SHADOW_MAP_N_CASCADES,
+            0.95,
+            &light_dir,
+        );
+
+        for (idx, cascade) in self.frame_infos_indices[1..].iter().zip(&cascades) {
+            let info = &mut infos[*idx];
+
+            info.camera = CameraInfo {
+                pos: Default::default(),  // TODO
+                dir: Default::default(),  // TODO
+                proj: Default::default(), // TODO
+                view: Default::default(), // TODO
+                proj_view: cascade.proj_view,
+                z_near: 0.0, // TODO
+                fovy: 0.0,
+            };
+            info.frame_size = glm::vec2(512, 512);
+        }
+
+        self.last_cascades = cascades;
     }
 
     fn register_pipeline_kind(&self, params: MaterialPipelineParams, pipeline_set: &mut MaterialPipelineSet) {

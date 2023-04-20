@@ -273,7 +273,7 @@ impl PostProcessStage {
         }
     }
 
-    pub fn g_buffer_merge_stage(
+    fn g_buffer_merge_stage(
         &self,
         cl: &mut CmdList,
         resources: &ResourceManagementScope,
@@ -391,7 +391,7 @@ impl PostProcessStage {
         cl.end_render_pass();
     }
 
-    pub fn bloom_stage(&self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {
+    fn bloom_stage(&self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {
         // Algorithm overview (example with four mipmaps)
         // 1. Downscaling
         // I1 = downscale(SOURCE);

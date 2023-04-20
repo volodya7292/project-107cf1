@@ -1,5 +1,5 @@
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderType;
+use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt};
@@ -743,7 +743,7 @@ impl TextRenderer {
             let simple_text = entry.get::<SimpleTextC>();
             let stage = simple_text.render_type;
             let mat_pipeline = simple_text.mat_pipeline;
-            let normalize_transforms = stage == RenderType::Overlay;
+            let normalize_transforms = stage == RenderLayer::Overlay;
 
             let seq = self.allocator.alloc_for(&simple_text.text);
 
@@ -803,7 +803,7 @@ impl TextRenderer {
 
             *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw());
             *entry.get_mut::<MeshRenderConfigC>() =
-                MeshRenderConfigC::new(mat_pipeline, true).with_stage(stage)
+                MeshRenderConfigC::new(mat_pipeline, true).with_render_layer(stage)
         }
 
         let mut staging_job = self.staging_job.borrow_mut_owned();
