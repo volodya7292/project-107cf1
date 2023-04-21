@@ -4,9 +4,11 @@ use std::any::Any;
 use std::collections::hash_map;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::{mem, slice};
 use vk_wrapper::{
-    Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device, DeviceBuffer,
-    Format, HostBuffer, Image, ImageType, ImageUsageFlags, PipelineSignature, QueueType,
+    AccessFlags, Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
+    DeviceBuffer, Format, HostBuffer, Image, ImageType, ImageUsageFlags, PipelineSignature,
+    PipelineStageFlags, QueueType,
 };
 
 pub struct OwnedDescriptorSets {
@@ -81,8 +83,28 @@ impl ResourceManagementScope<'_> {
         self.get(name)
     }
 
+    /// Creates a resource.
+    /// Panics if the resource with `name` has already been requested.
+    pub fn create<Res: Send + Sync + 'static>(&self, name: &str, value: Arc<Res>) -> Arc<Res> {
+        self.add_used_name(name);
+
+        let mut data = self.manager.resources.lock();
+
+        match data.entry(name.to_owned()) {
+            hash_map::Entry::Vacant(res) => {
+                res.insert(Box::new(Arc::clone(&value)));
+                value
+            }
+            hash_map::Entry::Occupied(mut curr_res) => {
+                let curr_res = curr_res.get_mut().downcast_mut::<Arc<Res>>().unwrap();
+                *curr_res = Arc::clone(&value);
+                value
+            }
+        }
+    }
+
     /// Requests a resource. If `key_params` has been changed, `on_create` is called.
-    /// Panics if the resource with `name` is already requested.
+    /// Panics if the resource with `name` has already been requested.
     pub fn request<
         Params: PartialEq + Send + Sync + 'static,
         Res: Send + Sync + 'static,
@@ -173,6 +195,48 @@ impl ResourceManagementScope<'_> {
                 .unwrap();
             Arc::new(buffer)
         })
+    }
+
+    pub fn request_uniform_buffer<T: Copy + 'static>(
+        &self,
+        name: &str,
+        data: T,
+        copy_cl: &mut CmdList,
+    ) -> Arc<DeviceBuffer> {
+        let len = mem::size_of_val(&data);
+
+        let staging_buffer = self.request_host_buffer(
+            &format!("{name}-staging"),
+            HostBufferParams::new(BufferUsageFlags::TRANSFER_SRC, len as u64),
+        );
+
+        let device_buffer = self.request_device_buffer(
+            name,
+            DeviceBufferParams::new(
+                BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM,
+                1,
+                len as u64,
+            ),
+        );
+
+        let mut staging_buffer = staging_buffer.lock();
+        staging_buffer.write(0, unsafe {
+            slice::from_raw_parts(&data as *const _ as *const u8, len)
+        });
+
+        copy_cl.copy_buffer(&*staging_buffer, 0, &*device_buffer, 0, len as u64);
+        copy_cl.barrier_buffer(
+            PipelineStageFlags::TRANSFER,
+            PipelineStageFlags::VERTEX_SHADER
+                | PipelineStageFlags::PIXEL_SHADER
+                | PipelineStageFlags::COMPUTE,
+            &[device_buffer
+                .barrier()
+                .src_access_mask(AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(AccessFlags::SHADER_READ)],
+        );
+
+        device_buffer
     }
 
     pub fn request_image(&self, name: &str, params: ImageParams) -> Arc<Image> {

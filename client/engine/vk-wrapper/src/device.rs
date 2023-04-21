@@ -731,12 +731,8 @@ impl Device {
         name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
         #[allow(clippy::cast_ptr_alignment)]
-        let code_words = unsafe {
-            slice::from_raw_parts(
-                code.as_ptr() as *const u32,
-                code.len() / std::mem::size_of::<u32>(),
-            )
-        };
+        let code_words =
+            unsafe { slice::from_raw_parts(code.as_ptr() as *const u32, code.len() / mem::size_of::<u32>()) };
 
         let ast = spirv::Ast::<glsl::Target>::parse(&spirv::Module::from_words(code_words))?;
         let entry_points = ast.get_entry_points()?;

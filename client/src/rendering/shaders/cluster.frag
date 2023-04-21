@@ -130,5 +130,5 @@ void main() {
 
     // outDiffuse = vec4(color, 1);
 
-    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), vec3(0.0), vec3(0.0));
+    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), vec3(0.0), vs_in.surface_normal);
 }

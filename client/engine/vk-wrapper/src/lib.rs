@@ -5,7 +5,6 @@ pub use buffer::BufferHandle;
 pub use buffer::BufferUsageFlags;
 pub use buffer::DeviceBuffer;
 pub use buffer::HostBuffer;
-pub use buffer::RawHostBuffer;
 pub use cmd_list::CmdList;
 pub use cmd_list::CopyRegion;
 pub use descriptor_pool::Binding;

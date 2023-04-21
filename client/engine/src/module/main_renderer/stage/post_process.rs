@@ -1,9 +1,9 @@
 use crate::module::main_renderer::resource_manager::{ImageParams, ResourceManagementScope};
-use crate::module::main_renderer::stage::depth::DepthStage;
+use crate::module::main_renderer::stage::depth::{DepthStage, ShadowCascade};
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use common::glm;
-use common::glm::Vec2;
+use common::glm::{Mat4, Vec2, Vec4};
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::sampler::SamplerClamp;
@@ -40,6 +40,14 @@ struct DownscalePushConstants {
 #[repr(C)]
 struct UpscalePushConstants {
     filter_radius: f32,
+}
+
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+struct MainShadowInfo {
+    cascade_splits: [f32; shader_ids::MAIN_SHADOW_MAP_N_CASCADES as usize],
+    cascade_proj_view: [Mat4; shader_ids::MAIN_SHADOW_MAP_N_CASCADES as usize],
+    light_dir: Vec4,
 }
 
 impl PostProcessStage {
@@ -250,7 +258,7 @@ impl PostProcessStage {
 
         let shadow_map_sampler = device
             .create_sampler(
-                SamplerFilter::LINEAR,
+                SamplerFilter::NEAREST,
                 SamplerFilter::NEAREST,
                 SamplerMipmap::NEAREST,
                 SamplerClamp::CLAMP_TO_EDGE,
@@ -319,6 +327,17 @@ impl PostProcessStage {
             .unwrap();
 
         let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
+        let main_shadow_map_cascades: Arc<Vec<ShadowCascade>> = resources.get(DepthStage::RES_CASCADES_INFO);
+
+        let mut main_shadow_info = MainShadowInfo::default();
+        main_shadow_info.light_dir = DepthStage::MAIN_LIGHT_DIR.push(0.0);
+        for (i, cascade) in main_shadow_map_cascades.iter().enumerate() {
+            main_shadow_info.cascade_splits[i] = cascade.split_depth;
+            main_shadow_info.cascade_proj_view[i] = cascade.proj_view;
+        }
+
+        let main_shadow_info_ub =
+            resources.request_uniform_buffer("post-main_shadow_ub", main_shadow_info, cl);
 
         unsafe {
             self.device.update_descriptor_set(
@@ -370,11 +389,11 @@ impl PostProcessStage {
                         0,
                         BindingRes::Image(
                             Arc::clone(&main_shadow_map),
-                            None,
-                            // Some(Arc::clone(&self.shadow_map_sampler)),
+                            Some(Arc::clone(&self.shadow_map_sampler)),
                             ImageLayout::SHADER_READ,
                         ),
                     ),
+                    merge_descriptor.create_binding(10, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
                 ],
             )
         }

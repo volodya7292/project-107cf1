@@ -57,7 +57,7 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
                     continue;
                 }
 
-                t_cl.copy_raw_host_buffer_to_device(&src_buffer.raw(), 0, dst_buffer, 0, src_buffer.size());
+                t_cl.copy_buffer(src_buffer, 0, dst_buffer, 0, src_buffer.size());
 
                 transfer_barriers.push(
                     dst_buffer

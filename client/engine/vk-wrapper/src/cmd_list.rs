@@ -1,11 +1,11 @@
 use crate::buffer::BufferHandleImpl;
 use crate::render_pass::vk_clear_value;
+use crate::DescriptorSet;
 use crate::{
     BufferBarrier, ClearValue, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout, Pipeline,
     PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use crate::{BufferHandle, DeviceWrapper};
-use crate::{DescriptorSet, RawHostBuffer};
 use ash::vk;
 use smallvec::SmallVec;
 use std::num::NonZeroU64;
@@ -480,27 +480,27 @@ impl CmdList {
         };
     }
 
-    pub fn copy_raw_host_buffer_to_device(
+    pub fn copy_buffer(
         &mut self,
-        src_buffer: &RawHostBuffer,
-        src_element_index: u64,
+        src_buffer: &impl BufferHandleImpl,
+        src_offset: u64,
         dst_buffer: &impl BufferHandleImpl,
-        dst_element_index: u64,
-        size: u64,
+        dst_offset: u64,
+        len: u64,
     ) {
-        if size == 0 {
+        if len == 0 {
             return;
         }
 
         let region = vk::BufferCopy {
-            src_offset: src_element_index * src_buffer.0.elem_size,
-            dst_offset: dst_element_index * src_buffer.0.elem_size,
-            size: size * src_buffer.0.elem_size,
+            src_offset,
+            dst_offset,
+            size: len,
         };
         unsafe {
             self.device_wrapper.native.cmd_copy_buffer(
                 self.native,
-                src_buffer.0.native,
+                src_buffer.handle().0,
                 dst_buffer.handle().0,
                 &[region],
             )

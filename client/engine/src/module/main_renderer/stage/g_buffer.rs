@@ -50,7 +50,7 @@ impl GBufferStage {
                 &[
                     // Position
                     Attachment {
-                        format: Format::RGBA16_FLOAT,
+                        format: Format::RGBA32_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
                         load_store: LoadStore::InitClearFinalStore,
@@ -78,7 +78,7 @@ impl GBufferStage {
                     },
                     // Normal
                     Attachment {
-                        format: Format::RG16_UNORM,
+                        format: Format::RG16_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
                         final_layout: ImageLayout::SHADER_READ,
                         load_store: LoadStore::InitClearFinalStore,
@@ -405,6 +405,7 @@ impl RenderStage for GBufferStage {
             dir: overlay_cam_dir.push(0.0),
             proj: overlay_proj,
             view: overlay_view,
+            view_inverse: glm::inverse(&overlay_view),
             proj_view: overlay_proj * overlay_view,
             z_near: ctx.overlay_camera.z_near(),
             fovy: 0.0,

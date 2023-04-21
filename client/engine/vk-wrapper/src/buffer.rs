@@ -47,27 +47,6 @@ unsafe impl Send for Buffer {}
 unsafe impl Sync for Buffer {}
 
 #[derive(Clone)]
-pub struct RawHostBuffer(pub(crate) Arc<Buffer>);
-
-impl RawHostBuffer {
-    pub fn device(&self) -> &Arc<Device> {
-        &self.0.device
-    }
-
-    pub fn element_size(&self) -> u64 {
-        self.0.elem_size
-    }
-
-    pub fn size(&self) -> u64 {
-        self.0.len
-    }
-}
-
-unsafe impl Send for RawHostBuffer {}
-
-unsafe impl Sync for RawHostBuffer {}
-
-#[derive(Clone)]
 #[repr(transparent)]
 pub struct BufferBarrier(pub(crate) vk::BufferMemoryBarrier);
 
@@ -127,12 +106,12 @@ impl<T: Copy> IndexMut<usize> for HostBuffer<T> {
 }
 
 impl<T: Copy> HostBuffer<T> {
-    pub fn raw(&self) -> RawHostBuffer {
-        RawHostBuffer(Arc::clone(&self.buffer))
-    }
-
     pub fn size(&self) -> u64 {
         self.buffer.len
+    }
+
+    pub fn element_size(&self) -> u64 {
+        mem::size_of::<T>() as u64
     }
 
     pub fn as_ptr(&self) -> *const T {

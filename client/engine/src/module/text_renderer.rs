@@ -815,7 +815,13 @@ impl TextRenderer {
             px_range: MSDF_PX_RANGE as f32,
         };
         self.staging_uniform_buffer.write(0, &[uniform_data]);
-        cl.copy_raw_host_buffer_to_device(&self.staging_uniform_buffer.raw(), 0, &self.uniform_buffer, 0, 1);
+        cl.copy_buffer(
+            &self.staging_uniform_buffer,
+            0,
+            &self.uniform_buffer,
+            0,
+            self.staging_uniform_buffer.element_size(),
+        );
 
         // Copy new glyphs to the GPU
         self.load_glyphs(cl);

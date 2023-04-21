@@ -43,6 +43,7 @@ struct Camera {
     vec4 dir;
     mat4 proj;
     mat4 view;
+    mat4 viewInverse;
     mat4 proj_view;
     float z_near;
     float fovy;
@@ -61,6 +62,21 @@ struct FrameInfo {
     uvec2 surface_size;
 };
 
+vec2 normalToSphericalAngles(vec3 normal) {
+    normal = normalize(normal);
+
+    float theta = acos(normal.z);
+    float phi = atan(normal.y, normal.x);
+    return vec2(theta, phi);
+}
+
+vec3 sphericalAnglesToNormal(vec2 angles) {
+    return vec3(
+        sin(angles.x) * cos(angles.y),
+        sin(angles.x) * sin(angles.y),
+        cos(angles.x)
+    );
+}
 
 #ifdef ENGINE_PIXEL_SHADER
 layout(constant_id = CONST_ID_PASS_TYPE) const uint PASS_TYPE = 0;
@@ -157,7 +173,8 @@ void writeOutput(vec3 position, vec4 albedo, vec4 specular, vec3 emission, vec3 
     outPosition.rgb = position;
     outSpecular = specular;
     outEmission.rgb = emission;
-    outNormal.rgb = normal;
+    outNormal.xy = normalToSphericalAngles(normal);
+
     writeOutputAlbedo(albedo);
 }
 

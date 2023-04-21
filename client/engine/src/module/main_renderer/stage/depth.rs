@@ -29,7 +29,7 @@ use vk_wrapper::{
 use winit::event::VirtualKeyCode::M;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
-const MAIN_SHADOW_MAP_N_CASCADES: u32 = 3;
+const MAIN_SHADOW_MAP_N_CASCADES: u32 = shader_ids::MAIN_SHADOW_MAP_N_CASCADES;
 
 pub type VisibilityType = u32;
 
@@ -47,7 +47,7 @@ pub struct DepthStage {
     translucency_depths_pipe: PipelineKindId,
     shadow_map_pipe: PipelineKindId,
     frame_infos_indices: Vec<usize>,
-    last_cascades: Vec<Cascade>,
+    last_cascades: Vec<ShadowCascade>,
 }
 
 #[derive(Copy, Clone)]
@@ -71,9 +71,9 @@ struct CullConstants {
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
-struct Cascade {
-    split_depth: f32,
-    proj_view: Mat4,
+pub struct ShadowCascade {
+    pub split_depth: f32,
+    pub proj_view: Mat4,
 }
 
 fn calc_direct_light_cascade_shadow_projections(
@@ -83,11 +83,11 @@ fn calc_direct_light_cascade_shadow_projections(
     n_cascades: u32,
     split_lambda: f32,
     light_dir: &Vec3,
-) -> Vec<Cascade> {
+) -> Vec<ShadowCascade> {
     let z_range = z_far - z_near;
     let z_ratio = z_far / z_near;
 
-    let mut cascades = vec![Cascade::default(); n_cascades as usize];
+    let mut cascades = vec![ShadowCascade::default(); n_cascades as usize];
     let mut last_split_dist = 0.0;
 
     for (i, cascade) in cascades.iter_mut().enumerate() {
@@ -108,7 +108,7 @@ fn calc_direct_light_cascade_shadow_projections(
             Vec3::new(-1.0, -1.0, 1.0),
         ];
 
-        let inv_cam = cam_proj_view.try_inverse().unwrap();
+        let inv_cam = glm::inverse(&cam_proj_view);
 
         // Project frustum corners into world space
         for corner in &mut frustum_corners {
@@ -144,8 +144,8 @@ fn calc_direct_light_cascade_shadow_projections(
             max_extents.x,
             min_extents.y,
             max_extents.y,
-            0.0,
             max_extents.z - min_extents.z,
+            0.0,
         );
         let light_view = glm::look_at_rh(
             &(frustum_center - light_dir * -min_extents.z),
@@ -153,7 +153,7 @@ fn calc_direct_light_cascade_shadow_projections(
             &Vec3::new(0.0002324, 0.999224523453, 0.0006574),
         );
 
-        *cascade = Cascade {
+        *cascade = ShadowCascade {
             split_depth: -split_depth,
             proj_view: light_proj * light_view,
         };
@@ -165,10 +165,12 @@ fn calc_direct_light_cascade_shadow_projections(
 }
 
 impl DepthStage {
+    pub const MAIN_LIGHT_DIR: Vec3 = Vec3::new(0.0, -1.0, 0.0);
     pub const RES_DEPTH_IMAGE: &'static str = "depth_image";
     pub const RES_VISIBILITY_HOST_BUFFER: &'static str = "visibility_host_buffer";
     pub const RES_TRANSLUCENCY_DEPTHS_IMAGE: &'static str = "translucency_depths_image";
     pub const RES_MAIN_SHADOW_MAP: &'static str = "main_shadow_map";
+    pub const RES_CASCADES_INFO: &'static str = "depth-main_cascades_info";
 
     pub fn new(device: &Arc<Device>) -> Self {
         let depth_render_pass = device
@@ -386,7 +388,7 @@ impl DepthStage {
         cl: &mut CmdList,
         framebuffer: &Framebuffer,
         ctx: &StageContext,
-        cascade: &Cascade,
+        cascade: &ShadowCascade,
         cascade_idx: usize,
     ) {
         let mat_pipelines = ctx.material_pipelines;
@@ -527,6 +529,8 @@ impl DepthStage {
             cl.execute_secondary(iter::once(secondary_cl));
             cl.end_render_pass();
         }
+
+        resources.create(Self::RES_CASCADES_INFO, Arc::new(self.last_cascades.clone()));
     }
 }
 
@@ -565,24 +569,24 @@ impl RenderStage for DepthStage {
             &glm::convert(cam_pos),
             &camera.rotation(),
         ));
-        let light_dir = Vec3::new(0.0, -1.0, 0.0);
         let cascades = calc_direct_light_cascade_shadow_projections(
             &(cam_proj * cam_view),
             camera.z_near(),
             z_far,
             MAIN_SHADOW_MAP_N_CASCADES,
             0.95,
-            &light_dir,
+            &Self::MAIN_LIGHT_DIR,
         );
 
         for (idx, cascade) in self.frame_infos_indices[1..].iter().zip(&cascades) {
             let info = &mut infos[*idx];
 
             info.camera = CameraInfo {
-                pos: Default::default(),  // TODO
-                dir: Default::default(),  // TODO
-                proj: Default::default(), // TODO
-                view: Default::default(), // TODO
+                pos: Default::default(),          // TODO
+                dir: Default::default(),          // TODO
+                proj: Default::default(),         // TODO
+                view: Default::default(),         // TODO
+                view_inverse: Default::default(), // TODO
                 proj_view: cascade.proj_view,
                 z_near: 0.0, // TODO
                 fovy: 0.0,
