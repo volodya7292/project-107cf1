@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#define ENGINE_VERTEX_SHADER
 #include "../../../engine/shaders/common.glsl"
 
 #define CLUSTER_SIZE 24
@@ -50,5 +51,6 @@ void main() {
     vs_out.material_id = inMaterialId;
     vs_out.ao = inAO;
     vs_out.light = light;
-    gl_Position = info.camera.proj_view * world_pos;
+
+    writeOutput(info.camera.proj_view * world_pos);
 }

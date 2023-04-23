@@ -22,11 +22,10 @@ layout(binding = 7, std430) readonly buffer TranslucentDepthsArray {
 };
 layout(binding = 8, rgba8) uniform image2DArray translucencyColorsArray;
 
-layout(binding = 9) uniform sampler2DArray mainShadowMap;
+layout(binding = 9) uniform sampler2D mainShadowMap;
 
 layout(binding = 10, scalar) uniform MainShadowInfoBlock {
-    float cascadeSplits[MAIN_SHADOW_MAP_N_CASCADES];
-    mat4 cascadeProjView[MAIN_SHADOW_MAP_N_CASCADES];
+    mat4 lightProjView;
     vec4 lightDir;
 } mainShadowInfo;
 
@@ -42,39 +41,9 @@ const vec2 meanSampleJitter[] = {
     vec2(1, 1),
 };
 
-const mat4 biasMat = mat4(
-	0.5, 0.0, 0.0, 0.0,
-	0.0, 0.5, 0.0, 0.0,
-	0.0, 0.0, 1.0, 0.0,
-	0.5, 0.5, 0.0, 1.0
-);
-
-float textureProj(vec4 shadowCoord, vec2 offset, uint cascadeIndex) {
-	float shadow = 1.0;
-	float bias = 0.005;
-
-	if (shadowCoord.z > -1.0 && shadowCoord.z < 1.0 ) {
-		float dist = texture(mainShadowMap, vec3(shadowCoord.st + offset, cascadeIndex)).r;
-		if (shadowCoord.w > 0 && dist < shadowCoord.z - bias) {
-			shadow = 0.0;
-		}
-	}
-
-	return shadow;
-}
-
 float calc_shadow(vec3 worldPos, vec3 normal) {
-    vec4 viewPos = info.camera.view * vec4(worldPos, 1);
-
-    // Get cascade index for the current fragment's view position
-    uint cascadeIndex = 0;
-    for(uint i = 0; i < MAIN_SHADOW_MAP_N_CASCADES - 1; ++i) {
-        if(viewPos.z < mainShadowInfo.cascadeSplits[i]) {
-            cascadeIndex = i + 1;
-        }
-    }
-
-    vec4 worldPosLightClipSpace = mainShadowInfo.cascadeProjView[cascadeIndex] * vec4(worldPos, 1);
+    vec4 worldPosLightClipSpace = mainShadowInfo.lightProjView * vec4(worldPos, 1);
+    worldPosLightClipSpace = shadowClipPosMapping(worldPosLightClipSpace);
     worldPosLightClipSpace.y = -worldPosLightClipSpace.y;
 
     vec3 worldPosLightNDC = worldPosLightClipSpace.xyz / worldPosLightClipSpace.w;
@@ -84,25 +53,26 @@ float calc_shadow(vec3 worldPos, vec3 normal) {
 
     float shadowFactor = 0;
     int pfcRange = 1;
-    uint count = 0;
+    uint samples = 9;
 
+    uint texId = floatBitsToUint(worldPos.x) ^ floatBitsToUint(worldPos.y) ^ floatBitsToUint(worldPos.z);
     ivec2 texSize = textureSize(mainShadowMap, 0).xy;
-    vec2 texelSize = 0.75 / texSize;
+    vec2 texelSize = 1.0 / texSize * 4;
 
-    for (int x = -pfcRange; x <= pfcRange; x++) {
-    	for (int y = -pfcRange; y <= pfcRange; y++) {
-    	    vec2 offset = texelSize * vec2(x, y);
-            float shadowMapDepth = texture(mainShadowMap, vec3(worldPosLightNorm.xy + offset, cascadeIndex)).r;
+    for (int i = 0; i < samples; i++) {
+    	vec2 jitter = r2_seq_2d(texId + i) * 2.0 - 1.0;
+    	vec2 offset = texelSize * jitter * pfcRange;
 
-            float bias = max(0.5 * (1.0 - dot(normal, -info.main_light.dir.xyz)), 0.005);
+        float shadowMapDepth = texture(mainShadowMap, worldPosLightNorm.xy + offset).r;
 
-            float shadow = float((depthAtWorldPos + bias) > shadowMapDepth);
-            shadowFactor += shadow;
-            count += 1;
-    	}
+        float bias = max(0.5 * (1.0 - dot(normal, -mainShadowInfo.lightDir.xyz)), 0.001);
+
+        float shadow = float((depthAtWorldPos + bias) > shadowMapDepth);
+        shadowFactor += shadow;
     }
 
-    shadowFactor /= count;
+    shadowFactor /= samples;
+    shadowFactor = 1.0 - (1 - shadowFactor) * 0.5;
 
     return shadowFactor;
 }

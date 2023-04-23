@@ -56,7 +56,6 @@ struct LightInfo {
 
 struct FrameInfo {
     Camera camera;
-    LightInfo main_light;
     uvec4 tex_atlas_info; // .x: tile size in pixels
     uvec2 frame_size;
     uvec2 surface_size;
@@ -76,6 +75,18 @@ vec3 sphericalAnglesToNormal(vec2 angles) {
         sin(angles.x) * sin(angles.y),
         cos(angles.x)
     );
+}
+
+vec4 shadowClipPosMapping(vec4 pos) {
+    float maxDepth = 256;
+    vec2 worldPos = pos.xy * maxDepth;
+
+    float stepX = 64;
+    float maxX = stepX * log2(1 + maxDepth);
+
+    pos.xy = sign(pos.xy) * (stepX * log2(1 + abs(worldPos)) / maxX);
+
+    return pos;
 }
 
 #ifdef ENGINE_PIXEL_SHADER
@@ -180,7 +191,9 @@ void writeOutput(vec3 position, vec4 albedo, vec4 specular, vec3 emission, vec3 
 
 #endif // ENGINE_PIXEL_SHADER
 
-//#ifdef ENGINE_VERTEX_SHADER
+#ifdef ENGINE_VERTEX_SHADER
+layout(constant_id = CONST_ID_PASS_TYPE) const uint PASS_TYPE = 0;
+
 //layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
 //    FrameInfo info;
 //};
@@ -199,7 +212,16 @@ void writeOutput(vec3 position, vec4 albedo, vec4 specular, vec3 emission, vec3 
 //
 //
 //
-//#endif // ENGINE_VERTEX_SHADER
+
+
+void writeOutput(vec4 position) {
+    if (PASS_TYPE == PASS_TYPE_DEPTH_MAIN_SHADOW_MAP) {
+        gl_Position = shadowClipPosMapping(position);
+    } else {
+        gl_Position = position;
+    }
+}
+#endif // ENGINE_VERTEX_SHADER
 
 
 // R2 low discrepancy sequence
@@ -209,7 +231,7 @@ float r2_seq_1d(uint n) {
 }
 
 vec2 r2_seq_2d(uint n) {
-    return fract(0.5 + vec2(0.754877666246, 0.569840290998) * float(n));
+    return fract(0.5 + vec2(0.754877666246, 0.569840290998) * float(n % 1024));
 }
 
 vec3 r2_seq_3d(uint n) {

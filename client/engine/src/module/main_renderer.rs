@@ -251,7 +251,6 @@ struct LightInfo {
 #[repr(C)]
 pub(crate) struct FrameInfo {
     camera: CameraInfo,
-    main_light: LightInfo,
     atlas_info: U32Vec4,
     frame_size: UVec2,
     surface_size: UVec2,
@@ -1166,19 +1165,6 @@ impl MainRenderer {
                 &camera.rotation(),
             ));
 
-            let main_light_pos = Vec3::new(
-                self.relative_camera_pos.x as f32,
-                self.relative_camera_pos.y as f32 + 512.0,
-                self.relative_camera_pos.z as f32,
-            );
-            let main_light_dir = Vec3::new(0.0, -1.0, 0.0);
-            let main_light_proj: Mat4 = glm::ortho_rh_zo(-512.0, 512.0, -512.0, 512.0, 1.0, 1000.0);
-            let main_light_view = glm::look_at_rh(
-                &main_light_pos,
-                &Vec3::new(main_light_pos.x, 0.0, main_light_pos.z),
-                &Vec3::new(1.0, 0.0, 0.0),
-            );
-
             let default_frame_info = FrameInfo {
                 camera: CameraInfo {
                     pos: Vec4::new(cam_pos.x, cam_pos.y, cam_pos.z, 0.0),
@@ -1189,10 +1175,6 @@ impl MainRenderer {
                     proj_view: cam_proj * cam_view,
                     z_near: camera.z_near(),
                     fovy: camera.fovy(),
-                },
-                main_light: LightInfo {
-                    proj_view: main_light_proj * main_light_view,
-                    dir: main_light_dir.push(0.0),
                 },
                 atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
                 frame_size: self.render_size,
