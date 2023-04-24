@@ -99,7 +99,7 @@ impl GBufferStage {
                     },
                 ],
                 &[
-                    // Main pass
+                    // Solid-colors pass
                     Subpass::new()
                         .with_color(vec![
                             AttachmentRef {
@@ -123,6 +123,16 @@ impl GBufferStage {
                                 layout: ImageLayout::COLOR_ATTACHMENT,
                             },
                         ])
+                        .with_depth(AttachmentRef {
+                            index: 5,
+                            layout: ImageLayout::DEPTH_STENCIL_READ,
+                        }),
+                    // Transparent pass
+                    Subpass::new()
+                        .with_color(vec![AttachmentRef {
+                            index: 0,
+                            layout: ImageLayout::COLOR_ATTACHMENT,
+                        }])
                         .with_depth(AttachmentRef {
                             index: 5,
                             layout: ImageLayout::DEPTH_STENCIL_READ,
@@ -156,14 +166,24 @@ impl GBufferStage {
                             layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
                         }),
                 ],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                    dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                    src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                    dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                }],
+                &[
+                    SubpassDependency {
+                        src_subpass: 0,
+                        dst_subpass: 1,
+                        src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                        dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                    SubpassDependency {
+                        src_subpass: 1,
+                        dst_subpass: 2,
+                        src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                        dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                ],
             )
             .unwrap();
 
@@ -206,7 +226,7 @@ impl GBufferStage {
                     .begin_secondary_graphics(true, &self.render_pass, 0, Some(framebuffer))
                     .unwrap();
                 cl_trans
-                    .begin_secondary_graphics(true, &self.render_pass, 0, Some(framebuffer))
+                    .begin_secondary_graphics(true, &self.render_pass, 1, Some(framebuffer))
                     .unwrap();
 
                 for j in 0..draw_count_step {
@@ -269,7 +289,7 @@ impl GBufferStage {
     fn record_overlay_cmd_list(&self, cl: &mut CmdList, framebuffer: &Framebuffer, ctx: &StageContext) {
         let mat_pipelines = ctx.material_pipelines;
 
-        cl.begin_secondary_graphics(true, &self.render_pass, 1, Some(framebuffer))
+        cl.begin_secondary_graphics(true, &self.render_pass, 2, Some(framebuffer))
             .unwrap();
 
         for renderable_id in ctx.ordered_entities {
@@ -355,7 +375,7 @@ impl RenderStage for GBufferStage {
             &PipelineConfig {
                 render_pass: &self.render_pass,
                 signature: &params.main_signature,
-                subpass_index: 0,
+                subpass_index: 1,
                 cull_back_faces: params.cull_back_faces,
                 blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
@@ -371,7 +391,7 @@ impl RenderStage for GBufferStage {
             &PipelineConfig {
                 render_pass: &self.render_pass,
                 signature: &params.main_signature,
-                subpass_index: 1,
+                subpass_index: 2,
                 cull_back_faces: params.cull_back_faces,
                 blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
@@ -558,12 +578,11 @@ impl RenderStage for GBufferStage {
             ],
             true,
         );
-        cl.execute_secondary(
-            solid_objects_cmd_lists
-                .lock()
-                .iter()
-                .chain(translucent_objects_cmd_lists.lock().iter()),
-        );
+        cl.execute_secondary(solid_objects_cmd_lists.lock().iter());
+
+        // Transparency subpass
+        cl.next_subpass(true);
+        cl.execute_secondary(translucent_objects_cmd_lists.lock().iter());
 
         // Overlay subpass
         cl.next_subpass(true);

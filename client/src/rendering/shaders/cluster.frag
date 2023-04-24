@@ -122,13 +122,14 @@ void main() {
     uint material_id;
     sample_material(vs_in.material_id, vs_in.tex_uv, mat);
 
-    vec3 combined_light = min(vec3(1.0), ambient_light + vs_in.light);
+//    vec3 combined_light = min(vec3(1.0), ambient_light + vs_in.light);
+    vec3 combined_light = min(vec3(1.0), vs_in.light);
 
-    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
-    // vec3 diffuse = vec3(1.0) * (0.75 + vs_in.ao * 0.25);
-    // diffuse = vs_in.surface_normal;
+//    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
+    float aoMin = 0.75;
+    float ao = 1 - (1 - vs_in.ao) * aoMin;
+    vec3 diffuse = mat.diffuse.rgb * ao;
+    vec3 emission = mat.diffuse.rgb * combined_light;
 
-    // outDiffuse = vec4(color, 1);
-
-    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), vec3(0.0), vs_in.surface_normal);
+    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), emission, vs_in.surface_normal);
 }

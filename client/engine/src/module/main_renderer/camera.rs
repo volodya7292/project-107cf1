@@ -12,21 +12,20 @@ pub struct PerspectiveCamera {
 
 pub fn create_view_matrix(position: &Vec3, rotation: &Vec3) -> Mat4 {
     let mut mat = Mat4::identity();
-    mat *= Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x);
-    mat *= Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y);
-    mat *= Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z);
-    mat *= Mat4::new_translation(&(-position));
+    mat = Mat4::new_translation(&(-position)) * mat;
+    mat = Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z) * mat;
+    mat = Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y) * mat;
+    mat = Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x) * mat;
     mat
 }
 
 pub fn rotation_to_direction(rotation: &Vec3) -> Vec3 {
-    let mut rot_mat = Mat4::identity();
-    rot_mat *= Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x);
-    rot_mat *= Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y);
-    rot_mat *= Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z);
+    let mut mat = Mat4::identity();
+    mat = Mat4::from_axis_angle(&Vec3::z_axis(), rotation.z) * mat;
+    mat = Mat4::from_axis_angle(&Vec3::y_axis(), rotation.y) * mat;
+    mat = Mat4::from_axis_angle(&Vec3::x_axis(), rotation.x) * mat;
 
-    let d: Vec3 = rot_mat.row(2).transpose().fixed_rows::<3>(0).into();
-
+    let d: Vec3 = mat.row(2).transpose().fixed_rows::<3>(0).into();
     -d
 }
 

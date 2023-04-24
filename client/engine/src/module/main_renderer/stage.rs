@@ -26,6 +26,7 @@ pub(crate) struct StageContext<'a> {
     pub ordered_entities: &'a [EntityId],
     pub active_camera: &'a PerspectiveCamera,
     pub relative_camera_pos: Vec3,
+    pub main_light_dir: Vec3,
     pub curr_vertex_meshes: &'a HashMap<EntityId, Arc<RawVertexMesh>>,
     pub renderables: &'a HashMap<EntityId, Renderable>,
     pub g_per_frame_pool: &'a DescriptorPool,
@@ -42,6 +43,7 @@ pub(crate) struct FrameContext<'a> {
     pub active_camera: &'a PerspectiveCamera,
     pub overlay_camera: &'a OrthoCamera,
     pub relative_camera_pos: Vec3,
+    pub main_light_dir: Vec3,
 }
 
 pub struct StageRunResult {

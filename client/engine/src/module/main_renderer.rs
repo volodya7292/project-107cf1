@@ -173,6 +173,7 @@ pub struct MainRenderer {
     res: RendererResources,
     update_handlers: Vec<Box<UpdateHandler>>,
     stage_manager: StageManager,
+    main_light_dir: Vec3,
 }
 
 #[derive(Copy, Clone)]
@@ -251,6 +252,7 @@ struct LightInfo {
 #[repr(C)]
 pub(crate) struct FrameInfo {
     camera: CameraInfo,
+    main_light_dir: Vec4,
     atlas_info: U32Vec4,
     frame_size: UVec2,
     surface_size: UVec2,
@@ -744,6 +746,7 @@ impl MainRenderer {
             res: resources,
             update_handlers: vec![],
             stage_manager,
+            main_light_dir: Vec3::new(0.0, -1.0, 0.0),
         };
         renderer.on_resize(curr_size);
 
@@ -1176,6 +1179,7 @@ impl MainRenderer {
                     z_near: camera.z_near(),
                     fovy: camera.fovy(),
                 },
+                main_light_dir: self.main_light_dir.push(0.0),
                 atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
                 frame_size: self.render_size,
                 surface_size: self.surface_size,
@@ -1185,6 +1189,7 @@ impl MainRenderer {
                 active_camera: &self.active_camera,
                 overlay_camera: &self.overlay_camera,
                 relative_camera_pos: self.relative_camera_pos,
+                main_light_dir: self.main_light_dir,
             };
 
             for (_, stage) in self.stage_manager.stages() {
@@ -1272,6 +1277,7 @@ impl MainRenderer {
             ordered_entities: &self.ordered_entities,
             active_camera: &self.active_camera,
             relative_camera_pos: self.relative_camera_pos,
+            main_light_dir: self.main_light_dir,
             curr_vertex_meshes: &self.res.curr_vertex_meshes,
             renderables: &self.res.renderables,
             g_per_frame_pool: &self.res.g_per_frame_pool,

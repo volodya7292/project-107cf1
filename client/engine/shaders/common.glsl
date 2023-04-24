@@ -56,6 +56,7 @@ struct LightInfo {
 
 struct FrameInfo {
     Camera camera;
+    vec4 main_light_dir;
     uvec4 tex_atlas_info; // .x: tile size in pixels
     uvec2 frame_size;
     uvec2 surface_size;

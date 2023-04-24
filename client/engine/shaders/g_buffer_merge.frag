@@ -1,6 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "common.glsl"
+#include "sky.glsl"
 
 layout(location = 0) in vec2 inUV;
 
@@ -72,7 +72,6 @@ float calc_shadow(vec3 worldPos, vec3 normal) {
     }
 
     shadowFactor /= samples;
-    shadowFactor = 1.0 - (1 - shadowFactor) * 0.5;
 
     return shadowFactor;
 }
@@ -82,7 +81,7 @@ void main() {
     uint coordIdx = info.frame_size.x * coord.y + coord.x;
     uint depthSliceSize = info.frame_size.x * info.frame_size.y;
 
-    vec4 currColor = vec4(0);
+    vec4 transpColor = vec4(0);
 
     // Collect translucency
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
@@ -92,24 +91,35 @@ void main() {
         } else {
             vec4 nextColor = imageLoad(translucencyColorsArray, ivec3(coord, i));
             // Note: reverse blending
-            currColor.rgb = mix(nextColor.rgb, currColor.rgb, currColor.a);
-            currColor.a = currColor.a + (1 - currColor.a) * nextColor.a;
+            transpColor.rgb = mix(nextColor.rgb, transpColor.rgb, transpColor.a);
+            transpColor.a = transpColor.a + (1 - transpColor.a) * nextColor.a;
         }
     }
 
     vec3 worldPos = texture(gPosition, inUV).rgb;
     float depth = texture(gDepth, inUV).r;
 
-    // Blend with solid colors
     vec4 solidColor = texture(gAlbedo, inUV);
-    currColor = mix(solidColor, currColor, currColor.a);
-
     vec4 emission = texture(gEmissive, inUV);
-    currColor.rgb += emission.rgb;
-
     vec3 normal = sphericalAnglesToNormal(texture(gNormal, inUV).xy);
 
     float shadow = calc_shadow(worldPos, normal);
+//    shadow = 1.0 - (1 - shadow) * 0.5;
 
-    outColor = vec4(currColor.rgb * shadow, 1);
+    vec3 sun_dir = info.main_light_dir.xyz;
+    vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
+
+    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * 0.25;
+
+    // Blend transparent with solid colors
+    vec3 currColor = mix(solidColor.rgb * cosFactor, transpColor.rgb, transpColor.a);
+    // Apply additional emission
+    currColor.rgb += emission.rgb;
+
+    if (depth < 0.0001) {
+        skyCol = 1.0 - exp(-2.0 * skyCol);
+        outColor = vec4(skyCol, 1);
+    } else {
+        outColor = vec4(currColor * shadow, 1);
+    }
 }
