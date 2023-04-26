@@ -45,6 +45,7 @@ struct UpscalePushConstants {
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 struct MainShadowInfo {
+    light_view: Mat4,
     light_proj_view: Mat4,
     light_dir: Vec4,
 }
@@ -326,11 +327,14 @@ impl PostProcessStage {
             .unwrap();
 
         let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
-        let main_shadow_map_mat: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ_VIEW);
+        let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
+        let main_light_view: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_VIEW);
 
-        let mut main_shadow_info = MainShadowInfo::default();
-        main_shadow_info.light_proj_view = *main_shadow_map_mat;
-        main_shadow_info.light_dir = DepthStage::MAIN_LIGHT_DIR.push(0.0);
+        let mut main_shadow_info = MainShadowInfo {
+            light_view: *main_light_view,
+            light_proj_view: *main_light_proj * *main_light_view,
+            light_dir: DepthStage::MAIN_LIGHT_DIR.push(0.0),
+        };
 
         let main_shadow_info_ub =
             resources.request_uniform_buffer("post-main_shadow_ub", main_shadow_info, cl);

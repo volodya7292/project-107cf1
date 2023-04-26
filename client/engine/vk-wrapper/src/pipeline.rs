@@ -104,26 +104,33 @@ impl Default for PipelineDepthStencil {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct CullMode(pub(crate) vk::CullModeFlags);
+
+impl CullMode {
+    pub const NONE: Self = Self(vk::CullModeFlags::NONE);
+    pub const BACK: Self = Self(vk::CullModeFlags::BACK);
+    pub const FRONT: Self = Self(vk::CullModeFlags::FRONT);
+}
+
 pub struct PipelineRasterization {
-    pub cull_back_faces: bool,
+    pub cull: CullMode,
 }
 
 impl PipelineRasterization {
-    pub fn new() -> PipelineRasterization {
+    pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn cull_back_faces(mut self, enabled: bool) -> PipelineRasterization {
-        self.cull_back_faces = enabled;
+    pub fn cull(mut self, cull: CullMode) -> Self {
+        self.cull = cull;
         self
     }
 }
 
 impl Default for PipelineRasterization {
     fn default() -> Self {
-        PipelineRasterization {
-            cull_back_faces: false,
-        }
+        PipelineRasterization { cull: CullMode::NONE }
     }
 }
 

@@ -26,6 +26,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
@@ -622,7 +623,7 @@ impl TextRenderer {
         let mat_pipe_id = renderer.register_material_pipeline(
             &[vertex_shader, pixel_shader],
             PrimitiveTopology::TRIANGLE_STRIP,
-            true,
+            CullMode::BACK,
         );
 
         let pipe = renderer.get_material_pipeline(mat_pipe_id).unwrap();

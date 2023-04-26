@@ -79,6 +79,7 @@ use vertex_mesh::RawVertexMesh;
 pub use vertex_mesh::VertexMesh;
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
+use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
     swapchain, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet, Device,
@@ -832,7 +833,7 @@ impl MainRenderer {
         &mut self,
         shaders: &[Arc<Shader>],
         topology: PrimitiveTopology,
-        cull_back_faces: bool,
+        cull: CullMode,
     ) -> MaterialPipelineId {
         let main_signature = self
             .device
@@ -863,7 +864,7 @@ impl MainRenderer {
                 MaterialPipelineParams {
                     shaders,
                     topology,
-                    cull_back_faces,
+                    cull,
                     main_signature: &main_signature,
                 },
                 &mut pipeline_set,

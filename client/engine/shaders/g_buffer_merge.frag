@@ -25,23 +25,14 @@ layout(binding = 8, rgba8) uniform image2DArray translucencyColorsArray;
 layout(binding = 9) uniform sampler2D mainShadowMap;
 
 layout(binding = 10, scalar) uniform MainShadowInfoBlock {
+    mat4 lightView;
     mat4 lightProjView;
     vec4 lightDir;
 } mainShadowInfo;
 
-const vec2 meanSampleJitter[] = {
-    vec2(0, 0),
-    vec2(0, -1),
-    vec2(0, 1),
-    vec2(-1, 0),
-    vec2(1, 0),
-    vec2(-1, -1),
-    vec2(-1, 1),
-    vec2(1, -1),
-    vec2(1, 1),
-};
 
 float calc_shadow(vec3 worldPos, vec3 normal) {
+
     vec4 worldPosLightClipSpace = mainShadowInfo.lightProjView * vec4(worldPos, 1);
     worldPosLightClipSpace = shadowClipPosMapping(worldPosLightClipSpace);
     worldPosLightClipSpace.y = -worldPosLightClipSpace.y;
@@ -50,22 +41,26 @@ float calc_shadow(vec3 worldPos, vec3 normal) {
     vec2 worldPosLightNorm = worldPosLightNDC.xy * 0.5 + 0.5;
     float depthAtWorldPos = worldPosLightNDC.z;
 
-
     float shadowFactor = 0;
-    int pfcRange = 1;
-    uint samples = 9;
+    float pfcRange = 4;
+    uint samples = 8;
 
     uint texId = floatBitsToUint(worldPos.x) ^ floatBitsToUint(worldPos.y) ^ floatBitsToUint(worldPos.z);
     ivec2 texSize = textureSize(mainShadowMap, 0).xy;
-    vec2 texelSize = 1.0 / texSize * 4;
+    vec2 texelSize = 1.0 / texSize;
+
+    vec4 normalOffset = mainShadowInfo.lightView * vec4(normal, 0);
+    normalOffset.y = -normalOffset.y;
 
     for (int i = 0; i < samples; i++) {
     	vec2 jitter = r2_seq_2d(texId + i) * 2.0 - 1.0;
-    	vec2 offset = texelSize * jitter * pfcRange;
+    	jitter += normalOffset.xy;
+    	jitter *= pfcRange;
 
+    	vec2 offset = texelSize * jitter;
         float shadowMapDepth = texture(mainShadowMap, worldPosLightNorm.xy + offset).r;
 
-        float bias = max(0.5 * (1.0 - dot(normal, -mainShadowInfo.lightDir.xyz)), 0.001);
+        float bias = 0.0001;// max(0.5 * (1.0 - dot(normal, -mainShadowInfo.lightDir.xyz)), 0.001);
 
         float shadow = float((depthAtWorldPos + bias) > shadowMapDepth);
         shadowFactor += shadow;
@@ -109,7 +104,8 @@ void main() {
     vec3 sun_dir = info.main_light_dir.xyz;
     vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
 
-    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * 0.25;
+    float areaLightCosImportance = 0.1;
+    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * areaLightCosImportance;
 
     // Blend transparent with solid colors
     vec3 currColor = mix(solidColor.rgb * cosFactor, transpColor.rgb, transpColor.a);

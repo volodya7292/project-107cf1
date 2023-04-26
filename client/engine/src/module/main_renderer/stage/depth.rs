@@ -46,7 +46,8 @@ pub struct DepthStage {
     translucency_depths_pipe: PipelineKindId,
     shadow_map_pipe: PipelineKindId,
     frame_infos_indices: Vec<usize>,
-    last_light_proj_view: Mat4,
+    last_light_proj: Mat4,
+    last_light_view: Mat4,
 }
 
 #[derive(Copy, Clone)]
@@ -169,7 +170,8 @@ impl DepthStage {
     pub const RES_VISIBILITY_HOST_BUFFER: &'static str = "visibility_host_buffer";
     pub const RES_TRANSLUCENCY_DEPTHS_IMAGE: &'static str = "translucency_depths_image";
     pub const RES_MAIN_SHADOW_MAP: &'static str = "main_shadow_map";
-    pub const RES_LIGHT_PROJ_VIEW: &'static str = "depth-main_light_proj_view";
+    pub const RES_LIGHT_VIEW: &'static str = "depth-main_light_view";
+    pub const RES_LIGHT_PROJ: &'static str = "depth-main_light_proj";
 
     pub fn new(device: &Arc<Device>) -> Self {
         let depth_render_pass = device
@@ -267,7 +269,8 @@ impl DepthStage {
             translucency_depths_pipe: u32::MAX,
             shadow_map_pipe: u32::MAX,
             frame_infos_indices: vec![],
-            last_light_proj_view: Default::default(),
+            last_light_proj: Default::default(),
+            last_light_view: Default::default(),
         }
     }
 
@@ -497,7 +500,7 @@ impl DepthStage {
             &mut cmd_lists.lock(),
             &main_shadow_framebuffer,
             ctx,
-            &self.last_light_proj_view,
+            &(self.last_light_proj * self.last_light_view),
         );
 
         // Render solid objects for each cascade
@@ -510,7 +513,8 @@ impl DepthStage {
         cl.execute_secondary(cmd_lists.lock().iter());
         cl.end_render_pass();
 
-        resources.create(Self::RES_LIGHT_PROJ_VIEW, Arc::new(self.last_light_proj_view));
+        resources.create(Self::RES_LIGHT_PROJ, Arc::new(self.last_light_proj));
+        resources.create(Self::RES_LIGHT_VIEW, Arc::new(self.last_light_view));
     }
 }
 
@@ -562,7 +566,8 @@ impl RenderStage for DepthStage {
         };
         shadow_info.frame_size = glm::vec2(1024, 1024);
 
-        self.last_light_proj_view = light_proj_view;
+        self.last_light_proj = light_proj;
+        self.last_light_view = light_view;
     }
 
     fn register_pipeline_kind(&self, params: MaterialPipelineParams, pipeline_set: &mut MaterialPipelineSet) {
@@ -598,7 +603,7 @@ impl RenderStage for DepthStage {
                 render_pass: &self.depth_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
-                cull_back_faces: params.cull_back_faces,
+                cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,
@@ -611,7 +616,7 @@ impl RenderStage for DepthStage {
                 render_pass: &self.depth_render_pass,
                 signature: &translucency_depth_signature,
                 subpass_index: 1,
-                cull_back_faces: params.cull_back_faces,
+                cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
@@ -627,7 +632,7 @@ impl RenderStage for DepthStage {
                 render_pass: &self.shadow_map_render_pass,
                 signature: &depth_signature,
                 subpass_index: 0,
-                cull_back_faces: params.cull_back_faces,
+                cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,

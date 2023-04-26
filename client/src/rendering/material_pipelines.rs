@@ -2,6 +2,7 @@ use crate::rendering::ui::{fancy_button, text};
 use common::resource_file::ResourceFile;
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::text_renderer::TextRenderer;
+use engine::vkw::pipeline::CullMode;
 use engine::vkw::shader::VInputRate;
 use engine::vkw::PrimitiveTopology;
 use engine::{vkw, EngineContext};
@@ -56,7 +57,11 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
             )
             .unwrap();
 
-        renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_LIST, true)
+        renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_LIST,
+            CullMode::BACK,
+        )
     };
 
     let text_3d = {
@@ -100,7 +105,11 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
             )
             .unwrap();
 
-        renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_STRIP, true)
+        renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        )
     };
 
     let text_ui = text::load_pipeline(&mut renderer, &mut text_renderer);

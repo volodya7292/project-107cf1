@@ -3,14 +3,14 @@ use std::collections::hash_map;
 use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::device::{SpecConstId, SpecConstValue};
-use vk_wrapper::pipeline::CompareOp;
+use vk_wrapper::pipeline::{CompareOp, CullMode};
 use vk_wrapper::{AttachmentColorBlend, PrimitiveTopology};
 
 pub struct PipelineConfig<'a> {
     pub render_pass: &'a Arc<vkw::RenderPass>,
     pub signature: &'a Arc<vkw::PipelineSignature>,
     pub subpass_index: u32,
-    pub cull_back_faces: bool,
+    pub cull: CullMode,
     pub blend_attachments: &'a [u32],
     pub depth_test: bool,
     pub depth_write: bool,
@@ -44,7 +44,7 @@ impl MaterialPipelineSet {
                             .depth_write(params.depth_write)
                             // Reversed-Z
                             .depth_compare_op(CompareOp::GREATER_OR_EQUAL),
-                        vkw::PipelineRasterization::new().cull_back_faces(params.cull_back_faces),
+                        vkw::PipelineRasterization::new().cull(params.cull),
                         &params
                             .blend_attachments
                             .iter()

@@ -1320,11 +1320,7 @@ impl Device {
             .depth_clamp_enable(false)
             .rasterizer_discard_enable(false)
             .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(if rasterization.cull_back_faces {
-                vk::CullModeFlags::BACK
-            } else {
-                vk::CullModeFlags::NONE
-            })
+            .cull_mode(rasterization.cull.0)
             .front_face(vk::FrontFace::CLOCKWISE)
             .depth_bias_enable(false)
             .line_width(1.0);

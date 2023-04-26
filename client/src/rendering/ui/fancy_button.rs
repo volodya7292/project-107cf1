@@ -11,6 +11,7 @@ use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, Scene};
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIRenderer};
+use engine::vkw::pipeline::CullMode;
 use engine::vkw::PrimitiveTopology;
 use engine::EngineContext;
 use entity_data::EntityId;
@@ -46,7 +47,11 @@ pub fn load_pipeline(renderer: &mut MainRenderer) -> MaterialPipelineId {
         )
         .unwrap();
 
-    renderer.register_material_pipeline(&[vertex, pixel], PrimitiveTopology::TRIANGLE_STRIP, true)
+    renderer.register_material_pipeline(
+        &[vertex, pixel],
+        PrimitiveTopology::TRIANGLE_STRIP,
+        CullMode::BACK,
+    )
 }
 
 impl UIState for FancyButtonState {}

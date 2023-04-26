@@ -6,6 +6,7 @@ use entity_data::EntityId;
 use index_pool::IndexPool;
 use smallvec::SmallVec;
 use std::sync::Arc;
+use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::{
     DescriptorPool, DescriptorSet, DeviceBuffer, PipelineSignature, PrimitiveTopology, Sampler, Shader,
 };
@@ -42,6 +43,6 @@ pub struct Renderable {
 pub struct MaterialPipelineParams<'a> {
     pub shaders: &'a [Arc<Shader>],
     pub topology: PrimitiveTopology,
-    pub cull_back_faces: bool,
+    pub cull: CullMode,
     pub main_signature: &'a Arc<PipelineSignature>,
 }
