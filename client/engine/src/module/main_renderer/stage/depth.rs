@@ -10,7 +10,8 @@ use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OB
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{
-    calc_group_count, camera, compose_descriptor_sets, CameraInfo, FrameInfo,
+    calc_group_count, calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, CameraInfo,
+    FrameInfo,
 };
 use crate::module::scene::N_MAX_OBJECTS;
 use common::glm::{Mat4, Vec2, Vec3, Vec4};
@@ -919,7 +920,8 @@ impl RenderStage for DepthStage {
             };
             cl.push_constants(self.depth_pyramid_pipeline.signature(), &constants);
 
-            cl.dispatch(calc_group_count(out_size.0), calc_group_count(out_size.1), 1);
+            let n_groups = calc_group_count_2d(out_size);
+            cl.dispatch(n_groups.0, n_groups.1, 1);
 
             cl.barrier_image(
                 PipelineStageFlags::COMPUTE,
@@ -985,7 +987,8 @@ impl RenderStage for DepthStage {
         };
         cl.push_constants(self.cull_pipeline.signature(), &constants);
 
-        cl.dispatch(calc_group_count(n_frustum_visible_objects as u32), 1, 1);
+        let n_groups = calc_group_count_1d(n_frustum_visible_objects as u32);
+        cl.dispatch(n_groups, 1, 1);
 
         cl.barrier_buffer(
             PipelineStageFlags::COMPUTE,

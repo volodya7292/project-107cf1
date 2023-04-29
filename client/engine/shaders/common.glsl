@@ -5,10 +5,6 @@
 #include "engine_ids.h"
 
 #define ALPHA_BIAS 4.0 / 255.0
-#define OIT_N_CLOSEST_LAYERS 4
-#define THREAD_GROUP_WIDTH 8
-#define THREAD_GROUP_HEIGHT 8
-#define THREAD_GROUP_1D_WIDTH (THREAD_GROUP_WIDTH * THREAD_GROUP_HEIGHT)
 
 #define M_PI 3.1415927f
 #define SQRT_2 1.4142136f

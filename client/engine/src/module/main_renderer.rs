@@ -326,7 +326,8 @@ pub(crate) struct ParallelJob {
 pub const TEXTURE_ID_NONE: u16 = u16::MAX;
 
 pub const N_MAX_MATERIALS: u32 = 4096;
-pub const COMPUTE_LOCAL_THREADS: u32 = 32;
+pub const COMPUTE_LOCAL_THREADS_1D: u32 = shader_ids::THREAD_GROUP_1D_SIZE;
+pub const COMPUTE_LOCAL_THREADS_2D: u32 = shader_ids::THREAD_GROUP_2D_SIZE;
 
 const RESET_CAMERA_POS_THRESHOLD: f64 = 4096.0;
 
@@ -431,8 +432,19 @@ lazy_static! {
     ];
 }
 
-fn calc_group_count(thread_count: u32) -> u32 {
-    (thread_count + COMPUTE_LOCAL_THREADS - 1) / COMPUTE_LOCAL_THREADS
+fn calc_group_count(thread_count: u32, group_size: u32) -> u32 {
+    (thread_count + group_size - 1) / group_size
+}
+
+fn calc_group_count_1d(thread_count: u32) -> u32 {
+    calc_group_count(thread_count, COMPUTE_LOCAL_THREADS_1D)
+}
+
+fn calc_group_count_2d(thread_count: (u32, u32)) -> (u32, u32) {
+    (
+        calc_group_count(thread_count.0, COMPUTE_LOCAL_THREADS_2D),
+        calc_group_count(thread_count.1, COMPUTE_LOCAL_THREADS_2D),
+    )
 }
 
 fn compose_descriptor_sets(

@@ -21,7 +21,7 @@ use vk_wrapper::{
     SubpassDependency,
 };
 
-const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
+const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = shader_ids::OIT_N_CLOSEST_LAYERS;
 
 pub struct GBufferStage {
     device: Arc<Device>,
