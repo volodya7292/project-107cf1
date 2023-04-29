@@ -31,11 +31,7 @@ pub struct Adapter {
     pub(crate) props: vk::PhysicalDeviceProperties,
     pub(crate) enabled_extensions: Vec<CString>,
     pub(crate) features: vk::PhysicalDeviceFeatures,
-    pub(crate) scalar_features: vk::PhysicalDeviceScalarBlockLayoutFeaturesEXT,
-    pub(crate) desc_features: vk::PhysicalDeviceDescriptorIndexingFeaturesEXT,
-    pub(crate) ts_features: vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR,
-    pub(crate) storage8bit_features: vk::PhysicalDevice8BitStorageFeaturesKHR,
-    pub(crate) shader_float16_int8_features: vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR,
+    pub(crate) vulkan12_features: vk::PhysicalDeviceVulkan12Features,
     pub(crate) queue_family_indices: [QueueId; QueueType::TOTAL_QUEUES],
     pub(crate) formats_props: HashMap<vk::Format, vk::FormatProperties>,
 }
@@ -64,24 +60,15 @@ impl Adapter {
             queue_infos.push(queue_info.build());
         }
 
-        let mut scalar_features = self.scalar_features;
-        let mut desc_features = self.desc_features;
-        let mut ts_features = self.ts_features;
-        let mut storage8bit_features = self.storage8bit_features;
-        let mut shader_float16_int8_features = self.shader_float16_int8_features;
-
         let enabled_extensions_raw: Vec<*const c_char> =
             self.enabled_extensions.iter().map(|name| name.as_ptr()).collect();
+        let mut vulkan12_features = self.vulkan12_features;
 
         let create_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&enabled_extensions_raw)
             .enabled_features(&self.features)
-            .push_next(&mut desc_features)
-            .push_next(&mut ts_features)
-            .push_next(&mut storage8bit_features)
-            .push_next(&mut shader_float16_int8_features)
-            .push_next(&mut scalar_features);
+            .push_next(&mut vulkan12_features);
 
         let native_device = unsafe {
             self.instance
@@ -89,13 +76,11 @@ impl Adapter {
                 .create_device(self.native, &create_info, None)?
         };
 
-        let ts_khr = ash::extensions::khr::TimelineSemaphore::new(&self.instance.native, &native_device);
         let swapchain_khr = ash::extensions::khr::Swapchain::new(&self.instance.native, &native_device);
 
         let device_wrapper = Arc::new(DeviceWrapper {
             native: native_device,
             adapter: Arc::clone(self),
-            ts_khr,
         });
 
         // Get queues

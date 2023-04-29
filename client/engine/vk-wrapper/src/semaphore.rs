@@ -14,7 +14,7 @@ impl Semaphore {
     pub fn get_current_value(&self) -> Result<u64, vk::Result> {
         unsafe {
             self.device_wrapper
-                .ts_khr
+                .native
                 .get_semaphore_counter_value(self.native)
         }
     }
@@ -28,7 +28,7 @@ impl Semaphore {
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
 
-        Ok(unsafe { self.device_wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX)? })
+        Ok(unsafe { self.device_wrapper.native.wait_semaphores(&wait_info, u64::MAX)? })
     }
 
     pub fn signal(&self, value: u64) -> Result<(), DeviceError> {
@@ -40,7 +40,7 @@ impl Semaphore {
             .semaphore(self.native)
             .value(value);
 
-        Ok(unsafe { self.device_wrapper.ts_khr.signal_semaphore(&signal_info)? })
+        Ok(unsafe { self.device_wrapper.native.signal_semaphore(&signal_info)? })
     }
 }
 
@@ -58,6 +58,6 @@ impl Device {
             .semaphores(&natives)
             .values(values);
 
-        unsafe { self.wrapper.ts_khr.wait_semaphores(&wait_info, u64::MAX) }
+        unsafe { self.wrapper.native.wait_semaphores(&wait_info, u64::MAX) }
     }
 }

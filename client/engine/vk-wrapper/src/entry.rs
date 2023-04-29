@@ -7,7 +7,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::sync::Arc;
 
-pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_0;
+pub(crate) const VK_API_VERSION: u32 = vk::API_VERSION_1_2;
 
 #[derive(Debug)]
 pub enum InstanceError {
@@ -140,7 +140,7 @@ impl Entry {
         let app_info = vk::ApplicationInfo::builder()
             .application_name(c_app_name.as_c_str())
             .engine_name(c_engine_name.as_c_str())
-            .api_version(vk::API_VERSION_1_1);
+            .api_version(VK_API_VERSION);
 
         let required_extensions = enumerate_required_window_extensions(window)?;
         let available_layers = self.enumerate_instance_layer_names()?;
