@@ -10,7 +10,6 @@ pub struct ShaderStageFlags(pub(crate) vk::ShaderStageFlags);
 impl ShaderStageFlags {
     pub const VERTEX: Self = Self(vk::ShaderStageFlags::VERTEX);
     pub const PIXEL: Self = Self(vk::ShaderStageFlags::FRAGMENT);
-    pub const GEOMETRY: Self = Self(vk::ShaderStageFlags::GEOMETRY);
     pub const COMPUTE: Self = Self(vk::ShaderStageFlags::COMPUTE);
 }
 vk_bitflags_impl!(ShaderStageFlags, vk::ShaderStageFlags);
@@ -55,6 +54,16 @@ pub struct ShaderBinding {
     pub stage_flags: ShaderStageFlags,
     pub binding_type: BindingType,
     pub count: u32,
+}
+
+impl ShaderBinding {
+    pub fn new(ty: BindingType) -> Self {
+        Self {
+            stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::PIXEL | ShaderStageFlags::COMPUTE,
+            binding_type: ty,
+            count: 1,
+        }
+    }
 }
 
 pub struct Shader {

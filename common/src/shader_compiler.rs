@@ -93,7 +93,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
 
                 cmd.arg("-spirv")
                     .arg("-fvk-use-scalar-layout")
-                    .arg("-fspv-target-env=vulkan1.0")
+                    .arg("-fspv-target-env=vulkan1.2")
                     .arg("-HV")
                     .arg("2021")
                     .arg("-T")
@@ -106,7 +106,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                 let mut cmd = Command::new("glslangValidator");
                 cmd.arg("--spirv-val")
                     .arg("--target-env")
-                    .arg("vulkan1.0")
+                    .arg("vulkan1.2")
                     .arg("-e")
                     .arg("main")
                     .arg("-o")
@@ -138,7 +138,7 @@ pub fn compile_shaders<P: AsRef<Path>>(src_dir: P, dst_dir: P) {
                     .arg(dst_path_s.clone())
                     .arg("-o")
                     .arg(dst_path_s.clone())
-                    .arg("--target-env=vulkan1.1")
+                    .arg("--target-env=vulkan1.2")
                     .arg("--skip-validation")
                     .arg("--preserve-bindings")
                     .arg("--scalar-block-layout")
