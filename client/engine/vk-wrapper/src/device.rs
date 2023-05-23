@@ -743,7 +743,6 @@ impl Device {
         let stage = match entry_point.execution_model {
             spirv::ExecutionModel::Vertex => ShaderStage::VERTEX,
             spirv::ExecutionModel::Fragment => ShaderStage::PIXEL,
-            spirv::ExecutionModel::Geometry => ShaderStage::GEOMETRY,
             spirv::ExecutionModel::GlCompute => ShaderStage::COMPUTE,
             m => {
                 return Err(DeviceError::InvalidShader(format!(

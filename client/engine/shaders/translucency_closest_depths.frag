@@ -40,10 +40,10 @@ void main() {
         return;
     }
 
-    // Find OIT_N_CLOSEST_LAYERS closest depths
+    // Find OIT_N_CLOSEST_LAYERS closest depths and append new depths if possible
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
         uint prev = atomicMax(transparencyDepthsArray[coordIdx + i * sliceSize], currDepth);
-        if (prev == 0xFFFFFFFFu || prev == currDepth) {
+        if (prev == FARTHEST_DEPTH_UINT || prev == currDepth) {
             break;
         }
         currDepth = min(prev, currDepth);

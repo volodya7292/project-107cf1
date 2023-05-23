@@ -413,7 +413,7 @@ fn construct_liquid_quad(
                     position: posf + pos,
                     normal,
                     tex_uv: uv,
-                    ao: 0,
+                    ao: u8::MAX,
                     lighting,
                     material_id,
                 }
@@ -562,6 +562,7 @@ fn gen_block_vertices(
 
             for v in &mut quad_vertices {
                 let neighbours = get_vertex_neighbours(cells, pos, &v.position, facing);
+
                 v.position += posf;
                 v.normal = normal;
                 v.ao = neighbours.calculate_ao();

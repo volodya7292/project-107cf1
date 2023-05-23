@@ -852,7 +852,8 @@ impl RenderStage for DepthStage {
 
         cl.begin(true).unwrap();
 
-        cl.fill_buffer(&*translucency_depths_image, u32::MAX);
+        // Fill closest depths with the farthest value (z is reversed)
+        cl.fill_buffer(&*translucency_depths_image, shader_ids::FARTHEST_DEPTH_UINT);
 
         cl.barrier_buffer(
             PipelineStageFlags::TRANSFER,

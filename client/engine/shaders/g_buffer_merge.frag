@@ -80,7 +80,7 @@ void main() {
 
     // Collect translucency
     for (uint i = 0; i < OIT_N_CLOSEST_LAYERS; i++) {
-        if (depthsArray[coordIdx + i * depthSliceSize] == 0xFFFFFFFFu) {
+        if (depthsArray[coordIdx + i * depthSliceSize] == FARTHEST_DEPTH_UINT) {
             // The following layers do not contain any colors, stop the loop
             break;
         } else {
@@ -98,24 +98,24 @@ void main() {
     vec4 emission = texture(gEmissive, inUV);
     vec3 normal = sphericalAnglesToNormal(texture(gNormal, inUV).xy);
 
-    float shadow = calc_shadow(worldPos, normal);
+//    float shadow = calc_shadow(worldPos, normal);
 //    shadow = 1.0 - (1 - shadow) * 0.5;
 
     vec3 sun_dir = info.main_light_dir.xyz;
     vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
 
-    float areaLightCosImportance = 0.1;
-    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * areaLightCosImportance;
+//    float areaLightCosImportance = 0.1;
+//    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * areaLightCosImportance;
 
     // Blend transparent with solid colors
-    vec3 currColor = mix(solidColor.rgb * cosFactor, transpColor.rgb, transpColor.a);
+    vec3 currColor = mix(solidColor.rgb, transpColor.rgb, transpColor.a);
     // Apply additional emission
-    currColor.rgb += emission.rgb;
+//    currColor.rgb += emission.rgb;
 
     if (depth < 0.0001) {
         skyCol = 1.0 - exp(-2.0 * skyCol);
         outColor = vec4(skyCol, 1);
     } else {
-        outColor = vec4(currColor * shadow, 1);
+        outColor = vec4(currColor, 1);
     }
 }
