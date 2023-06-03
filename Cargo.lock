@@ -738,23 +738,23 @@ dependencies = [
 
 [[package]]
 name = "entity_data"
-version = "1.10.3"
+version = "1.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "602b5897711193242b7ad0d670293f54e7717c5da0c8697d65ffb3cfeffa97d1"
+checksum = "eca517fbdd0e5f1513971a87d4b2a3c6066a32fcdb4ab44c7c2525efe16bc0c9"
 dependencies = [
  "ahash",
- "bitvec",
  "entity_data-macros",
- "memoffset 0.8.0",
+ "index-pool",
+ "memoffset 0.9.0",
  "rayon",
  "smallvec",
 ]
 
 [[package]]
 name = "entity_data-macros"
-version = "1.6.1"
+version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b12619f84c1bba826ff82ad413b566f78ead71fbabaa6dfe3b6fffaad8344ff"
+checksum = "6943ffa840904012d39c98308dad8ee5746d2e75067ef5379b9c46e8e209e7a9"
 dependencies = [
  "proc-macro2",
  "quote",

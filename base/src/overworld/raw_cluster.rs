@@ -168,7 +168,11 @@ impl BlockDataMut<'_> {
         }
 
         // Add new state to the storage
-        let entity_id = self.block_storage.add(state.components);
+        let entity_id = if state.components.num_components() > 0 {
+            self.block_storage.add(state.components)
+        } else {
+            EntityId::NULL
+        };
 
         self.info.entity_id = CompactEntityId::new(entity_id);
         self.info.block_id = state.block_id;
