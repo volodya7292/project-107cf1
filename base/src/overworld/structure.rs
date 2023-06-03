@@ -9,9 +9,8 @@ use bit_vec::BitVec;
 use common::glm;
 use common::glm::{I64Vec3, U64Vec3};
 use common::types::UInt;
-use once_cell::sync::OnceCell;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Returns whether the structure can be generated at specified center position.
 pub type GenPosCheckFn =
@@ -24,7 +23,7 @@ pub type GenFn = fn(
     structure_seed: u64,
     cluster_pos: ClusterPos,
     cluster: &mut RawCluster,
-    structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
+    structure_state: Arc<OnceLock<Box<dyn StructureCache>>>,
 );
 
 /// Returns potential spawn point.
@@ -32,7 +31,7 @@ pub type GenSpawnPointFn = fn(
     structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    structure_state: Arc<OnceCell<Box<dyn StructureCache>>>,
+    structure_state: Arc<OnceLock<Box<dyn StructureCache>>>,
 ) -> BlockPos;
 
 pub struct Structure {
@@ -101,7 +100,7 @@ impl Structure {
         structure_seed: u64,
         cluster_pos: ClusterPos,
         cluster: &mut RawCluster,
-        structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+        structure_cache: Arc<OnceLock<Box<dyn StructureCache>>>,
     ) {
         (self.gen_fn)(
             self,
@@ -117,7 +116,7 @@ impl Structure {
         &self,
         generator: &OverworldGenerator,
         structure_seed: u64,
-        structure_cache: Arc<OnceCell<Box<dyn StructureCache>>>,
+        structure_cache: Arc<OnceLock<Box<dyn StructureCache>>>,
     ) -> Option<BlockPos> {
         self.gen_spawn_point_fn
             .map(|f| f(self, generator, structure_seed, structure_cache))

@@ -20,7 +20,6 @@ use common::types::ConcurrentCache;
 use common::types::ConcurrentCacheExt;
 use noise;
 use noise::{NoiseFn, Seedable};
-use once_cell::sync::OnceCell;
 use overworld::raw_cluster;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
@@ -30,7 +29,7 @@ use std::any::Any;
 use std::collections::VecDeque;
 use std::mem;
 use std::ops::RangeInclusive;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub const MIN_RADIUS: u64 = 2_048;
 pub const MAX_RADIUS: u64 = 100_000;
@@ -463,7 +462,7 @@ pub fn gen_fn(
     structure_seed: u64,
     cluster_pos: ClusterPos,
     cluster: &mut RawCluster,
-    state: Arc<OnceCell<Box<dyn StructureCache>>>,
+    state: Arc<OnceLock<Box<dyn StructureCache>>>,
 ) {
     let state = state
         .get_or_init(|| {
@@ -500,7 +499,7 @@ pub fn spawn_point_fn(
     _structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    state: Arc<OnceCell<Box<dyn StructureCache>>>,
+    state: Arc<OnceLock<Box<dyn StructureCache>>>,
 ) -> BlockPos {
     let state = state
         .get_or_init(|| {

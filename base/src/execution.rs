@@ -1,12 +1,11 @@
 use common::futures_lite::future;
 use common::threading::{SafeThreadPool, TaskPriority};
 use common::{async_executor, threading};
-use once_cell::sync::OnceCell;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-static DEFAULT_THREAD_POOL: OnceCell<SafeThreadPool> = OnceCell::new();
-static COROUTINE_EXECUTOR: OnceCell<Arc<async_executor::Executor<'static>>> = OnceCell::new();
+static DEFAULT_THREAD_POOL: OnceLock<SafeThreadPool> = OnceLock::new();
+static COROUTINE_EXECUTOR: OnceLock<Arc<async_executor::Executor<'static>>> = OnceLock::new();
 
 pub fn init(n_default_threads: usize, n_coroutine_threads: usize) {
     let default_thread_pool = SafeThreadPool::new(n_default_threads, TaskPriority::Default).unwrap();

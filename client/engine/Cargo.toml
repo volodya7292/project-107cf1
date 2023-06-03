@@ -1,6 +1,7 @@
 [package]
 name = "engine"
 version = "0.1.0"
+authors = ["volodya7292 <a7292969@gmail.com>"]
 edition = "2021"
 
 [dependencies]
@@ -8,18 +9,18 @@ vk-wrapper = { path = "vk-wrapper" }
 common = { path = "../../common" }
 msdfgen = { path = "msdfgen" }
 shader_ids = { path = "shader_ids" }
-basis-universal = "0.2"
+basis-universal = "0.3"
 fixedbitset = "0.4"
 index-pool = "1.0"
 entity_data = { version = "1.10", features = ["rayon"] }
 #entity_data = { path = "../../../entity_data", features = ["rayon"] }
-smallvec = { version = "1.9", features = ["const_generics"] }
+smallvec = { version = "1.10", features = ["const_generics"] }
 lazy_static = "1.4"
 winit = "0.28"
 rusttype = "0.9"
 unicode-normalization = "0.1"
 bitvec = "1.0"
-bumpalo = "3.12"
+bumpalo = "3.13"
 
 [build-dependencies]
 common = { path = "../../common" }
@@ -28,4 +29,4 @@ common = { path = "../../common" }
 core-graphics = "0.22"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.45", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
+windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }

@@ -8,12 +8,11 @@ use common::glm::I64Vec3;
 use common::types::ConcurrentCache;
 use common::types::ConcurrentCacheExt;
 use common::types::UInt;
-use once_cell::sync::OnceCell;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
 use std::any::Any;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // Note: always set empty blocks to potentially mark the whole cluster as empty
 
@@ -35,7 +34,7 @@ pub struct OverworldGenerator {
     seed: u64,
     white_noise: WhiteNoise,
     main_registry: Arc<MainRegistry>,
-    structure_states: ConcurrentCache<(u32, BlockPos), Arc<OnceCell<Box<dyn StructureCache>>>>,
+    structure_states: ConcurrentCache<(u32, BlockPos), Arc<OnceLock<Box<dyn StructureCache>>>>,
 }
 
 impl OverworldGenerator {
@@ -46,7 +45,7 @@ impl OverworldGenerator {
             main_registry: Arc::clone(main_registry),
             structure_states: ConcurrentCache::with_weigher(
                 MAX_STRUCTURE_STATES_SIZE,
-                |_, v: &Arc<OnceCell<Box<dyn StructureCache>>>| v.get().map(|v| v.size()).unwrap_or(0),
+                |_, v: &Arc<OnceLock<Box<dyn StructureCache>>>| v.get().map(|v| v.size()).unwrap_or(0),
             ),
         }
     }
@@ -160,7 +159,7 @@ impl OverworldGenerator {
         let cache = self
             .structure_states
             .get_with((world_st.uid(), world_pos.center_pos), || {
-                Arc::new(OnceCell::new())
+                Arc::new(OnceLock::new())
             });
 
         let rel_spawn_point = world_st.gen_spawn_point(self, world_seed, cache).unwrap();
@@ -184,7 +183,7 @@ impl OverworldGenerator {
         let cache = self
             .structure_states
             .get_with((world_st.uid(), world_pos.center_pos), || {
-                Arc::new(OnceCell::new())
+                Arc::new(OnceLock::new())
             });
 
         let rel_cluster_pos = pos
