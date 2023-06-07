@@ -2,7 +2,7 @@ use crate::sampler::SamplerFilter;
 use crate::{BufferHandle, Device, Image, ImageLayout, ImageView, PipelineSignature, Sampler, SamplerMipmap};
 use ash::vk;
 use ash::vk::Handle;
-use fixedbitset::FixedBitSet;
+use common::alloc::index_allocator::IndexAllocator;
 use smallvec::SmallVec;
 use std::ops::Range;
 use std::slice;
@@ -59,8 +59,8 @@ pub struct DescriptorPool {
     pub(crate) name: String,
     pub(crate) set_layout_id: u32,
     pub(crate) native: SmallVec<[NativeDescriptorPool; 16]>,
-    pub(crate) allocated: Vec<DescriptorSet>,
-    pub(crate) free_sets: FixedBitSet,
+    pub(crate) all_sets: Vec<vk::DescriptorSet>,
+    pub(crate) allocator: IndexAllocator,
 }
 
 impl DescriptorPool {
@@ -113,19 +113,9 @@ impl DescriptorPool {
         let alloc_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(next_pool.handle)
             .set_layouts(&layouts);
+
         let sets = unsafe { self.device.wrapper.native.allocate_descriptor_sets(&alloc_info)? };
-
-        let start_i = self.allocated.len() as u32;
-
-        self.allocated
-            .extend(sets.into_iter().enumerate().map(|(i, v)| DescriptorSet {
-                native: v,
-                id: start_i + i as u32,
-            }));
-
-        self.free_sets.grow((start_i + size) as usize);
-        self.free_sets
-            .insert_range((start_i as usize..(start_i + size) as usize).into_iter());
+        self.all_sets.extend(sets);
 
         self.native.push(next_pool);
         Ok(())
@@ -134,24 +124,27 @@ impl DescriptorPool {
     /// Allocate a new descriptor from the pool.
     /// If the pool doesn't have layout (its descriptor sizes = 0), this returns `DescriptorSet::NULL`.
     pub fn alloc(&mut self) -> Result<DescriptorSet, vk::Result> {
-        if let Some(id) = self.free_sets.ones().next() {
-            self.free_sets.toggle(id);
-            Ok(self.allocated[id])
-        } else {
+        let id = self.allocator.alloc();
+
+        if id >= self.all_sets.len() {
             self.alloc_next_pool((self.native.last().unwrap().size + 1).next_power_of_two())?;
-            self.alloc()
         }
+
+        let native = self.all_sets[id];
+
+        Ok(DescriptorSet {
+            native,
+            id: id as u32,
+        })
     }
 
     pub fn free(&mut self, descriptor_set: DescriptorSet) {
         assert_ne!(descriptor_set, DescriptorSet::NULL);
-        self.free_sets.insert(descriptor_set.id as usize);
+        self.allocator.free(descriptor_set.id as usize);
     }
 
     pub fn reset(&mut self) {
-        for set in &self.allocated {
-            self.free_sets.insert(set.id as usize);
-        }
+        self.allocator.clear();
     }
 
     pub fn create_binding(&self, id: u32, array_index: u32, res: BindingRes) -> Binding {

@@ -28,8 +28,8 @@ impl PipelineSignature {
             name: name.to_owned(),
             set_layout_id,
             native: Default::default(),
-            allocated: vec![],
-            free_sets: Default::default(),
+            all_sets: vec![],
+            allocator: Default::default(),
         };
         pool.alloc_next_pool(base_reserve.next_power_of_two())?;
         Ok(pool)
