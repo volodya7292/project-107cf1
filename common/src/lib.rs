@@ -15,6 +15,7 @@ pub mod types;
 pub mod unsafe_slice;
 pub mod utils;
 
+pub use async_channel;
 pub use async_executor;
 pub use crossbeam_channel;
 pub use event_listener;
@@ -34,3 +35,4 @@ use std::sync::atomic;
 pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
 pub const MO_RELEASE: atomic::Ordering = atomic::Ordering::Release;
+pub const MO_SEQCST: atomic::Ordering = atomic::Ordering::SeqCst;
