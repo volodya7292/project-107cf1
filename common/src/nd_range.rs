@@ -66,3 +66,24 @@ impl<const N: usize> Iterator for NDRangeIter<N> {
 }
 
 impl<const N: usize> ExactSizeIterator for NDRangeIter<N> {}
+
+#[test]
+fn nd_range_iter_works() {
+    use glm::TVec3;
+    use nalgebra_glm as glm;
+
+    let elements: Vec<_> = NDRange::of_size(TVec3::from_element(2)).into_iter().collect();
+    assert_eq!(
+        elements,
+        vec![
+            glm::vec3(0, 0, 0),
+            glm::vec3(0, 0, 1),
+            glm::vec3(0, 1, 0),
+            glm::vec3(0, 1, 1),
+            glm::vec3(1, 0, 0),
+            glm::vec3(1, 0, 1),
+            glm::vec3(1, 1, 0),
+            glm::vec3(1, 1, 1)
+        ]
+    )
+}

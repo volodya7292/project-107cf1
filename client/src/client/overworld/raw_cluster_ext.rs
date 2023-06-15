@@ -1,12 +1,13 @@
 use crate::rendering::textured_block_model::{PackedVertex, Vertex};
 use crate::resource_mapping::ResourceMapping;
+use base::overworld::accessor::ClusterNeighbourhoodAccessor;
 use base::overworld::facing::Facing;
-use base::overworld::light_state::LightState;
+use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
-use base::overworld::position::ClusterBlockPos;
+use base::overworld::occluder::Occluder;
+use base::overworld::position::RelativeBlockPos;
 use base::overworld::raw_cluster::BlockDataImpl;
-use base::overworld::raw_cluster::{aligned_block_index, CellInfo, RawCluster};
-use base::registry::Registry;
+use base::overworld::raw_cluster::RawCluster;
 use common::glm;
 use common::glm::{I32Vec3, Vec2, Vec3};
 use common::types::Bool;
@@ -21,33 +22,18 @@ pub struct ClusterMeshes {
     pub transparent: VertexMesh<PackedVertex, ()>,
 }
 
-pub trait ClientRawCluster {
+pub trait ClusterMeshBuilder {
     fn build_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterMeshes;
-}
-
-struct NeighbourVertexIntrinsics {
-    corner: CellInfo,
-    sides: [CellInfo; 2],
-}
-
-impl NeighbourVertexIntrinsics {
-    #[inline]
-    fn calculate_ao(&self) -> u8 {
-        (self.corner.occluder.is_empty()
-            && self.sides[0].occluder.is_empty()
-            && self.sides[1].occluder.is_empty()) as u8
-            * 255
-    }
 }
 
 /// Returns a corner and two sides corresponding to the specified vertex on the given block and facing.
 #[inline]
-fn get_vertex_neighbours(
-    intrinsic_data: &[CellInfo],
-    block_pos: &I32Vec3,
+fn calculate_ao(
+    accessor: &ClusterNeighbourhoodAccessor,
+    block_pos: &RelativeBlockPos,
     vertex_pos: &Vec3,
     facing: Facing,
-) -> NeighbourVertexIntrinsics {
+) -> u8 {
     let facing_dir = facing.direction();
     let facing_comp = facing_dir.iter().cloned().position(|v| v != 0).unwrap_or(0);
 
@@ -68,29 +54,26 @@ fn get_vertex_neighbours(
     let mut side2_dir = I32Vec3::default();
     side2_dir[side2_comp] = side_dir[side2_comp];
 
-    let new_pos = block_pos.add_scalar(1) + facing_dir;
-    let corner_pos = new_pos + side_dir;
-    let side1_pos = new_pos + side1_dir;
-    let side2_pos = new_pos + side2_dir;
+    let new_pos = block_pos.offset(facing_dir);
+    let corner_pos = new_pos.offset(&side_dir);
+    let side1_pos = new_pos.offset(&side1_dir);
+    let side2_pos = new_pos.offset(&side2_dir);
 
-    let corner_index = aligned_block_index(&glm::convert_unchecked(corner_pos));
-    let side1_index = aligned_block_index(&glm::convert_unchecked(side1_pos));
-    let side2_index = aligned_block_index(&glm::convert_unchecked(side2_pos));
+    let corner = accessor.get_block(&corner_pos);
+    let side1 = accessor.get_block(&side1_pos);
+    let side2 = accessor.get_block(&side2_pos);
 
-    let corner = intrinsic_data[corner_index];
-    let side1 = intrinsic_data[side1_index];
-    let side2 = intrinsic_data[side2_index];
+    let corner_occluder = corner.map_or(Occluder::EMPTY, |v| v.occluder());
+    let side1_occluder = side1.map_or(Occluder::EMPTY, |v| v.occluder());
+    let side2_occluder = side2.map_or(Occluder::EMPTY, |v| v.occluder());
 
-    NeighbourVertexIntrinsics {
-        corner,
-        sides: [side1, side2],
-    }
+    (corner_occluder.is_empty() && side1_occluder.is_empty() && side2_occluder.is_empty()) as u8 * 255
 }
 
 #[inline]
 fn calc_quad_lighting(
-    intrinsic_data: &[CellInfo],
-    block_pos: &I32Vec3,
+    accessor: &ClusterNeighbourhoodAccessor,
+    block_pos: &RelativeBlockPos,
     quad: &mut [Vertex; 4],
     facing: Facing,
 ) {
@@ -143,7 +126,7 @@ fn calc_quad_lighting(
     //     )
     // }
 
-    fn blend_lighting(base: LightState, mut neighbours: [LightState; 3]) -> Vec3 {
+    fn blend_lighting(base: LightLevel, mut neighbours: [LightLevel; 3]) -> Vec3 {
         for n in &mut neighbours {
             if n.is_zero() {
                 *n = base;
@@ -155,7 +138,7 @@ fn calc_quad_lighting(
                 + neighbours[0].components()
                 + neighbours[1].components()
                 + neighbours[2].components(),
-        ) / (LightState::MAX_COMPONENT_VALUE as f32)
+        ) / (LightLevel::MAX_COMPONENT_VALUE as f32)
             * 0.25
     }
 
@@ -163,43 +146,45 @@ fn calc_quad_lighting(
 
     // FIXME: if block shape is not of full block, rel_pos = block_pos.
     let dir = facing.direction();
-    let rel_pos = block_pos.add_scalar(1) + dir;
+    let rel_pos = block_pos.offset(dir);
 
-    let base = intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos))];
-    let side0 = intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0]))];
-    let side1 = intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1]))];
-    let side2 = intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2]))];
-    let side3 = intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3]))];
+    let base = accessor
+        .get_block(&rel_pos)
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let side0 = accessor
+        .get_block(&rel_pos.offset(&sides[0]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let side1 = accessor
+        .get_block(&rel_pos.offset(&sides[1]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let side2 = accessor
+        .get_block(&rel_pos.offset(&sides[2]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let side3 = accessor
+        .get_block(&rel_pos.offset(&sides[3]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
 
-    let corner01 =
-        intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[0] + sides[1]))];
-    let corner12 =
-        intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[1] + sides[2]))];
-    let corner23 =
-        intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[2] + sides[3]))];
-    let corner30 =
-        intrinsic_data[aligned_block_index(&glm::convert_unchecked(rel_pos + sides[3] + sides[0]))];
+    let corner01 = accessor
+        .get_block(&rel_pos.offset(&sides[0]).offset(&sides[1]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let corner12 = accessor
+        .get_block(&rel_pos.offset(&sides[1]).offset(&sides[2]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let corner23 = accessor
+        .get_block(&rel_pos.offset(&sides[2]).offset(&sides[3]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
+    let corner30 = accessor
+        .get_block(&rel_pos.offset(&sides[3]).offset(&sides[0]))
+        .map_or(LightLevel::ZERO, |v| v.light_state());
 
     // if min >= Vec3::from_element(1e-5) || max <= Vec3::from_element(1.0 - 1e-5) {
     // Do bilinear interpolation because the quad is not covering full block face.
 
     let lights = [
-        blend_lighting(
-            base.light_level,
-            [side0.light_level, side1.light_level, corner01.light_level],
-        ),
-        blend_lighting(
-            base.light_level,
-            [side1.light_level, side2.light_level, corner12.light_level],
-        ),
-        blend_lighting(
-            base.light_level,
-            [side3.light_level, side0.light_level, corner30.light_level],
-        ),
-        blend_lighting(
-            base.light_level,
-            [side2.light_level, side3.light_level, corner23.light_level],
-        ),
+        blend_lighting(base, [side0, side1, corner01]),
+        blend_lighting(base, [side1, side2, corner12]),
+        blend_lighting(base, [side3, side0, corner30]),
+        blend_lighting(base, [side2, side3, corner23]),
     ];
 
     let facing_comp = dir.iamax();
@@ -214,7 +199,7 @@ fn calc_quad_lighting(
         let lighting =
             lights[0] * weights[0] + lights[1] * weights[1] + lights[2] * weights[2] + lights[3] * weights[3];
 
-        v.lighting = LightState::from_color(lighting).bits();
+        v.lighting = LightLevel::from_color(lighting).raw();
     }
 
     // quad[vert_ids[0]].lighting = blend_lighting(
@@ -250,36 +235,39 @@ type LiquidHeightsCache =
 
 /// Calculates liquid height at vertex in XZ-range 0..25
 fn calc_liquid_height(
-    registry: &Registry,
-    intrinsics: &[CellInfo],
+    accessor: &ClusterNeighbourhoodAccessor,
     cache: &mut LiquidHeightsCache,
-    pos: &I32Vec3,
+    pos: &RelativeBlockPos,
 ) -> f32 {
-    let entry = &mut cache[pos.x as usize][pos.y as usize][pos.z as usize];
+    let registry = accessor.registry();
+    let entry = &mut cache[pos.0.x as usize][pos.0.y as usize][pos.0.z as usize];
 
     // Use a cache to reduce the number of calculations by a factor of ~4
     *entry.get_or_insert_with(|| {
-        let aligned_pos = pos.add_scalar(1);
         let mut height_sum = 0_u32;
         let mut count = 0_u32;
         let mut level_bias_allowed = false;
 
         'outer: for i in -1..=0_i32 {
             for j in -1..=0_i32 {
-                let rel_padded = aligned_pos + glm::vec3(i, 0, j);
-                let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
-                let rel_data = &intrinsics[rel_padded_idx];
-                let rel_liquid = &rel_data.liquid_state;
-                let rel_block = registry.get_block(rel_data.block_id).unwrap();
+                let rel_pos = pos.offset(&glm::vec3(i, 0, j));
+                // let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
+                let Some(rel_data) = accessor.get_block(&rel_pos) else {
+                    continue;
+                };
+
+                let rel_liquid = rel_data.liquid_state();
+                let rel_block = registry.get_block(rel_data.block_id()).unwrap();
 
                 if !rel_block.can_pass_liquid() {
                     continue;
                 }
 
                 let top_liquid_exists = {
-                    let top_rel_padded = rel_padded + Facing::PositiveY.direction();
-                    let top_rel_padded_idx = aligned_block_index(&glm::convert_unchecked(top_rel_padded));
-                    let top_level = intrinsics[top_rel_padded_idx].liquid_state.level();
+                    let top_rel_pos = rel_pos.offset(Facing::PositiveY.direction());
+                    let top_level = accessor
+                        .get_block(&top_rel_pos)
+                        .map_or(0, |v| v.liquid_state().level());
                     top_level > 0
                 };
                 if rel_liquid.is_max() {
@@ -308,7 +296,7 @@ fn construct_liquid_quad(
     material_id: u16,
     liquid_heights: &[f32; 4],
     facing: Facing,
-    light_level: LightState,
+    light_level: LightLevel,
     vertices: &mut Vec<PackedVertex>,
 ) {
     const P000: Vec3 = Vec3::new(0.0, 0.0, 0.0);
@@ -345,7 +333,7 @@ fn construct_liquid_quad(
      */
 
     let material_id = material_id as u32;
-    let lighting = light_level.bits();
+    let lighting = light_level.raw();
     let quad_vertices;
     let mut normal: Vec3 = glm::convert(*facing.direction());
 
@@ -423,34 +411,30 @@ fn construct_liquid_quad(
 }
 
 fn gen_block_vertices(
-    cluster: &RawCluster,
+    accessor: &ClusterNeighbourhoodAccessor,
     res_map: &ResourceMapping,
-    pos: &I32Vec3,
+    pos: &RelativeBlockPos,
     liquid_cache: &mut LiquidHeightsCache,
     vertices: &mut Vec<PackedVertex>,
     vertices_translucent: &mut Vec<PackedVertex>,
 ) {
-    let registry = cluster.registry();
-    let cells = cluster.cells();
+    let registry = accessor.registry();
 
-    let state = cluster.get(&ClusterBlockPos::from_vec_unchecked(glm::convert_unchecked(*pos)));
+    let state = accessor.get_block(pos).unwrap();
     let block = registry.get_block(state.block_id()).unwrap();
 
-    let posf: Vec3 = glm::convert(*pos);
+    let posf: Vec3 = glm::convert(pos.0);
     let model = res_map.textured_model_for_block(state.block_id());
 
-    let intrinsic_idx = aligned_block_index(&glm::convert_unchecked(pos.add_scalar(1)));
-    let curr_cell = &cells[intrinsic_idx];
-
-    let contains_liquid = curr_cell.liquid_state.level() > 0;
+    let contains_liquid = state.liquid_state().level() > 0;
     let mut liquid_heights = [0_f32; 4];
 
     // Calculate liquid heights if it is present
     if contains_liquid {
         for x in 0..2 {
             for z in 0..2 {
-                let rel = pos + glm::vec3(x, 0, z);
-                let height = calc_liquid_height(registry, cells, liquid_cache, &rel);
+                let rel = pos.offset(&glm::vec3(x, 0, z));
+                let height = calc_liquid_height(accessor, liquid_cache, &rel);
                 liquid_heights[(x * 2 + z) as usize] = height;
             }
         }
@@ -474,8 +458,8 @@ fn gen_block_vertices(
             );
 
             calc_quad_lighting(
-                cells,
-                &pos,
+                accessor,
+                pos,
                 &mut quad_vertices,
                 Facing::from_normal_closest(&normal),
             );
@@ -498,52 +482,56 @@ fn gen_block_vertices(
     // Generate side faces
     for i in 0..6 {
         let facing = Facing::from_u8(i as u8);
-        let rel_padded = (pos + facing.direction()).add_scalar(1);
-        let rel_padded_index = aligned_block_index(&glm::convert_unchecked(rel_padded));
+        let rel_pos = pos.offset(facing.direction());
+        let rel_cell = accessor.get_block(&rel_pos);
 
-        let rel_cell = cells[rel_padded_index];
-        let rel_occludes = rel_cell.occluder.occludes_side(facing.mirror());
+        if let Some(rel_cell) = rel_cell {
+            let rel_block = registry.get_block(rel_cell.block_id()).unwrap();
 
-        // Render liquid quad if liquid is present
-        if contains_liquid
-            && (rel_cell.liquid_state.level() == 0
-                || (facing == Facing::NegativeY && !rel_cell.liquid_state.is_max())
-                || (facing == Facing::PositiveY && !curr_cell.liquid_state.is_max()))
-        {
-            // Add respective liquid quad
-            construct_liquid_quad(
-                &posf,
-                curr_cell.liquid_state.liquid_id(),
-                &liquid_heights,
-                facing,
-                curr_cell.light_level,
-                vertices_translucent,
-            );
-        }
+            let rel_occludes = rel_block.occluder().occludes_side(facing.mirror());
 
-        // Do not emit face if this side is fully occluded by neighbouring block
-        if rel_occludes {
-            continue;
-        }
+            // Render liquid quad if liquid is present
+            if contains_liquid
+                && (rel_cell.liquid_state().level() == 0
+                    || (facing == Facing::NegativeY && !rel_cell.liquid_state().is_max())
+                    || (facing == Facing::PositiveY && !state.liquid_state().is_max()))
+            {
+                // Add respective liquid quad
+                construct_liquid_quad(
+                    &posf,
+                    state.liquid_state().liquid_id(),
+                    &liquid_heights,
+                    facing,
+                    state.light_state(),
+                    vertices_translucent,
+                );
+            }
 
-        if block.is_model_invisible() {
-            // The model is invisible, skip further rendering
-            continue;
-        }
-
-        // Do not emit face if certain conditions are met
-        if model.merge_enabled() {
-            if curr_cell.block_id == rel_cell.block_id && model.side_shapes_equality()[facing.axis_idx()] {
-                // Side faces are of the same shape
+            // Do not emit face if this side is fully occluded by neighbouring block
+            if rel_occludes {
                 continue;
-            } else {
-                let rel_model = res_map.textured_model_for_block(rel_cell.block_id);
-                if model
-                    .first_side_quad_vsorted(facing)
-                    .cmp_ordered(rel_model.first_side_quad_vsorted(facing.mirror()))
+            }
+
+            if block.is_model_invisible() {
+                // The model is invisible, skip further rendering
+                continue;
+            }
+
+            // Do not emit face if certain conditions are met
+            if model.merge_enabled() {
+                if state.block_id() == rel_cell.block_id() && model.side_shapes_equality()[facing.axis_idx()]
                 {
-                    // `model` and `rel_model` have side quad of the same shape
+                    // Side faces are of the same shape
                     continue;
+                } else {
+                    let rel_model = res_map.textured_model_for_block(rel_cell.block_id());
+                    if model
+                        .first_side_quad_vsorted(facing)
+                        .cmp_ordered(rel_model.first_side_quad_vsorted(facing.mirror()))
+                    {
+                        // `model` and `rel_model` have side quad of the same shape
+                        continue;
+                    }
                 }
             }
         }
@@ -558,15 +546,13 @@ fn gen_block_vertices(
                 &quad_vertices[2].position,
             );
 
-            calc_quad_lighting(cells, pos, &mut quad_vertices, facing);
+            calc_quad_lighting(accessor, pos, &mut quad_vertices, facing);
 
             for v in &mut quad_vertices {
-                let neighbours = get_vertex_neighbours(cells, pos, &v.position, facing);
-
+                let ao = calculate_ao(accessor, pos, &v.position, facing);
                 v.position += posf;
                 v.normal = normal;
-                v.ao = neighbours.calculate_ao();
-                // v.lighting = neighbours.calculate_lighting(intrinsic);
+                v.ao = ao;
             }
 
             if quad_vertices[1].ao != quad_vertices[2].ao
@@ -590,20 +576,20 @@ fn gen_block_vertices(
     }
 }
 
-impl ClientRawCluster for RawCluster {
+impl ClusterMeshBuilder for ClusterNeighbourhoodAccessor {
     fn build_mesh(&self, device: &Arc<vkw::Device>, res_map: &ResourceMapping) -> ClusterMeshes {
-        let mut vertices = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
-        let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(Self::VOLUME * 8);
+        let mut vertices = Vec::<PackedVertex>::with_capacity(RawCluster::VOLUME * 8);
+        let mut vertices_translucent = Vec::<PackedVertex>::with_capacity(RawCluster::VOLUME * 8);
         let mut liquid_cache = LiquidHeightsCache::default();
 
-        for x in 0..Self::SIZE {
-            for y in 0..Self::SIZE {
-                for z in 0..Self::SIZE {
+        for x in 0..RawCluster::SIZE {
+            for y in 0..RawCluster::SIZE {
+                for z in 0..RawCluster::SIZE {
                     let pos = I32Vec3::new(x as i32, y as i32, z as i32);
                     gen_block_vertices(
                         self,
                         res_map,
-                        &pos,
+                        &RelativeBlockPos(pos),
                         &mut liquid_cache,
                         &mut vertices,
                         &mut vertices_translucent,

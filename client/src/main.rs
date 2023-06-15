@@ -72,7 +72,8 @@ fn main() {
 
     base::execution::spawn_coroutine(async {
         println!("coroutine test!");
-    });
+    })
+    .detach();
 
     engine.run();
 }

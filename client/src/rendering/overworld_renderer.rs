@@ -1,38 +1,80 @@
-use crate::client::overworld::raw_cluster_ext::{ClientRawCluster, ClusterMeshes};
-use crate::default_resources::DefaultResourceMapping;
-use crate::game::Game;
+use crate::client::overworld::raw_cluster_ext::{ClusterMeshBuilder, ClusterMeshes};
 use crate::resource_mapping::ResourceMapping;
+use base::execution;
+use base::execution::Task;
+use base::overworld::accessor::ClusterNeighbourhoodAccessor;
+use base::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
 use base::overworld::orchestrator::get_side_clusters;
 use base::overworld::orchestrator::OverworldUpdateResult;
 use base::overworld::position::ClusterPos;
-use base::overworld::LoadedClusters;
-use common::glm::{DVec3, I64Vec3, Vec3};
+use base::overworld::{ClusterState, LoadedClusters};
+use base::registry::Registry;
+use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::types::{HashMap, HashSet};
-use common::{glm, rayon};
-use engine::ecs::component;
+use common::{event_listener, glm, MO_SEQCST};
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
-use engine::module::main_renderer::{MainRenderer, VertexMeshObject};
+use engine::module::main_renderer::VertexMeshObject;
 use engine::module::scene::Scene;
 use engine::vkw;
 use entity_data::EntityId;
+use smallvec::SmallVec;
+use std::collections::hash_map;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 pub struct OverworldRenderer {
     device: Arc<vkw::Device>,
     cluster_mat_pipeline: u32,
+    registry: Arc<Registry>,
     resource_mapping: Arc<ResourceMapping>,
     loaded_clusters: LoadedClusters,
     root_entity: EntityId,
 
     to_add: HashSet<ClusterPos>,
     to_remove: HashSet<ClusterPos>,
-    to_build_mesh: Mutex<HashSet<ClusterPos>>,
-    to_update_mesh: Mutex<HashMap<ClusterPos, ClusterMeshes>>,
+    to_build_meshes: HashMap<ClusterPos, ClusterPartSet>,
+    to_update_meshes: Arc<Mutex<HashMap<ClusterPos, ClusterMeshes>>>,
 
     entities: HashMap<ClusterPos, ClusterEntities>,
+    r_clusters: HashMap<ClusterPos, RCluster>,
+}
+
+#[derive(Default)]
+struct BooleanFlag {
+    event: event_listener::Event,
+    value: AtomicBool,
+}
+
+impl BooleanFlag {
+    fn signal(&self) {
+        self.value.store(true, MO_SEQCST);
+        self.event.notify(usize::MAX);
+    }
+
+    async fn wait(&self) {
+        while !self.value.load(MO_SEQCST) {
+            self.event.listen().await;
+        }
+    }
+}
+
+struct PendingUpdate {
+    pos: ClusterPos,
+    dependencies: SmallVec<[Arc<BooleanFlag>; ClusterPartSet::NUM]>,
+    finish_event: Arc<BooleanFlag>,
+
+    to_update_meshes: Arc<Mutex<HashMap<ClusterPos, ClusterMeshes>>>,
+    registry: Arc<Registry>,
+    res_map: Arc<ResourceMapping>,
+    loaded_clusters: LoadedClusters,
+    device: Arc<vkw::Device>,
+}
+
+struct RCluster {
+    build_mesh_task: Option<Task<()>>,
+    finish_event: Arc<BooleanFlag>,
 }
 
 #[derive(Default)]
@@ -47,10 +89,36 @@ impl ClusterEntities {
     }
 }
 
+async fn build_cluster_mesh(update: PendingUpdate) {
+    // 1. Perform the update
+    let meshes = execution::spawn_blocking_task_fifo(move || {
+        let accessor =
+            ClusterNeighbourhoodAccessor::new(update.registry, &update.loaded_clusters, update.pos);
+        accessor
+            .is_center_available()
+            .then(|| accessor.build_mesh(&update.device, &update.res_map))
+    })
+    .await;
+
+    // 2. Notify others
+    update.finish_event.signal();
+
+    // 3. Wait for dependencies clusters to update
+    for dep in &update.dependencies {
+        dep.wait().await;
+    }
+
+    // 4. Commit the mesh
+    if let Some(meshes) = meshes {
+        update.to_update_meshes.lock().insert(update.pos, meshes);
+    };
+}
+
 impl OverworldRenderer {
     pub fn new(
         device: Arc<vkw::Device>,
         cluster_mat_pipeline: u32,
+        registry: Arc<Registry>,
         resource_mapping: Arc<ResourceMapping>,
         loaded_clusters: LoadedClusters,
         root_entity: EntityId,
@@ -58,90 +126,153 @@ impl OverworldRenderer {
         Self {
             device,
             cluster_mat_pipeline,
+            registry,
             resource_mapping,
             loaded_clusters,
             root_entity,
             to_add: HashSet::with_capacity(8192),
             to_remove: HashSet::with_capacity(8192),
-            to_build_mesh: Mutex::new(HashSet::with_capacity(8192)),
-            to_update_mesh: Mutex::new(HashMap::with_capacity(1024)),
+            to_build_meshes: HashMap::with_capacity(8192),
+            to_update_meshes: Arc::new(Mutex::new(HashMap::with_capacity(1024))),
             entities: HashMap::with_capacity(8192),
+            r_clusters: HashMap::with_capacity(8192),
         }
     }
 
     pub fn manage_changes(&mut self, overworld_update: &OverworldUpdateResult) {
-        let mut to_build_mesh = self.to_build_mesh.lock();
-
-        to_build_mesh.extend(overworld_update.processed_dirty_clusters.iter().map(|v| v.0));
-        to_build_mesh.extend(overworld_update.updated_auxiliary_parts.iter().map(|v| v.0));
-
         // Handle new clusters
         for pos in &overworld_update.new_clusters {
+            self.r_clusters.insert(
+                *pos,
+                RCluster {
+                    build_mesh_task: None,
+                    finish_event: Default::default(),
+                },
+            );
             self.to_add.insert(*pos);
             self.to_remove.remove(pos);
-            to_build_mesh.insert(*pos);
         }
 
+        let to_remove_iter = overworld_update.removed_clusters.iter();
+
         // Handle removed clusters
-        for pos in overworld_update
-            .removed_clusters
-            .iter()
-            .chain(&overworld_update.offloaded_clusters)
-        {
+        for pos in to_remove_iter.clone() {
+            let mut r_cl = self.r_clusters.remove(pos).unwrap();
+            if let Some(task) = r_cl.build_mesh_task.take() {
+                let _ = task.cancel();
+            }
+            r_cl.finish_event.signal();
+
             self.to_remove.insert(*pos);
             self.to_add.remove(pos);
-            to_build_mesh.remove(pos);
+            self.to_build_meshes.remove(pos);
+        }
+
+        // Nearby clusters must be updated if the central cluster is removed
+        for pos in to_remove_iter {
+            for rel_pos in get_side_clusters(pos) {
+                if !self.r_clusters.contains_key(&rel_pos) {
+                    continue;
+                }
+                if let hash_map::Entry::Vacant(e) = self.to_build_meshes.entry(rel_pos) {
+                    e.insert(ClusterPartSet::NONE);
+                }
+            }
         }
     }
 
-    pub fn update(
-        &mut self,
-        stream_pos: DVec3,
-        overworld_update: &OverworldUpdateResult,
-        max_execution_time: Duration,
-    ) {
-        let t_start = Instant::now();
-
+    pub fn update(&mut self, stream_pos: DVec3, overworld_update: &OverworldUpdateResult) {
         self.manage_changes(overworld_update);
 
         let stream_pos_i: I64Vec3 = glm::convert_unchecked(stream_pos);
         let o_clusters = self.loaded_clusters.read();
 
+        // 1. Accumulate updates
+        for (pos, parts) in &overworld_update.dirty_clusters_parts {
+            let curr_parts = self.to_build_meshes.entry(*pos).or_default();
+            *curr_parts |= *parts;
+        }
+
+        // 2. Collect dependent clusters, meshes of which may have been affected by changes of this cluster
+        for (pos, parts) in self.to_build_meshes.clone() {
+            for part_idx in parts.iter_ones() {
+                let dir = part_idx_to_dir(part_idx);
+                let rel_pos = pos.offset_i32(&dir);
+
+                if !o_clusters
+                    .get(&rel_pos)
+                    .is_some_and(|o_cluster| o_cluster.state() == ClusterState::Loaded)
+                {
+                    continue;
+                }
+
+                if let hash_map::Entry::Vacant(e) = self.to_build_meshes.entry(rel_pos) {
+                    e.insert(ClusterPartSet::NONE);
+                }
+            }
+        }
+
+        // 3. Collect cluster meshes to build
+        let to_build_meshes: HashSet<_> = self
+            .to_build_meshes
+            .keys()
+            .cloned()
+            .filter(|pos| {
+                let r_cl = self.r_clusters.get_mut(pos).unwrap();
+                let prev_task_finished = r_cl.build_mesh_task.as_ref().map_or(true, |v| v.is_finished());
+
+                if prev_task_finished {
+                    r_cl.build_mesh_task = None;
+                    r_cl.finish_event = Default::default();
+                }
+
+                prev_task_finished
+            })
+            .collect();
+
         // Sort dirty clusters by distance from observer
-        let mut to_build_sorted: Vec<_> = self.to_build_mesh.lock().iter().cloned().collect();
-        to_build_sorted.par_sort_by_cached_key(|pos| {
+        let mut sorted_build_positions: Vec<_> = to_build_meshes.iter().cloned().collect();
+        sorted_build_positions.par_sort_by_cached_key(|pos| {
             let diff = pos.get() - stream_pos_i;
             diff.dot(&diff)
         });
 
-        // Build new meshes for dirty clusters
-        for chunk in to_build_sorted.chunks(rayon::current_num_threads()) {
-            chunk.par_iter().for_each(|pos| {
-                let o_cluster = o_clusters.get(pos).unwrap();
-                if !o_cluster.state().is_loaded() {
-                    return;
-                }
-                let t_cluster_guard = o_cluster.cluster.read();
-                let Some(t_cluster) = t_cluster_guard.as_ref() else {
-                    // Cluster is not accessible because it must be offloaded
-                    assert!(o_cluster.state().is_offloaded());
-                    return;
-                };
+        // 4. Schedule new updates
+        for pos in &sorted_build_positions {
+            let r_cl = self.r_clusters.get(pos).unwrap();
 
-                let meshes = t_cluster.raw().build_mesh(&self.device, &self.resource_mapping);
-                self.to_update_mesh.lock().insert(*pos, meshes);
-                self.to_build_mesh.lock().remove(pos);
-            });
+            let deps: SmallVec<[ClusterPos; ClusterPartSet::NUM]> = get_side_clusters(pos)
+                .into_iter()
+                .filter(|v| to_build_meshes.contains(v))
+                .collect();
 
-            let t1 = Instant::now();
-            if t1.duration_since(t_start) >= max_execution_time {
-                break;
-            }
+            let update_info = PendingUpdate {
+                pos: *pos,
+                dependencies: deps
+                    .iter()
+                    .map(|v| Arc::clone(&self.r_clusters[v].finish_event))
+                    .collect(),
+                finish_event: Arc::clone(&r_cl.finish_event),
+                to_update_meshes: Arc::clone(&self.to_update_meshes),
+                registry: Arc::clone(&self.registry),
+                res_map: Arc::clone(&self.resource_mapping),
+                loaded_clusters: Arc::clone(&self.loaded_clusters),
+                device: Arc::clone(&self.device),
+            };
+
+            let build_mesh_task = execution::spawn_coroutine(build_cluster_mesh(update_info));
+
+            let r_cl = self.r_clusters.get_mut(pos).unwrap();
+            r_cl.build_mesh_task = Some(build_mesh_task);
         }
+
+        // Remove schedules clusters
+        self.to_build_meshes
+            .retain(|pos, _| !to_build_meshes.contains(pos));
     }
 
     pub fn update_scene(&mut self, scene: &mut Scene) {
-        let mut to_update_mesh = self.to_update_mesh.lock();
+        let mut to_update_mesh = self.to_update_meshes.lock();
 
         // Remove objects
         for pos in self.to_remove.drain() {
@@ -152,19 +283,10 @@ impl OverworldRenderer {
             to_update_mesh.remove(&pos);
         }
 
-        let to_build = self.to_build_mesh.lock();
-
         // Update meshes for scene objects
-        to_update_mesh.retain(|pos, meshes| {
-            for neighbour in get_side_clusters(&pos) {
-                if to_build.contains(&neighbour) {
-                    // Retain, do mesh update later when neighbours are ready
-                    return true;
-                }
-            }
-
-            let entities = self.entities.entry(*pos).or_insert_with(|| {
-                assert_eq!(self.to_add.remove(pos), true);
+        for (pos, meshes) in to_update_mesh.drain() {
+            let entities = self.entities.entry(pos).or_insert_with(|| {
+                assert_eq!(self.to_add.remove(&pos), true);
 
                 let transform_comp = TransformC::new().with_position(glm::convert(*pos.get()));
                 let render_config_solid = MeshRenderConfigC::new(self.cluster_mat_pipeline, false);
@@ -194,8 +316,6 @@ impl OverworldRenderer {
                 *entry.get_mut_checked::<VertexMeshC>().unwrap() =
                     VertexMeshC::new(&meshes.transparent.raw());
             }
-
-            false
-        });
+        }
     }
 }

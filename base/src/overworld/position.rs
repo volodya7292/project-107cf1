@@ -1,10 +1,9 @@
+use crate::overworld::raw_cluster::RawCluster;
 use common::glm;
 use glm::{DVec3, I32Vec3, I64Vec3, TVec3};
 
-use crate::overworld::raw_cluster::RawCluster;
-
 /// Block position relative to cluster
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Default, Debug)]
 pub struct ClusterBlockPos(TVec3<usize>);
 
 impl ClusterBlockPos {
@@ -28,7 +27,7 @@ impl ClusterBlockPos {
 
     #[inline]
     pub fn offset(&self, offset: &TVec3<usize>) -> Self {
-        ClusterBlockPos(self.0 + offset)
+        Self(self.0 + offset)
     }
 
     #[inline]
@@ -65,12 +64,12 @@ impl BlockPos {
 
     #[inline]
     pub fn offset(&self, offset: &I64Vec3) -> Self {
-        BlockPos(self.0 + offset)
+        Self(self.0 + offset)
     }
 
     #[inline]
     pub fn offset_i32(&self, offset: &I32Vec3) -> Self {
-        BlockPos(self.0 + glm::convert::<_, I64Vec3>(*offset))
+        Self(self.0 + glm::convert::<_, I64Vec3>(*offset))
     }
 
     #[inline]
@@ -113,13 +112,13 @@ impl ClusterPos {
     }
 
     #[inline]
-    pub fn offset(&self, offset: &I64Vec3) -> ClusterPos {
-        ClusterPos(self.0 + offset * RawCluster::SIZE as i64)
+    pub fn offset(&self, offset: &I64Vec3) -> Self {
+        Self(self.0 + offset * RawCluster::SIZE as i64)
     }
 
     #[inline]
-    pub fn offset_i32(&self, offset: &I32Vec3) -> ClusterPos {
-        ClusterPos(self.0 + glm::convert::<_, I64Vec3>(*offset) * RawCluster::SIZE as i64)
+    pub fn offset_i32(&self, offset: &I32Vec3) -> Self {
+        Self(self.0 + glm::convert::<_, I64Vec3>(*offset) * RawCluster::SIZE as i64)
     }
 }
 
@@ -127,4 +126,38 @@ impl From<ClusterPos> for I64Vec3 {
     fn from(pos: ClusterPos) -> Self {
         *pos.get()
     }
+}
+
+/// Relative block position in 3x3x3 cluster vicinity.
+#[derive(Copy, Clone, Debug)]
+pub struct RelativeBlockPos(pub I32Vec3);
+
+impl RelativeBlockPos {
+    #[inline]
+    pub fn offset(&self, offset: &I32Vec3) -> Self {
+        Self(self.0 + offset)
+    }
+
+    pub fn neighbour_pos(&self) -> TVec3<usize> {
+        self.0
+            .map(|v| (v >= 0) as usize + (v >= RawCluster::SIZE as i32) as usize)
+    }
+
+    pub fn cluster_idx(&self) -> usize {
+        let p = self.neighbour_pos();
+        p[0] * 9 + p[1] * 3 + p[2]
+    }
+
+    pub fn cluster_block_pos(&self) -> ClusterBlockPos {
+        ClusterBlockPos(glm::convert_unchecked(
+            self.0.map(|v| v.rem_euclid(RawCluster::SIZE as i32)),
+        ))
+    }
+}
+
+#[test]
+fn relative_block_pos_works() {
+    let pos = RelativeBlockPos(glm::vec3(-1, 0, 24));
+    assert_eq!(pos.cluster_idx(), 5);
+    assert_eq!(pos.cluster_block_pos(), ClusterBlockPos(glm::vec3(23, 0, 0)));
 }

@@ -48,8 +48,11 @@ impl MainRegistry {
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let id =
-                reg.register_block(BlockBuilder::new(Registry::MODEL_ID_NULL).with_can_pass_liquid(true));
+            let id = reg.register_block(
+                BlockBuilder::new(Registry::MODEL_ID_NULL)
+                    .with_can_pass_liquid(true)
+                    .with_can_pass_light(true),
+            );
             BlockState::new(id, StatelessBlock)
         };
         let block_default = {
@@ -62,8 +65,8 @@ impl MainRegistry {
                     .with_active_by_default(true)
                     .with_event_handlers(block::EventHandlers::new().with_on_tick(
                         |_, pos, _, _, _, mut after_actions| {
-                            after_actions.set_activity(*pos, false);
                             println!("ON TICK!");
+                            false
                         },
                     )),
             );

@@ -3,7 +3,7 @@ use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
-use crate::rendering::ui::text::{TextImpl, UIText};
+use crate::rendering::ui::text::{new, TextImpl, UIText};
 use crate::rendering::ui::{fancy_button, text};
 use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
@@ -17,14 +17,13 @@ use base::overworld::actions_storage::OverworldActionsStorage;
 use base::overworld::actions_storage::StateChangeInfo;
 use base::overworld::block::{AnyBlockState, Block, BlockState};
 use base::overworld::facing::Facing;
-use base::overworld::light_state::LightState;
+use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
-use base::overworld::orchestrator::OverworldOrchestrator;
 use base::overworld::position::{BlockPos, ClusterPos};
 use base::overworld::raw_cluster::{BlockDataImpl, RawCluster};
-use base::overworld::Overworld;
 use base::overworld::ReadOnlyOverworld;
 use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
+use base::overworld::{Overworld, OverworldOrchestrator};
 use base::physics::aabb::{AABBRayIntersection, AABB};
 use base::physics::MOTION_EPSILON;
 use base::registry::Registry;
@@ -247,6 +246,7 @@ impl Application for Game {
         let overworld_renderer = OverworldRenderer::new(
             Arc::clone(renderer.device()),
             mat_pipelines.cluster,
+            Arc::clone(self.registry.registry()),
             Arc::clone(self.res_map.storage()),
             Arc::clone(state.overworld_orchestrator.lock().loaded_clusters()),
             self.root_entity,
@@ -616,11 +616,10 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
         &curr_state.overworld.main_registry().registry(),
         &mut curr_state.overworld_orchestrator.lock(),
         &new_actions,
-        Duration::from_millis(10),
     );
 
     let mut overworld_renderer = overworld_renderer.lock();
-    overworld_renderer.update(curr_state.player_pos, &update_res, Duration::from_millis(5));
+    overworld_renderer.update(curr_state.player_pos, &update_res);
 
     main_state.lock().tick_count += 1;
 }
@@ -647,7 +646,7 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
                     new_actions.set_block(set_pos, curr_state.curr_block.clone());
 
                     if curr_state.curr_block.block_id == registry.block_glow.block_id {
-                        new_actions.set_light(set_pos, LightState::from_intensity(10));
+                        new_actions.set_light_source(set_pos, LightLevel::from_intensity(10));
                     } else {
                     }
                 }
@@ -657,6 +656,7 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
         } else if curr_state.do_remove_block {
             if let Some(inter) = curr_state.look_at_block {
                 new_actions.set_block(inter.0, registry.block_empty);
+                new_actions.set_light_source(inter.0, LightLevel::ZERO);
 
                 new_block_set_cooldown = 0.15;
             }

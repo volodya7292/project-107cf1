@@ -51,40 +51,16 @@ pub enum ClusterState {
     Initial,
     /// The cluster is available in read/write mode
     Loaded,
-    /// The cluster is invisible because it is empty and is offloaded to reduce memory usage
-    OffloadedEmpty,
-    /// The cluster is invisible relative to camera and is offloaded to reduce memory usage
-    OffloadedOccluded,
 }
 
 impl ClusterState {
     /// Whether cluster is loaded
     pub fn is_loaded(&self) -> bool {
-        (*self == Self::Loaded) || self.is_offloaded()
-    }
-
-    /// Whether cluster is loaded
-    pub fn is_writable(&self) -> bool {
         *self == Self::Loaded
     }
 
-    /// Whether cluster can be accessed in read-only mode
-    pub fn is_readable(&self) -> bool {
-        matches!(*self, Self::Loaded | Self::OffloadedEmpty)
-    }
-
-    /// Whether cluster is empty or occluded by its neighbours
-    pub fn is_empty_or_occluded(&self) -> bool {
-        matches!(*self, Self::OffloadedEmpty | Self::OffloadedOccluded)
-    }
-
-    /// Whether cluster is offloaded due to emptiness or full occlusion by neighbours
-    pub fn is_offloaded(&self) -> bool {
-        matches!(*self, Self::OffloadedEmpty | Self::OffloadedOccluded)
-    }
-
     pub fn from_u32(v: u32) -> Self {
-        assert!(v <= Self::OffloadedOccluded as u32);
+        assert!(v <= Self::Loaded as u32);
         unsafe { std::mem::transmute(v) }
     }
 }
@@ -106,10 +82,10 @@ pub fn is_cell_empty(registry: &Registry, data: impl BlockDataImpl) -> bool {
 // LOADED  -> DISCARDED
 
 pub struct TrackingCluster {
-    pub(crate) raw: RawCluster,
-    pub(crate) dirty_parts: ClusterPartSet,
-    pub(crate) active_cells: FixedBitSet,
-    pub(crate) empty_cells: FixedBitSet,
+    pub raw: RawCluster,
+    pub dirty_parts: ClusterPartSet,
+    pub active_cells: FixedBitSet,
+    pub empty_cells: FixedBitSet,
 }
 
 impl TrackingCluster {
@@ -153,11 +129,6 @@ impl TrackingCluster {
     /// Complexity: O(N), where N is RawCluster::VOLUME.
     pub fn has_active_blocks(&self) -> bool {
         self.active_cells.as_slice().iter().any(|v| *v != 0)
-    }
-
-    pub(crate) fn propagate_lighting(&mut self, pos: &ClusterBlockPos) {
-        let dirty_parts = self.raw.propagate_lighting(pos);
-        self.dirty_parts |= dirty_parts;
     }
 
     pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {

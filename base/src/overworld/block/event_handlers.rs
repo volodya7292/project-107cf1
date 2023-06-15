@@ -8,6 +8,7 @@ use crate::overworld::Overworld;
 use crate::registry::Registry;
 
 /// Collects actions to perform after the tick.
+/// Returns whether to keep the block at `pos` active.
 pub type OnTickFn = fn(
     tick: u64,
     pos: &BlockPos,
@@ -15,7 +16,7 @@ pub type OnTickFn = fn(
     registry: &Arc<Registry>,
     accessor: &mut ReadOnlyOverworldAccessor,
     result: OverworldActionsBuilder,
-);
+) -> bool;
 
 /// Gets called when nearby block is set.
 pub type OnNearbyBlockSet = fn(

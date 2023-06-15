@@ -1,10 +1,12 @@
 use crate::overworld::facing::Facing;
-use crate::overworld::light_state::LightState;
+use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
-use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::position::{BlockPos, ClusterPos, RelativeBlockPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
 use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
 use crate::registry::Registry;
+use common::glm::TVec3;
+use common::nd_range::NDRange;
 use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
 use common::parking_lot::RawRwLock;
 use common::types::Bool;
@@ -13,7 +15,7 @@ use common::{glm, MO_RELAXED};
 use entity_data::EntityStorage;
 use glm::{DVec3, I64Vec3};
 use lazy_static::lazy_static;
-use std::collections::{hash_map, VecDeque};
+use std::collections::hash_map;
 use std::sync::Arc;
 
 lazy_static! {
@@ -74,7 +76,7 @@ impl ClustersAccessorCache {
                 let o_cluster = clusters.get(cluster_pos)?;
                 let state = o_cluster.state();
 
-                if !state.is_readable() {
+                if !state.is_loaded() {
                     return None;
                 }
 
@@ -162,10 +164,6 @@ impl ReadOnlyOverworldAccessorImpl for OverworldAccessor {
             .access_cluster(&pos.cluster_pos())
             .map(|access| match access.cluster() {
                 Some(cluster) => Some(cluster.raw.get(&pos.cluster_block_pos())),
-                None if access.locked_state == ClusterState::OffloadedEmpty => Some(BlockData {
-                    block_storage: &EMPTY_BLOCK_STORAGE,
-                    info: self.registry.inner_block_state_empty(),
-                }),
                 _ => None,
             })
             .flatten()
@@ -309,7 +307,28 @@ impl OverworldAccessor {
     }
 
     /// Sets light level if the respective cluster is loaded
-    fn set_light_level(&mut self, pos: &BlockPos, light_level: LightState) {
+    pub fn set_light_source(&mut self, pos: &BlockPos, light_level: LightLevel) {
+        if let Some(cluster) = self
+            .cache
+            .access_cluster_mut(&pos.cluster_pos())
+            .map(|access| access.cluster_mut())
+            .flatten()
+        {
+            let cluster_block_pos = pos.cluster_block_pos();
+            let mut data = cluster.raw.get_mut(&cluster_block_pos);
+
+            *data.light_source_mut() = light_level;
+
+            // The light must spread or vanish
+            *data.active_mut() = true;
+            cluster.active_cells.set(cluster_block_pos.index(), data.active());
+
+            cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
+        }
+    }
+
+    /// Sets light level if the respective cluster is loaded
+    pub fn set_light_state(&mut self, pos: &BlockPos, light_level: LightLevel) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -322,89 +341,6 @@ impl OverworldAccessor {
             *data.light_state_mut() = light_level;
 
             cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
-        }
-    }
-
-    fn propagate_light_addition(&mut self, queue: &mut VecDeque<BlockPos>) {
-        while let Some(curr_pos) = queue.pop_front() {
-            let block = self.get_block(&curr_pos).unwrap();
-            let curr_level = block.light_state();
-            let curr_color = curr_level.components();
-
-            for i in 0..6 {
-                let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
-                let rel_pos = curr_pos.offset(&dir);
-
-                let block_id = self.get_block(&rel_pos).unwrap().block_id();
-                let block = *self.registry.get_block(block_id).unwrap();
-                let data = self.get_block(&rel_pos).unwrap();
-                let level = data.light_state();
-                let color = level.components();
-
-                if !block.is_opaque() && glm::any(&color.add_scalar(2).zip_map(&curr_color, |a, b| a <= b)) {
-                    let new_color = curr_color.map(|v| v.saturating_sub(1));
-                    self.set_light_level(&rel_pos, LightState::from_vec(new_color));
-
-                    queue.push_back(rel_pos);
-                }
-            }
-        }
-    }
-
-    /// Use breadth-first search to set lighting across all lit area
-    pub fn set_light(&mut self, pos: &BlockPos, light_level: LightState) {
-        if let Some(cluster) = self
-            .cache
-            .access_cluster_mut(&pos.cluster_pos())
-            .map(|accesss| accesss.cluster_mut())
-            .flatten()
-        {
-            let cluster_block_pos = pos.cluster_block_pos();
-            let mut data = cluster.raw.get_mut(&cluster_block_pos);
-            *data.light_state_mut() = light_level;
-            cluster.propagate_lighting(&cluster_block_pos);
-        }
-    }
-
-    pub fn remove_light(&mut self, global_pos: &BlockPos) {
-        let curr_data = self.get_block(&global_pos).unwrap();
-        let curr_level = curr_data.light_state();
-        self.set_light_level(global_pos, LightState::ZERO);
-
-        let mut removal_queue = VecDeque::with_capacity((curr_level.components().max() as usize * 2).pow(3));
-        let mut addition_queue = VecDeque::with_capacity(removal_queue.capacity());
-
-        removal_queue.push_back((*global_pos, curr_level));
-
-        while let Some((curr_pos, curr_level)) = removal_queue.pop_front() {
-            let curr_color = curr_level.components();
-
-            for i in 0..6 {
-                let dir: I64Vec3 = glm::convert(Facing::DIRECTIONS[i]);
-                let rel_pos = curr_pos.offset(&dir);
-
-                let level = self.get_block(&rel_pos).unwrap().light_state();
-                let color = level.components();
-
-                if glm::any(&color.zip_map(&curr_color, |a, b| a < b)) {
-                    if !level.is_zero() {
-                        self.set_light_level(&rel_pos, LightState::ZERO);
-                        removal_queue.push_back((rel_pos, level));
-                    }
-                }
-
-                if glm::any(&color.zip_map(&curr_color, |a, b| a >= b)) {
-                    addition_queue.push_back(rel_pos);
-                }
-            }
-        }
-
-        for pos in addition_queue {
-            let cluster = self.cache.access_cluster_mut(&pos.cluster_pos()).unwrap();
-            let cluster_block_pos = pos.cluster_block_pos();
-            if let Some(cluster) = cluster.cluster_mut() {
-                cluster.propagate_lighting(&cluster_block_pos);
-            }
         }
     }
 }
@@ -425,5 +361,65 @@ impl ReadOnlyOverworldAccessorImpl for ReadOnlyOverworldAccessor {
         max_ray_length: f64,
     ) -> Option<(BlockPos, Facing)> {
         self.inner.get_block_at_ray(ray_origin, ray_dir, max_ray_length)
+    }
+}
+
+pub struct ClusterNeighbourhoodAccessor {
+    registry: Arc<Registry>,
+    neighbours: [Option<AccessGuard>; 3 * 3 * 3],
+}
+
+impl ClusterNeighbourhoodAccessor {
+    pub fn new(registry: Arc<Registry>, loaded_clusters: &LoadedClusters, pos: ClusterPos) -> Self {
+        let o_clusters = loaded_clusters.read();
+
+        let neighbours: Vec<_> = NDRange::of_size(TVec3::from_element(3))
+            .into_iter()
+            .map(|offset| {
+                let offset: I64Vec3 = glm::convert(offset);
+                let rel_pos = pos.offset(&offset).offset(&I64Vec3::from_element(-1));
+                let o_cluster = o_clusters.get(&rel_pos)?;
+                let state = o_cluster.state();
+
+                if !state.is_loaded() {
+                    return None;
+                }
+
+                let t_cluster = o_cluster.cluster.read_arc();
+
+                if t_cluster.is_none() {
+                    return None;
+                }
+
+                Some(AccessGuard {
+                    locked_state: state,
+                    lock: AccessGuardLock::Read(t_cluster),
+                })
+            })
+            .collect();
+
+        Self {
+            registry,
+            neighbours: neighbours.try_into().ok().unwrap(),
+        }
+    }
+
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.registry
+    }
+
+    pub fn is_center_available(&self) -> bool {
+        let center = self.neighbours[1 * 9 + 1 * 3 + 1].as_ref();
+        center.is_some_and(|v| v.cluster().is_some())
+    }
+
+    pub fn get_block(&self, pos: &RelativeBlockPos) -> Option<BlockData> {
+        let neighbour_pos = pos.cluster_idx();
+
+        let access = self.neighbours[neighbour_pos].as_ref()?;
+        let t_cluster = access.cluster().unwrap();
+
+        let cluster_block_pos = pos.cluster_block_pos();
+        Some(t_cluster.raw.get(&cluster_block_pos))
     }
 }

@@ -50,7 +50,8 @@ impl Registry {
             entity_id: Default::default(),
             block_id: block_empty,
             occluder: Default::default(),
-            light_level: Default::default(),
+            light_source: Default::default(),
+            light_state: Default::default(),
             liquid_state: Default::default(),
             active: false,
         });

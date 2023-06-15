@@ -2,9 +2,9 @@ use common::glm;
 use glm::{U8Vec3, Vec3};
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
-pub struct LightState(u16);
+pub struct LightLevel(u16);
 
-impl LightState {
+impl LightLevel {
     pub const MAX_COMPONENT_VALUE: u8 = 31;
     pub const ZERO: Self = Self(0);
     pub const MAX: Self = Self::from_intensity(Self::MAX_COMPONENT_VALUE);
@@ -31,7 +31,7 @@ impl LightState {
         Self(((c.x as u16) << 10) | ((c.y as u16) << 5) | (c.z as u16))
     }
 
-    pub fn bits(&self) -> u16 {
+    pub fn raw(&self) -> u16 {
         self.0
     }
 
@@ -44,10 +44,7 @@ impl LightState {
     }
 
     pub fn color(&self) -> Vec3 {
-        Vec3::new(
-            ((self.0 >> 10) & 0x1f) as f32,
-            ((self.0 >> 5) & 0x1f) as f32,
-            (self.0 & 0x1f) as f32,
-        ) / (Self::MAX_COMPONENT_VALUE as f32)
+        let f_vec: Vec3 = glm::convert(self.components());
+        f_vec / (Self::MAX_COMPONENT_VALUE as f32)
     }
 }
