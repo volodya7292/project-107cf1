@@ -12,19 +12,20 @@ layout(binding = 2) uniform sampler2D gSpecular;
 layout(binding = 3) uniform sampler2D gEmissive;
 layout(binding = 4) uniform sampler2D gNormal;
 layout(binding = 5) uniform sampler2D gDepth;
+layout(binding = 6) uniform sampler2D gOverlayDepth;
 
-layout(binding = 6, scalar) uniform FrameInfoBlock {
+layout(binding = 7, scalar) uniform FrameInfoBlock {
     FrameInfo info;
 };
 
-layout(binding = 7, std430) readonly buffer TranslucentDepthsArray {
+layout(binding = 8, std430) readonly buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
-layout(binding = 8, rgba8) uniform image2DArray translucencyColorsArray;
+layout(binding = 9, rgba8) uniform image2DArray translucencyColorsArray;
 
-layout(binding = 9) uniform sampler2D mainShadowMap;
+layout(binding = 10) uniform sampler2D mainShadowMap;
 
-layout(binding = 10, scalar) uniform MainShadowInfoBlock {
+layout(binding = 11, scalar) uniform MainShadowInfoBlock {
     mat4 lightView;
     mat4 lightProjView;
     vec4 lightDir;
@@ -93,6 +94,7 @@ void main() {
 
     vec3 worldPos = texture(gPosition, inUV).rgb;
     float depth = texture(gDepth, inUV).r;
+//    float overlayDepth = texture(gOverlayDepth, inUV).r;
 
     vec4 solidColor = texture(gAlbedo, inUV);
     vec4 emission = texture(gEmissive, inUV);
@@ -101,21 +103,24 @@ void main() {
 //    float shadow = calc_shadow(worldPos, normal);
 //    shadow = 1.0 - (1 - shadow) * 0.5;
 
-    vec3 sun_dir = info.main_light_dir.xyz;
-    vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
 
 //    float areaLightCosImportance = 0.1;
 //    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * areaLightCosImportance;
 
-    // Blend transparent with solid colors
-    vec3 currColor = mix(solidColor.rgb, transpColor.rgb, transpColor.a);
-    // Apply additional emission
-//    currColor.rgb += emission.rgb;
-
+    vec3 currColor = vec3(0);
     if (depth < 0.0001) {
+        vec3 sun_dir = info.main_light_dir.xyz;
+        vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
         skyCol = 1.0 - exp(-2.0 * skyCol);
-        outColor = vec4(skyCol, 1);
-    } else {
-        outColor = vec4(currColor, 1);
+        currColor = skyCol;
     }
+
+    // Blend in solid color into sky color
+    currColor = mix(currColor, solidColor.rgb, solidColor.a);
+    // Blend transparent with solid colors
+    currColor = mix(currColor.rgb, transpColor.rgb, transpColor.a);
+    // Apply additional emission
+    currColor.rgb += emission.rgb;
+
+    outColor = vec4(currColor, 1);
 }

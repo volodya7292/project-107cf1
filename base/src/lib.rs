@@ -334,7 +334,7 @@ fn apply_overworld_actions(
         }
     }
 
-    // Merge light changes
+    // Merge light source changes
     for info in actions.iter().flat_map(|v| &v.light_source_infos) {
         let changes = after_actions_by_cluster
             .entry(info.pos.cluster_pos())
@@ -342,14 +342,10 @@ fn apply_overworld_actions(
 
         if let hash_map::Entry::Vacant(e) = changes.lights_sources.entry(info.pos) {
             e.insert(info.light);
-            // hash_map::Entry::Occupied(mut e) => {
-            //     let max_components = info.light.components().sup(&e.get().components());
-            //     e.insert(LightLevel::from_vec(max_components));
-            // }
         }
     }
 
-    // Merge light changes
+    // Merge light state changes
     for info in actions.iter().flat_map(|v| &v.light_state_infos) {
         let changes = after_actions_by_cluster
             .entry(info.pos.cluster_pos())
@@ -357,10 +353,6 @@ fn apply_overworld_actions(
 
         if let hash_map::Entry::Vacant(e) = changes.lights_states.entry(info.pos) {
             e.insert(info.light);
-            // hash_map::Entry::Occupied(mut e) => {
-            //     let max_components = info.light.components().sup(&e.get().components());
-            //     e.insert(LightLevel::from_vec(max_components));
-            // }
         }
     }
 

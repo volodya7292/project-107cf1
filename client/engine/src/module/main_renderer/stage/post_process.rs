@@ -325,6 +325,9 @@ impl PostProcessStage {
         let g_depth = g_framebuffer
             .get_image(GBufferStage::DEPTH_ATTACHMENT_ID)
             .unwrap();
+        let g_overlay_depth = g_framebuffer
+            .get_image(GBufferStage::OVERLAY_DEPTH_ATTACHMENT_ID)
+            .unwrap();
 
         let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
         let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
@@ -373,19 +376,24 @@ impl PostProcessStage {
                         0,
                         BindingRes::Image(Arc::clone(g_depth), None, ImageLayout::DEPTH_STENCIL_READ),
                     ),
-                    merge_descriptor.create_binding(6, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
                     merge_descriptor.create_binding(
-                        7,
+                        6,
+                        0,
+                        BindingRes::Image(Arc::clone(g_overlay_depth), None, ImageLayout::DEPTH_STENCIL_READ),
+                    ),
+                    merge_descriptor.create_binding(7, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    merge_descriptor.create_binding(
+                        8,
                         0,
                         BindingRes::Buffer(translucency_depths_image.handle()),
                     ),
                     merge_descriptor.create_binding(
-                        8,
+                        9,
                         0,
                         BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
                     ),
                     merge_descriptor.create_binding(
-                        9,
+                        10,
                         0,
                         BindingRes::Image(
                             Arc::clone(&main_shadow_map),
@@ -393,7 +401,7 @@ impl PostProcessStage {
                             ImageLayout::SHADER_READ,
                         ),
                     ),
-                    merge_descriptor.create_binding(10, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
+                    merge_descriptor.create_binding(11, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
                 ],
             )
         }

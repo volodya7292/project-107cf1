@@ -39,8 +39,10 @@ impl GBufferStage {
     pub const EMISSIVE_ATTACHMENT_ID: u32 = 3;
     pub const NORMAL_ATTACHMENT_ID: u32 = 4;
     pub const DEPTH_ATTACHMENT_ID: u32 = 5;
+    pub const OVERLAY_DEPTH_ATTACHMENT_ID: u32 = 6;
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
     pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
+    pub const RES_OVERLAY_DEPTH_IMAGE: &'static str = "g-overlay-depth";
 
     pub fn new(device: &Arc<Device>) -> Self {
         // Create G-Buffer pass resources
@@ -94,8 +96,8 @@ impl GBufferStage {
                     Attachment {
                         format: Format::D32_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        load_store: LoadStore::InitClear,
+                        final_layout: ImageLayout::DEPTH_STENCIL_READ,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                 ],
                 &[
@@ -454,6 +456,16 @@ impl RenderStage for GBufferStage {
         );
 
         let depth_image = resources.get_image(DepthStage::RES_DEPTH_IMAGE);
+        let overlay_depth_image = resources.request_image(
+            Self::RES_OVERLAY_DEPTH_IMAGE,
+            ImageParams::d2(
+                Format::D32_FLOAT,
+                ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                    | ImageUsageFlags::INPUT_ATTACHMENT
+                    | ImageUsageFlags::SAMPLED,
+                ctx.render_size,
+            ),
+        );
 
         let framebuffer = resources.request(
             Self::RES_FRAMEBUFFER,
@@ -461,8 +473,9 @@ impl RenderStage for GBufferStage {
                 ctx.render_size,
                 Arc::clone(&self.render_pass),
                 Arc::clone(&depth_image),
+                Arc::clone(&overlay_depth_image),
             ),
-            |(render_size, render_pass, depth_image), _| {
+            |(render_size, render_pass, depth_image, overlay_depth_image), _| {
                 render_pass
                     .create_framebuffer(
                         *render_size,
@@ -498,6 +511,7 @@ impl RenderStage for GBufferStage {
                                 ),
                             ),
                             (5, ImageMod::OverrideImage(Arc::clone(&depth_image))),
+                            (6, ImageMod::OverrideImage(Arc::clone(&overlay_depth_image))),
                         ],
                     )
                     .unwrap()
