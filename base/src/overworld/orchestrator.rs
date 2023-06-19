@@ -272,7 +272,10 @@ impl OverworldOrchestrator {
             let load_task = spawn_blocking_task_fifo(move || {
                 let mut cluster = generator.create_cluster();
                 generator.generate_cluster(&mut cluster, pos);
-                *t_cluster.write() = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));
+                let mut t_cluster = t_cluster.write();
+                *t_cluster = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));
+                // Compress immediately to prevent memory flooding
+                t_cluster.compress();
             });
             r_cluster.load_task = Some(load_task);
         }
@@ -312,15 +315,16 @@ impl OverworldOrchestrator {
         }
 
         // 5. Check dirty clusters for active blocks
-        dirty_clusters.par_iter().for_each(|(pos, _)| {
+        // ------------------------------------------------------------------------------------------------------
+        for (pos, _) in &dirty_clusters {
             let o_cluster = o_clusters.get(pos).unwrap();
-            let t_cluster_guard = o_cluster.ready().unwrap();
-            let t_cluster = t_cluster_guard.unwrap();
+            let t_cluster = o_cluster.cluster.read();
             let has_active_blocks = t_cluster.has_active_blocks();
             o_cluster.has_active_blocks.store(has_active_blocks, MO_RELAXED);
-        });
+        }
 
         // 6. Compress redundant clusters
+        // ------------------------------------------------------------------------------------------------------
         // let n_max_uncompressed_clusters = (self.xz_render_distance.pow(2) as f64 * 3.14) as usize;
         // let uncompressed_count = 0;
 

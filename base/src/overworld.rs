@@ -130,6 +130,7 @@ impl TrackingCluster {
 pub struct CompressedTrackingCluster {
     pub raw: CompressedCluster,
     pub dirty_parts: ClusterPartSet,
+    pub has_active_blocks: bool,
 }
 
 pub enum ClusterState {
@@ -178,17 +179,29 @@ impl ClusterState {
         mem::replace(dirty_parts, ClusterPartSet::NONE)
     }
 
+    pub fn has_active_blocks(&self) -> bool {
+        match self {
+            ClusterState::Ready(cluster) => cluster.has_active_blocks(),
+            ClusterState::Compressed(cluster) => cluster.has_active_blocks,
+            ClusterState::Initial => {
+                panic!("Invalid state!")
+            }
+        }
+    }
+
     pub fn compress(&mut self) {
         replace_with::replace_with_or_abort(self, |curr| {
             let Self::Ready(cluster) = curr else {
                 panic!("Invalid state");
             };
 
+            let has_active_blocks = cluster.has_active_blocks();
             let raw_compressed = cluster.raw.compress();
 
             Self::Compressed(CompressedTrackingCluster {
                 raw: raw_compressed,
                 dirty_parts: cluster.dirty_parts,
+                has_active_blocks,
             })
         })
     }
