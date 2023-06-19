@@ -28,16 +28,19 @@ use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
 pub use crate::overworld::orchestrator::OverworldOrchestrator;
 use crate::overworld::position::{ClusterBlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, RawCluster};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, CompressedCluster, RawCluster};
 use crate::registry::Registry;
 use accessor::OverworldAccessor;
-use common::parking_lot::RwLock;
+use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
+use common::parking_lot::{Mutex, RawRwLock, RwLock};
 use common::types::HashMap;
 use common::{glm, MO_RELAXED};
 use fixedbitset::FixedBitSet;
 use glm::{I64Vec3, U32Vec3};
+use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
+use std::time::Instant;
 
 // TODO Main world - 'The Origin'
 
@@ -46,14 +49,14 @@ use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
-pub enum ClusterState {
+pub enum ClusterStateEnum {
     /// The cluster is not ready to be read or written to.
     Initial,
     /// The cluster is available in read/write mode
     Loaded,
 }
 
-impl ClusterState {
+impl ClusterStateEnum {
     /// Whether cluster is loaded
     pub fn is_loaded(&self) -> bool {
         *self == Self::Loaded
@@ -85,13 +88,11 @@ pub struct TrackingCluster {
     pub raw: RawCluster,
     pub dirty_parts: ClusterPartSet,
     pub active_cells: FixedBitSet,
-    pub empty_cells: FixedBitSet,
 }
 
 impl TrackingCluster {
-    pub fn new(registry: &Registry, raw: RawCluster) -> TrackingCluster {
+    pub fn new(raw: RawCluster, dirty_parts: ClusterPartSet) -> TrackingCluster {
         let mut active_cells = FixedBitSet::with_capacity(RawCluster::VOLUME);
-        let mut empty_cells = FixedBitSet::with_capacity(RawCluster::VOLUME);
 
         for x in 0..RawCluster::SIZE {
             for y in 0..RawCluster::SIZE {
@@ -101,29 +102,16 @@ impl TrackingCluster {
                     let data = raw.get(&pos);
 
                     let active = data.active();
-                    let empty = is_cell_empty(registry, data);
-
                     active_cells.set(pos_idx, active);
-                    empty_cells.set(pos_idx, empty);
                 }
             }
         }
 
         Self {
             raw,
-            dirty_parts: ClusterPartSet::ALL,
+            dirty_parts,
             active_cells,
-            empty_cells,
         }
-    }
-
-    pub fn raw(&self) -> &RawCluster {
-        &self.raw
-    }
-
-    /// Complexity: O(N), where N is RawCluster::VOLUME.
-    pub fn is_empty(&self) -> bool {
-        self.empty_cells.as_slice().iter().all(|v| *v == !0)
     }
 
     /// Complexity: O(N), where N is RawCluster::VOLUME.
@@ -139,9 +127,94 @@ impl TrackingCluster {
     }
 }
 
+pub struct CompressedTrackingCluster {
+    pub raw: CompressedCluster,
+    pub dirty_parts: ClusterPartSet,
+}
+
+pub enum ClusterState {
+    Initial,
+    Ready(TrackingCluster),
+    Compressed(CompressedTrackingCluster),
+}
+
+impl ClusterState {
+    pub fn is_initial(&self) -> bool {
+        matches!(self, Self::Initial)
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Ready(_) | Self::Compressed(_))
+    }
+
+    pub fn is_compressed(&self) -> bool {
+        matches!(self, Self::Compressed(_))
+    }
+
+    pub fn unwrap(&self) -> &TrackingCluster {
+        if let Self::Ready(cluster) = self {
+            cluster
+        } else {
+            panic!("Invalid state");
+        }
+    }
+
+    pub fn unwrap_mut(&mut self) -> &mut TrackingCluster {
+        if let Self::Ready(cluster) = self {
+            cluster
+        } else {
+            panic!("Invalid state");
+        }
+    }
+
+    pub fn take_dirty_parts(&mut self) -> ClusterPartSet {
+        let dirty_parts = match self {
+            ClusterState::Ready(cluster) => &mut cluster.dirty_parts,
+            ClusterState::Compressed(cluster) => &mut cluster.dirty_parts,
+            ClusterState::Initial => {
+                panic!("Invalid state!")
+            }
+        };
+        mem::replace(dirty_parts, ClusterPartSet::NONE)
+    }
+
+    pub fn compress(&mut self) {
+        replace_with::replace_with_or_abort(self, |curr| {
+            let Self::Ready(cluster) = curr else {
+                panic!("Invalid state");
+            };
+
+            let raw_compressed = cluster.raw.compress();
+
+            Self::Compressed(CompressedTrackingCluster {
+                raw: raw_compressed,
+                dirty_parts: cluster.dirty_parts,
+            })
+        })
+    }
+
+    pub fn decompress(&mut self) {
+        replace_with::replace_with_or_abort(self, |curr| {
+            let Self::Compressed(compressed) = curr else {
+                panic!("Invalid state");
+            };
+
+            let raw_cluster = RawCluster::from_compressed(compressed.raw);
+
+            Self::Ready(TrackingCluster::new(raw_cluster, compressed.dirty_parts))
+        })
+    }
+}
+
+impl Default for ClusterState {
+    fn default() -> Self {
+        Self::Initial
+    }
+}
+
 pub struct OverworldCluster {
-    pub cluster: Arc<RwLock<Option<TrackingCluster>>>,
-    pub state: Arc<AtomicU32>,
+    pub cluster: Arc<RwLock<ClusterState>>,
+    pub state: AtomicU32,
     pub dirty: AtomicBool,
     /// Managed by [OverworldOrchestrator].
     pub has_active_blocks: AtomicBool,
@@ -151,14 +224,27 @@ impl OverworldCluster {
     pub fn new() -> Self {
         Self {
             cluster: Default::default(),
-            state: Arc::new(AtomicU32::new(ClusterState::Initial as u32)),
+            state: AtomicU32::new(ClusterStateEnum::Initial as u32),
             dirty: AtomicBool::new(false),
             has_active_blocks: Default::default(),
         }
     }
 
-    pub fn state(&self) -> ClusterState {
-        ClusterState::from_u32(self.state.load(MO_RELAXED))
+    pub fn ready(&self) -> Option<ArcRwLockReadGuard<RawRwLock, ClusterState>> {
+        let mut t_cluster_read = self.cluster.upgradable_read_arc();
+        if t_cluster_read.is_initial() {
+            return None;
+        }
+        if t_cluster_read.is_compressed() {
+            let mut t_cluster = ArcRwLockUpgradableReadGuard::upgrade(t_cluster_read);
+            t_cluster.decompress();
+            t_cluster_read = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster);
+        }
+        Some(ArcRwLockUpgradableReadGuard::downgrade(t_cluster_read))
+    }
+
+    pub fn state(&self) -> ClusterStateEnum {
+        ClusterStateEnum::from_u32(self.state.load(MO_RELAXED))
     }
 }
 

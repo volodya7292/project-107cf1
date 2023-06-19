@@ -7,7 +7,9 @@ use crate::registry::Registry;
 use common::glm;
 use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
 use glm::TVec3;
+use std::io::{Read, Write};
 use std::sync::Arc;
+use std::{mem, slice};
 
 #[inline]
 pub fn cell_index(pos: &TVec3<usize>) -> usize {
@@ -209,6 +211,7 @@ pub struct RawCluster {
 impl RawCluster {
     pub const SIZE: usize = 24;
     pub const VOLUME: usize = Self::SIZE * Self::SIZE * Self::SIZE;
+    pub const APPROX_MEM_SIZE: usize = Self::VOLUME * mem::size_of::<CellInfo>();
 
     /// Creating a new cluster is expensive due to its big size of memory
     pub fn new(registry: &Arc<Registry>) -> Self {
@@ -216,6 +219,46 @@ impl RawCluster {
             registry: Arc::clone(registry),
             block_state_storage: Default::default(),
             cells: vec![Default::default(); Self::VOLUME],
+        }
+    }
+
+    pub fn from_compressed(compressed: CompressedCluster) -> RawCluster {
+        let mut decompressor = lz4_flex::frame::FrameDecoder::new(compressed.cells_data.as_slice());
+        let cells = unsafe {
+            let len = RawCluster::VOLUME;
+            let mut vec = Vec::<CellInfo>::with_capacity(len);
+
+            let u8_slice =
+                slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, len * mem::size_of::<CellInfo>());
+            decompressor.read_exact(u8_slice).unwrap();
+
+            vec.set_len(len);
+            vec
+        };
+
+        RawCluster {
+            registry: compressed.registry,
+            block_state_storage: compressed.block_state_storage,
+            cells,
+        }
+    }
+
+    pub fn compress(self) -> CompressedCluster {
+        let mut cells_data = Vec::new();
+        let mut compressor = lz4_flex::frame::FrameEncoder::new(&mut cells_data);
+        unsafe {
+            let cells_raw = slice::from_raw_parts(
+                self.cells.as_ptr() as *const u8,
+                Self::VOLUME * mem::size_of::<CellInfo>(),
+            );
+            compressor.write_all(cells_raw).unwrap();
+        }
+        compressor.finish().unwrap();
+
+        CompressedCluster {
+            registry: self.registry,
+            cells_data,
+            block_state_storage: self.block_state_storage,
         }
     }
 
@@ -245,4 +288,10 @@ impl RawCluster {
             info: &mut self.cells[cell_index(pos.get())],
         }
     }
+}
+
+pub struct CompressedCluster {
+    registry: Arc<Registry>,
+    cells_data: Vec<u8>,
+    block_state_storage: EntityStorage,
 }

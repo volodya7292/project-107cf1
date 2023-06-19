@@ -19,3 +19,6 @@ opt-level = 3
 
 [profile.dev.package."ash"]
 opt-level = 3
+
+[profile.dev.package."lz4_flex"]
+opt-level = 3

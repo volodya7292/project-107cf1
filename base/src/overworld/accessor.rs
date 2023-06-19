@@ -3,11 +3,11 @@ use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterPos, RelativeBlockPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
-use crate::overworld::{is_cell_empty, ClusterState, LoadedClusters, TrackingCluster};
+use crate::overworld::{ClusterState, LoadedClusters, OverworldCluster, TrackingCluster};
 use crate::registry::Registry;
 use common::glm::TVec3;
 use common::nd_range::NDRange;
-use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockWriteGuard};
+use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
 use common::parking_lot::RawRwLock;
 use common::types::Bool;
 use common::types::HashMap;
@@ -22,33 +22,28 @@ lazy_static! {
     static ref EMPTY_BLOCK_STORAGE: EntityStorage = EntityStorage::new();
 }
 
-pub struct AccessGuard {
-    locked_state: ClusterState,
-    lock: AccessGuardLock,
-}
-
-pub enum AccessGuardLock {
-    Read(ArcRwLockReadGuard<RawRwLock, Option<TrackingCluster>>),
-    Write(ArcRwLockWriteGuard<RawRwLock, Option<TrackingCluster>>),
+pub enum AccessGuard {
+    Read(ArcRwLockReadGuard<RawRwLock, ClusterState>),
+    Write(ArcRwLockWriteGuard<RawRwLock, ClusterState>),
 }
 
 impl AccessGuard {
     /// Returns cluster for the specified global block position.
     /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster(&self) -> Option<&TrackingCluster> {
-        match &self.lock {
-            AccessGuardLock::Read(g) => g.as_ref(),
-            AccessGuardLock::Write(g) => g.as_ref(),
+    pub fn cluster(&self) -> &TrackingCluster {
+        match self {
+            Self::Read(g) => g.unwrap(),
+            Self::Write(g) => g.unwrap(),
         }
     }
 
     /// Returns cluster for the specified global block position.
     /// Returns `None` if the cluster is offloaded.
     #[inline]
-    pub fn cluster_mut(&mut self) -> Option<&mut TrackingCluster> {
-        match &mut self.lock {
-            AccessGuardLock::Write(g) => g.as_mut(),
+    pub fn cluster_mut(&mut self) -> &mut TrackingCluster {
+        match self {
+            Self::Write(g) => g.unwrap_mut(),
             _ => unreachable!(),
         }
     }
@@ -57,6 +52,22 @@ impl AccessGuard {
 pub struct ClustersAccessorCache {
     loaded_clusters: LoadedClusters,
     clusters_cache: HashMap<ClusterPos, AccessGuard>,
+}
+
+fn read_access_cluster(o_cluster: &OverworldCluster) -> Option<AccessGuard> {
+    let mut t_cluster = o_cluster.cluster.upgradable_read_arc();
+    if t_cluster.is_initial() {
+        return None;
+    }
+    if t_cluster.is_compressed() {
+        let mut t_cluster_write = ArcRwLockUpgradableReadGuard::upgrade(t_cluster);
+        t_cluster_write.decompress();
+        t_cluster = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster_write);
+    }
+
+    Some(AccessGuard::Read(ArcRwLockUpgradableReadGuard::downgrade(
+        t_cluster,
+    )))
 }
 
 impl ClustersAccessorCache {
@@ -74,18 +85,8 @@ impl ClustersAccessorCache {
             hash_map::Entry::Vacant(e) => {
                 let clusters = self.loaded_clusters.read();
                 let o_cluster = clusters.get(cluster_pos)?;
-                let state = o_cluster.state();
-
-                if !state.is_loaded() {
-                    return None;
-                }
-
-                let lock = AccessGuardLock::Read(o_cluster.cluster.read_arc());
-
-                Some(e.insert(AccessGuard {
-                    locked_state: state,
-                    lock,
-                }))
+                let guard = read_access_cluster(o_cluster)?;
+                Some(e.insert(guard))
             }
         }
     }
@@ -93,47 +94,59 @@ impl ClustersAccessorCache {
     /// Returns `None` if the cluster is not loaded yet.
     pub fn access_cluster_mut(&mut self, cluster_pos: &ClusterPos) -> Option<&mut AccessGuard> {
         match self.clusters_cache.entry(*cluster_pos) {
-            hash_map::Entry::Occupied(e) => {
-                let guard = e.into_mut();
-
-                if let AccessGuardLock::Read(_) = &guard.lock {
-                    replace_with::replace_with_or_abort(&mut guard.lock, |v| {
-                        let read_guard = if let AccessGuardLock::Read(v) = v {
-                            v
-                        } else {
-                            unreachable!()
-                        };
-
-                        let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
-                        drop(read_guard);
-
-                        let clusters = self.loaded_clusters.read();
-                        let ocluster = clusters.get(cluster_pos).unwrap();
-                        ocluster.dirty.store(true, MO_RELAXED);
-
-                        AccessGuardLock::Write(rwlock.write_arc())
-                    });
+            hash_map::Entry::Occupied(mut guard) => {
+                if let AccessGuard::Write(_) = guard.get() {
+                    return Some(guard.into_mut());
                 }
 
-                Some(guard)
+                replace_with::replace_with_or_abort(guard.get_mut(), |v| {
+                    let AccessGuard::Read(read_guard) = v else {
+                        unreachable!()
+                    };
+
+                    let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
+                    drop(read_guard);
+
+                    let clusters = self.loaded_clusters.read();
+                    let o_cluster = clusters.get(cluster_pos).unwrap();
+
+                    o_cluster.dirty.store(true, MO_RELAXED);
+
+                    AccessGuard::Write(rwlock.write_arc())
+                });
+
+                if let AccessGuard::Write(t_cluster) = guard.get_mut() {
+                    if t_cluster.is_initial() {
+                        guard.remove();
+                        return None;
+                    }
+                    if t_cluster.is_compressed() {
+                        t_cluster.decompress();
+                    }
+                };
+
+                Some(guard.into_mut())
             }
             hash_map::Entry::Vacant(e) => {
                 let clusters = self.loaded_clusters.read();
                 let o_cluster = clusters.get(cluster_pos)?;
                 let state = o_cluster.state();
 
-                if state != ClusterState::Loaded {
-                    None
-                } else {
-                    o_cluster.dirty.store(true, MO_RELAXED);
-
-                    let lock = AccessGuardLock::Write(o_cluster.cluster.write_arc());
-
-                    Some(e.insert(AccessGuard {
-                        locked_state: state,
-                        lock,
-                    }))
+                if !state.is_loaded() {
+                    return None;
                 }
+
+                let mut t_cluster = o_cluster.cluster.write_arc();
+                if t_cluster.is_initial() {
+                    return None;
+                }
+                if t_cluster.is_compressed() {
+                    t_cluster.decompress();
+                }
+
+                o_cluster.dirty.store(true, MO_RELAXED);
+
+                Some(e.insert(AccessGuard::Write(t_cluster)))
             }
         }
     }
@@ -162,11 +175,7 @@ impl ReadOnlyOverworldAccessorImpl for OverworldAccessor {
     fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData> {
         self.cache
             .access_cluster(&pos.cluster_pos())
-            .map(|access| match access.cluster() {
-                Some(cluster) => Some(cluster.raw.get(&pos.cluster_block_pos())),
-                _ => None,
-            })
-            .flatten()
+            .map(|access| access.cluster().raw.get(&pos.cluster_block_pos()))
     }
 
     /// Returns intersection facing and position of the block that specified ray intersect.
@@ -265,7 +274,6 @@ impl OverworldAccessor {
             .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
-            .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
             let pos_idx = cluster_block_pos.index();
@@ -273,10 +281,8 @@ impl OverworldAccessor {
 
             update_fn(&mut block_data);
             let active_after_update = block_data.active();
-            let empty_after_update = is_cell_empty(&self.registry, block_data);
 
             cluster.active_cells.set(pos_idx, active_after_update);
-            cluster.empty_cells.set(pos_idx, empty_after_update);
             cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
 
             true
@@ -291,7 +297,6 @@ impl OverworldAccessor {
             .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
-            .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
@@ -312,7 +317,6 @@ impl OverworldAccessor {
             .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
-            .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
@@ -333,7 +337,6 @@ impl OverworldAccessor {
             .cache
             .access_cluster_mut(&pos.cluster_pos())
             .map(|access| access.cluster_mut())
-            .flatten()
         {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
@@ -379,22 +382,7 @@ impl ClusterNeighbourhoodAccessor {
                 let offset: I64Vec3 = glm::convert(offset);
                 let rel_pos = pos.offset(&offset).offset(&I64Vec3::from_element(-1));
                 let o_cluster = o_clusters.get(&rel_pos)?;
-                let state = o_cluster.state();
-
-                if !state.is_loaded() {
-                    return None;
-                }
-
-                let t_cluster = o_cluster.cluster.read_arc();
-
-                if t_cluster.is_none() {
-                    return None;
-                }
-
-                Some(AccessGuard {
-                    locked_state: state,
-                    lock: AccessGuardLock::Read(t_cluster),
-                })
+                read_access_cluster(o_cluster)
             })
             .collect();
 
@@ -410,14 +398,14 @@ impl ClusterNeighbourhoodAccessor {
 
     pub fn is_center_available(&self) -> bool {
         let center = self.neighbours[1 * 9 + 1 * 3 + 1].as_ref();
-        center.is_some_and(|v| v.cluster().is_some())
+        center.is_some()
     }
 
     pub fn get_block(&self, pos: &RelativeBlockPos) -> Option<BlockData> {
         let neighbour_pos = pos.cluster_idx();
 
         let access = self.neighbours[neighbour_pos].as_ref()?;
-        let t_cluster = access.cluster().unwrap();
+        let t_cluster = access.cluster();
 
         let cluster_block_pos = pos.cluster_block_pos();
         Some(t_cluster.raw.get(&cluster_block_pos))

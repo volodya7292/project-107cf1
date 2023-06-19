@@ -35,7 +35,6 @@ mod stage_manager;
 //
 
 use crate::ecs::component::internal::GlobalTransformC;
-use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::system;
@@ -544,7 +543,7 @@ impl MainRenderer {
         let overlay_camera = OrthoCamera::new();
 
         let staging_buffer = device
-            .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 0x800000)
+            .create_host_buffer(BufferUsageFlags::TRANSFER_SRC, 64_000_000)
             .unwrap();
         let per_frame_ub = device
             .create_device_buffer(

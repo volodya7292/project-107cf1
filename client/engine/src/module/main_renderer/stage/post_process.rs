@@ -1,5 +1,5 @@
 use crate::module::main_renderer::resource_manager::{ImageParams, ResourceManagementScope};
-use crate::module::main_renderer::stage::depth::{DepthStage, ShadowCascade};
+use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
 use common::glm;
@@ -333,7 +333,7 @@ impl PostProcessStage {
         let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
         let main_light_view: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_VIEW);
 
-        let mut main_shadow_info = MainShadowInfo {
+        let main_shadow_info = MainShadowInfo {
             light_view: *main_light_view,
             light_proj_view: *main_light_proj * *main_light_view,
             light_dir: DepthStage::MAIN_LIGHT_DIR.push(0.0),

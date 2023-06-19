@@ -105,7 +105,7 @@ pub(crate) trait RenderStage: Any + Send + Sync + 'static {
         &mut self,
         _infos: &mut [FrameInfo],
         _frame_infos_indices: &[usize],
-        ctx: &FrameContext,
+        _ctx: &FrameContext,
     ) {
     }
 

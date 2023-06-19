@@ -10,8 +10,7 @@ use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OB
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{
-    calc_group_count, calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, CameraInfo,
-    FrameInfo,
+    calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, CameraInfo, FrameInfo,
 };
 use crate::module::scene::N_MAX_OBJECTS;
 use common::glm::{Mat4, Vec2, Vec3, Vec4};
@@ -19,15 +18,14 @@ use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::utils::prev_power_of_two;
 use common::{glm, rayon};
+use std::mem;
 use std::sync::Arc;
-use std::{iter, mem};
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList, Device,
     Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline, PipelineStageFlags,
     QueueType, RenderPass, Shader, ShaderStageFlags, Subpass, SubpassDependency,
 };
-use winit::event::VirtualKeyCode::M;
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
 
@@ -68,101 +66,6 @@ struct CullConstants {
     pyramid_size: Vec2,
     max_pyramid_levels: u32,
     object_count: u32,
-}
-
-#[derive(Default, Copy, Clone)]
-#[repr(C)]
-pub struct ShadowCascade {
-    pub split_depth: f32,
-    pub proj_view: Mat4,
-}
-
-fn calc_direct_light_cascade_shadow_projections(
-    cam_proj_view: &Mat4,
-    z_near: f32,
-    z_far: f32,
-    n_cascades: u32,
-    split_lambda: f32,
-    light_dir: &Vec3,
-) -> Vec<ShadowCascade> {
-    let z_range = z_far - z_near;
-    let z_ratio = z_far / z_near;
-
-    let mut cascades = vec![ShadowCascade::default(); n_cascades as usize];
-    let mut last_split_dist = 0.0;
-
-    for (i, cascade) in cascades.iter_mut().enumerate() {
-        let p = (i + 1) as f32 / n_cascades as f32;
-        let log = z_near * z_ratio.powf(p);
-        let uniform = z_near + z_range * p;
-        let split_depth = split_lambda * log + (1.0 - split_lambda) * uniform;
-        let split_dist = (split_depth - z_near) / z_range;
-
-        let mut frustum_corners = [
-            Vec3::new(-1.0, 1.0, 0.0),
-            Vec3::new(1.0, 1.0, 0.0),
-            Vec3::new(1.0, -1.0, 0.0),
-            Vec3::new(-1.0, -1.0, 0.0),
-            Vec3::new(-1.0, 1.0, 1.0),
-            Vec3::new(1.0, 1.0, 1.0),
-            Vec3::new(1.0, -1.0, 1.0),
-            Vec3::new(-1.0, -1.0, 1.0),
-        ];
-
-        let inv_cam = glm::inverse(&cam_proj_view);
-
-        // Project frustum corners into world space
-        for corner in &mut frustum_corners {
-            let inv_corner = inv_cam * corner.push(1.0);
-            *corner = inv_corner.xyz() / inv_corner.w;
-        }
-
-        for i in 0..4 {
-            let dist = frustum_corners[i + 4] - frustum_corners[i];
-            frustum_corners[i + 4] = frustum_corners[i] + dist * split_dist;
-            frustum_corners[i] = frustum_corners[i] + dist * last_split_dist;
-        }
-
-        let frustum_center = frustum_corners
-            .iter()
-            .cloned()
-            .reduce(|acc, corner| acc + corner)
-            .unwrap()
-            / 8.0;
-
-        let radius = frustum_corners
-            .iter()
-            .map(|corner| (corner - frustum_center).magnitude())
-            .max_by(|a, b| a.total_cmp(b))
-            .unwrap();
-        let radius_rounded = (radius * 16.0).ceil() / 16.0;
-
-        let max_extents = Vec3::from_element(radius_rounded);
-        let min_extents = -max_extents;
-
-        let light_proj = glm::ortho_rh_zo(
-            min_extents.x,
-            max_extents.x,
-            min_extents.y,
-            max_extents.y,
-            max_extents.z - min_extents.z,
-            0.0,
-        );
-        let light_view = glm::look_at_rh(
-            &(frustum_center - light_dir * -min_extents.z),
-            &frustum_center,
-            &Vec3::new(0.0002324, 0.999224523453, 0.0006574),
-        );
-
-        *cascade = ShadowCascade {
-            split_depth: -split_depth,
-            proj_view: light_proj * light_view,
-        };
-
-        last_split_dist = split_dist;
-    }
-
-    cascades
 }
 
 impl DepthStage {

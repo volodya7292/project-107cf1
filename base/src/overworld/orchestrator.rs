@@ -1,19 +1,18 @@
-use crate::execution;
-use crate::execution::Task;
-use crate::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
+use crate::execution::{spawn_blocking_task_fifo, Task};
+use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
-use crate::overworld::occluder::Occluder;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::{ClusterState, LoadedClusters, Overworld, OverworldCluster, TrackingCluster};
+use crate::overworld::{
+    ClusterState, ClusterStateEnum, LoadedClusters, Overworld, OverworldCluster, TrackingCluster,
+};
 use common::glm;
 use common::parking_lot::RwLockWriteGuard;
 use common::rayon::prelude::*;
 use common::types::{HashMap, HashSet};
 use common::{MO_RELAXED, MO_RELEASE};
-use glm::{DVec3, I64Vec3};
+use glm::DVec3;
 use smallvec::SmallVec;
-use std::mem;
 use std::sync::Arc;
 
 /// Manages overworld: adds/removes new clusters, loads them in parallel, etc.
@@ -28,6 +27,7 @@ pub struct OverworldOrchestrator {
 
 struct RCluster {
     load_task: Option<Task<()>>,
+    compress_task: Option<Task<()>>,
 }
 
 struct ClusterPosDistance {
@@ -155,7 +155,13 @@ fn add_new_clusters(
     o_clusters: &mut HashMap<ClusterPos, OverworldCluster>,
 ) {
     for pos in positions {
-        r_clusters.insert(*pos, RCluster { load_task: None });
+        r_clusters.insert(
+            *pos,
+            RCluster {
+                load_task: None,
+                compress_task: None,
+            },
+        );
         o_clusters.insert(*pos, OverworldCluster::new());
     }
 }
@@ -185,6 +191,7 @@ impl OverworldOrchestrator {
     const MAX_XZ_RENDER_DISTANCE: u64 = 1024;
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
     const MAX_Y_RENDER_DISTANCE: u64 = 512;
+    const MIN_UNCOMPRESSED_DISTANCE: u64 = 128;
 
     pub fn new(overworld: &Overworld) -> Self {
         Self {
@@ -217,20 +224,6 @@ impl OverworldOrchestrator {
         &self.loaded_clusters
     }
 
-    pub fn collect_dirty_clusters(&self) -> Vec<ClusterPos> {
-        let o_clusters = self.loaded_clusters.write();
-        let mut dirty_clusters = Vec::with_capacity(o_clusters.len());
-
-        for (pos, o_cluster) in &*o_clusters {
-            if !o_cluster.dirty.load(MO_RELAXED) {
-                continue;
-            }
-            dirty_clusters.push(*pos);
-        }
-
-        dirty_clusters
-    }
-
     pub fn update(&mut self) -> OverworldUpdateResult {
         // Lock loaded_clusters so no accessor can modify clusters
         let mut o_clusters = self.loaded_clusters.write();
@@ -242,8 +235,6 @@ impl OverworldOrchestrator {
             self.y_render_distance,
             &r_clusters,
         );
-
-        // TODO: implement compression of irrelevant clusters (eg. that are further from the stream pos)
 
         // Cancel tasks associated with removed clusters
         for d_pos in &clusters_diff.to_remove {
@@ -262,15 +253,13 @@ impl OverworldOrchestrator {
 
         // 2. Load new clusters
         // ------------------------------------------------------------------------------------------------------
-        let registry = self.overworld_generator.main_registry().registry();
-
         for d_pos in clusters_diff.sorted_layout.iter() {
             let pos = d_pos.pos;
             let o_cluster = o_clusters.get(&pos).unwrap();
             let r_cluster = r_clusters.get_mut(&pos).unwrap();
             let state = o_cluster.state();
 
-            if state == ClusterState::Loaded {
+            if state == ClusterStateEnum::Loaded {
                 continue;
             }
             if r_cluster.load_task.is_some() {
@@ -279,12 +268,11 @@ impl OverworldOrchestrator {
 
             let t_cluster = Arc::clone(&o_cluster.cluster);
             let generator = Arc::clone(&self.overworld_generator);
-            let registry = Arc::clone(registry);
 
-            let load_task = execution::spawn_blocking_task_fifo(move || {
+            let load_task = spawn_blocking_task_fifo(move || {
                 let mut cluster = generator.create_cluster();
                 generator.generate_cluster(&mut cluster, pos);
-                *t_cluster.write() = Some(TrackingCluster::new(&registry, cluster));
+                *t_cluster.write() = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));
             });
             r_cluster.load_task = Some(load_task);
         }
@@ -297,12 +285,8 @@ impl OverworldOrchestrator {
             rcl.load_task = None;
 
             let o_cluster = o_clusters.get(pos).unwrap();
-            o_cluster.state.store(ClusterState::Loaded as u32, MO_RELEASE);
+            o_cluster.state.store(ClusterStateEnum::Loaded as u32, MO_RELEASE);
             o_cluster.dirty.store(true, MO_RELEASE);
-
-            let mut t_cluster = o_cluster.cluster.write();
-            let t_cluster = t_cluster.as_mut().unwrap();
-            t_cluster.dirty_parts = ClusterPartSet::ALL;
         }
 
         // 4. Collect dirty clusters
@@ -319,22 +303,60 @@ impl OverworldOrchestrator {
             o_cluster.dirty.store(false, MO_RELAXED);
 
             let mut cluster = o_cluster.cluster.write();
-            let Some(cluster) = cluster.as_mut() else {
+            if !cluster.is_loaded() {
                 continue;
-            };
+            }
 
-            let dirty_parts = mem::replace(&mut cluster.dirty_parts, ClusterPartSet::NONE);
+            let dirty_parts = cluster.take_dirty_parts();
             dirty_clusters.insert(*pos, dirty_parts);
         }
 
         // 5. Check dirty clusters for active blocks
         dirty_clusters.par_iter().for_each(|(pos, _)| {
             let o_cluster = o_clusters.get(pos).unwrap();
-            let t_cluster_guard = o_cluster.cluster.read();
-            let t_cluster = t_cluster_guard.as_ref().unwrap();
+            let t_cluster_guard = o_cluster.ready().unwrap();
+            let t_cluster = t_cluster_guard.unwrap();
             let has_active_blocks = t_cluster.has_active_blocks();
             o_cluster.has_active_blocks.store(has_active_blocks, MO_RELAXED);
         });
+
+        // 6. Compress redundant clusters
+        // let n_max_uncompressed_clusters = (self.xz_render_distance.pow(2) as f64 * 3.14) as usize;
+        // let uncompressed_count = 0;
+
+        for (pos, o_cluster) in &*o_clusters {
+            let dist = glm::distance2(&glm::convert::<_, DVec3>(*pos.get()), &self.stream_pos);
+            if dist < Self::MIN_UNCOMPRESSED_DISTANCE.pow(2) as f64 {
+                // Nearby clusters are always uncompressed for minimum access latency
+                continue;
+            }
+
+            let t_cluster = Arc::clone(&o_cluster.cluster);
+
+            {
+                let t_cluster = t_cluster.read();
+                if t_cluster.is_initial() || t_cluster.is_compressed() {
+                    // The cluster is not loaded or is already compressed
+                    continue;
+                }
+            }
+
+            let r_cluster = r_clusters.get_mut(&pos).unwrap();
+            if r_cluster
+                .compress_task
+                .as_ref()
+                .map_or(false, |v| !v.is_finished())
+            {
+                // The previous compression task is not finished
+                continue;
+            }
+
+            let task = spawn_blocking_task_fifo(move || {
+                let mut t_cluster = t_cluster.write();
+                t_cluster.compress();
+            });
+            r_cluster.compress_task = Some(task);
+        }
 
         OverworldUpdateResult {
             dirty_clusters_parts: dirty_clusters,

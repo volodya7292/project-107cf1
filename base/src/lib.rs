@@ -14,7 +14,7 @@ use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
-use crate::overworld::LoadedClusters;
+use crate::overworld::{ClusterState, LoadedClusters};
 use crate::registry::Registry;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
@@ -192,20 +192,42 @@ pub fn process_active_blocks(
             return;
         }
 
-        let cluster = o_cluster.cluster.read();
+        let Some(cluster) = o_cluster.ready() else {
+            return;
+        };
+        let cluster = cluster.unwrap();
+
         let mut after_actions = OverworldActionsStorage::new();
+        let mut accessor =
+            OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters)).into_read_only();
 
-        if let Some(cluster) = &*cluster {
-            let mut accessor =
-                OverworldAccessor::new(Arc::clone(registry), Arc::clone(loaded_clusters)).into_read_only();
+        for (pos, block_data) in cluster.active_blocks() {
+            let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
+            let block = registry.get_block(block_data.block_id()).unwrap();
+            let mut keep_active = false;
 
-            for (pos, block_data) in cluster.active_blocks() {
-                let global_pos = cl_pos.to_block_pos().offset(&glm::convert(*pos.get()));
-                let block = registry.get_block(block_data.block_id()).unwrap();
-                let mut keep_active = false;
+            // Spread/vanish liquids
+            keep_active |= on_liquid_tick(
+                tick,
+                &global_pos,
+                block_data,
+                &registry,
+                &mut accessor,
+                after_actions.builder(),
+            );
 
-                // Spread/vanish liquids
-                keep_active |= on_liquid_tick(
+            // Spread/vanish lights
+            keep_active |= on_light_tick(
+                &global_pos,
+                block_data,
+                &registry,
+                &mut accessor,
+                after_actions.builder(),
+            );
+
+            // Block-specific on-tick event
+            if let Some(on_tick) = &block.event_handlers().on_tick {
+                keep_active |= on_tick(
                     tick,
                     &global_pos,
                     block_data,
@@ -213,30 +235,9 @@ pub fn process_active_blocks(
                     &mut accessor,
                     after_actions.builder(),
                 );
-
-                // Spread/vanish lights
-                keep_active |= on_light_tick(
-                    &global_pos,
-                    block_data,
-                    &registry,
-                    &mut accessor,
-                    after_actions.builder(),
-                );
-
-                // Block-specific on-tick event
-                if let Some(on_tick) = &block.event_handlers().on_tick {
-                    keep_active |= on_tick(
-                        tick,
-                        &global_pos,
-                        block_data,
-                        &registry,
-                        &mut accessor,
-                        after_actions.builder(),
-                    );
-                }
-
-                after_actions.set_active(global_pos, keep_active);
             }
+
+            after_actions.set_active(global_pos, keep_active);
         }
 
         total_after_actions.lock().push(after_actions);

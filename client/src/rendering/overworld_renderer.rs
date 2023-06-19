@@ -7,7 +7,7 @@ use base::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
 use base::overworld::orchestrator::get_side_clusters;
 use base::overworld::orchestrator::OverworldUpdateResult;
 use base::overworld::position::ClusterPos;
-use base::overworld::{ClusterState, LoadedClusters};
+use base::overworld::{ClusterStateEnum, LoadedClusters};
 use base::registry::Registry;
 use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
@@ -32,7 +32,6 @@ pub struct OverworldRenderer {
     loaded_clusters: LoadedClusters,
     root_entity: EntityId,
 
-    to_add: HashSet<ClusterPos>,
     to_remove: HashSet<ClusterPos>,
     to_build_meshes: HashMap<ClusterPos, ClusterPartSet>,
     to_update_meshes: Arc<Mutex<HashMap<ClusterPos, ClusterMeshes>>>,
@@ -130,7 +129,6 @@ impl OverworldRenderer {
             resource_mapping,
             loaded_clusters,
             root_entity,
-            to_add: HashSet::with_capacity(8192),
             to_remove: HashSet::with_capacity(8192),
             to_build_meshes: HashMap::with_capacity(8192),
             to_update_meshes: Arc::new(Mutex::new(HashMap::with_capacity(1024))),
@@ -149,7 +147,6 @@ impl OverworldRenderer {
                     finish_event: Default::default(),
                 },
             );
-            self.to_add.insert(*pos);
             self.to_remove.remove(pos);
         }
 
@@ -164,7 +161,6 @@ impl OverworldRenderer {
             r_cl.finish_event.signal();
 
             self.to_remove.insert(*pos);
-            self.to_add.remove(pos);
             self.to_build_meshes.remove(pos);
         }
 
@@ -201,7 +197,7 @@ impl OverworldRenderer {
 
                 if !o_clusters
                     .get(&rel_pos)
-                    .is_some_and(|o_cluster| o_cluster.state() == ClusterState::Loaded)
+                    .is_some_and(|o_cluster| o_cluster.state().is_loaded())
                 {
                     continue;
                 }
@@ -285,9 +281,15 @@ impl OverworldRenderer {
 
         // Update meshes for scene objects
         for (pos, meshes) in to_update_mesh.drain() {
-            let entities = self.entities.entry(pos).or_insert_with(|| {
-                assert_eq!(self.to_add.remove(&pos), true);
+            if meshes.solid.vertex_count() == 0 && meshes.transparent.vertex_count() == 0 {
+                if let Some(entities) = self.entities.remove(&pos) {
+                    scene.remove_object(&entities.solid);
+                    scene.remove_object(&entities.translucent);
+                }
+                continue;
+            }
 
+            let entities = self.entities.entry(pos).or_insert_with(|| {
                 let transform_comp = TransformC::new().with_position(glm::convert(*pos.get()));
                 let render_config_solid = MeshRenderConfigC::new(self.cluster_mat_pipeline, false);
                 let render_config_translucent = MeshRenderConfigC::new(self.cluster_mat_pipeline, true);
