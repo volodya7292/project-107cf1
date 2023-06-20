@@ -1,4 +1,5 @@
-use crate::execution::{spawn_blocking_task_fifo, Task};
+use crate::execution::virtual_processor::{VirtualProcessor, VirtualTask};
+use crate::execution::{default_queue, Task};
 use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
 use crate::overworld::position::{BlockPos, ClusterPos};
@@ -23,11 +24,13 @@ pub struct OverworldOrchestrator {
     loaded_clusters: LoadedClusters,
     overworld_generator: Arc<OverworldGenerator>,
     r_clusters: HashMap<ClusterPos, RCluster>,
+    cluster_load_processor: VirtualProcessor,
+    cluster_compression_processor: VirtualProcessor,
 }
 
 struct RCluster {
-    load_task: Option<Task<()>>,
-    compress_task: Option<Task<()>>,
+    load_task: Option<VirtualTask<()>>,
+    compress_task: Option<VirtualTask<()>>,
 }
 
 struct ClusterPosDistance {
@@ -201,6 +204,8 @@ impl OverworldOrchestrator {
             loaded_clusters: Arc::clone(overworld.loaded_clusters()),
             overworld_generator: Arc::clone(overworld.generator()),
             r_clusters: Default::default(),
+            cluster_load_processor: VirtualProcessor::new(default_queue()),
+            cluster_compression_processor: VirtualProcessor::new(default_queue()),
         }
     }
 
@@ -269,7 +274,7 @@ impl OverworldOrchestrator {
             let t_cluster = Arc::clone(&o_cluster.cluster);
             let generator = Arc::clone(&self.overworld_generator);
 
-            let load_task = spawn_blocking_task_fifo(move || {
+            let load_task = self.cluster_load_processor.spawn(move || {
                 let mut cluster = generator.create_cluster();
                 generator.generate_cluster(&mut cluster, pos);
                 let mut t_cluster = t_cluster.write();
@@ -355,7 +360,7 @@ impl OverworldOrchestrator {
                 continue;
             }
 
-            let task = spawn_blocking_task_fifo(move || {
+            let task = self.cluster_compression_processor.spawn(move || {
                 let mut t_cluster = t_cluster.write();
                 t_cluster.compress();
             });

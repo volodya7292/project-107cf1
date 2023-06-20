@@ -9,6 +9,7 @@ pub struct IntervalTimer {
     running: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
+
 impl IntervalTimer {
     pub fn new(interval: Duration) -> Self {
         Self {
@@ -40,7 +41,7 @@ impl IntervalTimer {
 
                 if dt < interval {
                     let remainder = interval - dt;
-                    crate::utils::high_precision_sleep(remainder, Duration::from_micros(100));
+                    common::utils::high_precision_sleep(remainder, Duration::from_micros(100));
                 }
             })
         };

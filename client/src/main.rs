@@ -51,10 +51,9 @@ fn init_threads() {
 
     let default_threads = available_threads;
 
-    let coroutine_threads = 1;
     // available_threads = available_threads.saturating_sub(coroutine_threads).max(1);
 
-    base::execution::init(default_threads, coroutine_threads);
+    base::execution::init(default_threads);
     engine::execution::init(render_threads);
 }
 

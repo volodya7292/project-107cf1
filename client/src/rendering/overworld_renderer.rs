@@ -1,7 +1,8 @@
 use crate::client::overworld::raw_cluster_ext::{ClusterMeshBuilder, ClusterMeshes};
 use crate::resource_mapping::ResourceMapping;
 use base::execution;
-use base::execution::Task;
+use base::execution::virtual_processor::{VirtualProcessor, VirtualTask};
+use base::execution::{default_queue, Task};
 use base::overworld::accessor::ClusterNeighbourhoodAccessor;
 use base::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
 use base::overworld::orchestrator::get_side_clusters;
@@ -12,8 +13,9 @@ use base::registry::Registry;
 use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
+use common::tokio::sync::Notify;
 use common::types::{HashMap, HashSet};
-use common::{event_listener, glm, MO_SEQCST};
+use common::{glm, MO_RELAXED};
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
 use engine::module::main_renderer::VertexMeshObject;
 use engine::module::scene::Scene;
@@ -38,23 +40,25 @@ pub struct OverworldRenderer {
 
     entities: HashMap<ClusterPos, ClusterEntities>,
     r_clusters: HashMap<ClusterPos, RCluster>,
+
+    build_processor: VirtualProcessor,
 }
 
 #[derive(Default)]
 struct BooleanFlag {
-    event: event_listener::Event,
+    event: Notify,
     value: AtomicBool,
 }
 
 impl BooleanFlag {
     fn signal(&self) {
-        self.value.store(true, MO_SEQCST);
-        self.event.notify(usize::MAX);
+        self.value.store(true, MO_RELAXED);
+        self.event.notify_waiters();
     }
 
     async fn wait(&self) {
-        while !self.value.load(MO_SEQCST) {
-            self.event.listen().await;
+        while !self.value.load(MO_RELAXED) {
+            self.event.notified().await;
         }
     }
 }
@@ -69,6 +73,8 @@ struct PendingUpdate {
     res_map: Arc<ResourceMapping>,
     loaded_clusters: LoadedClusters,
     device: Arc<vkw::Device>,
+
+    build_task: VirtualTask<Option<ClusterMeshes>>,
 }
 
 struct RCluster {
@@ -90,14 +96,7 @@ impl ClusterEntities {
 
 async fn build_cluster_mesh(update: PendingUpdate) {
     // 1. Perform the update
-    let meshes = execution::spawn_blocking_task_fifo(move || {
-        let accessor =
-            ClusterNeighbourhoodAccessor::new(update.registry, &update.loaded_clusters, update.pos);
-        accessor
-            .is_center_available()
-            .then(|| accessor.build_mesh(&update.device, &update.res_map))
-    })
-    .await;
+    let meshes = update.build_task.future().await;
 
     // 2. Notify others
     update.finish_event.signal();
@@ -134,6 +133,7 @@ impl OverworldRenderer {
             to_update_meshes: Arc::new(Mutex::new(HashMap::with_capacity(1024))),
             entities: HashMap::with_capacity(8192),
             r_clusters: HashMap::with_capacity(8192),
+            build_processor: VirtualProcessor::new(default_queue()),
         }
     }
 
@@ -222,6 +222,14 @@ impl OverworldRenderer {
                     r_cl.finish_event = Default::default();
                 }
 
+                // If any neighbour is not loaded yet, do not build the mesh of this cluster
+                if get_side_clusters(pos)
+                    .iter()
+                    .any(|rel_pos| o_clusters.get(rel_pos).map_or(false, |v| !v.state().is_loaded()))
+                {
+                    return false;
+                }
+
                 prev_task_finished
             })
             .collect();
@@ -242,6 +250,21 @@ impl OverworldRenderer {
                 .filter(|v| to_build_meshes.contains(v))
                 .collect();
 
+            let build_task = {
+                let registry = self.registry.clone();
+                let loaded_clusters = self.loaded_clusters.clone();
+                let pos = *pos;
+                let res_map = self.resource_mapping.clone();
+                let device = self.device.clone();
+
+                self.build_processor.spawn(move || {
+                    let accessor = ClusterNeighbourhoodAccessor::new(registry, &loaded_clusters, pos);
+                    accessor
+                        .is_center_available()
+                        .then(|| accessor.build_mesh(&device, &res_map))
+                })
+            };
+
             let update_info = PendingUpdate {
                 pos: *pos,
                 dependencies: deps
@@ -254,6 +277,7 @@ impl OverworldRenderer {
                 res_map: Arc::clone(&self.resource_mapping),
                 loaded_clusters: Arc::clone(&self.loaded_clusters),
                 device: Arc::clone(&self.device),
+                build_task,
             };
 
             let build_mesh_task = execution::spawn_coroutine(build_cluster_mesh(update_info));

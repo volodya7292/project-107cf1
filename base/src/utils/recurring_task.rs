@@ -1,5 +1,4 @@
 use crate::execution::{spawn_coroutine, Task};
-use common::event_listener::Event;
 use common::MO_RELAXED;
 use std::future::Future;
 use std::sync::atomic::AtomicU64;
