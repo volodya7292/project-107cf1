@@ -47,7 +47,12 @@ impl<T> Drop for Task<T> {
 
 pub fn init(n_default_threads: usize) {
     let default_thread_pool = SafeThreadPool::new(n_default_threads, TaskPriority::Default).unwrap();
-    let coroutine_executor = Arc::new(tokio::runtime::Builder::new_current_thread().build().unwrap());
+    let coroutine_executor = Arc::new(
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap(),
+    );
 
     // Start coroutine executor
     {

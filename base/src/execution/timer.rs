@@ -1,65 +1,31 @@
+use crate::execution::virtual_processor::VirtualProcessor;
+use crate::execution::{spawn_coroutine, Task};
 use crate::MO_RELAXED;
+use common::tokio;
+use common::tokio::time::MissedTickBehavior;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub struct IntervalTimer {
-    interval: Duration,
-    running: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
+    waiter: Task<()>,
 }
 
 impl IntervalTimer {
-    pub fn new(interval: Duration) -> Self {
-        Self {
-            interval,
-            running: Arc::new(Default::default()),
-            thread: None,
-        }
-    }
+    pub fn start<F>(period: Duration, processor: VirtualProcessor, on_tick: F) -> Self
+    where
+        F: Fn() + Send + Sync + Clone + 'static,
+    {
+        let waiter = spawn_coroutine(async move {
+            let mut interval = tokio::time::interval(period);
+            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                processor.spawn(on_tick.clone()).future().await;
+            }
+        });
 
-    pub fn start<F: Fn() + Send + Sync + 'static>(&mut self, on_tick: F) {
-        if self.thread.is_some() {
-            return;
-        }
-        self.running.store(true, MO_RELAXED);
-
-        let handle = {
-            let running = Arc::clone(&self.running);
-            let interval = self.interval;
-
-            thread::spawn(move || loop {
-                if !running.load(MO_RELAXED) {
-                    break;
-                }
-
-                let t0 = Instant::now();
-                on_tick();
-                let t1 = Instant::now();
-                let dt = t1 - t0;
-
-                if dt < interval {
-                    let remainder = interval - dt;
-                    common::utils::high_precision_sleep(remainder, Duration::from_micros(100));
-                }
-            })
-        };
-
-        self.thread = Some(handle);
-    }
-
-    pub fn stop(&mut self) {
-        self.running.store(false, MO_RELAXED);
-
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-
-impl Drop for IntervalTimer {
-    fn drop(&mut self) {
-        self.stop();
+        Self { waiter }
     }
 }

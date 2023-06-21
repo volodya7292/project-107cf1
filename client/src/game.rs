@@ -9,6 +9,8 @@ use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
 use base::execution::default_queue;
+use base::execution::timer::IntervalTimer;
+use base::execution::virtual_processor::VirtualProcessor;
 use base::main_registry::{MainRegistry, StatelessBlock};
 use base::overworld::accessor::ClustersAccessorCache;
 use base::overworld::accessor::ReadOnlyOverworldAccessor;
@@ -32,7 +34,6 @@ use common::parking_lot::{Mutex, RwLock};
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
 use common::threading::SafeThreadPool;
-use common::timer::IntervalTimer;
 use common::types::{HashMap, HashSet};
 use common::{glm, MO_RELAXED};
 use engine::ecs::component;
@@ -71,7 +72,7 @@ pub struct Game {
     res_map: Arc<DefaultResourceMapping>,
 
     cursor_rel: (f64, f64),
-    tick_timer: IntervalTimer,
+    tick_timer: Option<IntervalTimer>,
 
     main_state: Arc<Mutex<MainState>>,
     overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
@@ -100,9 +101,9 @@ impl Game {
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
-        overworld_orchestrator.set_xz_render_distance(256);
+        overworld_orchestrator.set_xz_render_distance(1024);
         // overworld_orchestrator.set_xz_render_distance(1024);
-        overworld_orchestrator.set_y_render_distance(256);
+        overworld_orchestrator.set_y_render_distance(1024);
         overworld_orchestrator.set_stream_pos(player_pos);
 
         let main_state = Arc::new(Mutex::new(MainState {
@@ -138,7 +139,7 @@ impl Game {
             registry: Arc::clone(&main_registry),
             res_map,
             cursor_rel: (0.0, 0.0),
-            tick_timer: IntervalTimer::new(Duration::from_millis(20)),
+            tick_timer: None,
             main_state,
             overworld_renderer: None,
             cursor_grab: true,
@@ -259,11 +260,16 @@ impl Application for Game {
             let main_state = Arc::clone(&self.main_state);
             let overworld_renderer = Arc::clone(&self.overworld_renderer.as_ref().unwrap());
 
-            self.tick_timer.start(move || {
-                default_queue().install(|| {
+            self.tick_timer = Some(IntervalTimer::start(
+                Duration::from_millis(20),
+                VirtualProcessor::new(default_queue()),
+                move || {
+                    let t0 = Instant::now();
                     on_tick(Arc::clone(&main_state), Arc::clone(&overworld_renderer));
-                });
-            });
+                    let t1 = Instant::now();
+                    println!("tick_inner {}", (t1 - t0).as_millis());
+                },
+            ));
         }
         drop(renderer);
 

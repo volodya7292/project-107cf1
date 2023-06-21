@@ -14,6 +14,7 @@ use std::task::{Context, Poll};
 struct ScheduledTask {
     func: Box<dyn FnOnce() + Send + 'static>,
     cancelled: Arc<AtomicBool>,
+    complete_notify: Arc<Notify>,
 }
 
 /// Many such processors allow executing their tasks concurrently on fixed number of real cores.
@@ -31,12 +32,14 @@ impl VirtualProcessor {
 
     async fn worker_fn(pool: &'static SafeThreadPool, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
         while let Some(task) = receiver.recv().await {
-            pool.spawn_fifo(move || {
+            let listener = task.complete_notify.notified();
+            pool.spawn(move || {
                 if task.cancelled.load(MO_RELAXED) {
                     return;
                 }
                 (task.func)()
             });
+            listener.await;
         }
     }
 
@@ -45,22 +48,26 @@ impl VirtualProcessor {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let sync_pair = Arc::new((Mutex::new(None::<T>), Notify::new()));
+        let result = Arc::new(Mutex::new(None::<T>));
+        let completion_notify = Arc::new(Notify::new());
 
         let closure = {
-            let sync_pair = Arc::clone(&sync_pair);
+            let result = Arc::clone(&result);
+            let completion_notify = Arc::clone(&completion_notify);
             move || {
-                let result = task();
-                *sync_pair.0.lock() = Some(result);
-                sync_pair.1.notify_one();
+                let output = task();
+                *result.lock() = Some(output);
+                completion_notify.notify_waiters();
             }
         };
         let scheduled_task = ScheduledTask {
             func: Box::new(closure),
             cancelled: Arc::new(AtomicBool::new(false)),
+            complete_notify: Arc::clone(&completion_notify),
         };
         let virtual_task = VirtualTask {
-            sync_pair,
+            result,
+            completion_notify,
             cancelled: Arc::clone(&scheduled_task.cancelled),
         };
 
@@ -70,13 +77,14 @@ impl VirtualProcessor {
 }
 
 pub struct VirtualTask<T> {
-    sync_pair: Arc<(Mutex<Option<T>>, Notify)>,
+    result: Arc<Mutex<Option<T>>>,
+    completion_notify: Arc<Notify>,
     cancelled: Arc<AtomicBool>,
 }
 
 impl<T> VirtualTask<T> {
     pub fn is_finished(&self) -> bool {
-        self.sync_pair.0.lock().is_some()
+        self.result.lock().is_some()
     }
 
     pub fn cancel(self) {
@@ -85,10 +93,11 @@ impl<T> VirtualTask<T> {
 
     pub async fn future(self) -> T {
         loop {
-            if let Some(result) = self.sync_pair.0.lock().take() {
+            let listener = self.completion_notify.notified();
+            if let Some(result) = self.result.lock().take() {
                 return result;
             }
-            self.sync_pair.1.notified().await;
+            listener.await;
         }
     }
 }
