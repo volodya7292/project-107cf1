@@ -3,7 +3,7 @@ use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
-use crate::rendering::ui::text::{new, TextImpl, UIText};
+use crate::rendering::ui::text::{new_text, TextImpl, UIText};
 use crate::rendering::ui::{fancy_button, text};
 use crate::resource_mapping::ResourceMapping;
 use crate::{default_resources, PROGRAM_NAME};
@@ -322,7 +322,7 @@ impl Application for Game {
             )
             .unwrap();
 
-        let text = text::new(&mut scene, panel, mat_pipelines.text_ui);
+        let text = new_text(&mut scene, panel, mat_pipelines.text_ui);
 
         let mut obj = scene.object::<UIText>(&text);
         obj.set_text(StyledString::new(
@@ -331,7 +331,7 @@ impl Application for Game {
         ));
         drop(obj);
 
-        let fb = fancy_button::new(
+        let fb = fancy_button::new_fancy_button(
             &mut scene,
             panel,
             mat_pipelines.fancy_button,

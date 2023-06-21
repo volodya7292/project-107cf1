@@ -48,7 +48,7 @@ impl UIState for TextState {}
 
 pub type UIText = UIObject<TextState>;
 
-pub fn new(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId) -> EntityId {
+pub fn new_text(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId) -> EntityId {
     let main_obj = UIText::new_raw(
         UILayoutC::new().with_shader_inverted_y(true),
         TextState {

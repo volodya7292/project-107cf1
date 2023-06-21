@@ -58,7 +58,7 @@ impl UIState for FancyButtonState {}
 
 pub type FancyButton = UIObject<FancyButtonState>;
 
-pub fn new(
+pub fn new_fancy_button(
     scene: &mut Scene,
     parent: EntityId,
     mat_pipeline: MaterialPipelineId,
@@ -84,7 +84,7 @@ pub fn new(
     );
 
     let btn_entity = scene.add_object(Some(parent), surface_obj).unwrap();
-    let text_entity = text::new(scene, btn_entity, text_mat_pipeline);
+    let text_entity = text::new_text(scene, btn_entity, text_mat_pipeline);
 
     let mut surface_obj = scene.object::<FancyButton>(&btn_entity);
     surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;
