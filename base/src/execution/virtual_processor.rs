@@ -1,25 +1,20 @@
-use crate::execution::{default_queue, spawn_coroutine, Task};
+use crate::execution::{spawn_coroutine, Task};
 use common::parking_lot::Mutex;
 use common::threading::SafeThreadPool;
-use common::tokio::sync::futures::Notified;
 use common::tokio::sync::{mpsc, Notify};
-use common::{tokio, MO_RELAXED};
-use std::future::{Future, IntoFuture};
-use std::marker::PhantomData;
-use std::pin::Pin;
+use common::MO_RELAXED;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 struct ScheduledTask {
     func: Box<dyn FnOnce() + Send + 'static>,
-    cancelled: Arc<AtomicBool>,
     complete_notify: Arc<Notify>,
 }
 
+/// A software processor that maps to OS threads.
 /// Many such processors allow executing their tasks concurrently on fixed number of real cores.
 pub struct VirtualProcessor {
-    worker: Task<()>,
+    _worker: Task<()>,
     sender: mpsc::UnboundedSender<ScheduledTask>,
 }
 
@@ -27,19 +22,43 @@ impl VirtualProcessor {
     pub fn new(pool: &'static SafeThreadPool) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let worker = spawn_coroutine(VirtualProcessor::worker_fn(pool, receiver));
-        Self { worker, sender }
+        Self {
+            _worker: worker,
+            sender,
+        }
     }
 
     async fn worker_fn(pool: &'static SafeThreadPool, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
-        while let Some(task) = receiver.recv().await {
-            let listener = task.complete_notify.notified();
-            pool.spawn(move || {
-                if task.cancelled.load(MO_RELAXED) {
-                    return;
-                }
-                (task.func)()
-            });
-            listener.await;
+        'outer: loop {
+            let n_parallel_tasks = pool.current_num_threads();
+            let mut notifiers = Vec::with_capacity(n_parallel_tasks);
+            let mut tasks = Vec::with_capacity(n_parallel_tasks);
+
+            for i in 0..n_parallel_tasks {
+                let task = if i == 0 {
+                    let Some(task) = receiver.recv().await else {
+                        break 'outer;
+                    };
+                    task
+                } else {
+                    let Ok(task) = receiver.try_recv() else {
+                        break;
+                    };
+                    task
+                };
+                notifiers.push(task.complete_notify);
+                tasks.push(task.func);
+            }
+
+            let listeners: Vec<_> = notifiers.iter().map(|notify| notify.notified()).collect();
+
+            for task_fn in tasks.into_iter() {
+                pool.spawn(task_fn);
+            }
+
+            for listener in listeners {
+                listener.await;
+            }
         }
     }
 
@@ -50,11 +69,17 @@ impl VirtualProcessor {
     {
         let result = Arc::new(Mutex::new(None::<T>));
         let completion_notify = Arc::new(Notify::new());
+        let cancelled = Arc::new(AtomicBool::new(false));
 
         let closure = {
             let result = Arc::clone(&result);
             let completion_notify = Arc::clone(&completion_notify);
+            let cancelled = Arc::clone(&cancelled);
             move || {
+                if cancelled.load(MO_RELAXED) {
+                    completion_notify.notify_waiters();
+                    return;
+                }
                 let output = task();
                 *result.lock() = Some(output);
                 completion_notify.notify_waiters();
@@ -62,13 +87,12 @@ impl VirtualProcessor {
         };
         let scheduled_task = ScheduledTask {
             func: Box::new(closure),
-            cancelled: Arc::new(AtomicBool::new(false)),
             complete_notify: Arc::clone(&completion_notify),
         };
         let virtual_task = VirtualTask {
             result,
             completion_notify,
-            cancelled: Arc::clone(&scheduled_task.cancelled),
+            cancelled,
         };
 
         self.sender.send(scheduled_task).ok().unwrap();

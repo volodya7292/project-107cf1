@@ -2,7 +2,6 @@ pub mod timer;
 pub mod virtual_processor;
 
 use common::futures_lite::{future, FutureExt};
-use common::parking_lot::Mutex;
 use common::threading::{SafeThreadPool, TaskPriority};
 use common::{threading, tokio};
 use std::future::Future;
@@ -24,7 +23,7 @@ impl<T> Task<T> {
         self.0 = None;
     }
 
-    pub async fn cancel(self) {
+    pub fn cancel(self) {
         self.0.as_ref().unwrap().abort();
     }
 }

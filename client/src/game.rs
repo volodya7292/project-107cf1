@@ -101,9 +101,9 @@ impl Game {
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
-        overworld_orchestrator.set_xz_render_distance(1024);
+        overworld_orchestrator.set_xz_render_distance(256);
         // overworld_orchestrator.set_xz_render_distance(1024);
-        overworld_orchestrator.set_y_render_distance(1024);
+        overworld_orchestrator.set_y_render_distance(256);
         overworld_orchestrator.set_stream_pos(player_pos);
 
         let main_state = Arc::new(Mutex::new(MainState {

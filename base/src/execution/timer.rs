@@ -1,15 +1,11 @@
 use crate::execution::virtual_processor::VirtualProcessor;
 use crate::execution::{spawn_coroutine, Task};
-use crate::MO_RELAXED;
 use common::tokio;
 use common::tokio::time::MissedTickBehavior;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub struct IntervalTimer {
-    waiter: Task<()>,
+    _waiter: Task<()>,
 }
 
 impl IntervalTimer {
@@ -26,6 +22,6 @@ impl IntervalTimer {
             }
         });
 
-        Self { waiter }
+        Self { _waiter: waiter }
     }
 }

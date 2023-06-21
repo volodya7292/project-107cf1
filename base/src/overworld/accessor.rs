@@ -64,6 +64,7 @@ fn read_access_cluster(o_cluster: &OverworldCluster) -> Option<AccessGuard> {
         t_cluster_write.decompress();
         t_cluster = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster_write);
     }
+    t_cluster.unwrap().update_used_time();
 
     Some(AccessGuard::Read(ArcRwLockUpgradableReadGuard::downgrade(
         t_cluster,
@@ -107,11 +108,6 @@ impl ClustersAccessorCache {
                     let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
                     drop(read_guard);
 
-                    let clusters = self.loaded_clusters.read();
-                    let o_cluster = clusters.get(cluster_pos).unwrap();
-
-                    o_cluster.dirty.store(true, MO_RELAXED);
-
                     AccessGuard::Write(rwlock.write_arc())
                 });
 
@@ -124,6 +120,10 @@ impl ClustersAccessorCache {
                         t_cluster.decompress();
                     }
                 };
+
+                let clusters = self.loaded_clusters.read();
+                let o_cluster = clusters.get(cluster_pos).unwrap();
+                o_cluster.dirty.store(true, MO_RELAXED);
 
                 Some(guard.into_mut())
             }
@@ -146,6 +146,7 @@ impl ClustersAccessorCache {
 
                 o_cluster.dirty.store(true, MO_RELAXED);
 
+                t_cluster.unwrap().update_used_time();
                 Some(e.insert(AccessGuard::Write(t_cluster)))
             }
         }

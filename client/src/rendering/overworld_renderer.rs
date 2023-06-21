@@ -156,7 +156,7 @@ impl OverworldRenderer {
         for pos in to_remove_iter.clone() {
             let mut r_cl = self.r_clusters.remove(pos).unwrap();
             if let Some(task) = r_cl.build_mesh_task.take() {
-                let _ = task.cancel();
+                task.cancel();
             }
             r_cl.finish_event.signal();
 

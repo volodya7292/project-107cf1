@@ -7,7 +7,6 @@ use crate::registry::Registry;
 use common::glm;
 use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
 use glm::TVec3;
-use std::io::{Read, Write};
 use std::sync::Arc;
 use std::{mem, slice};
 
@@ -223,14 +222,13 @@ impl RawCluster {
     }
 
     pub fn from_compressed(compressed: CompressedCluster) -> RawCluster {
-        let mut decompressor = lz4_flex::frame::FrameDecoder::new(compressed.cells_data.as_slice());
         let cells = unsafe {
             let len = RawCluster::VOLUME;
             let mut vec = Vec::<CellInfo>::with_capacity(len);
-
             let u8_slice =
                 slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, len * mem::size_of::<CellInfo>());
-            decompressor.read_exact(u8_slice).unwrap();
+
+            lz4_flex::decompress_into(&compressed.cells_data, u8_slice).unwrap();
 
             vec.set_len(len);
             vec
@@ -244,16 +242,13 @@ impl RawCluster {
     }
 
     pub fn compress(self) -> CompressedCluster {
-        let mut cells_data = Vec::new();
-        let mut compressor = lz4_flex::frame::FrameEncoder::new(&mut cells_data);
-        unsafe {
+        let cells_data = unsafe {
             let cells_raw = slice::from_raw_parts(
                 self.cells.as_ptr() as *const u8,
                 Self::VOLUME * mem::size_of::<CellInfo>(),
             );
-            compressor.write_all(cells_raw).unwrap();
-        }
-        compressor.finish().unwrap();
+            lz4_flex::compress(cells_raw)
+        };
 
         CompressedCluster {
             registry: self.registry,

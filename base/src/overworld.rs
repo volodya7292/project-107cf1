@@ -88,6 +88,7 @@ pub struct TrackingCluster {
     pub raw: RawCluster,
     pub dirty_parts: ClusterPartSet,
     pub active_cells: FixedBitSet,
+    pub last_used_time: Mutex<Instant>,
 }
 
 impl TrackingCluster {
@@ -111,7 +112,16 @@ impl TrackingCluster {
             raw,
             dirty_parts,
             active_cells,
+            last_used_time: Mutex::new(Instant::now()),
         }
+    }
+
+    pub fn last_used_time(&self) -> Instant {
+        *self.last_used_time.lock()
+    }
+
+    pub fn update_used_time(&self) {
+        *self.last_used_time.lock() = Instant::now();
     }
 
     /// Complexity: O(N), where N is RawCluster::VOLUME.

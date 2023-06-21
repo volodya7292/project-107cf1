@@ -1,5 +1,5 @@
+use crate::execution::default_queue;
 use crate::execution::virtual_processor::{VirtualProcessor, VirtualTask};
-use crate::execution::{default_queue, Task};
 use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
 use crate::overworld::position::{BlockPos, ClusterPos};
@@ -9,12 +9,12 @@ use crate::overworld::{
 };
 use common::glm;
 use common::parking_lot::RwLockWriteGuard;
-use common::rayon::prelude::*;
 use common::types::{HashMap, HashSet};
 use common::{MO_RELAXED, MO_RELEASE};
 use glm::DVec3;
 use smallvec::SmallVec;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Manages overworld: adds/removes new clusters, loads them in parallel, etc.
 pub struct OverworldOrchestrator {
@@ -195,6 +195,7 @@ impl OverworldOrchestrator {
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
     const MAX_Y_RENDER_DISTANCE: u64 = 512;
     const MIN_UNCOMPRESSED_DISTANCE: u64 = 128;
+    const IDLE_TIME_FOR_COMPRESSION: Duration = Duration::from_secs(5);
 
     pub fn new(overworld: &Overworld) -> Self {
         Self {
@@ -210,15 +211,11 @@ impl OverworldOrchestrator {
     }
 
     pub fn set_xz_render_distance(&mut self, dist: u64) {
-        self.xz_render_distance = dist
-            .min(Self::MAX_XZ_RENDER_DISTANCE)
-            .max(Self::MIN_XZ_RENDER_DISTANCE);
+        self.xz_render_distance = dist.clamp(Self::MIN_XZ_RENDER_DISTANCE, Self::MAX_XZ_RENDER_DISTANCE);
     }
 
     pub fn set_y_render_distance(&mut self, dist: u64) {
-        self.y_render_distance = dist
-            .min(Self::MAX_Y_RENDER_DISTANCE)
-            .max(Self::MIN_Y_RENDER_DISTANCE);
+        self.y_render_distance = dist.clamp(Self::MIN_Y_RENDER_DISTANCE, Self::MAX_Y_RENDER_DISTANCE);
     }
 
     pub fn set_stream_pos(&mut self, pos: DVec3) {
@@ -245,7 +242,7 @@ impl OverworldOrchestrator {
         for d_pos in &clusters_diff.to_remove {
             let cluster = r_clusters.get_mut(d_pos).unwrap();
             if let Some(task) = cluster.load_task.take() {
-                let _ = task.cancel();
+                task.cancel();
             }
         }
 
@@ -279,8 +276,6 @@ impl OverworldOrchestrator {
                 generator.generate_cluster(&mut cluster, pos);
                 let mut t_cluster = t_cluster.write();
                 *t_cluster = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));
-                // Compress immediately to prevent memory flooding
-                t_cluster.compress();
             });
             r_cluster.load_task = Some(load_task);
         }
@@ -332,6 +327,7 @@ impl OverworldOrchestrator {
         // ------------------------------------------------------------------------------------------------------
         // let n_max_uncompressed_clusters = (self.xz_render_distance.pow(2) as f64 * 3.14) as usize;
         // let uncompressed_count = 0;
+        let curr_time = Instant::now();
 
         for (pos, o_cluster) in &*o_clusters {
             let dist = glm::distance2(&glm::convert::<_, DVec3>(*pos.get()), &self.stream_pos);
@@ -340,10 +336,16 @@ impl OverworldOrchestrator {
                 continue;
             }
 
-            let t_cluster = Arc::clone(&o_cluster.cluster);
-
             {
-                let t_cluster = t_cluster.read();
+                let t_cluster = o_cluster.cluster.read();
+
+                if let ClusterState::Ready(t_cluster) = &*t_cluster {
+                    if curr_time.duration_since(t_cluster.last_used_time()) <= Self::IDLE_TIME_FOR_COMPRESSION
+                    {
+                        continue;
+                    }
+                }
+
                 if t_cluster.is_initial() || t_cluster.is_compressed() {
                     // The cluster is not loaded or is already compressed
                     continue;
@@ -360,10 +362,13 @@ impl OverworldOrchestrator {
                 continue;
             }
 
-            let task = self.cluster_compression_processor.spawn(move || {
-                let mut t_cluster = t_cluster.write();
-                t_cluster.compress();
-            });
+            let task = {
+                let t_cluster = Arc::clone(&o_cluster.cluster);
+                self.cluster_compression_processor.spawn(move || {
+                    let mut t_cluster = t_cluster.write();
+                    t_cluster.compress();
+                })
+            };
             r_cluster.compress_task = Some(task);
         }
 
