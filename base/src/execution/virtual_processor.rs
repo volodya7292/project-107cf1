@@ -12,9 +12,10 @@ struct ScheduledTask {
 }
 
 /// A software processor that maps to OS threads.
-/// Many such processors allow executing their tasks concurrently on fixed number of real cores.
+/// Many such processors allow executing their tasks concurrently
+/// instead of waiting for FIFO queue in case of threadpool.
 pub struct VirtualProcessor {
-    _worker: Task<()>,
+    worker: Task<()>,
     sender: mpsc::UnboundedSender<ScheduledTask>,
 }
 
@@ -22,10 +23,12 @@ impl VirtualProcessor {
     pub fn new(pool: &'static SafeThreadPool) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let worker = spawn_coroutine(VirtualProcessor::worker_fn(pool, receiver));
-        Self {
-            _worker: worker,
-            sender,
-        }
+        Self { worker, sender }
+    }
+
+    /// Detaches the virtual processor so the tasks can continue executing in background.
+    pub fn detach(self) {
+        self.worker.detach()
     }
 
     async fn worker_fn(pool: &'static SafeThreadPool, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {

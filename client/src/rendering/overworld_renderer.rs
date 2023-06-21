@@ -40,8 +40,6 @@ pub struct OverworldRenderer {
 
     entities: HashMap<ClusterPos, ClusterEntities>,
     r_clusters: HashMap<ClusterPos, RCluster>,
-
-    build_processor: VirtualProcessor,
 }
 
 #[derive(Default)]
@@ -133,7 +131,6 @@ impl OverworldRenderer {
             to_update_meshes: Arc::new(Mutex::new(HashMap::with_capacity(1024))),
             entities: HashMap::with_capacity(8192),
             r_clusters: HashMap::with_capacity(8192),
-            build_processor: VirtualProcessor::new(default_queue()),
         }
     }
 
@@ -242,6 +239,8 @@ impl OverworldRenderer {
         });
 
         // 4. Schedule new updates
+        let build_processor = VirtualProcessor::new(default_queue());
+
         for pos in &sorted_build_positions {
             let r_cl = self.r_clusters.get(pos).unwrap();
 
@@ -257,7 +256,7 @@ impl OverworldRenderer {
                 let res_map = self.resource_mapping.clone();
                 let device = self.device.clone();
 
-                self.build_processor.spawn(move || {
+                build_processor.spawn(move || {
                     let accessor = ClusterNeighbourhoodAccessor::new(registry, &loaded_clusters, pos);
                     accessor
                         .is_center_available()
@@ -285,6 +284,7 @@ impl OverworldRenderer {
             let r_cl = self.r_clusters.get_mut(pos).unwrap();
             r_cl.build_mesh_task = Some(build_mesh_task);
         }
+        build_processor.detach();
 
         // Remove schedules clusters
         self.to_build_meshes

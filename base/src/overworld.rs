@@ -263,6 +263,7 @@ impl OverworldCluster {
             t_cluster.decompress();
             t_cluster_read = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster);
         }
+        t_cluster_read.unwrap().update_used_time();
         Some(ArcRwLockUpgradableReadGuard::downgrade(t_cluster_read))
     }
 
