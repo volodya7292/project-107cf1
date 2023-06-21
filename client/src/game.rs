@@ -107,6 +107,7 @@ impl Game {
         overworld_orchestrator.set_stream_pos(player_pos);
 
         let main_state = Arc::new(Mutex::new(MainState {
+            last_tick_start: Instant::now(),
             tick_count: 0,
             overworld,
             overworld_orchestrator: Arc::new(Mutex::new(overworld_orchestrator)),
@@ -267,7 +268,7 @@ impl Application for Game {
                     let t0 = Instant::now();
                     on_tick(Arc::clone(&main_state), Arc::clone(&overworld_renderer));
                     let t1 = Instant::now();
-                    println!("tick_inner {}", (t1 - t0).as_millis());
+                    // println!("tick_inner {}", (t1 - t0).as_millis());
                 },
             ));
         }
@@ -463,11 +464,8 @@ impl Application for Game {
             curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
         }
 
-        if input.mouse().is_button_pressed(MouseButton::Left) {
-            curr_state.do_set_block = true;
-        } else if input.mouse().is_button_pressed(MouseButton::Right) {
-            curr_state.do_remove_block = true;
-        }
+        curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
+        curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
 
         drop(curr_state);
         drop(renderer);
@@ -585,6 +583,7 @@ impl Application for Game {
 
 #[derive(Clone)]
 struct MainState {
+    last_tick_start: Instant,
     tick_count: u64,
     overworld: Arc<Overworld>,
     overworld_orchestrator: Arc<Mutex<OverworldOrchestrator>>,
@@ -631,11 +630,10 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
 }
 
 fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut OverworldActionsStorage) {
+    let start_t = Instant::now();
     let curr_state = main_state.lock().clone();
     let registry = curr_state.overworld.main_registry();
-
-    // TODO: calculate precisely.
-    let delta_time = 0.02;
+    let delta_time = (start_t - curr_state.last_tick_start).as_secs_f64();
 
     let mut new_block_set_cooldown = curr_state.block_set_cooldown;
 
@@ -678,9 +676,7 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
             .set_stream_pos(curr_state.player_pos);
     }
 
-    let mut main_state = main_state.lock();
-
-    main_state.do_set_block = false;
-    main_state.do_remove_block = false;
-    main_state.block_set_cooldown = new_block_set_cooldown;
+    let mut new_state = main_state.lock();
+    new_state.last_tick_start = start_t;
+    new_state.block_set_cooldown = new_block_set_cooldown;
 }
