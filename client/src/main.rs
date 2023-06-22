@@ -8,7 +8,8 @@ mod resource_mapping;
 mod tests;
 
 use crate::game::Game;
-use common::log;
+use base::execution::RuntimeGuard;
+use common::{log, rayon};
 use engine::{utils, Engine};
 use simple_logger::SimpleLogger;
 use std::thread;
@@ -43,7 +44,7 @@ fn parking_lot_deadlock_detection() {
     });
 }
 
-fn init_threads() {
+fn init_threads() -> RuntimeGuard {
     let mut available_threads = thread::available_parallelism().unwrap().get();
 
     let render_threads = (available_threads / 2).min(2);
@@ -53,13 +54,14 @@ fn init_threads() {
 
     // available_threads = available_threads.saturating_sub(coroutine_threads).max(1);
 
-    base::execution::init(default_threads);
+    let guard = base::execution::init(default_threads);
     engine::execution::init(render_threads);
+    guard
 }
 
 fn main() {
     parking_lot_deadlock_detection();
-    init_threads();
+    let _rt_guard = init_threads();
 
     SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)

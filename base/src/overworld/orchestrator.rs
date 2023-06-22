@@ -193,7 +193,7 @@ impl OverworldOrchestrator {
     const MIN_XZ_RENDER_DISTANCE: u64 = 128;
     const MAX_XZ_RENDER_DISTANCE: u64 = 1024;
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
-    const MAX_Y_RENDER_DISTANCE: u64 = 512;
+    const MAX_Y_RENDER_DISTANCE: u64 = 1024;
     const MIN_UNCOMPRESSED_DISTANCE: u64 = 128;
     const IDLE_TIME_FOR_COMPRESSION: Duration = Duration::from_secs(5);
 
@@ -205,8 +205,8 @@ impl OverworldOrchestrator {
             loaded_clusters: Arc::clone(overworld.loaded_clusters()),
             overworld_generator: Arc::clone(overworld.generator()),
             r_clusters: Default::default(),
-            cluster_load_processor: VirtualProcessor::new(default_queue()),
-            cluster_compression_processor: VirtualProcessor::new(default_queue()),
+            cluster_load_processor: VirtualProcessor::new(&default_queue().unwrap()),
+            cluster_compression_processor: VirtualProcessor::new(&default_queue().unwrap()),
         }
     }
 

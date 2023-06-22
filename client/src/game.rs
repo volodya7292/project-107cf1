@@ -70,6 +70,7 @@ pub struct Game {
     resources: Arc<ResourceFile>,
     registry: Arc<MainRegistry>,
     res_map: Arc<DefaultResourceMapping>,
+    default_queue: Arc<SafeThreadPool>,
 
     cursor_rel: (f64, f64),
     tick_timer: Option<IntervalTimer>,
@@ -101,9 +102,9 @@ impl Game {
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
-        overworld_orchestrator.set_xz_render_distance(256);
+        overworld_orchestrator.set_xz_render_distance(512);
         // overworld_orchestrator.set_xz_render_distance(1024);
-        overworld_orchestrator.set_y_render_distance(256);
+        overworld_orchestrator.set_y_render_distance(512);
         overworld_orchestrator.set_stream_pos(player_pos);
 
         let main_state = Arc::new(Mutex::new(MainState {
@@ -130,15 +131,11 @@ impl Game {
 
         // TODO: save tick_count_state to disk
 
-        // TODO: render sunlight:
-        //   when there's no visible blocks above the viewer to form a shadow
-        //      height < 0 => do not pass the sunlight
-        //      height >= 0 => pass the sunlight
-
         let program = Game {
             resources,
             registry: Arc::clone(&main_registry),
             res_map,
+            default_queue: default_queue().unwrap(),
             cursor_rel: (0.0, 0.0),
             tick_timer: None,
             main_state,
@@ -263,7 +260,7 @@ impl Application for Game {
 
             self.tick_timer = Some(IntervalTimer::start(
                 Duration::from_millis(20),
-                VirtualProcessor::new(default_queue()),
+                VirtualProcessor::new(&self.default_queue),
                 move || {
                     let t0 = Instant::now();
                     on_tick(Arc::clone(&main_state), Arc::clone(&overworld_renderer));

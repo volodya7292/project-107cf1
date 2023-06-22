@@ -13,6 +13,7 @@ use base::registry::Registry;
 use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
+use common::threading::SafeThreadPool;
 use common::tokio::sync::Notify;
 use common::types::{HashMap, HashSet};
 use common::{glm, MO_RELAXED};
@@ -27,6 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 pub struct OverworldRenderer {
+    default_queue: Arc<SafeThreadPool>,
     device: Arc<vkw::Device>,
     cluster_mat_pipeline: u32,
     registry: Arc<Registry>,
@@ -120,6 +122,7 @@ impl OverworldRenderer {
         root_entity: EntityId,
     ) -> Self {
         Self {
+            default_queue: default_queue().unwrap(),
             device,
             cluster_mat_pipeline,
             registry,
@@ -239,7 +242,7 @@ impl OverworldRenderer {
         });
 
         // 4. Schedule new updates
-        let build_processor = VirtualProcessor::new(default_queue());
+        let build_processor = VirtualProcessor::new(&self.default_queue);
 
         for pos in &sorted_build_positions {
             let r_cl = self.r_clusters.get(pos).unwrap();

@@ -20,9 +20,9 @@ pub struct VirtualProcessor {
 }
 
 impl VirtualProcessor {
-    pub fn new(pool: &'static SafeThreadPool) -> Self {
+    pub fn new(pool: &Arc<SafeThreadPool>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = spawn_coroutine(VirtualProcessor::worker_fn(pool, receiver));
+        let worker = spawn_coroutine(VirtualProcessor::worker_fn(Arc::clone(&pool), receiver));
         Self { worker, sender }
     }
 
@@ -31,7 +31,7 @@ impl VirtualProcessor {
         self.worker.detach()
     }
 
-    async fn worker_fn(pool: &'static SafeThreadPool, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
+    async fn worker_fn(pool: Arc<SafeThreadPool>, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
         'outer: loop {
             let n_parallel_tasks = pool.current_num_threads();
             let mut notifiers = Vec::with_capacity(n_parallel_tasks);
