@@ -1,4 +1,5 @@
 use crate::client::utils;
+use crate::default_resources;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
@@ -6,7 +7,6 @@ use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
 use crate::rendering::ui::text::{new_text, TextImpl, UIText};
 use crate::rendering::ui::{fancy_button, text};
 use crate::resource_mapping::ResourceMapping;
-use crate::{default_resources, PROGRAM_NAME};
 use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
@@ -63,6 +63,7 @@ use std::sync::{atomic, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
@@ -102,9 +103,9 @@ impl Game {
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
-        overworld_orchestrator.set_xz_render_distance(512);
+        overworld_orchestrator.set_xz_render_distance(256);
         // overworld_orchestrator.set_xz_render_distance(1024);
-        overworld_orchestrator.set_y_render_distance(512);
+        overworld_orchestrator.set_y_render_distance(256);
         overworld_orchestrator.set_stream_pos(player_pos);
 
         let main_state = Arc::new(Mutex::new(MainState {

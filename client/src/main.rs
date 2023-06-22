@@ -15,8 +15,6 @@ use simple_logger::SimpleLogger;
 use std::thread;
 use std::time::{Duration, Instant};
 
-pub const PROGRAM_NAME: &str = "project-107cf1";
-
 #[cfg(target_os = "macos")]
 embed_plist::embed_info_plist!("../Info.plist");
 
@@ -60,7 +58,7 @@ fn init_threads() -> RuntimeGuard {
 }
 
 fn main() {
-    parking_lot_deadlock_detection();
+    // parking_lot_deadlock_detection();
     let _rt_guard = init_threads();
 
     SimpleLogger::new()

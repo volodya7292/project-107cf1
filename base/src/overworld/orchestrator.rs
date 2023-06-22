@@ -8,6 +8,7 @@ use crate::overworld::{
     ClusterState, ClusterStateEnum, LoadedClusters, Overworld, OverworldCluster, TrackingCluster,
 };
 use common::glm;
+use common::glm::DVec2;
 use common::parking_lot::RwLockWriteGuard;
 use common::types::{HashMap, HashSet};
 use common::{MO_RELAXED, MO_RELEASE};
@@ -43,7 +44,7 @@ fn calc_cluster_layout(
     xz_render_distance: u64,
     y_render_distance: u64,
 ) -> HashSet<ClusterPos> {
-    let cr = (xz_render_distance / RawCluster::SIZE as u64 / 2) as i64;
+    let cr = (xz_render_distance / RawCluster::SIZE as u64) as i64 + 1;
     let cl_size = RawCluster::SIZE as i64;
     let c_stream_pos = BlockPos::from_f64(stream_pos).cluster_pos();
 
@@ -109,9 +110,13 @@ fn get_clusters_difference(
         .iter()
         .map(|p| ClusterPosDistance {
             pos: *p,
+            // distance: glm::distance2(
+            //     &glm::convert::<_, DVec3>(p.get().add_scalar(RawCluster::SIZE as i64 / 2)),
+            //     &stream_pos,
+            // ),
             distance: glm::distance2(
-                &glm::convert::<_, DVec3>(p.get().add_scalar(RawCluster::SIZE as i64 / 2)),
-                &stream_pos,
+                &glm::convert::<_, DVec2>(p.get().xy().add_scalar(RawCluster::SIZE as i64 / 2)),
+                &stream_pos.xy(),
             ),
         })
         .collect();
@@ -195,7 +200,7 @@ impl OverworldOrchestrator {
     const MIN_Y_RENDER_DISTANCE: u64 = 128;
     const MAX_Y_RENDER_DISTANCE: u64 = 1024;
     const MIN_UNCOMPRESSED_DISTANCE: u64 = 128;
-    const IDLE_TIME_FOR_COMPRESSION: Duration = Duration::from_secs(5);
+    const IDLE_TIME_FOR_COMPRESSION: Duration = Duration::from_secs(4);
 
     pub fn new(overworld: &Overworld) -> Self {
         Self {

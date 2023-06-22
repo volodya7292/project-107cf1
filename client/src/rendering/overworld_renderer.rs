@@ -8,7 +8,7 @@ use base::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
 use base::overworld::orchestrator::get_side_clusters;
 use base::overworld::orchestrator::OverworldUpdateResult;
 use base::overworld::position::ClusterPos;
-use base::overworld::{ClusterStateEnum, LoadedClusters};
+use base::overworld::LoadedClusters;
 use base::registry::Registry;
 use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
@@ -67,13 +67,7 @@ struct PendingUpdate {
     pos: ClusterPos,
     dependencies: SmallVec<[Arc<BooleanFlag>; ClusterPartSet::NUM]>,
     finish_event: Arc<BooleanFlag>,
-
     to_update_meshes: Arc<Mutex<HashMap<ClusterPos, ClusterMeshes>>>,
-    registry: Arc<Registry>,
-    res_map: Arc<ResourceMapping>,
-    loaded_clusters: LoadedClusters,
-    device: Arc<vkw::Device>,
-
     build_task: VirtualTask<Option<ClusterMeshes>>,
 }
 
@@ -190,7 +184,7 @@ impl OverworldRenderer {
         }
 
         // 2. Collect dependent clusters, meshes of which may have been affected by changes of this cluster
-        for (pos, parts) in self.to_build_meshes.clone() {
+        for (pos, parts) in &overworld_update.dirty_clusters_parts {
             for part_idx in parts.iter_ones() {
                 let dir = part_idx_to_dir(part_idx);
                 let rel_pos = pos.offset_i32(&dir);
@@ -237,7 +231,7 @@ impl OverworldRenderer {
         // Sort dirty clusters by distance from observer
         let mut sorted_build_positions: Vec<_> = to_build_meshes.iter().cloned().collect();
         sorted_build_positions.par_sort_by_cached_key(|pos| {
-            let diff = pos.get() - stream_pos_i;
+            let diff = pos.get().xy() - stream_pos_i.xy();
             diff.dot(&diff)
         });
 
@@ -275,10 +269,6 @@ impl OverworldRenderer {
                     .collect(),
                 finish_event: Arc::clone(&r_cl.finish_event),
                 to_update_meshes: Arc::clone(&self.to_update_meshes),
-                registry: Arc::clone(&self.registry),
-                res_map: Arc::clone(&self.resource_mapping),
-                loaded_clusters: Arc::clone(&self.loaded_clusters),
-                device: Arc::clone(&self.device),
                 build_task,
             };
 
