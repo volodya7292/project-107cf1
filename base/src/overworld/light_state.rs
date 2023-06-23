@@ -13,7 +13,7 @@ impl LightLevel {
         self == &Self::ZERO
     }
 
-    /// Only 5 bit is available for each component
+    /// Only 5 bits is available for each component
     pub const fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         Self(((r as u16) << 10) | ((g as u16) << 5) | (b as u16))
     }

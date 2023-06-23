@@ -2,7 +2,7 @@ use crate::overworld::facing::Facing;
 use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterPos, RelativeBlockPos};
-use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, BlockDataMut, LightType};
 use crate::overworld::{ClusterState, LoadedClusters, OverworldCluster, TrackingCluster};
 use crate::registry::Registry;
 use common::glm::TVec3;
@@ -313,7 +313,7 @@ impl OverworldAccessor {
     }
 
     /// Sets light level if the respective cluster is loaded
-    pub fn set_light_source(&mut self, pos: &BlockPos, light_level: LightLevel) {
+    pub fn set_light_source(&mut self, pos: &BlockPos, light_level: LightLevel, ty: LightType) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -322,7 +322,8 @@ impl OverworldAccessor {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
 
-            *data.light_source_mut() = light_level;
+            *data.raw_light_source_mut() = light_level;
+            *data.light_source_type_mut() = ty;
 
             // The light must spread or vanish
             *data.active_mut() = true;
@@ -333,7 +334,7 @@ impl OverworldAccessor {
     }
 
     /// Sets light level if the respective cluster is loaded
-    pub fn set_light_state(&mut self, pos: &BlockPos, light_level: LightLevel) {
+    pub fn set_light_state(&mut self, pos: &BlockPos, light_level: LightLevel, ty: LightType) {
         if let Some(cluster) = self
             .cache
             .access_cluster_mut(&pos.cluster_pos())
@@ -342,7 +343,14 @@ impl OverworldAccessor {
             let cluster_block_pos = pos.cluster_block_pos();
             let mut data = cluster.raw.get_mut(&cluster_block_pos);
 
-            *data.light_state_mut() = light_level;
+            match ty {
+                LightType::Regular => {
+                    *data.light_state_mut() = light_level;
+                }
+                LightType::Sky => {
+                    *data.sky_light_state_mut() = light_level;
+                }
+            }
 
             cluster.dirty_parts.set_from_block_pos(&cluster_block_pos);
         }

@@ -22,7 +22,7 @@ use base::overworld::facing::Facing;
 use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
 use base::overworld::position::{BlockPos, ClusterPos};
-use base::overworld::raw_cluster::{BlockDataImpl, RawCluster};
+use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
 use base::overworld::ReadOnlyOverworld;
 use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use base::overworld::{Overworld, OverworldOrchestrator};
@@ -648,7 +648,11 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
                     new_actions.set_block(set_pos, curr_state.curr_block.clone());
 
                     if curr_state.curr_block.block_id == registry.block_glow.block_id {
-                        new_actions.set_light_source(set_pos, LightLevel::from_intensity(10));
+                        new_actions.set_light_source(
+                            set_pos,
+                            LightLevel::from_intensity(10),
+                            LightType::Regular,
+                        );
                     } else {
                     }
                 }
@@ -658,7 +662,7 @@ fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut Overwo
         } else if curr_state.do_remove_block {
             if let Some(inter) = curr_state.look_at_block {
                 new_actions.set_block(inter.0, registry.block_empty);
-                new_actions.set_light_source(inter.0, LightLevel::ZERO);
+                new_actions.set_light_source(inter.0, LightLevel::ZERO, LightType::Regular);
 
                 new_block_set_cooldown = 0.15;
             }

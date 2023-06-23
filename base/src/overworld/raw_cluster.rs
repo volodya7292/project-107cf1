@@ -47,13 +47,22 @@ impl Default for CompactEntityId {
     }
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+pub enum LightType {
+    Regular,
+    Sky,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct CellInfo {
     pub entity_id: CompactEntityId,
     pub block_id: u16,
     pub occluder: Occluder,
     pub light_source: LightLevel,
+    pub light_source_type: LightType,
     pub light_state: LightLevel,
+    pub sky_light_state: LightLevel,
     pub liquid_state: LiquidState,
     pub active: bool,
 }
@@ -65,7 +74,9 @@ impl Default for CellInfo {
             block_id: u16::MAX,
             occluder: Default::default(),
             light_source: Default::default(),
+            light_source_type: LightType::Regular,
             light_state: Default::default(),
+            sky_light_state: Default::default(),
             liquid_state: LiquidState::NONE,
             active: false,
         }
@@ -82,8 +93,23 @@ pub trait BlockDataImpl {
     fn block_id(&self) -> u16;
     /// Returns the specified block component `C`
     fn get<C: Component>(&self) -> Option<&C>;
-    fn light_source(&self) -> LightLevel;
+    fn raw_light_source(&self) -> LightLevel;
+    fn light_source_type(&self) -> LightType;
+
+    fn regular_light_source(&self) -> LightLevel {
+        (self.light_source_type() == LightType::Regular)
+            .then_some(self.raw_light_source())
+            .unwrap_or(LightLevel::ZERO)
+    }
+
+    fn sky_light_source(&self) -> LightLevel {
+        (self.light_source_type() == LightType::Sky)
+            .then_some(self.raw_light_source())
+            .unwrap_or(LightLevel::ZERO)
+    }
+
     fn light_state(&self) -> LightLevel;
+    fn sky_light_state(&self) -> LightLevel;
     fn liquid_state(&self) -> &LiquidState;
     fn occluder(&self) -> Occluder;
     fn active(&self) -> bool;
@@ -98,12 +124,20 @@ impl BlockDataImpl for BlockData<'_> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 
-    fn light_source(&self) -> LightLevel {
+    fn raw_light_source(&self) -> LightLevel {
         self.info.light_source
+    }
+
+    fn light_source_type(&self) -> LightType {
+        self.info.light_source_type
     }
 
     fn light_state(&self) -> LightLevel {
         self.info.light_state
+    }
+
+    fn sky_light_state(&self) -> LightLevel {
+        self.info.sky_light_state
     }
 
     fn liquid_state(&self) -> &LiquidState {
@@ -134,12 +168,20 @@ impl BlockDataImpl for BlockDataMut<'_> {
         self.block_storage.get::<C>(&self.info.entity_id.regular())
     }
 
-    fn light_source(&self) -> LightLevel {
+    fn raw_light_source(&self) -> LightLevel {
         self.info.light_source
+    }
+
+    fn light_source_type(&self) -> LightType {
+        self.info.light_source_type
     }
 
     fn light_state(&self) -> LightLevel {
         self.info.light_state
+    }
+
+    fn sky_light_state(&self) -> LightLevel {
+        self.info.sky_light_state
     }
 
     fn liquid_state(&self) -> &LiquidState {
@@ -177,17 +219,22 @@ impl BlockDataMut<'_> {
         self.info.active |= block.active_by_default();
     }
 
-    /// Raw mutable access to light source.
-    pub fn light_source_mut(&mut self) -> &mut LightLevel {
+    pub fn raw_light_source_mut(&mut self) -> &mut LightLevel {
         &mut self.info.light_source
     }
 
-    /// Raw mutable access to light state.
+    pub fn light_source_type_mut(&mut self) -> &mut LightType {
+        &mut self.info.light_source_type
+    }
+
     pub fn light_state_mut(&mut self) -> &mut LightLevel {
         &mut self.info.light_state
     }
 
-    /// Raw mutable access to liquid state.
+    pub fn sky_light_state_mut(&mut self) -> &mut LightLevel {
+        &mut self.info.sky_light_state
+    }
+
     pub fn liquid_state_mut(&mut self) -> &mut LiquidState {
         &mut self.info.liquid_state
     }

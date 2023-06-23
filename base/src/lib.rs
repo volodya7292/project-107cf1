@@ -13,7 +13,7 @@ use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{BlockData, BlockDataImpl};
+use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, LightType};
 use crate::overworld::{ClusterState, LoadedClusters};
 use crate::registry::Registry;
 use common::parking_lot::Mutex;
@@ -141,7 +141,7 @@ fn on_light_tick(
     mut result: OverworldActionsBuilder,
 ) -> bool {
     let prev_light = block_data.light_state().components();
-    let mut new_light = block_data.light_source().components();
+    let mut new_light = block_data.regular_light_source().components();
     let block = registry.get_block(block_data.block_id()).unwrap();
 
     // Collect neighbouring light (vanishing)
@@ -156,7 +156,7 @@ fn on_light_tick(
             let rel_light = if rel_block.can_pass_light() {
                 data.light_state()
             } else {
-                data.light_source()
+                data.regular_light_source()
             };
 
             let rel_curr_light = rel_light.components().map(|v| v.saturating_sub(1));
@@ -173,7 +173,58 @@ fn on_light_tick(
         }
 
         let new_state = LightLevel::from_vec(new_light);
-        result.set_light_state(*pos, new_state);
+        result.set_regular_light_state(*pos, new_state);
+        return true;
+    }
+
+    false
+}
+
+fn on_sky_light_tick(
+    pos: &BlockPos,
+    block_data: BlockData,
+    registry: &Registry,
+    access: &mut ReadOnlyOverworldAccessor,
+    mut result: OverworldActionsBuilder,
+) -> bool {
+    let prev_light = block_data.sky_light_state().components();
+    let mut new_light = block_data.sky_light_source().components();
+    let block = registry.get_block(block_data.block_id()).unwrap();
+
+    // Collect neighbouring light (vanishing)
+    if block.can_pass_light() {
+        for dir in Facing::DIRECTIONS {
+            let rel_pos = pos.offset_i32(&dir);
+            let Some(data) = access.get_block(&rel_pos) else {
+                return true;
+            };
+            let rel_block = registry.get_block(data.block_id()).unwrap();
+
+            let rel_light = if rel_block.can_pass_light() {
+                data.sky_light_state()
+            } else {
+                data.sky_light_source()
+            };
+
+            let rel_curr_light = if &dir == Facing::PositiveY.direction() {
+                rel_light.components()
+            } else {
+                rel_light.components().map(|v| v.saturating_sub(1))
+            };
+
+            new_light = new_light.sup(&rel_curr_light);
+        }
+    }
+
+    // Spread current light to neighbours
+    if new_light != prev_light {
+        for dir in Facing::DIRECTIONS {
+            let rel_pos = pos.offset_i32(&dir);
+            result.set_activity(rel_pos, true);
+        }
+
+        let new_state = LightLevel::from_vec(new_light);
+        result.set_sky_light_state(*pos, new_state);
         return true;
     }
 
@@ -218,6 +269,15 @@ pub fn process_active_blocks(
 
             // Spread/vanish lights
             keep_active |= on_light_tick(
+                &global_pos,
+                block_data,
+                &registry,
+                &mut accessor,
+                after_actions.builder(),
+            );
+
+            // Spread/vanish sky lights
+            keep_active |= on_sky_light_tick(
                 &global_pos,
                 block_data,
                 &registry,
@@ -279,8 +339,9 @@ fn apply_overworld_actions(
         params: Vec<&'a StateChangeInfo>,
         activities: HashMap<BlockPos, bool>,
         liquids: HashMap<BlockPos, LiquidState>,
-        lights_sources: HashMap<BlockPos, LightLevel>,
+        lights_sources: HashMap<BlockPos, (LightLevel, LightType)>,
         lights_states: HashMap<BlockPos, LightLevel>,
+        sky_lights_states: HashMap<BlockPos, LightLevel>,
     }
     impl Default for AllChanges<'_> {
         fn default() -> Self {
@@ -290,6 +351,7 @@ fn apply_overworld_actions(
                 liquids: HashMap::with_capacity(256),
                 lights_sources: HashMap::with_capacity(256),
                 lights_states: HashMap::with_capacity(256),
+                sky_lights_states: HashMap::with_capacity(256),
             }
         }
     }
@@ -342,7 +404,7 @@ fn apply_overworld_actions(
             .or_default();
 
         if let hash_map::Entry::Vacant(e) = changes.lights_sources.entry(info.pos) {
-            e.insert(info.light);
+            e.insert((info.light, info.ty));
         }
     }
 
@@ -353,6 +415,17 @@ fn apply_overworld_actions(
             .or_default();
 
         if let hash_map::Entry::Vacant(e) = changes.lights_states.entry(info.pos) {
+            e.insert(info.light);
+        }
+    }
+
+    // Merge sky light state changes
+    for info in actions.iter().flat_map(|v| &v.sky_light_state_infos) {
+        let changes = after_actions_by_cluster
+            .entry(info.pos.cluster_pos())
+            .or_default();
+
+        if let hash_map::Entry::Vacant(e) = changes.sky_lights_states.entry(info.pos) {
             e.insert(info.light);
         }
     }
@@ -377,11 +450,14 @@ fn apply_overworld_actions(
         for (pos, liquid) in &changes.liquids {
             access.set_liquid_state(pos, *liquid);
         }
-        for (pos, light) in &changes.lights_sources {
-            access.set_light_source(pos, *light);
+        for (pos, (light, ty)) in &changes.lights_sources {
+            access.set_light_source(pos, *light, *ty);
         }
         for (pos, light) in &changes.lights_states {
-            access.set_light_state(pos, *light);
+            access.set_light_state(pos, *light, LightType::Regular);
+        }
+        for (pos, light) in &changes.sky_lights_states {
+            access.set_light_state(pos, *light, LightType::Sky);
         }
 
         all_affected_positions.lock().push(affected_positions);

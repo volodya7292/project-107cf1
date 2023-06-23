@@ -2,7 +2,7 @@ use crate::overworld;
 use crate::overworld::block::{Block, BlockBuilder};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::occluder::Occluder;
-use crate::overworld::raw_cluster::{BlockData, CellInfo};
+use crate::overworld::raw_cluster::{BlockData, CellInfo, LightType};
 use crate::overworld::structure::world::{biome, Biome};
 use crate::overworld::structure::Structure;
 use common::resource_file::ResourceRef;
@@ -51,7 +51,9 @@ impl Registry {
             block_id: block_empty,
             occluder: Default::default(),
             light_source: Default::default(),
+            light_source_type: LightType::Regular,
             light_state: Default::default(),
+            sky_light_state: Default::default(),
             liquid_state: Default::default(),
             active: false,
         });

@@ -3,6 +3,7 @@ use crate::overworld::block::BlockState;
 use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::BlockPos;
+use crate::overworld::raw_cluster::LightType;
 use entity_data::{ArchetypeState, Component};
 use std::{mem, ptr};
 
@@ -40,6 +41,12 @@ pub struct LightChangeInfo {
     pub light: LightLevel,
 }
 
+pub struct LightSourceChangeInfo {
+    pub pos: BlockPos,
+    pub light: LightLevel,
+    pub ty: LightType,
+}
+
 pub struct LiquidChangeInfo {
     pub pos: BlockPos,
     pub liquid: LiquidState,
@@ -58,8 +65,9 @@ pub struct OverworldActionsStorage {
     pub states_infos: Vec<StateChangeInfo>,
     pub components_infos: Vec<StateChangeInfo>,
     pub liquid_infos: Vec<LiquidChangeInfo>,
-    pub light_source_infos: Vec<LightChangeInfo>,
+    pub light_source_infos: Vec<LightSourceChangeInfo>,
     pub light_state_infos: Vec<LightChangeInfo>,
+    pub sky_light_state_infos: Vec<LightChangeInfo>,
     pub activity_infos: Vec<ActivityChangeInfo>,
 }
 
@@ -73,6 +81,7 @@ impl OverworldActionsStorage {
             liquid_infos: Vec::with_capacity(4096),
             light_source_infos: Vec::with_capacity(4096),
             light_state_infos: Vec::with_capacity(4096),
+            sky_light_state_infos: Vec::with_capacity(4096),
             activity_infos: Vec::with_capacity(4096),
         }
     }
@@ -136,12 +145,17 @@ impl OverworldActionsStorage {
         self.activity_infos.push(ActivityChangeInfo { pos, active });
     }
 
-    pub fn set_light_source(&mut self, pos: BlockPos, light: LightLevel) {
-        self.light_source_infos.push(LightChangeInfo { pos, light });
+    pub fn set_light_source(&mut self, pos: BlockPos, light: LightLevel, ty: LightType) {
+        self.light_source_infos
+            .push(LightSourceChangeInfo { pos, light, ty });
     }
 
-    pub fn set_light_state(&mut self, pos: BlockPos, light: LightLevel) {
+    pub fn set_regular_light_state(&mut self, pos: BlockPos, light: LightLevel) {
         self.light_state_infos.push(LightChangeInfo { pos, light });
+    }
+
+    pub fn set_sky_light_state(&mut self, pos: BlockPos, light: LightLevel) {
+        self.sky_light_state_infos.push(LightChangeInfo { pos, light });
     }
 
     pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
@@ -166,12 +180,16 @@ impl OverworldActionsBuilder<'_> {
         self.storage.set_component(pos, component);
     }
 
-    pub fn set_light_source(&mut self, pos: BlockPos, light: LightLevel) {
-        self.storage.set_light_source(pos, light);
+    pub fn set_light_source(&mut self, pos: BlockPos, light: LightLevel, ty: LightType) {
+        self.storage.set_light_source(pos, light, ty);
     }
 
-    pub fn set_light_state(&mut self, pos: BlockPos, light: LightLevel) {
-        self.storage.set_light_state(pos, light);
+    pub fn set_regular_light_state(&mut self, pos: BlockPos, light: LightLevel) {
+        self.storage.set_regular_light_state(pos, light);
+    }
+
+    pub fn set_sky_light_state(&mut self, pos: BlockPos, light: LightLevel) {
+        self.storage.set_sky_light_state(pos, light);
     }
 
     pub fn set_liquid(&mut self, pos: BlockPos, liquid: LiquidState) {
