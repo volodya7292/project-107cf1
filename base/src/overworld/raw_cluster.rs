@@ -110,6 +110,14 @@ pub trait BlockDataImpl {
 
     fn light_state(&self) -> LightLevel;
     fn sky_light_state(&self) -> LightLevel;
+
+    fn light_state_by(&self, ty: LightType) -> LightLevel {
+        match ty {
+            LightType::Regular => self.light_state(),
+            LightType::Sky => self.sky_light_state(),
+        }
+    }
+
     fn liquid_state(&self) -> &LiquidState;
     fn occluder(&self) -> Occluder;
     fn active(&self) -> bool;

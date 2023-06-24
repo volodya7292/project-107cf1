@@ -39,6 +39,7 @@ pub struct Vertex {
     pub tex_uv: Vec2,
     pub ao: u8,
     pub lighting: u16,
+    pub sky_lighting: u16,
     pub material_id: u32,
 }
 
@@ -55,7 +56,7 @@ impl Vertex {
             ((enc_normal[2] & 0xff) << 24) | ((self.ao as u32 & 0xff) << 16) | (self.material_id & 0xffff);
         let pack1_3 = ((enc_tex_uv[0] & 0xffff) << 16) | (enc_tex_uv[1] & 0xffff);
 
-        let pack2_4 = self.lighting as u32;
+        let pack2_4 = self.lighting as u32 | ((self.sky_lighting as u32) << 16);
 
         PackedVertex {
             pack1: UVec4::new(pack1_0, pack1_1, pack1_2, pack1_3),
@@ -266,6 +267,7 @@ impl TexturedBlockModel {
                         tex_uv: *uv,
                         ao: 0,
                         lighting: 0,
+                        sky_lighting: 0,
                         material_id,
                     })
                     .collect();

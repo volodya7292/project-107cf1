@@ -3,8 +3,9 @@ pub mod biome;
 use crate::overworld;
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
+use crate::overworld::light_state::LightLevel;
 use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
-use crate::overworld::raw_cluster::RawCluster;
+use crate::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::Structure;
 use crate::overworld::Overworld;
@@ -484,11 +485,18 @@ pub fn gen_fn(
                 let global_y = cluster_pos.get().y + y as i64;
                 let height = xz_cache.heights[x][z];
                 let pos = ClusterBlockPos::new(x, y, z);
+                let mut data = cluster.get_mut(&pos);
 
                 if global_y <= height as i64 {
-                    cluster.get_mut(&pos).set(registry.block_test);
+                    data.set(registry.block_test);
                 } else {
-                    cluster.get_mut(&pos).set(registry.block_empty);
+                    data.set(registry.block_empty);
+                    *data.sky_light_state_mut() = LightLevel::MAX;
+                }
+
+                if global_y.div_euclid(1024) == 0 {
+                    *data.light_source_type_mut() = LightType::Sky;
+                    *data.raw_light_source_mut() = LightLevel::MAX;
                 }
             }
         }

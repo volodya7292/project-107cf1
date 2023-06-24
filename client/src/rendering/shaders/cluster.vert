@@ -23,7 +23,16 @@ layout(location = 0) out Output {
     uint material_id;
     float ao;
     vec3 light;
+    vec3 sky_light;
 } vs_out;
+
+vec3 decodeLight(uint rawLight) {
+    return vec3(
+        float((rawLight >> 10) & 0x1Fu),
+        float((rawLight >> 5) & 0x1Fu),
+        float(rawLight & 0x1Fu)
+    ) / 32.0;
+}
 
 void main() {
     vec3 inPosition = vec3(uvec3((inPack1[0] >> 16) & 0xffffu, (inPack1[0]) & 0xffffu, (inPack1[1] >> 16) & 0xffffu));
@@ -34,13 +43,12 @@ void main() {
     inTexUV = inTexUV / 65535.0 * 64.0;
     float inAO = float((inPack1[2] >> 16) & 0xffu) / 255.0;
     uint inMaterialId = inPack1[2] & 0xffffu;
-    uint inLighting = inPack2;
 
-    vec3 light = vec3(
-    float((inLighting >> 10) & 0x1Fu),
-    float((inLighting >> 5) & 0x1Fu),
-    float(inLighting & 0x1Fu)
-    ) / 32.0;
+    uint inLighting = inPack2 & 0xffffu;
+    uint inSkyLighting = (inPack2 >> 16) & 0xffffu;
+
+    vec3 light = decodeLight(inLighting);
+    vec3 skyLight = decodeLight(inSkyLighting);
 
     vec4 world_pos = (model * vec4(inPosition.xyz, 1));
 
@@ -51,6 +59,7 @@ void main() {
     vs_out.material_id = inMaterialId;
     vs_out.ao = inAO;
     vs_out.light = light;
+    vs_out.sky_light = skyLight;
 
     writeOutput(info.camera.proj_view * world_pos);
 }

@@ -6,8 +6,8 @@ use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
 use base::overworld::occluder::Occluder;
 use base::overworld::position::RelativeBlockPos;
-use base::overworld::raw_cluster::BlockDataImpl;
 use base::overworld::raw_cluster::RawCluster;
+use base::overworld::raw_cluster::{BlockDataImpl, LightType};
 use common::glm;
 use common::glm::{I32Vec3, Vec2, Vec3};
 use common::types::Bool;
@@ -74,57 +74,48 @@ fn calculate_ao(
 fn calc_quad_lighting(
     accessor: &ClusterNeighbourhoodAccessor,
     block_pos: &RelativeBlockPos,
-    quad: &mut [Vertex; 4],
+    quad: &[Vertex; 4],
     facing: Facing,
-) {
-    const RELATIVE_SIDES: [[&I32Vec3; 4]; 6] = [
+    light_type: LightType,
+) -> [u16; 4] {
+    const RELATIVE_SIDES: [[I32Vec3; 4]; 6] = [
         [
-            Facing::NegativeY.direction(),
-            Facing::NegativeZ.direction(),
-            Facing::PositiveY.direction(),
-            Facing::PositiveZ.direction(),
+            *Facing::NegativeY.direction(),
+            *Facing::NegativeZ.direction(),
+            *Facing::PositiveY.direction(),
+            *Facing::PositiveZ.direction(),
         ],
         [
-            Facing::NegativeY.direction(),
-            Facing::NegativeZ.direction(),
-            Facing::PositiveY.direction(),
-            Facing::PositiveZ.direction(),
+            *Facing::NegativeY.direction(),
+            *Facing::NegativeZ.direction(),
+            *Facing::PositiveY.direction(),
+            *Facing::PositiveZ.direction(),
         ],
         [
-            Facing::NegativeX.direction(),
-            Facing::NegativeZ.direction(),
-            Facing::PositiveX.direction(),
-            Facing::PositiveZ.direction(),
+            *Facing::NegativeX.direction(),
+            *Facing::NegativeZ.direction(),
+            *Facing::PositiveX.direction(),
+            *Facing::PositiveZ.direction(),
         ],
         [
-            Facing::NegativeX.direction(),
-            Facing::NegativeZ.direction(),
-            Facing::PositiveX.direction(),
-            Facing::PositiveZ.direction(),
+            *Facing::NegativeX.direction(),
+            *Facing::NegativeZ.direction(),
+            *Facing::PositiveX.direction(),
+            *Facing::PositiveZ.direction(),
         ],
         [
-            Facing::NegativeX.direction(),
-            Facing::NegativeY.direction(),
-            Facing::PositiveX.direction(),
-            Facing::PositiveY.direction(),
+            *Facing::NegativeX.direction(),
+            *Facing::NegativeY.direction(),
+            *Facing::PositiveX.direction(),
+            *Facing::PositiveY.direction(),
         ],
         [
-            Facing::NegativeX.direction(),
-            Facing::NegativeY.direction(),
-            Facing::PositiveX.direction(),
-            Facing::PositiveY.direction(),
+            *Facing::NegativeX.direction(),
+            *Facing::NegativeY.direction(),
+            *Facing::PositiveX.direction(),
+            *Facing::PositiveY.direction(),
         ],
     ];
-
-    // #[inline]
-    // fn calc_weights(weight_indices: &[usize; 8], v_comps: &[f32; 12]) -> Vec4 {
-    //     Vec4::new(
-    //         v_comps[weight_indices[0]] * v_comps[weight_indices[1]],
-    //         v_comps[weight_indices[2]] * v_comps[weight_indices[3]],
-    //         v_comps[weight_indices[4]] * v_comps[weight_indices[5]],
-    //         v_comps[weight_indices[6]] * v_comps[weight_indices[7]],
-    //     )
-    // }
 
     fn blend_lighting(base: LightLevel, mut neighbours: [LightLevel; 3]) -> Vec3 {
         for n in &mut neighbours {
@@ -150,35 +141,32 @@ fn calc_quad_lighting(
 
     let base = accessor
         .get_block(&rel_pos)
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let side0 = accessor
         .get_block(&rel_pos.offset(&sides[0]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let side1 = accessor
         .get_block(&rel_pos.offset(&sides[1]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let side2 = accessor
         .get_block(&rel_pos.offset(&sides[2]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let side3 = accessor
         .get_block(&rel_pos.offset(&sides[3]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
 
     let corner01 = accessor
         .get_block(&rel_pos.offset(&sides[0]).offset(&sides[1]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let corner12 = accessor
         .get_block(&rel_pos.offset(&sides[1]).offset(&sides[2]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let corner23 = accessor
         .get_block(&rel_pos.offset(&sides[2]).offset(&sides[3]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
     let corner30 = accessor
         .get_block(&rel_pos.offset(&sides[3]).offset(&sides[0]))
-        .map_or(LightLevel::ZERO, |v| v.light_state());
-
-    // if min >= Vec3::from_element(1e-5) || max <= Vec3::from_element(1.0 - 1e-5) {
-    // Do bilinear interpolation because the quad is not covering full block face.
+        .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
 
     let lights = [
         blend_lighting(base, [side0, side1, corner01]),
@@ -191,7 +179,9 @@ fn calc_quad_lighting(
     let vi = (facing_comp + 1) % 3;
     let vj = (facing_comp + 2) % 3;
 
-    for v in quad {
+    let mut result = [0_u16; 4];
+
+    for (v_idx, v) in quad.iter().enumerate() {
         let ij = Vec2::new(v.position[vi], v.position[vj]);
         let inv_v = Vec2::from_element(1.0) - ij;
         let weights = [inv_v.x * inv_v.y, ij.x * inv_v.y, inv_v.x * ij.y, ij.x * ij.y];
@@ -199,34 +189,10 @@ fn calc_quad_lighting(
         let lighting =
             lights[0] * weights[0] + lights[1] * weights[1] + lights[2] * weights[2] + lights[3] * weights[3];
 
-        v.lighting = LightLevel::from_color(lighting).raw();
+        result[v_idx] = LightLevel::from_color(lighting).raw();
     }
 
-    // quad[vert_ids[0]].lighting = blend_lighting(
-    //     base.light_level,
-    //     [side0.light_level, side1.light_level, corner01.light_level],
-    // )
-    //     .bits();
-    // quad[vert_ids[1]].lighting = blend_lighting(
-    //     base.light_level,
-    //     [side1.light_level, side2.light_level, corner12.light_level],
-    // )
-    //     .bits();
-    // quad[vert_ids[2]].lighting = blend_lighting(
-    //     base.light_level,
-    //     [side2.light_level, side3.light_level, corner23.light_level],
-    // )
-    //     .bits();
-    // quad[vert_ids[3]].lighting = blend_lighting(
-    //     base.light_level,
-    //     [side3.light_level, side0.light_level, corner30.light_level],
-    // )
-    //     .bits();
-
-    // } else {
-    // The quad covers full block face.
-    // let lighting = neighbour_index_to_dir();
-    // }
+    result
 }
 
 // `+ 1` in height is not needed
@@ -297,6 +263,7 @@ fn construct_liquid_quad(
     liquid_heights: &[f32; 4],
     facing: Facing,
     light_level: LightLevel,
+    sky_light_level: LightLevel,
     vertices: &mut Vec<PackedVertex>,
 ) {
     const P000: Vec3 = Vec3::new(0.0, 0.0, 0.0);
@@ -334,6 +301,7 @@ fn construct_liquid_quad(
 
     let material_id = material_id as u32;
     let lighting = light_level.raw();
+    let sky_lighting = sky_light_level.raw();
     let quad_vertices;
     let mut normal: Vec3 = glm::convert(*facing.direction());
 
@@ -403,6 +371,7 @@ fn construct_liquid_quad(
                     tex_uv: uv,
                     ao: u8::MAX,
                     lighting,
+                    sky_lighting,
                     material_id,
                 }
                 .pack()
@@ -457,12 +426,16 @@ fn gen_block_vertices(
                 &quad_vertices[2].position,
             );
 
-            calc_quad_lighting(
-                accessor,
-                pos,
-                &mut quad_vertices,
-                Facing::from_normal_closest(&normal),
-            );
+            let closest_facing = Facing::from_normal_closest(&normal);
+            let regular_lighting =
+                calc_quad_lighting(accessor, pos, &quad_vertices, closest_facing, LightType::Regular);
+            let sky_lighting =
+                calc_quad_lighting(accessor, pos, &quad_vertices, closest_facing, LightType::Sky);
+
+            for ((vert, regular), sky) in quad_vertices.iter_mut().zip(regular_lighting).zip(sky_lighting) {
+                vert.lighting = regular;
+                vert.sky_lighting = sky;
+            }
 
             let vertices_vec = if quad.transparent {
                 &mut *vertices_translucent
@@ -503,6 +476,7 @@ fn gen_block_vertices(
                     &liquid_heights,
                     facing,
                     state.light_state(),
+                    state.sky_light_state(),
                     vertices_translucent,
                 );
             }
@@ -546,13 +520,19 @@ fn gen_block_vertices(
                 &quad_vertices[2].position,
             );
 
-            calc_quad_lighting(accessor, pos, &mut quad_vertices, facing);
+            let regular_lighting =
+                calc_quad_lighting(accessor, pos, &quad_vertices, facing, LightType::Regular);
+            let sky_lighting = calc_quad_lighting(accessor, pos, &quad_vertices, facing, LightType::Sky);
 
-            for v in &mut quad_vertices {
+            for ((v, regular_light), sky_light) in
+                quad_vertices.iter_mut().zip(regular_lighting).zip(sky_lighting)
+            {
                 let ao = calculate_ao(accessor, pos, &v.position, facing);
                 v.position += posf;
                 v.normal = normal;
                 v.ao = ao;
+                v.lighting = regular_light;
+                v.sky_lighting = sky_light;
             }
 
             if quad_vertices[1].ao != quad_vertices[2].ao
