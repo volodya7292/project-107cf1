@@ -30,15 +30,15 @@ pub trait AttributesImpl {
 pub trait VertexPositionImpl {
     fn position(&self) -> Vec3;
 
-    fn set_position(&self, _pos: na::Vector3<f32>) {
+    fn set_position(&mut self, _pos: Vec3) {
         unimplemented!()
     }
 }
 
 pub trait VertexNormalImpl {
-    fn normal(&self) -> &na::Vector3<f32>;
+    fn normal(&self) -> &Vec3;
 
-    fn set_normal(&self, _normal: na::Vector3<f32>) {
+    fn set_normal(&mut self, _normal: Vec3) {
         unimplemented!()
     }
 }
@@ -46,12 +46,12 @@ pub trait VertexNormalImpl {
 #[macro_export]
 macro_rules! vertex_impl_position {
     ($vertex: ty) => {
-        impl $crate::renderer::vertex_mesh::VertexPositionImpl for $vertex {
-            fn position(&self) -> nalgebra_glm::Vec3 {
+        impl $crate::module::main_renderer::vertex_mesh::VertexPositionImpl for $vertex {
+            fn position(&self) -> ::common::glm::Vec3 {
                 self.position
             }
 
-            fn set_position(&mut self, pos: nalgebra::Vector3<f32>) {
+            fn set_position(&mut self, pos: ::common::glm::Vec3) {
                 self.position = pos;
             }
         }
@@ -61,7 +61,7 @@ macro_rules! vertex_impl_position {
 #[macro_export]
 macro_rules! vertex_impl_normal {
     ($vertex: ty) => {
-        impl $crate::renderer::vertex_mesh::VertexNormalImpl for $vertex {
+        impl $crate::module::main_renderer::vertex_mesh::VertexNormalImpl for $vertex {
             fn normal(&self) -> &nalgebra::Vector3<f32> {
                 &self.normal
             }

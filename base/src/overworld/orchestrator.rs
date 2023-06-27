@@ -277,7 +277,7 @@ impl OverworldOrchestrator {
             let generator = Arc::clone(&self.overworld_generator);
 
             let load_task = self.cluster_load_processor.spawn(move || {
-                let mut cluster = generator.create_cluster();
+                let mut cluster = RawCluster::new();
                 generator.generate_cluster(&mut cluster, pos);
                 let mut t_cluster = t_cluster.write();
                 *t_cluster = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));

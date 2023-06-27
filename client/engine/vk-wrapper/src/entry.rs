@@ -133,7 +133,7 @@ impl Entry {
     pub fn create_instance(
         self: &Arc<Self>,
         app_name: &str,
-        window: &impl HasRawWindowHandle,
+        window: Option<&dyn HasRawWindowHandle>,
     ) -> Result<Arc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();
@@ -142,7 +142,8 @@ impl Entry {
             .engine_name(c_engine_name.as_c_str())
             .api_version(VK_API_VERSION);
 
-        let required_extensions = enumerate_required_window_extensions(window)?;
+        let required_extensions =
+            window.map_or(Ok(vec![]), |window| enumerate_required_window_extensions(window))?;
         let available_layers = self.enumerate_instance_layer_names()?;
         let available_extensions = self.enumerate_instance_extension_names()?;
 

@@ -9,15 +9,15 @@ use std::sync::Arc;
 use std::{collections::HashMap, ffi::CString, os::raw::c_char};
 use std::{mem, ptr};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub(crate) struct QueueId {
     pub family_index: u32,
     /// A queue family may have multiple queues in it. This identifies queue array index.
     pub index: u32,
 }
 
-impl Default for QueueId {
-    fn default() -> Self {
+impl QueueId {
+    pub fn null() -> Self {
         Self {
             family_index: u32::MAX,
             index: 0,
@@ -48,6 +48,9 @@ impl Adapter {
         let mut queue_count_by_family = HashMap::<u32, u32>::new();
 
         for id in &self.queue_family_indices {
+            if *id == QueueId::null() {
+                continue;
+            }
             let count = queue_count_by_family.entry(id.family_index).or_default();
             *count = (*count).max(id.index + 1);
         }
@@ -117,7 +120,11 @@ impl Adapter {
         let queues: Vec<_> = self
             .queue_family_indices
             .iter()
-            .map(|id| Arc::clone(&unique_queues[&id.family_index][id.index as usize]))
+            .map(|id| {
+                unique_queues
+                    .get(&id.family_index)
+                    .map(|vec| Arc::clone(&vec[id.index as usize]))
+            })
             .collect();
 
         let memory_props = unsafe {

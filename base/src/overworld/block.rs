@@ -1,11 +1,12 @@
-use entity_data::{AnyState, ArchetypeState, StaticArchetype};
+pub mod event_handlers;
 
 pub use crate::overworld::block::event_handlers::EventHandlers;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::BlockData;
 use crate::registry::Registry;
-
-pub mod event_handlers;
+use entity_data::{AnyState, ArchetypeState, EntityId, EntityStorage, StaticArchetype};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 #[derive(Copy, Clone)]
 pub struct Block {
@@ -153,7 +154,28 @@ pub struct BlockState<A: ArchetypeState> {
     clone_any_fn: fn(&A) -> A,
 }
 
-impl<A: StaticArchetype + Clone> BlockState<A> {
+pub trait BlockStateArchetype: StaticArchetype + Serialize + DeserializeOwned {
+    fn canon_name() -> &'static str;
+
+    fn serialize_from(
+        storage: &EntityStorage,
+        entity_id: &EntityId,
+        serializer: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
+        let state = storage.get_state::<Self>(entity_id).unwrap();
+        serializer(state);
+    }
+
+    fn deserialize_into(
+        deserializer: &mut dyn erased_serde::Deserializer,
+        storage: &mut EntityStorage,
+    ) -> EntityId {
+        let this = Self::deserialize(deserializer).unwrap();
+        storage.add(this)
+    }
+}
+
+impl<A: BlockStateArchetype + Clone> BlockState<A> {
     pub fn new(block_id: u16, state: A) -> Self {
         Self {
             block_id,

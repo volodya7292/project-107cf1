@@ -14,8 +14,8 @@ noise = { version = "0.8", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"
 approx = "0.5"
-entity_data = "1.10"
-#entity_data = { path = "../entity_data"}
+entity_data = "1.11"
+#entity_data = { path = "../../entity_data"}
 smallvec = "1.10"
 bit-vec = "0.6"
 fixedbitset = "0.4"

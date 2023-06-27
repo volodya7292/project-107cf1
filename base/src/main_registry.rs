@@ -1,20 +1,28 @@
-use std::sync::Arc;
-
-use common::glm;
-use entity_data::Archetype;
-use glm::{DVec3, U64Vec3, Vec3};
-
-use crate::overworld::block::{BlockBuilder, BlockState};
+use crate::overworld::block::{BlockBuilder, BlockState, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::world::Biome;
 use crate::overworld::structure::{world, Structure};
 use crate::overworld::{block, block_model};
 use crate::physics::aabb::AABB;
-use crate::registry::Registry;
+use crate::registry::{Registry, StatelessBlock};
+use common::glm;
+use entity_data::Archetype;
+use glm::{DVec3, U64Vec3, Vec3};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-#[derive(Copy, Clone, Archetype)]
-pub struct StatelessBlock;
+#[derive(Copy, Clone, Archetype, Serialize, Deserialize)]
+pub struct TestStatefulBlock {
+    pub go: u32,
+    pub go2: u64,
+}
+
+impl BlockStateArchetype for TestStatefulBlock {
+    fn canon_name() -> &'static str {
+        "TestStatefulBlock"
+    }
+}
 
 pub struct MainRegistry {
     registry: Arc<Registry>,
@@ -23,6 +31,7 @@ pub struct MainRegistry {
     pub block_empty: BlockState<StatelessBlock>,
     pub block_test: BlockState<StatelessBlock>,
     pub block_glow: BlockState<StatelessBlock>,
+    pub block_test_stateful: BlockState<TestStatefulBlock>,
     // pub block_water: BlockState<StatelessBlock>,
 }
 
@@ -48,7 +57,7 @@ impl MainRegistry {
         // Blocks
         // ----------------------------------------------------------------------------------------------------
         let block_empty = {
-            let id = reg.register_block(
+            let id = reg.register_block::<StatelessBlock>(
                 BlockBuilder::new(Registry::MODEL_ID_NULL)
                     .with_can_pass_liquid(true)
                     .with_can_pass_light(true),
@@ -56,21 +65,25 @@ impl MainRegistry {
             BlockState::new(id, StatelessBlock)
         };
         let block_default = {
-            let id = reg.register_block(BlockBuilder::new(model_cube));
+            let id = reg.register_block::<StatelessBlock>(BlockBuilder::new(model_cube));
             BlockState::new(id, StatelessBlock)
         };
         let block_glow = {
-            let id = reg.register_block(
+            let id = reg.register_block::<StatelessBlock>(
                 BlockBuilder::new(model_cube)
                     .with_active_by_default(true)
                     .with_event_handlers(block::EventHandlers::new().with_on_tick(
-                        |_, pos, _, _, _, mut after_actions| {
+                        |_, pos, _, _, _, after_actions| {
                             println!("ON TICK!");
                             false
                         },
                     )),
             );
             BlockState::new(id, StatelessBlock)
+        };
+        let block_test_stateful = {
+            let id = reg.register_block::<TestStatefulBlock>(BlockBuilder::new(model_cube));
+            BlockState::new(id, TestStatefulBlock { go: 0, go2: 0 })
         };
 
         // Biomes
@@ -155,6 +168,7 @@ impl MainRegistry {
             block_empty,
             block_test: block_default,
             block_glow,
+            block_test_stateful,
             // block_water,
             // water_states,
         })

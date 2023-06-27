@@ -166,10 +166,6 @@ impl OverworldGenerator {
         world_pos.center_pos.offset(&rel_spawn_point.0)
     }
 
-    pub fn create_cluster(&self) -> RawCluster {
-        RawCluster::new(self.main_registry.registry())
-    }
-
     pub fn generate_cluster(&self, cluster: &mut RawCluster, pos: ClusterPos) {
         let reg = self.main_registry.registry();
         let world_st = reg.get_structure(self.main_registry.structure_world()).unwrap();

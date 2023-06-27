@@ -12,7 +12,7 @@ noise = { version = "0.8", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"
 approx = "0.5"
-entity_data = "1.10"
+entity_data = "1.11"
 #entity_data = { path = "../../entity_data" }
 smallvec = "1.10"
 bit-vec = "0.6"
@@ -23,3 +23,6 @@ rstar = "0.11"
 bumpalo = "3.13"
 rand_xoshiro = "0.6"
 lz4_flex = { version = "0.10", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+erased-serde = "0.3"
+bincode = "1.3"

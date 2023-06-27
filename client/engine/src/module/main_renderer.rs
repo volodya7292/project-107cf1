@@ -513,7 +513,7 @@ impl MainRenderer {
         ctx: &EngineContext,
     ) -> MainRenderer {
         let vke = vkw::Entry::new().unwrap();
-        let instance = vke.create_instance(name, window).unwrap();
+        let instance = vke.create_instance(name, Some(window)).unwrap();
         let surface = instance.create_surface(window).unwrap();
         let adapters = instance.enumerate_adapters(Some(&surface)).unwrap();
 

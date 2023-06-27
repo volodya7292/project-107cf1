@@ -129,7 +129,7 @@ pub struct Device {
     pub(crate) device_mem_pool: vma::VmaPool,
     pub(crate) total_used_dev_memory: Arc<AtomicUsize>,
     pub(crate) swapchain_khr: ash::extensions::khr::Swapchain,
-    pub(crate) queues: Vec<Arc<Queue>>,
+    pub(crate) queues: Vec<Option<Arc<Queue>>>,
     pub(crate) default_sampler: Arc<Sampler>,
     pub(crate) pipeline_cache: Mutex<vk::PipelineCache>,
 }
@@ -187,7 +187,7 @@ impl Device {
     }
 
     pub fn get_queue(&self, queue_type: QueueType) -> &Queue {
-        &self.queues[queue_type as usize]
+        self.queues[queue_type as usize].as_ref().unwrap()
     }
 
     pub fn real_device_mem_usage(&self) -> u64 {
@@ -1464,7 +1464,7 @@ impl Device {
     }
 
     pub fn wait_idle(&self) -> Result<(), vk::Result> {
-        for queue in &self.queues {
+        for queue in self.queues.iter().filter_map(Option::as_ref) {
             queue.wait_idle()?;
         }
         Ok(())

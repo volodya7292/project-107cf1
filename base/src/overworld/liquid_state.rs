@@ -1,4 +1,6 @@
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiquidState {
     liquid_id: u16,
     state: u8,

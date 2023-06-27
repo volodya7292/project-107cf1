@@ -154,10 +154,3 @@ impl RelativeBlockPos {
         ))
     }
 }
-
-#[test]
-fn relative_block_pos_works() {
-    let pos = RelativeBlockPos(glm::vec3(-1, 0, 24));
-    assert_eq!(pos.cluster_idx(), 5);
-    assert_eq!(pos.cluster_block_pos(), ClusterBlockPos(glm::vec3(23, 0, 0)));
-}

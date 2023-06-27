@@ -1,13 +1,17 @@
 use crate::overworld::block::BlockState;
 use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
-use crate::overworld::occluder::Occluder;
 use crate::overworld::position::ClusterBlockPos;
+use crate::persistence::block_states::{EntityStorageDeserializer, SerializableEntityStorage};
 use crate::registry::Registry;
 use common::glm;
+use common::types::HashMap;
 use entity_data::{ArchetypeState, Component, EntityId, EntityStorage};
 use glm::TVec3;
-use std::sync::Arc;
+use serde::de::SeqAccess;
+use serde::ser::SerializeTuple;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::Formatter;
 use std::{mem, slice};
 
 #[inline]
@@ -16,7 +20,7 @@ pub fn cell_index(pos: &TVec3<usize>) -> usize {
     pos.x * SIZE_SQR + pos.y * RawCluster::SIZE + pos.z
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CompactEntityId {
     arch_id: u16,
     /// Cluster size of 24^3 fits into 2^16 space.
@@ -47,18 +51,17 @@ impl Default for CompactEntityId {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum LightType {
     Regular,
     Sky,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CellInfo {
     pub entity_id: CompactEntityId,
     pub block_id: u16,
-    pub occluder: Occluder,
     pub light_source: LightLevel,
     pub light_source_type: LightType,
     pub light_state: LightLevel,
@@ -72,7 +75,6 @@ impl Default for CellInfo {
         Self {
             entity_id: Default::default(),
             block_id: u16::MAX,
-            occluder: Default::default(),
             light_source: Default::default(),
             light_source_type: LightType::Regular,
             light_state: Default::default(),
@@ -119,7 +121,6 @@ pub trait BlockDataImpl {
     }
 
     fn liquid_state(&self) -> &LiquidState;
-    fn occluder(&self) -> Occluder;
     fn active(&self) -> bool;
 }
 
@@ -152,17 +153,12 @@ impl BlockDataImpl for BlockData<'_> {
         &self.info.liquid_state
     }
 
-    fn occluder(&self) -> Occluder {
-        self.info.occluder
-    }
-
     fn active(&self) -> bool {
         self.info.active
     }
 }
 
 pub struct BlockDataMut<'a> {
-    registry: &'a Registry,
     block_storage: &'a mut EntityStorage,
     info: &'a mut CellInfo,
 }
@@ -196,10 +192,6 @@ impl BlockDataImpl for BlockDataMut<'_> {
         &self.info.liquid_state
     }
 
-    fn occluder(&self) -> Occluder {
-        self.info.occluder
-    }
-
     fn active(&self) -> bool {
         self.info.active
     }
@@ -207,8 +199,6 @@ impl BlockDataImpl for BlockDataMut<'_> {
 
 impl BlockDataMut<'_> {
     pub fn set(&mut self, state: BlockState<impl ArchetypeState>) {
-        let block = self.registry.get_block(state.block_id).unwrap();
-
         // Remove previous block state if present
         if self.info.entity_id != CompactEntityId::NULL {
             self.block_storage.remove(&self.info.entity_id.regular());
@@ -223,8 +213,6 @@ impl BlockDataMut<'_> {
 
         self.info.entity_id = CompactEntityId::new(entity_id);
         self.info.block_id = state.block_id;
-        self.info.occluder = block.occluder();
-        self.info.active |= block.active_by_default();
     }
 
     pub fn raw_light_source_mut(&mut self) -> &mut LightLevel {
@@ -257,9 +245,8 @@ impl BlockDataMut<'_> {
 }
 
 pub struct RawCluster {
-    registry: Arc<Registry>,
-    block_state_storage: EntityStorage,
     cells: Vec<CellInfo>,
+    block_state_storage: EntityStorage,
 }
 
 impl RawCluster {
@@ -268,11 +255,10 @@ impl RawCluster {
     pub const APPROX_MEM_SIZE: usize = Self::VOLUME * mem::size_of::<CellInfo>();
 
     /// Creating a new cluster is expensive due to its big size of memory
-    pub fn new(registry: &Arc<Registry>) -> Self {
+    pub fn new() -> Self {
         Self {
-            registry: Arc::clone(registry),
-            block_state_storage: Default::default(),
             cells: vec![Default::default(); Self::VOLUME],
+            block_state_storage: Default::default(),
         }
     }
 
@@ -290,7 +276,6 @@ impl RawCluster {
         };
 
         RawCluster {
-            registry: compressed.registry,
             block_state_storage: compressed.block_state_storage,
             cells,
         }
@@ -306,14 +291,9 @@ impl RawCluster {
         };
 
         CompressedCluster {
-            registry: self.registry,
             cells_data,
             block_state_storage: self.block_state_storage,
         }
-    }
-
-    pub fn registry(&self) -> &Arc<Registry> {
-        &self.registry
     }
 
     pub fn cells(&self) -> &[CellInfo] {
@@ -333,15 +313,77 @@ impl RawCluster {
     #[inline]
     pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut {
         BlockDataMut {
-            registry: &self.registry,
             block_storage: &mut self.block_state_storage,
             info: &mut self.cells[cell_index(pos.get())],
         }
     }
 }
 
+pub fn serialize_cluster<S>(
+    cluster: &RawCluster,
+    registry: &Registry,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let storage = SerializableEntityStorage {
+        registry,
+        storage: &cluster.block_state_storage,
+    };
+    let mut tup = serializer.serialize_tuple(2)?;
+    tup.serialize_element(&cluster.cells)?;
+    tup.serialize_element(&storage)?;
+    tup.end()
+}
+
+pub fn deserialize_cluster<'de, D>(registry: &Registry, deserializer: D) -> Result<RawCluster, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Visitor;
+    struct TupleVisitor<'a> {
+        registry: &'a Registry,
+    }
+
+    impl<'de2> Visitor<'de2> for TupleVisitor<'_> {
+        type Value = RawCluster;
+
+        fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+            write!(formatter, "a tuple of (cells, storage)")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de2>,
+        {
+            let mut cells = seq.next_element::<Vec<CellInfo>>()?.unwrap();
+            let mut storage_deser = EntityStorageDeserializer {
+                registry: self.registry,
+                storage: Default::default(),
+                entity_mapping: HashMap::with_capacity(RawCluster::VOLUME),
+            };
+            seq.next_element_seed(&mut storage_deser)?.unwrap();
+
+            // Renew old entity ids
+            for cell in &mut cells {
+                let old_entity = cell.entity_id.regular();
+                if let Some(new_entity) = storage_deser.entity_mapping.get(&old_entity) {
+                    cell.entity_id = CompactEntityId::new(*new_entity);
+                }
+            }
+
+            Ok(RawCluster {
+                cells,
+                block_state_storage: storage_deser.storage,
+            })
+        }
+    }
+
+    deserializer.deserialize_tuple(2, TupleVisitor { registry })
+}
+
 pub struct CompressedCluster {
-    registry: Arc<Registry>,
     cells_data: Vec<u8>,
     block_state_storage: EntityStorage,
 }

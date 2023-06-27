@@ -34,6 +34,7 @@ fn calculate_ao(
     vertex_pos: &Vec3,
     facing: Facing,
 ) -> u8 {
+    let registry = accessor.registry();
     let facing_dir = facing.direction();
     let facing_comp = facing_dir.iter().cloned().position(|v| v != 0).unwrap_or(0);
 
@@ -63,9 +64,15 @@ fn calculate_ao(
     let side1 = accessor.get_block(&side1_pos);
     let side2 = accessor.get_block(&side2_pos);
 
-    let corner_occluder = corner.map_or(Occluder::EMPTY, |v| v.occluder());
-    let side1_occluder = side1.map_or(Occluder::EMPTY, |v| v.occluder());
-    let side2_occluder = side2.map_or(Occluder::EMPTY, |v| v.occluder());
+    let corner_occluder = corner.map_or(Occluder::EMPTY, |v| {
+        registry.get_block(v.block_id()).unwrap().occluder()
+    });
+    let side1_occluder = side1.map_or(Occluder::EMPTY, |v| {
+        registry.get_block(v.block_id()).unwrap().occluder()
+    });
+    let side2_occluder = side2.map_or(Occluder::EMPTY, |v| {
+        registry.get_block(v.block_id()).unwrap().occluder()
+    });
 
     (corner_occluder.is_empty() && side1_occluder.is_empty() && side2_occluder.is_empty()) as u8 * 255
 }

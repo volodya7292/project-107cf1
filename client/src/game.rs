@@ -11,7 +11,7 @@ use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
 use base::execution::virtual_processor::VirtualProcessor;
-use base::main_registry::{MainRegistry, StatelessBlock};
+use base::main_registry::MainRegistry;
 use base::overworld::accessor::ClustersAccessorCache;
 use base::overworld::accessor::ReadOnlyOverworldAccessor;
 use base::overworld::accessor::ReadOnlyOverworldAccessorImpl;

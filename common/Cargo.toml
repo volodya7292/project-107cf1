@@ -10,7 +10,7 @@ serde_yaml = "0.9"
 glob = "0.3"
 byteorder = "1.4"
 bincode = { version = "2.0.0-rc.3", features = ["serde"] }
-entity_data = "1.10"
+entity_data = "1.11"
 #entity_data = { path = "../../entity_data" }
 indexmap = "1.9"
 moka = "0.11"

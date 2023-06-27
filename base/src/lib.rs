@@ -1,8 +1,11 @@
 pub mod execution;
 pub mod main_registry;
 pub mod overworld;
+pub mod persistence;
 pub mod physics;
 pub mod registry;
+#[cfg(test)]
+mod tests;
 pub mod utils;
 
 use crate::overworld::accessor::{
@@ -14,7 +17,7 @@ use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, LightType};
-use crate::overworld::{ClusterState, LoadedClusters};
+use crate::overworld::LoadedClusters;
 use crate::registry::Registry;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;

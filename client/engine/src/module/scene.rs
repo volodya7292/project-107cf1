@@ -137,8 +137,8 @@ impl Scene {
 
             // Remove component changes if any present
             let arch = self.storage.get_archetype_by_id(entity.archetype_id).unwrap();
-            for ty in arch.iter_component_types() {
-                change_manager.record(*ty, entity, ChangeType::Removed);
+            for info in arch.iter_component_infos() {
+                change_manager.record(info.type_id, entity, ChangeType::Removed);
             }
 
             self.storage.remove(&entity);

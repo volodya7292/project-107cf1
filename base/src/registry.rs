@@ -1,13 +1,25 @@
-use crate::overworld;
-use crate::overworld::block::{Block, BlockBuilder};
+use crate::overworld::block::{Block, BlockBuilder, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::{BlockData, CellInfo, LightType};
 use crate::overworld::structure::world::{biome, Biome};
 use crate::overworld::structure::Structure;
+use crate::persistence::block_states::{StateDeserializeFn, StateSerializeInfo};
 use common::resource_file::ResourceRef;
 use common::types::HashMap;
+use entity_data::{Archetype, EntityId, EntityStorage};
+use serde::{Deserialize, Serialize};
+use std::any::TypeId;
 use std::convert::TryInto;
+
+#[derive(Copy, Clone, Archetype, Serialize, Deserialize)]
+pub struct StatelessBlock;
+
+impl BlockStateArchetype for StatelessBlock {
+    fn canon_name() -> &'static str {
+        "StatelessBlock"
+    }
+}
 
 pub struct Registry {
     structures: Vec<Structure>,
@@ -19,6 +31,8 @@ pub struct Registry {
     material_count: u16,
     // textured_models: Vec<TexturedBlockModel>,
     blocks: Vec<Block>,
+    block_state_serializers: HashMap<TypeId, StateSerializeInfo>,
+    block_state_deserializers: HashMap<&'static str, StateDeserializeFn>,
     block_empty: u16,
     inner_block_state_empty: Option<CellInfo>,
 }
@@ -39,17 +53,18 @@ impl Registry {
             material_count: 0,
             // textured_models: vec![],
             blocks: vec![],
+            block_state_serializers: Default::default(),
+            block_state_deserializers: Default::default(),
             block_empty: u16::MAX,
             inner_block_state_empty: None,
         };
 
-        let block_empty = registry.register_block(BlockBuilder::new(Self::MODEL_ID_NULL));
+        let block_empty = registry.register_block::<StatelessBlock>(BlockBuilder::new(Self::MODEL_ID_NULL));
         registry.block_empty = block_empty;
 
         registry.inner_block_state_empty = Some(CellInfo {
             entity_id: Default::default(),
             block_id: block_empty,
-            occluder: Default::default(),
             light_source: Default::default(),
             light_source_type: LightType::Regular,
             light_state: Default::default(),
@@ -111,12 +126,23 @@ impl Registry {
     //     (self.textured_models.len() - 1).try_into().unwrap()
     // }
 
-    pub fn register_block(&mut self, builder: BlockBuilder) -> u16 {
-        let block = builder.build(self);
-
+    pub fn register_block<S: BlockStateArchetype>(&mut self, builder: BlockBuilder) -> u16 {
         if self.blocks.len() == Self::MAX_BLOCKS as usize {
             panic!("Maximum number of blocks is reached!");
         }
+
+        let block = builder.build(self);
+
+        self.block_state_serializers.insert(
+            TypeId::of::<S>(),
+            StateSerializeInfo {
+                canon_name: S::canon_name(),
+                func: S::serialize_from,
+            },
+        );
+        self.block_state_deserializers
+            .insert(S::canon_name(), S::deserialize_into);
+
         self.blocks.push(block);
         (self.blocks.len() - 1) as u16
     }
@@ -153,6 +179,14 @@ impl Registry {
 
     pub fn get_structure(&self, id: u32) -> Option<&Structure> {
         self.structures.get(id as usize)
+    }
+
+    pub fn get_state_serializer(&self, state_id: &TypeId) -> Option<&StateSerializeInfo> {
+        self.block_state_serializers.get(state_id)
+    }
+
+    pub fn get_state_deserializer(&self, type_canon_name: &str) -> Option<&StateDeserializeFn> {
+        self.block_state_deserializers.get(type_canon_name)
     }
 
     // pub fn get_structures_by_lod(&self, cluster_level: u32) -> &[Structure] {

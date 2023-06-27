@@ -121,10 +121,10 @@ impl Instance {
             // ------------------------------------------------------------------------------------
             let queue_families = unsafe { self.native.get_physical_device_queue_family_properties(p_device) };
 
-            let mut graphics_queue_id = QueueId::default();
-            let mut compute_queue_id = QueueId::default();
-            let mut transfer_queue_id = QueueId::default();
-            let mut present_queue_id = QueueId::default();
+            let mut graphics_queue_id = QueueId::null();
+            let mut compute_queue_id = QueueId::null();
+            let mut transfer_queue_id = QueueId::null();
+            let mut present_queue_id = QueueId::null();
 
             for (i, fam_prop) in queue_families.iter().enumerate() {
                 // Check for present usage

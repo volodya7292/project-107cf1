@@ -1,7 +1,8 @@
 use common::glm;
 use glm::{U8Vec3, Vec3};
+use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Eq, PartialEq, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct LightLevel(u16);
 
 impl LightLevel {
