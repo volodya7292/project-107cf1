@@ -1,7 +1,7 @@
 use crate::execution::default_queue;
 use crate::execution::virtual_processor::{VirtualProcessor, VirtualTask};
 use crate::overworld::cluster_part_set::ClusterPartSet;
-use crate::overworld::generator::OverworldGenerator;
+use crate::overworld::interface::{LoadedType, OverworldInterface};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
 use crate::overworld::{
@@ -23,14 +23,14 @@ pub struct OverworldOrchestrator {
     xz_render_distance: u64,
     y_render_distance: u64,
     loaded_clusters: LoadedClusters,
-    overworld_generator: Arc<OverworldGenerator>,
+    overworld_interface: Arc<dyn OverworldInterface>,
     r_clusters: HashMap<ClusterPos, RCluster>,
     cluster_load_processor: VirtualProcessor,
     cluster_compression_processor: VirtualProcessor,
 }
 
 struct RCluster {
-    load_task: Option<VirtualTask<()>>,
+    load_task: Option<VirtualTask<(RawCluster, LoadedType)>>,
     compress_task: Option<VirtualTask<()>>,
 }
 
@@ -208,7 +208,7 @@ impl OverworldOrchestrator {
             xz_render_distance: 128,
             y_render_distance: 128,
             loaded_clusters: Arc::clone(overworld.loaded_clusters()),
-            overworld_generator: Arc::clone(overworld.generator()),
+            overworld_interface: Arc::clone(overworld.interface()),
             r_clusters: Default::default(),
             cluster_load_processor: VirtualProcessor::new(&default_queue().unwrap()),
             cluster_compression_processor: VirtualProcessor::new(&default_queue().unwrap()),
@@ -273,31 +273,17 @@ impl OverworldOrchestrator {
                 continue;
             }
 
-            let t_cluster = Arc::clone(&o_cluster.cluster);
-            let generator = Arc::clone(&self.overworld_generator);
+            let interface = Arc::clone(&self.overworld_interface);
 
-            let load_task = self.cluster_load_processor.spawn(move || {
-                let mut cluster = RawCluster::new();
-                generator.generate_cluster(&mut cluster, pos);
-                let mut t_cluster = t_cluster.write();
-                *t_cluster = ClusterState::Ready(TrackingCluster::new(cluster, ClusterPartSet::ALL));
-            });
+            let load_task = self
+                .cluster_load_processor
+                .spawn(move || interface.load_cluster(&pos));
             r_cluster.load_task = Some(load_task);
         }
 
-        // 3. Check for previous finished load tasks
-        for (pos, rcl) in &mut *r_clusters {
-            if rcl.load_task.as_mut().map_or(true, |v| !v.is_finished()) {
-                continue;
-            };
-            rcl.load_task = None;
+        let mut just_loaded_clusters = HashSet::with_capacity(1024);
 
-            let o_cluster = o_clusters.get(pos).unwrap();
-            o_cluster.state.store(ClusterStateEnum::Loaded as u32, MO_RELEASE);
-            o_cluster.dirty.store(true, MO_RELEASE);
-        }
-
-        // 4. Collect dirty clusters
+        // 3. Collect dirty clusters
         // ------------------------------------------------------------------------------------------------------
         let mut dirty_clusters = HashMap::with_capacity(1024);
 
@@ -305,10 +291,9 @@ impl OverworldOrchestrator {
             if !o_cluster.state().is_loaded() {
                 continue;
             }
-            if !o_cluster.dirty.load(MO_RELAXED) {
+            if !o_cluster.dirty.swap(false, MO_RELAXED) {
                 continue;
             }
-            o_cluster.dirty.store(false, MO_RELAXED);
 
             let mut cluster = o_cluster.cluster.write();
             if !cluster.is_loaded() {
@@ -317,6 +302,30 @@ impl OverworldOrchestrator {
 
             let dirty_parts = cluster.take_dirty_parts();
             dirty_clusters.insert(*pos, dirty_parts);
+        }
+
+        // 4. Check for previous finished load tasks
+        for (pos, rcl) in &mut *r_clusters {
+            if rcl.load_task.as_mut().map_or(true, |v| !v.is_finished()) {
+                continue;
+            };
+
+            let load_task = rcl.load_task.take().unwrap();
+            let (raw_cluster, loaded_type) = load_task.get_result().unwrap();
+            let o_cluster = o_clusters.get(pos).unwrap();
+
+            let t_cluster = Arc::clone(&o_cluster.cluster);
+            *t_cluster.write() = ClusterState::Ready(TrackingCluster::new(raw_cluster, ClusterPartSet::NONE));
+
+            o_cluster.state.store(ClusterStateEnum::Loaded as u32, MO_RELEASE);
+
+            if !dirty_clusters.contains_key(pos) && loaded_type == LoadedType::Loaded {
+                // The cluster hasn't been modified since loading
+                // and hence 'just' loaded without the need for persistence.
+                just_loaded_clusters.insert(*pos);
+            }
+
+            dirty_clusters.insert(*pos, ClusterPartSet::ALL);
         }
 
         // 5. Check dirty clusters for active blocks
@@ -330,8 +339,6 @@ impl OverworldOrchestrator {
 
         // 6. Compress redundant clusters
         // ------------------------------------------------------------------------------------------------------
-        // let n_max_uncompressed_clusters = (self.xz_render_distance.pow(2) as f64 * 3.14) as usize;
-        // let uncompressed_count = 0;
         let curr_time = Instant::now();
 
         for (pos, o_cluster) in &*o_clusters {
@@ -375,6 +382,17 @@ impl OverworldOrchestrator {
                 })
             };
             r_cluster.compress_task = Some(task);
+        }
+
+        // 7. Persist changed clusters (but not that has just been loaded)
+        // ------------------------------------------------------------------------------------------------------
+        for (pos, _) in &dirty_clusters {
+            if just_loaded_clusters.contains(pos) {
+                continue;
+            }
+            let o_cluster = &o_clusters[pos];
+            self.overworld_interface
+                .persist_cluster(pos, Arc::clone(&o_cluster.cluster));
         }
 
         OverworldUpdateResult {

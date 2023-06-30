@@ -1,8 +1,8 @@
 use crate::overworld::block::BlockState;
+use crate::overworld::interface::block_states::{EntityStorageDeserializer, SerializableEntityStorage};
 use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::ClusterBlockPos;
-use crate::persistence::block_states::{EntityStorageDeserializer, SerializableEntityStorage};
 use crate::registry::Registry;
 use common::glm;
 use common::types::HashMap;
@@ -319,6 +319,11 @@ impl RawCluster {
     }
 }
 
+pub struct CompressedCluster {
+    cells_data: Vec<u8>,
+    block_state_storage: EntityStorage,
+}
+
 pub fn serialize_cluster<S>(
     cluster: &RawCluster,
     registry: &Registry,
@@ -381,9 +386,4 @@ where
     }
 
     deserializer.deserialize_tuple(2, TupleVisitor { registry })
-}
-
-pub struct CompressedCluster {
-    cells_data: Vec<u8>,
-    block_state_storage: EntityStorage,
 }

@@ -118,6 +118,11 @@ impl<T> VirtualTask<T> {
         self.cancelled.store(true, MO_RELAXED);
     }
 
+    /// Returns result if the task has been completed, `None` otherwise.
+    pub fn get_result(self) -> Option<T> {
+        self.result.lock().take()
+    }
+
     pub async fn future(self) -> T {
         loop {
             let listener = self.completion_notify.notified();

@@ -1,10 +1,10 @@
 use crate::overworld::block::{Block, BlockBuilder, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
+use crate::overworld::interface::block_states::{StateDeserializeFn, StateSerializeInfo};
 use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::{BlockData, CellInfo, LightType};
 use crate::overworld::structure::world::{biome, Biome};
 use crate::overworld::structure::Structure;
-use crate::persistence::block_states::{StateDeserializeFn, StateSerializeInfo};
 use common::resource_file::ResourceRef;
 use common::types::HashMap;
 use entity_data::{Archetype, EntityId, EntityStorage};

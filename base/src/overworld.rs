@@ -14,6 +14,7 @@ pub mod block_model;
 pub mod cluster_part_set;
 pub mod facing;
 pub mod generator;
+pub mod interface;
 pub mod light_state;
 pub mod liquid_state;
 pub mod occluder;
@@ -26,6 +27,8 @@ use crate::main_registry::MainRegistry;
 use crate::overworld::accessor::ReadOnlyOverworldAccessor;
 use crate::overworld::cluster_part_set::ClusterPartSet;
 use crate::overworld::generator::OverworldGenerator;
+use crate::overworld::interface::local_interface::LocalOverworldInterface;
+use crate::overworld::interface::OverworldInterface;
 pub use crate::overworld::orchestrator::OverworldOrchestrator;
 use crate::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, CompressedCluster, RawCluster};
@@ -227,6 +230,21 @@ impl ClusterState {
             Self::Ready(TrackingCluster::new(raw_cluster, compressed.dirty_parts))
         })
     }
+
+    /// Decompressed the cluster if it's compressed and returns it.
+    pub fn ready(cluster: &Arc<RwLock<ClusterState>>) -> Option<ArcRwLockReadGuard<RawRwLock, ClusterState>> {
+        let mut t_cluster_read = cluster.upgradable_read_arc();
+        if t_cluster_read.is_initial() {
+            return None;
+        }
+        if t_cluster_read.is_compressed() {
+            let mut t_cluster = ArcRwLockUpgradableReadGuard::upgrade(t_cluster_read);
+            t_cluster.decompress();
+            t_cluster_read = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster);
+        }
+        t_cluster_read.unwrap().update_used_time();
+        Some(ArcRwLockUpgradableReadGuard::downgrade(t_cluster_read))
+    }
 }
 
 impl Default for ClusterState {
@@ -252,21 +270,6 @@ impl OverworldCluster {
             has_active_blocks: Default::default(),
         }
     }
-
-    pub fn ready(&self) -> Option<ArcRwLockReadGuard<RawRwLock, ClusterState>> {
-        let mut t_cluster_read = self.cluster.upgradable_read_arc();
-        if t_cluster_read.is_initial() {
-            return None;
-        }
-        if t_cluster_read.is_compressed() {
-            let mut t_cluster = ArcRwLockUpgradableReadGuard::upgrade(t_cluster_read);
-            t_cluster.decompress();
-            t_cluster_read = ArcRwLockWriteGuard::downgrade_to_upgradable(t_cluster);
-        }
-        t_cluster_read.unwrap().update_used_time();
-        Some(ArcRwLockUpgradableReadGuard::downgrade(t_cluster_read))
-    }
-
     pub fn state(&self) -> ClusterStateEnum {
         ClusterStateEnum::from_u32(self.state.load(MO_RELAXED))
     }
@@ -278,16 +281,19 @@ pub struct Overworld {
     seed: u64,
     main_registry: Arc<MainRegistry>,
     loaded_clusters: LoadedClusters,
-    generator: Arc<OverworldGenerator>,
+    interface: Arc<dyn OverworldInterface>,
 }
 
 impl Overworld {
     pub fn new(registry: &Arc<MainRegistry>, seed: u64) -> Arc<Overworld> {
+        let generator = Arc::new(OverworldGenerator::new(seed, registry));
+        let interface = Arc::new(LocalOverworldInterface::new("test_overworld", generator));
+
         Arc::new(Overworld {
             seed,
             main_registry: Arc::clone(registry),
             loaded_clusters: Default::default(),
-            generator: Arc::new(OverworldGenerator::new(seed, registry)),
+            interface,
         })
     }
 
@@ -299,8 +305,8 @@ impl Overworld {
         &self.loaded_clusters
     }
 
-    pub fn generator(&self) -> &Arc<OverworldGenerator> {
-        &self.generator
+    pub fn interface(&self) -> &Arc<dyn OverworldInterface> {
+        &self.interface
     }
 
     pub fn load_cluster(&self) {

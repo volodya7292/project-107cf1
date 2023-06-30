@@ -93,7 +93,7 @@ impl Game {
 
         let overworld = Overworld::new(&main_registry, 0);
 
-        let spawn_point = overworld.generator().gen_spawn_point();
+        let spawn_point = overworld.interface().generator().gen_spawn_point();
         // dbg!(spawn_point);
 
         // crate::proto::make_world_prototype_image(overworld.generator());

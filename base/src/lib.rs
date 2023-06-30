@@ -1,7 +1,6 @@
 pub mod execution;
 pub mod main_registry;
 pub mod overworld;
-pub mod persistence;
 pub mod physics;
 pub mod registry;
 #[cfg(test)]
@@ -17,7 +16,7 @@ use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::orchestrator::{OverworldOrchestrator, OverworldUpdateResult};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, LightType};
-use crate::overworld::LoadedClusters;
+use crate::overworld::{ClusterState, LoadedClusters};
 use crate::registry::Registry;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
@@ -246,7 +245,7 @@ pub fn process_active_blocks(
             return;
         }
 
-        let Some(cluster) = o_cluster.ready() else {
+        let Some(cluster) = ClusterState::ready(&o_cluster.cluster) else {
             return;
         };
         let cluster = cluster.unwrap();
