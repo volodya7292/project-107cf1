@@ -1,13 +1,9 @@
-use std::sync::Arc;
-
+use crate::rendering::texture_material::TextureMaterial;
+use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use base::overworld::block_model::BlockModel;
-use base::registry::Registry;
 use common::resource_file::ResourceRef;
 use engine::module::main_renderer::material::MatComponent;
 use engine::module::main_renderer::TextureAtlasType;
-
-use crate::rendering::texture_material::TextureMaterial;
-use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
 
 pub struct ResourceMapping {
     textures: Vec<(TextureAtlasType, ResourceRef)>,

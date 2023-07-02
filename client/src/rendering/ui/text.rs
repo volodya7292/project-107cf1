@@ -1,3 +1,4 @@
+use crate::rendering::ui::UIContext;
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
@@ -8,20 +9,13 @@ use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, Scene};
 use engine::module::text_renderer::{RawTextObject, TextRenderer};
 use engine::module::ui::management::UIState;
-use engine::module::ui::UIObject;
+use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::EngineContext;
 use entity_data::EntityId;
 
-pub fn load_pipeline(renderer: &mut MainRenderer, text_renderer: &mut TextRenderer) -> MaterialPipelineId {
-    let pixel = renderer
-        .device()
-        .create_pixel_shader(
-            include_bytes!("../../../res/shaders/text_char_ui.frag.spv"),
-            "text_ui.frag",
-        )
-        .unwrap();
-
-    text_renderer.register_text_pipeline(renderer, pixel)
+#[derive(Copy, Clone)]
+struct TextImplContext {
+    mat_pipe_id: MaterialPipelineId,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -48,37 +42,61 @@ impl UIState for TextState {}
 
 pub type UIText = UIObject<TextState>;
 
-pub fn new_text(scene: &mut Scene, parent: EntityId, mat_pipeline: MaterialPipelineId) -> EntityId {
-    let main_obj = UIText::new_raw(
-        UILayoutC::new().with_shader_inverted_y(true),
-        TextState {
-            raw_text_entity: Default::default(),
-            text: Default::default(),
-            inner_shadow_intensity: 0.0,
-        },
-    )
-    .with_scene_event_handler(
-        SceneEventHandler::new()
-            .with_on_update(on_update)
-            .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-    )
-    .disable_pointer_events();
+pub trait UITextImpl {
+    fn register(ctx: &EngineContext) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+        let mut text_renderer = ctx.module_mut::<TextRenderer>();
+        let scene = ctx.module_mut::<Scene>();
 
-    let raw_text_obj = RawTextObject::new(
-        TransformC::new(),
-        SimpleTextC::new(mat_pipeline)
-            .with_max_width(0.0)
-            .with_render_type(RenderLayer::Overlay),
-    );
+        let pixel = renderer
+            .device()
+            .create_pixel_shader(
+                include_bytes!("../../../res/shaders/text_char_ui.frag.spv"),
+                "text_ui.frag",
+            )
+            .unwrap();
 
-    let text_entity = scene.add_object(Some(parent), main_obj).unwrap();
-    let raw_text_entity = scene.add_object(Some(text_entity), raw_text_obj).unwrap();
+        let mat_pipe_id = text_renderer.register_text_pipeline(&mut renderer, pixel);
 
-    let mut main_obj = scene.object::<UIText>(&text_entity);
-    main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
+        scene.add_resource(TextImplContext { mat_pipe_id });
+    }
 
-    text_entity
+    fn new(ctx: &mut UIContext, parent: EntityId) -> EntityId {
+        let impl_ctx = *ctx.scene.resource::<TextImplContext>();
+
+        let main_obj = UIText::new_raw(
+            UILayoutC::new().with_shader_inverted_y(true),
+            TextState {
+                raw_text_entity: Default::default(),
+                text: Default::default(),
+                inner_shadow_intensity: 0.0,
+            },
+        )
+        .with_scene_event_handler(
+            SceneEventHandler::new()
+                .with_on_update(on_update)
+                .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
+        )
+        .disable_pointer_events();
+
+        let raw_text_obj = RawTextObject::new(
+            TransformC::new(),
+            SimpleTextC::new(impl_ctx.mat_pipe_id)
+                .with_max_width(0.0)
+                .with_render_type(RenderLayer::Overlay),
+        );
+
+        let text_entity = ctx.scene.add_object(Some(parent), main_obj).unwrap();
+        let raw_text_entity = ctx.scene.add_object(Some(text_entity), raw_text_obj).unwrap();
+
+        let mut main_obj = ctx.scene.object::<UIText>(&text_entity);
+        main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
+
+        text_entity
+    }
 }
+
+impl UITextImpl for UIText {}
 
 fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
     let entry = scene.entry(entity);
@@ -110,18 +128,18 @@ fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _: f64) 
     simple_text.text = state.text;
 }
 
-pub trait TextImpl {
+pub trait TextAccess {
     fn get_text(&self) -> &StyledString;
     fn set_text(&mut self, text: StyledString);
 }
 
-impl<'a> TextImpl for EntityAccess<'a, UIText> {
+impl<'a> TextAccess for EntityAccess<'a, UIText> {
     fn get_text(&self) -> &StyledString {
-        &self.get::<TextState>().text
+        &self.state().text
     }
 
     fn set_text(&mut self, text: StyledString) {
-        let simple_text = self.get_mut_checked::<TextState>().unwrap();
+        let simple_text = self.state_mut();
         simple_text.text = text;
         self.request_update();
     }

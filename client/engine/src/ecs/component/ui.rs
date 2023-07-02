@@ -183,6 +183,11 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_padding(mut self, padding: Padding) -> Self {
+        self.padding = padding;
+        self
+    }
+
     pub fn with_width(mut self, width: Sizing) -> Self {
         self.sizing[0] = width;
         self

@@ -1,4 +1,4 @@
-use crate::module::main_renderer::resource_manager::{ImageParams, ResourceManagementScope};
+use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
@@ -6,6 +6,7 @@ use common::glm;
 use common::glm::{Mat4, Vec2, Vec4};
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentColorBlend, AttachmentRef, BindingRes, CmdList, Device, DeviceBuffer,

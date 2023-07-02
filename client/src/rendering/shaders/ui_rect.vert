@@ -17,7 +17,7 @@ void main() {
     vec2 pos2d = vec2(gl_VertexIndex >> 1, gl_VertexIndex & 1);
     vec4 worldPos = model * vec4(pos2d, 0.0, 1.0);
 
-    vs_out.texCoord = vec2(pos2d.x, pos2d.y);
+    vs_out.texCoord = vec2(pos2d.x, 1.0 - pos2d.y);
 
     gl_Position = info.camera.proj_view * worldPos;
 }

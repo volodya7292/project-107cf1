@@ -5,13 +5,12 @@ use base::overworld::facing::Facing;
 use base::overworld::occluder::Occluder;
 use base::overworld::raw_cluster::RawCluster;
 use base::physics::aabb::AABB;
-use base::registry::Registry;
 use bit_vec::BitVec;
 use common::glm;
 use common::glm::{U32Vec2, U32Vec3, UVec4, Vec2, Vec3};
 use engine::attributes_impl;
 use engine::module::main_renderer::vertex_mesh::VertexPositionImpl;
-use smallvec::{smallvec, SmallVec};
+use smallvec::SmallVec;
 use std::ops::Range;
 
 #[derive(Debug, Copy, Clone, Default)]

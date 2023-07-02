@@ -133,6 +133,9 @@ impl ResourceFile {
         let mut entry = &self.main_entry;
 
         for name in filename.split('/') {
+            if name.is_empty() {
+                continue;
+            }
             match entry.entries.get(name) {
                 Some(a) => entry = a,
                 _ => return Err(Error::ResourceNotFound(filename.to_owned())),

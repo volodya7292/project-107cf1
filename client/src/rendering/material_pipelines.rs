@@ -12,7 +12,6 @@ pub struct MaterialPipelines {
     pub cluster: MaterialPipelineId,
     pub panel: MaterialPipelineId,
     pub text_3d: MaterialPipelineId,
-    pub text_ui: MaterialPipelineId,
     pub fancy_button: MaterialPipelineId,
 }
 
@@ -112,15 +111,32 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
         )
     };
 
-    let text_ui = text::load_pipeline(&mut renderer, &mut text_renderer);
+    let fancy_button = {
+        let vertex = device
+            .create_vertex_shader(
+                include_bytes!("../../res/shaders/ui_rect.vert.spv"),
+                &[],
+                "ui_rect.vert",
+            )
+            .unwrap();
+        let pixel = device
+            .create_pixel_shader(
+                include_bytes!("../../res/shaders/fancy_button.frag.spv"),
+                "fancy_button.frag",
+            )
+            .unwrap();
 
-    let fancy_button = fancy_button::load_pipeline(&mut renderer);
+        renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        )
+    };
 
     MaterialPipelines {
         cluster,
         panel,
         text_3d,
-        text_ui,
         fancy_button,
     }
 }

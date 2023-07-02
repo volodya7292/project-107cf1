@@ -5,12 +5,13 @@ use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use change_manager::SceneChangeManager;
-use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRefMut};
+use common::any::AsAny;
+use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::scene::relation::Relation;
 use common::types::{HashMap, HashSet};
 use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
 use std::any::TypeId;
-use std::cell::RefMut;
+use std::cell::{RefCell, RefMut};
 use std::marker::PhantomData;
 
 pub const N_MAX_OBJECTS: usize = 65535;
@@ -23,12 +24,17 @@ pub trait SceneObject: StaticArchetype {
 
 pub type EntityUpdateJob = fn(entity: &EntityId, scene: &mut Scene, &EngineContext);
 
+pub trait Resource: AsAny {}
+
+impl<T: 'static> Resource for T {}
+
 pub struct Scene {
     storage: EntityStorage,
     object_count: usize,
     change_manager: Lrc<SceneChangeManager>,
     entities_to_update: HashSet<EntityId>,
     component_changes: HashMap<TypeId, ComponentChangesHandle>,
+    resources: RefCell<HashMap<TypeId, Lrc<dyn Resource>>>,
 }
 
 impl Scene {
@@ -40,7 +46,19 @@ impl Scene {
             change_manager: Lrc::wrap(change_manager),
             entities_to_update: HashSet::with_capacity(1024),
             component_changes: Default::default(),
+            resources: RefCell::new(Default::default()),
         }
+    }
+
+    pub fn add_resource<R: Resource>(&self, resource: R) {
+        self.resources
+            .borrow_mut()
+            .insert(TypeId::of::<R>(), Lrc::wrap(resource));
+    }
+
+    pub fn resource<R: Resource>(&self) -> OwnedRef<dyn Resource, R> {
+        let res = self.resources.borrow().get(&TypeId::of::<R>()).unwrap().clone();
+        OwnedRef::map(res.borrow_owned(), |v| v.as_any().downcast_ref::<R>().unwrap())
     }
 
     pub fn storage(&self) -> &EntityStorage {

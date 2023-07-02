@@ -37,10 +37,12 @@ impl BindingType {
     pub const INPUT_ATTACHMENT: Self = Self(vk::DescriptorType::INPUT_ATTACHMENT);
 }
 
+pub type BindingId = u32;
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BindingLoc {
     pub descriptor_set: u32,
-    pub id: u32,
+    pub id: BindingId,
 }
 
 impl BindingLoc {

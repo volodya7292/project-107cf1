@@ -1,9 +1,10 @@
 use crate::ecs::component;
+use crate::ecs::component::render_config::Resource;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
 use crate::module::main_renderer::resources::{Renderable, GENERAL_OBJECT_DESCRIPTOR_IDX};
-use crate::module::main_renderer::{BufferUpdate, BufferUpdate1};
+use crate::module::main_renderer::{BufferUpdate, BufferUpdate1, ImageUpdate};
 use crate::module::scene::change_manager::{ChangeType, ComponentChange};
 use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use vk_wrapper as vkw;
 use vk_wrapper::buffer::BufferHandleImpl;
-use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer};
+use vk_wrapper::{BindingRes, DescriptorSet, DeviceBuffer, ImageLayout};
 
 pub(crate) struct RenderConfigComponentEvents<'a> {
     pub device: &'a Arc<vkw::Device>,
@@ -64,23 +65,45 @@ impl RenderConfigComponentEvents<'_> {
         ));
 
         for (binding_id, res) in &mut config.resources {
-            if let component::render_config::Resource::Buffer(buf_res) = res {
-                if buf_res.changed {
-                    let data = mem::take(&mut buf_res.buffer);
+            match res {
+                Resource::Buffer {
+                    new_source_data,
+                    buffer,
+                } => {
+                    let Some(data) = new_source_data.take() else {
+                        continue;
+                    };
 
                     buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
-                        buffer: buf_res.device_buffer.handle(),
+                        buffer: buffer.handle(),
                         dst_offset: 0,
                         data: data.into(),
                     }));
-                    buf_res.changed = false;
-
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
-                        vkw::BindingRes::Buffer(buf_res.device_buffer.handle()),
+                        BindingRes::Buffer(buffer.handle()),
                     ));
                 }
+                Resource::Image {
+                    new_source_data,
+                    image,
+                } => {
+                    let Some(data) = new_source_data.take() else {
+                        continue;
+                    };
+
+                    buffer_updates.push(BufferUpdate::Image(ImageUpdate {
+                        image: Arc::clone(image),
+                        data,
+                    }));
+                    new_binding_updates.push(object_desc_pool.create_binding(
+                        *binding_id,
+                        0,
+                        BindingRes::Image(Arc::clone(image), None, ImageLayout::SHADER_READ),
+                    ));
+                }
+                Resource::None => {}
             }
         }
 

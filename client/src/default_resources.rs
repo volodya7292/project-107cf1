@@ -37,7 +37,7 @@ impl DefaultResourceMapping {
         // Textures
         let tex_default = map.register_texture(
             TextureAtlasType::ALBEDO,
-            resources.get("textures/test_texture.basis").unwrap(),
+            resources.get("textures/lawn.basis").unwrap(),
         );
 
         let tex_glow = map.register_texture(

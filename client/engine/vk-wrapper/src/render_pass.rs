@@ -3,6 +3,7 @@ use common::types::HashMap;
 use std::sync::Arc;
 
 use crate::format::DEPTH_FORMAT;
+use crate::image::ImageParams;
 use crate::{
     device::DeviceError, AccessFlags, Device, Format, Framebuffer, Image, ImageLayout, ImageUsageFlags,
     ImageView, PipelineStageFlags,
@@ -160,7 +161,10 @@ impl RenderPass {
             let (image, image_view) = if let Some(override_image_view) = override_image_view {
                 (override_image, override_image_view)
             } else {
-                let image = self.device.create_image_2d(attachment.format, 1, usage, size)?;
+                let image = self.device.create_image(
+                    &ImageParams::d2(attachment.format, usage, size).with_preferred_mip_levels(1),
+                    "",
+                )?;
                 let view = Arc::clone(&image.view);
                 (Some(image), view)
             };

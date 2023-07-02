@@ -111,6 +111,21 @@ impl<E: UIState> SceneObject for UIObject<E> {
     }
 }
 
+pub trait UIObjectEntityImpl<S: UIState> {
+    fn state(&self) -> &S;
+    fn state_mut(&mut self) -> &mut S;
+}
+
+impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
+    fn state(&self) -> &S {
+        self.get::<S>()
+    }
+
+    fn state_mut(&mut self) -> &mut S {
+        self.get_mut::<S>()
+    }
+}
+
 #[derive(Debug)]
 struct ChildFlowSizingInfo {
     entity: EntityId,

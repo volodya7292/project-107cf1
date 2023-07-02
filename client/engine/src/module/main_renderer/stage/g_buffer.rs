@@ -2,7 +2,7 @@ use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
-use crate::module::main_renderer::resource_manager::{CmdListParams, ImageParams, ResourceManagementScope};
+use crate::module::main_renderer::resource_manager::{CmdListParams, ResourceManagementScope};
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::module::main_renderer::stage::depth::{DepthStage, VisibilityType};
 use crate::module::main_renderer::stage::{
@@ -15,6 +15,7 @@ use common::rayon::prelude::*;
 use common::{glm, rayon};
 use std::iter;
 use std::sync::Arc;
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, ClearValue, CmdList, Device, Format, Framebuffer,
     ImageLayout, ImageMod, ImageUsageFlags, LoadStore, PipelineStageFlags, QueueType, RenderPass, Subpass,

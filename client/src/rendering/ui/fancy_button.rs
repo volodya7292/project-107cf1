@@ -1,18 +1,15 @@
-use crate::rendering::ui::text;
-use crate::rendering::ui::text::{TextImpl, UIText};
-use common::glm::{Mat4, U8Vec4, Vec4};
-use common::scene::relation::Relation;
+use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
+use crate::rendering::ui::UIContext;
+use common::glm::{U8Vec4, Vec4};
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::transition::{TransValue, Transition};
+use engine::ecs::component::transition::Transition;
 use engine::ecs::component::ui::{UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{transition, MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
-use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
+use engine::module::main_renderer::MaterialPipelineId;
 use engine::module::scene::{EntityAccess, Scene};
 use engine::module::ui::management::UIState;
-use engine::module::ui::{UIObject, UIRenderer};
-use engine::vkw::pipeline::CullMode;
-use engine::vkw::PrimitiveTopology;
+use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::EngineContext;
 use entity_data::EntityId;
 
@@ -30,73 +27,48 @@ struct UniformData {
     background_color: Vec4,
 }
 
-pub fn load_pipeline(renderer: &mut MainRenderer) -> MaterialPipelineId {
-    let device = renderer.device();
-
-    let vertex = device
-        .create_vertex_shader(
-            include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
-            &[],
-            "ui_rect.vert",
-        )
-        .unwrap();
-    let pixel = device
-        .create_pixel_shader(
-            include_bytes!("../../../res/shaders/fancy_button.frag.spv"),
-            "fancy_button.frag",
-        )
-        .unwrap();
-
-    renderer.register_material_pipeline(
-        &[vertex, pixel],
-        PrimitiveTopology::TRIANGLE_STRIP,
-        CullMode::BACK,
-    )
-}
-
 impl UIState for FancyButtonState {}
 
 pub type FancyButton = UIObject<FancyButtonState>;
 
-pub fn new_fancy_button(
-    scene: &mut Scene,
-    parent: EntityId,
-    mat_pipeline: MaterialPipelineId,
-    text_mat_pipeline: MaterialPipelineId,
-) -> EntityId {
-    let mut surface_obj = FancyButton::new_raw(
-        UILayoutC::new(),
-        FancyButtonState {
-            text_entity: Default::default(),
-            text: "".to_owned(),
-            background_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-            transition: Transition::none(Vec4::new(0.5, 0.5, 0.5, 1.0)),
-        },
-    )
-    .with_scene_event_handler(SceneEventHandler::new())
-    .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_render_layer(RenderLayer::Overlay))
-    .with_mesh(VertexMeshC::without_data(4, 1))
-    .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update))
-    .add_event_handler(
-        UIEventHandlerC::new()
-            .add_on_cursor_enter(on_cursor_enter)
-            .add_on_cursor_leave(on_cursor_leave),
-    );
+pub trait FancyButtonImpl {
+    fn new(ctx: &mut UIContext, parent: EntityId, mat_pipeline: MaterialPipelineId) -> EntityId {
+        let surface_obj = FancyButton::new_raw(
+            UILayoutC::new(),
+            FancyButtonState {
+                text_entity: Default::default(),
+                text: "".to_owned(),
+                background_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+                transition: Transition::none(Vec4::new(0.5, 0.5, 0.5, 1.0)),
+            },
+        )
+        .with_scene_event_handler(SceneEventHandler::new())
+        .with_renderer(MeshRenderConfigC::new(mat_pipeline, true).with_render_layer(RenderLayer::Overlay))
+        .with_mesh(VertexMeshC::without_data(4, 1))
+        .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update))
+        .add_event_handler(
+            UIEventHandlerC::new()
+                .add_on_cursor_enter(on_cursor_enter)
+                .add_on_cursor_leave(on_cursor_leave),
+        );
 
-    let btn_entity = scene.add_object(Some(parent), surface_obj).unwrap();
-    let text_entity = text::new_text(scene, btn_entity, text_mat_pipeline);
+        let btn_entity = ctx.scene.add_object(Some(parent), surface_obj).unwrap();
+        let text_entity = UIText::new(ctx, btn_entity);
 
-    let mut surface_obj = scene.object::<FancyButton>(&btn_entity);
-    surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;
+        let mut surface_obj = ctx.scene.object::<FancyButton>(&btn_entity);
+        surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;
 
-    btn_entity
+        btn_entity
+    }
 }
 
-pub trait FancyButtonImpl {
+impl FancyButtonImpl for FancyButton {}
+
+pub trait FancyButtonAccess {
     fn set_text(&mut self, text: &str);
 }
 
-impl FancyButtonImpl for EntityAccess<'_, FancyButton> {
+impl FancyButtonAccess for EntityAccess<'_, FancyButton> {
     fn set_text(&mut self, text: &str) {
         let state = self.get_mut::<FancyButtonState>();
         state.text = text.to_owned();
@@ -105,8 +77,8 @@ impl FancyButtonImpl for EntityAccess<'_, FancyButton> {
 }
 
 fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
-    let mut entry = scene.entry(entity);
-    let state = entry.get_mut::<FancyButtonState>();
+    let mut entry = scene.object::<FancyButton>(entity);
+    let state = entry.state_mut();
     let mut update_needed = false;
 
     if !state.transition.advance(&mut state.background_color, dt) {
@@ -136,8 +108,8 @@ fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
 }
 
 fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
-    let mut entry = scene.entry(entity);
-    let state = entry.get_mut::<FancyButtonState>();
+    let mut entry = scene.object::<FancyButton>(entity);
+    let state = entry.state_mut();
     state.transition = Transition::new(
         state.background_color,
         Vec4::new(1.0, 1.0, 1.0, 1.0),
@@ -148,8 +120,8 @@ fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
 }
 
 fn on_cursor_leave(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
-    let mut entry = scene.entry(entity);
-    let state = entry.get_mut::<FancyButtonState>();
+    let mut entry = scene.object::<FancyButton>(entity);
+    let state = entry.state_mut();
     state.transition = Transition::new(
         state.background_color,
         Vec4::new(0.5, 0.5, 0.5, 1.0),

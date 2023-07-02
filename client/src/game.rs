@@ -1,11 +1,14 @@
+mod ui;
+
 use crate::client::utils;
 use crate::default_resources;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
-use crate::rendering::ui::text::{new_text, TextImpl, UIText};
-use crate::rendering::ui::{fancy_button, text};
+use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
+use crate::rendering::ui::image::{ImageAccess, ImageImpl, ImageSource, UIImage};
+use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
+use crate::rendering::ui::{fancy_button, register_ui_elements, text, UIContext};
 use crate::resource_mapping::ResourceMapping;
 use approx::AbsDiffEq;
 use base::execution::default_queue;
@@ -219,6 +222,8 @@ impl Application for Game {
         ctx.register_module(UIInteractionManager::new(ctx));
         ctx.register_module(Input::new());
 
+        register_ui_elements(ctx);
+
         // ------------------------------------------------------------------------------------------------
 
         self.grab_cursor(&*ctx.window(), true, ctx);
@@ -273,7 +278,7 @@ impl Application for Game {
         drop(renderer);
 
         // -------------------------------------------------------
-        let mut scene = ctx.module_mut::<Scene>();
+        let mut ui_ctx = UIContext::new(ctx);
 
         let mut text_renderer = ctx.module_mut::<TextRenderer>();
         let font_id = text_renderer.register_font(
@@ -286,7 +291,7 @@ impl Application for Game {
         drop(text_renderer);
 
         let player_pos = self.main_state.lock().player_pos;
-        let text = scene.add_object(
+        let text = ui_ctx.scene().add_object(
             Some(self.root_entity),
             RawTextObject::new(
                 TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
@@ -304,7 +309,8 @@ impl Application for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        let panel = scene
+        let panel = ui_ctx
+            .scene()
             .add_object(
                 Some(root_ui_entity),
                 UIObject::new_raw(
@@ -320,22 +326,32 @@ impl Application for Game {
             )
             .unwrap();
 
-        let text = new_text(&mut scene, panel, mat_pipelines.text_ui);
+        let text = UIText::new(&mut ui_ctx, panel);
 
-        let mut obj = scene.object::<UIText>(&text);
+        let mut obj = ui_ctx.scene().object::<UIText>(&text);
         obj.set_text(StyledString::new(
             "Loremipsumdsadsf dorer",
             TextStyle::new().with_font(font_id).with_font_size(100.5),
         ));
         drop(obj);
 
-        let fb = fancy_button::new_fancy_button(
-            &mut scene,
-            panel,
-            mat_pipelines.fancy_button,
-            mat_pipelines.text_ui,
+        let img_ui = UIImage::new(
+            &ui_ctx,
+            UILayoutC::new()
+                .with_width(Sizing::Preferred(100.0))
+                .with_height(Sizing::Preferred(100.0)),
         );
-        let mut fb_obj = scene.object::<FancyButton>(&fb);
+        let img_ui = ui_ctx.scene().add_object(Some(panel), img_ui).unwrap();
+        let mut obj = ui_ctx.scene().object::<UIImage>(&img_ui);
+
+        let img_source =
+            image::load_from_memory(&self.resources.get("/textures/test.jpg").unwrap().read().unwrap())
+                .unwrap();
+        obj.set_image(ImageSource::Data(img_source.into_rgba8()));
+        drop(obj);
+
+        let fb = FancyButton::new(&mut ui_ctx, panel, mat_pipelines.fancy_button);
+        let mut fb_obj = ui_ctx.scene().object::<FancyButton>(&fb);
         fb_obj.set_text("GOV");
 
         // let panel2 = renderer.add_object(

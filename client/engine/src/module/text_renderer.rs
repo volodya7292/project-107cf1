@@ -26,6 +26,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::shader::VInputRate;
@@ -505,11 +506,13 @@ impl TextRenderer {
         let device = Arc::clone(renderer.device());
 
         let glyph_array = device
-            .create_image_2d_array_named(
-                Format::RGBA8_UNORM,
-                1,
-                ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
-                (GLYPH_SIZE, GLYPH_SIZE, PREFERRED_MAX_GLYPHS),
+            .create_image(
+                &ImageParams::d2_array(
+                    Format::RGBA8_UNORM,
+                    ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+                    (GLYPH_SIZE, GLYPH_SIZE, PREFERRED_MAX_GLYPHS),
+                )
+                .with_preferred_mip_levels(1),
                 "glyph_array",
             )
             .unwrap();
@@ -604,7 +607,11 @@ impl TextRenderer {
         }
     }
 
-    pub fn register_text_pipeline(&mut self, renderer: &mut MainRenderer, pixel_shader: Arc<Shader>) -> u32 {
+    pub fn register_text_pipeline(
+        &mut self,
+        renderer: &mut MainRenderer,
+        pixel_shader: Arc<Shader>,
+    ) -> MaterialPipelineId {
         let vertex_shader = renderer
             .device()
             .create_vertex_shader(

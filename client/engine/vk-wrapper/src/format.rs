@@ -19,6 +19,7 @@ impl Format {
     pub const RGB32_FLOAT: Self = Self(vk::Format::R32G32B32_SFLOAT);
     pub const RGB32_UINT: Self = Self(vk::Format::R32G32B32_UINT);
     pub const RGBA8_UNORM: Self = Self(vk::Format::R8G8B8A8_UNORM);
+    pub const RGBA8_SRGB: Self = Self(vk::Format::R8G8B8A8_SRGB);
     pub const RGBA16_UNORM: Self = Self(vk::Format::R16G16B16A16_UNORM);
     pub const RGBA16_FLOAT: Self = Self(vk::Format::R16G16B16A16_SFLOAT);
     pub const RGBA32_FLOAT: Self = Self(vk::Format::R32G32B32A32_SFLOAT);
@@ -74,6 +75,7 @@ lazy_static! {
         (Format::RG16_FLOAT, *DEFAULT_IMAGE_FEATURES),
         (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA8_SRGB, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA16_FLOAT, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA32_FLOAT, *DEFAULT_IMAGE_FEATURES),
     ]
@@ -92,6 +94,7 @@ lazy_static! {
         (Format::RGB32_FLOAT, 12),
         (Format::RGB32_UINT, 12),
         (Format::RGBA8_UNORM, 4),
+        (Format::RGBA8_SRGB, 4),
         (Format::RGBA16_UNORM, 8),
         (Format::RGBA16_FLOAT, 8),
         (Format::RGBA32_FLOAT, 16),

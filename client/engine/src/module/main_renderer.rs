@@ -81,9 +81,10 @@ use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
-    swapchain, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet, Device,
-    Format, HostBuffer, ImageLayout, PrimitiveTopology, QueueType, SamplerFilter, SamplerMipmap, Semaphore,
-    Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain, SwapchainImage,
+    swapchain, AccessFlags, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet,
+    Device, Format, HostBuffer, Image, ImageLayout, PipelineStageFlags, PrimitiveTopology, QueueType,
+    SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain,
+    SwapchainImage, FORMAT_SIZES,
 };
 use winit::window::Window;
 
@@ -312,9 +313,15 @@ pub(crate) struct BufferUpdate2 {
     pub regions: Vec<CopyRegion>,
 }
 
+pub(crate) struct ImageUpdate {
+    pub image: Arc<Image>,
+    pub data: Vec<u8>,
+}
+
 pub(crate) enum BufferUpdate {
     WithOffset(BufferUpdate1),
     Regions(BufferUpdate2),
+    Image(ImageUpdate),
 }
 
 pub(crate) struct ParallelJob {
@@ -323,6 +330,7 @@ pub(crate) struct ParallelJob {
 }
 
 pub const TEXTURE_ID_NONE: u16 = u16::MAX;
+pub const CUSTOM_OBJ_BINDING_START_ID: u32 = shader_ids::CUSTOM_OBJ_BINDING_START_ID;
 
 pub const N_MAX_MATERIALS: u32 = 4096;
 pub const COMPUTE_LOCAL_THREADS_1D: u32 = shader_ids::THREAD_GROUP_1D_SIZE;
@@ -907,7 +915,7 @@ impl MainRenderer {
 
         let update_count = updates.len();
         let staging_size = self.staging_buffer.size();
-        let mut used_size = 0;
+        let mut curr_offset = 0;
         let mut i = 0;
 
         while i < update_count {
@@ -917,44 +925,41 @@ impl MainRenderer {
             while i < update_count {
                 let update = &updates[i];
 
-                let (copy_size, new_used_size) = match update {
-                    BufferUpdate::WithOffset(update) => {
-                        let copy_size = update.data.len() as u64;
-                        assert!(copy_size <= staging_size);
-                        (copy_size, used_size + copy_size)
-                    }
-                    BufferUpdate::Regions(update) => {
-                        let copy_size = update.data.len() as u64;
-                        assert!(copy_size <= staging_size);
-                        (copy_size, used_size + copy_size)
-                    }
+                let (copy_size, used_size) = {
+                    let copy_size = match update {
+                        BufferUpdate::WithOffset(update) => update.data.len(),
+                        BufferUpdate::Regions(update) => update.data.len(),
+                        BufferUpdate::Image(update) => update.data.len(),
+                    } as u64;
+                    assert!(copy_size <= staging_size);
+                    (copy_size, curr_offset + copy_size)
                 };
 
-                if new_used_size > staging_size {
-                    used_size = 0;
+                if used_size > staging_size {
+                    curr_offset = 0;
                     break;
                 }
 
                 match update {
                     BufferUpdate::WithOffset(update) => {
-                        self.staging_buffer.write(used_size as u64, &update.data);
+                        self.staging_buffer.write(curr_offset, &update.data);
                         cl.copy_buffer_to_device(
                             &self.staging_buffer,
-                            used_size,
+                            curr_offset,
                             &update.buffer,
                             update.dst_offset,
                             copy_size,
                         );
                     }
                     BufferUpdate::Regions(update) => {
-                        self.staging_buffer.write(used_size as u64, &update.data);
+                        self.staging_buffer.write(curr_offset, &update.data);
 
                         let regions: SmallVec<[CopyRegion; 64]> = update
                             .regions
                             .iter()
                             .map(|region| {
                                 CopyRegion::new(
-                                    used_size + region.src_offset(),
+                                    curr_offset + region.src_offset(),
                                     region.dst_offset(),
                                     (region.size() as u64).try_into().unwrap(),
                                 )
@@ -967,9 +972,49 @@ impl MainRenderer {
                             &regions,
                         );
                     }
+                    BufferUpdate::Image(update) => {
+                        let size_2d = update.image.size_2d();
+                        assert_eq!(
+                            update.data.len(),
+                            size_2d.0 as usize
+                                * size_2d.1 as usize
+                                * FORMAT_SIZES[&update.image.format()] as usize
+                        );
+
+                        self.staging_buffer.write(curr_offset, &update.data);
+
+                        cl.barrier_image(
+                            PipelineStageFlags::TOP_OF_PIPE,
+                            PipelineStageFlags::TRANSFER,
+                            &[update
+                                .image
+                                .barrier()
+                                .new_layout(ImageLayout::TRANSFER_DST)
+                                .dst_access_mask(AccessFlags::TRANSFER_WRITE)],
+                        );
+                        cl.copy_host_buffer_to_image_2d(
+                            &self.staging_buffer,
+                            curr_offset,
+                            &update.image,
+                            ImageLayout::TRANSFER_DST,
+                            (0, 0),
+                            0,
+                            size_2d,
+                        );
+                        cl.barrier_image(
+                            PipelineStageFlags::TRANSFER,
+                            PipelineStageFlags::BOTTOM_OF_PIPE,
+                            &[update
+                                .image
+                                .barrier()
+                                .old_layout(ImageLayout::TRANSFER_DST)
+                                .new_layout(ImageLayout::SHADER_READ)
+                                .src_access_mask(AccessFlags::TRANSFER_WRITE)],
+                        );
+                    }
                 }
 
-                used_size = new_used_size;
+                curr_offset = used_size;
                 i += 1;
             }
 

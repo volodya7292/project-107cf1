@@ -1,4 +1,5 @@
 use crate::format::{FormatFeatureFlags, BUFFER_FORMATS};
+use crate::image::ImageParams;
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::{BindingLoc, ShaderStage, VInputRate};
 use crate::PipelineSignature;
@@ -6,7 +7,7 @@ use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{
     utils, BindingType, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
-    {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer}, {ImageType, ImageUsageFlags},
+    {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding};
@@ -341,37 +342,32 @@ impl Device {
     /// If max_mip_levels = 0, mip level count is calculated automatically.
     pub fn create_image(
         self: &Arc<Self>,
-        image_type: ImageType,
-        is_array: bool,
-        format: Format,
-        preferred_mip_levels: u32,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32, u32),
+        params: &ImageParams,
         name: &str,
     ) -> Result<Arc<Image>, DeviceError> {
-        if image_type == Image::TYPE_3D {
-            assert_eq!(is_array, false);
+        if params.ty == Image::TYPE_3D {
+            assert_eq!(params.is_array, false);
         }
 
-        if !IMAGE_FORMATS.contains_key(&format)
-            && !BC_IMAGE_FORMATS.contains(&format)
-            && format != DEPTH_FORMAT
+        if !IMAGE_FORMATS.contains_key(&params.format)
+            && !BC_IMAGE_FORMATS.contains(&params.format)
+            && params.format != DEPTH_FORMAT
         {
-            panic!("Image format {:?} is not supported!", format);
+            panic!("Image format {:?} is not supported!", params.format);
         }
 
         let format_props = self.wrapper.adapter.get_image_format_properties(
-            format.0,
-            image_type.0,
+            params.format.0,
+            params.ty.0,
             vk::ImageTiling::OPTIMAL,
-            usage.0,
+            params.usage.0,
         )?;
 
-        let mut size = preferred_size;
+        let mut size = params.preferred_size;
         size.0 = size.0.clamp(1, format_props.max_extent.width);
         size.1 = size.1.clamp(1, format_props.max_extent.height);
 
-        let (extent, array_layers) = if image_type == Image::TYPE_2D {
+        let (extent, array_layers) = if params.ty == Image::TYPE_2D {
             size.2 = size.2.min(format_props.max_array_layers);
             (
                 vk::Extent3D {
@@ -392,23 +388,23 @@ impl Device {
                 1,
             )
         };
-        let mut mip_levels = if preferred_mip_levels == 0 {
+        let mut mip_levels = if params.preferred_mip_levels == 0 {
             utils::log2(size.0.max(size.1).max(size.2)) + 1
         } else {
-            preferred_mip_levels
+            params.preferred_mip_levels
         };
         mip_levels = mip_levels.min(format_props.max_mip_levels);
 
         let tiling = vk::ImageTiling::OPTIMAL;
         let image_info = vk::ImageCreateInfo::builder()
-            .image_type(image_type.0)
-            .format(format.0)
+            .image_type(params.ty.0)
+            .format(params.format.0)
             .extent(extent)
             .mip_levels(mip_levels)
             .array_layers(array_layers)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(tiling)
-            .usage(usage.0)
+            .usage(params.usage.0)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
@@ -446,7 +442,7 @@ impl Device {
         };
         let bytesize = alloc_info.size;
 
-        let aspect = if format == DEPTH_FORMAT {
+        let aspect = if params.format == DEPTH_FORMAT {
             vk::ImageAspectFlags::DEPTH
         } else {
             vk::ImageAspectFlags::COLOR
@@ -461,10 +457,10 @@ impl Device {
             native: image,
             allocation: Some(allocation),
             bytesize,
-            is_array,
+            is_array: params.is_array,
             owned_handle: true,
-            ty: image_type,
-            format,
+            ty: params.ty,
+            format: params.format,
             aspect,
             tiling,
             name: name.to_owned(),
@@ -490,77 +486,6 @@ impl Device {
         Ok(self
             .wrapper
             .create_sampler(mag_filter, min_filter, mipmap, clamp, max_anisotropy)?)
-    }
-
-    /// If max_mip_levels = 0, mip level count is calculated automatically.
-    pub fn create_image_2d(
-        self: &Arc<Self>,
-        format: Format,
-        preferred_mip_levels: u32,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32),
-    ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_named(format, preferred_mip_levels, usage, preferred_size, "")
-    }
-
-    /// If max_mip_levels = 0, mip level count is calculated automatically.
-    pub fn create_image_2d_named(
-        self: &Arc<Self>,
-        format: Format,
-        preferred_mip_levels: u32,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32),
-        name: &str,
-    ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(
-            Image::TYPE_2D,
-            false,
-            format,
-            preferred_mip_levels,
-            usage,
-            (preferred_size.0, preferred_size.1, 1),
-            name,
-        )
-    }
-
-    /// If max_mip_levels = 0, mip level count is calculated automatically.
-    pub fn create_image_2d_array(
-        self: &Arc<Self>,
-        format: Format,
-        preferred_mip_levels: u32,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32, u32),
-    ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image_2d_array_named(format, preferred_mip_levels, usage, preferred_size, "")
-    }
-
-    /// If max_mip_levels = 0, mip level count is calculated automatically.
-    pub fn create_image_2d_array_named(
-        self: &Arc<Self>,
-        format: Format,
-        preferred_mip_levels: u32,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32, u32),
-        name: &str,
-    ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(
-            Image::TYPE_2D,
-            true,
-            format,
-            preferred_mip_levels,
-            usage,
-            preferred_size,
-            name,
-        )
-    }
-
-    pub fn create_image_3d(
-        self: &Arc<Self>,
-        format: Format,
-        usage: ImageUsageFlags,
-        preferred_size: (u32, u32, u32),
-    ) -> Result<Arc<Image>, DeviceError> {
-        self.create_image(Image::TYPE_3D, false, format, 1, usage, preferred_size, "")
     }
 
     pub fn create_query_pool(self: &Arc<Self>, query_count: u32) -> Result<Arc<QueryPool>, vk::Result> {

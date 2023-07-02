@@ -5,6 +5,7 @@ use std::collections::hash_map;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::{mem, slice};
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
     DeviceBuffer, Format, HostBuffer, Image, ImageType, ImageUsageFlags, PipelineSignature,
@@ -241,18 +242,7 @@ impl ResourceManagementScope<'_> {
 
     pub fn request_image(&self, name: &str, params: ImageParams) -> Arc<Image> {
         self.request(name, params, |params, name| {
-            self.manager
-                .device
-                .create_image(
-                    params.ty,
-                    params.is_array,
-                    params.format,
-                    params.preferred_mip_levels,
-                    params.usage,
-                    params.preferred_size,
-                    name,
-                )
-                .unwrap()
+            self.manager.device.create_image(params, name).unwrap()
         })
     }
 
@@ -336,55 +326,5 @@ impl DeviceBufferParams {
             element_size,
             len,
         }
-    }
-}
-
-#[derive(Eq, PartialEq, Hash)]
-pub struct ImageParams {
-    ty: ImageType,
-    format: Format,
-    usage: ImageUsageFlags,
-    preferred_size: (u32, u32, u32),
-    preferred_mip_levels: u32,
-    is_array: bool,
-}
-
-impl ImageParams {
-    pub fn d2(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32)) -> Self {
-        Self {
-            ty: Image::TYPE_2D,
-            format,
-            usage,
-            preferred_size: (preferred_size.0, preferred_size.1, 1),
-            preferred_mip_levels: 1,
-            is_array: false,
-        }
-    }
-
-    pub fn d2_array(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32, u32)) -> Self {
-        Self {
-            ty: Image::TYPE_2D,
-            format,
-            usage,
-            preferred_size,
-            preferred_mip_levels: 1,
-            is_array: true,
-        }
-    }
-
-    pub fn d3(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32, u32)) -> Self {
-        Self {
-            ty: Image::TYPE_3D,
-            format,
-            usage,
-            preferred_size,
-            preferred_mip_levels: 1,
-            is_array: false,
-        }
-    }
-
-    pub fn with_preferred_mip_levels(mut self, max_mip_levels: u32) -> Self {
-        self.preferred_mip_levels = max_mip_levels;
-        self
     }
 }

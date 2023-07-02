@@ -296,3 +296,59 @@ impl PartialEq for Image {
         self.wrapper.native == other.wrapper.native
     }
 }
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct ImageParams {
+    pub(crate) ty: ImageType,
+    pub(crate) format: Format,
+    pub(crate) usage: ImageUsageFlags,
+    pub(crate) preferred_size: (u32, u32, u32),
+    pub(crate) preferred_mip_levels: u32,
+    pub(crate) is_array: bool,
+}
+
+impl ImageParams {
+    pub fn d2(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32)) -> Self {
+        Self {
+            ty: Image::TYPE_2D,
+            format,
+            usage,
+            preferred_size: (preferred_size.0, preferred_size.1, 1),
+            preferred_mip_levels: 1,
+            is_array: false,
+        }
+    }
+
+    pub fn d2_array(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32, u32)) -> Self {
+        Self {
+            ty: Image::TYPE_2D,
+            format,
+            usage,
+            preferred_size,
+            preferred_mip_levels: 1,
+            is_array: true,
+        }
+    }
+
+    pub fn d3(format: Format, usage: ImageUsageFlags, preferred_size: (u32, u32, u32)) -> Self {
+        Self {
+            ty: Image::TYPE_3D,
+            format,
+            usage,
+            preferred_size,
+            preferred_mip_levels: 1,
+            is_array: false,
+        }
+    }
+
+    pub fn add_usage(mut self, usage: ImageUsageFlags) -> Self {
+        self.usage |= usage;
+        self
+    }
+
+    /// If max_mip_levels = 0, mip level count is calculated automatically.
+    pub fn with_preferred_mip_levels(mut self, max_mip_levels: u32) -> Self {
+        self.preferred_mip_levels = max_mip_levels;
+        self
+    }
+}

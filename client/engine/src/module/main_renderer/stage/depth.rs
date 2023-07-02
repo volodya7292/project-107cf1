@@ -4,7 +4,7 @@ use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::camera::Frustum;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
 use crate::module::main_renderer::resource_manager::{
-    CmdListParams, DeviceBufferParams, HostBufferParams, ImageParams, ResourceManagementScope,
+    CmdListParams, DeviceBufferParams, HostBufferParams, ResourceManagementScope,
 };
 use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
@@ -21,6 +21,7 @@ use common::{glm, rayon};
 use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList, Device,
     Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline, PipelineStageFlags,

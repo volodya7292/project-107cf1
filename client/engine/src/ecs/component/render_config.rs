@@ -1,54 +1,61 @@
+use crate::module::main_renderer;
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::{mem, slice};
 use vk_wrapper as vkw;
+use vk_wrapper::image::ImageParams;
+use vk_wrapper::shader::BindingId;
 
-pub struct BufferResource {
-    pub(crate) buffer: Vec<u8>,
-    pub(crate) device_buffer: vkw::DeviceBuffer,
-    pub(crate) changed: bool,
+pub enum Resource {
+    Buffer {
+        new_source_data: Option<Vec<u8>>,
+        buffer: vkw::DeviceBuffer,
+    },
+    Image {
+        new_source_data: Option<Vec<u8>>,
+        image: Arc<vkw::Image>,
+    },
+    None,
 }
 
-impl BufferResource {
-    pub fn set(&mut self, device: &Arc<vkw::Device>, buffer: Vec<u8>) -> Result<(), vkw::DeviceError> {
-        self.buffer = buffer;
-
-        let curr_size = self.device_buffer.size();
-        let new_size = self.buffer.len() as u64;
-
-        if (new_size > curr_size) || (new_size < curr_size / 2) {
-            self.device_buffer = device.create_device_buffer(
-                vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::STORAGE,
-                new_size,
-                1,
-            )?;
-        }
-
-        self.changed = true;
-        Ok(())
+impl Default for Resource {
+    fn default() -> Self {
+        Self::None
     }
 }
 
-pub enum Resource {
-    Buffer(BufferResource),
-}
-
 impl Resource {
-    pub fn buffer<T>(device: &Arc<vkw::Device>, buffer: &[T]) -> Result<Resource, vkw::DeviceError> {
-        let size = buffer.len() * mem::size_of::<T>();
+    pub fn image(
+        device: &Arc<vkw::Device>,
+        params: ImageParams,
+        source_data: Vec<u8>,
+    ) -> Result<Resource, vkw::DeviceError> {
+        let image = device.create_image(&params.add_usage(vkw::ImageUsageFlags::TRANSFER_DST), "")?;
+        let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr(), source_data.len()) };
+
+        Ok(Resource::Image {
+            new_source_data: Some(byte_slice.to_vec()),
+            image,
+        })
+    }
+
+    pub fn buffer<T: Copy>(
+        device: &Arc<vkw::Device>,
+        source_data: &[T],
+    ) -> Result<Resource, vkw::DeviceError> {
+        let size = source_data.len() * mem::size_of::<T>();
 
         let device_buffer = device.create_device_buffer(
             vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::STORAGE,
             size as u64,
             1,
         )?;
-        let byte_slice = unsafe { slice::from_raw_parts(buffer.as_ptr() as *const u8, size) };
+        let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr() as *const u8, size) };
 
-        Ok(Resource::Buffer(BufferResource {
-            buffer: byte_slice.to_vec(),
-            device_buffer,
-            changed: true,
-        }))
+        Ok(Resource::Buffer {
+            new_source_data: Some(byte_slice.to_vec()),
+            buffer: device_buffer,
+        })
     }
 }
 
@@ -63,8 +70,7 @@ pub enum RenderLayer {
 pub struct MeshRenderConfigC {
     pub(crate) render_layer: RenderLayer,
     pub(crate) mat_pipeline: u32,
-    /// binding id -> Resource
-    pub(crate) resources: SmallVec<[(u32, Resource); 4]>,
+    pub(crate) resources: SmallVec<[(BindingId, Resource); 4]>,
     pub(crate) translucent: bool,
     pub(crate) visible: bool,
 }
@@ -97,6 +103,18 @@ impl MeshRenderConfigC {
         self
     }
 
+    pub fn with_shader_resources(mut self, resources: SmallVec<[Resource; 4]>) -> Self {
+        self.resources = resources
+            .into_iter()
+            .enumerate()
+            .map(|(idx, res)| {
+                let binding_id = main_renderer::CUSTOM_OBJ_BINDING_START_ID + idx as u32;
+                (binding_id, res)
+            })
+            .collect();
+        self
+    }
+
     pub fn visible(&self) -> bool {
         self.visible
     }
@@ -105,7 +123,7 @@ impl MeshRenderConfigC {
         self.visible = visible;
     }
 
-    pub fn resources_mut(&mut self) -> &mut SmallVec<[(u32, Resource); 4]> {
-        &mut self.resources
+    pub fn set_shader_resource(&mut self, idx: usize, res: Resource) {
+        self.resources[idx].1 = res;
     }
 }

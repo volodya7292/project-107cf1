@@ -1,6 +1,7 @@
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use std::sync::Arc;
 use vk_wrapper as vkw;
+use vk_wrapper::image::ImageParams;
 use vk_wrapper::QueueType;
 
 #[derive(Debug)]
@@ -150,11 +151,14 @@ pub fn new(
         1
     };
 
-    let image = device.create_image_2d(
-        format,
-        max_mip_levels,
-        vkw::ImageUsageFlags::TRANSFER_DST | vkw::ImageUsageFlags::SAMPLED,
-        (width, width),
+    let image = device.create_image(
+        &ImageParams::d2(
+            format,
+            vkw::ImageUsageFlags::TRANSFER_DST | vkw::ImageUsageFlags::SAMPLED,
+            (width, width),
+        )
+        .with_preferred_mip_levels(max_mip_levels),
+        "tex-atlas",
     )?;
 
     let mut gpu_job = device.create_job("tex-atlas", QueueType::Graphics)?;

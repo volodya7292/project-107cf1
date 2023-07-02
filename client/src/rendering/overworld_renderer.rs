@@ -82,12 +82,6 @@ struct ClusterEntities {
     translucent: EntityId,
 }
 
-impl ClusterEntities {
-    fn is_null(&self) -> bool {
-        self.solid == EntityId::NULL && self.translucent == EntityId::NULL
-    }
-}
-
 async fn build_cluster_mesh(update: PendingUpdate) {
     // 1. Perform the update
     let meshes = update.build_task.future().await;
