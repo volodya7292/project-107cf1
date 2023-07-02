@@ -39,6 +39,83 @@ vec3 rnm_blend_unpacked(vec3 n1, vec3 n2) {
     return n1 * dot(n1, n2) / n1.z - n2;
 }
 
+vec3 hash33( vec3 p )
+{
+	p = vec3( dot(p,vec3(127.1,311.7, 74.7)),
+			  dot(p,vec3(269.5,183.3,246.1)),
+			  dot(p,vec3(113.5,271.9,124.6)));
+
+	return fract(sin(p)*43758.5453123);
+}
+
+struct InterpNodes2
+{
+    vec2 seeds;
+    vec2 weights;
+};
+InterpNodes2 GetNoiseInterpNodes(float smoothNoise)
+{
+    vec2 globalPhases = vec2(smoothNoise * 0.5) + vec2(0.5, 0.0);
+    vec2 phases = fract(globalPhases);
+    vec2 seeds = floor(globalPhases) * 2.0 + vec2(0.0, 1.0);
+    vec2 weights = min(phases, vec2(1.0f) - phases) * 2.0;
+    return InterpNodes2(seeds, weights);
+}
+vec4 GetTextureSample(in sampler2D samp, uint tile_width, vec2 pos, uint texId, float freq, float seed)
+{
+    vec3 hash = hash33(vec3(seed, 0.0, 0.0));
+    float ang = hash.x * 2.0 * M_PI;
+    mat2 rotation = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));
+
+    vec2 uv = rotation * pos * freq + hash.yz;
+    return textureAtlas(samp, tile_width, uv, texId);
+}
+
+// 2D Random
+float random (in vec2 st) {
+    return fract(sin(dot(st.xy,
+                         vec2(12.9898,78.233)))
+                 * 43758.5453123);
+}
+
+float noise (in vec2 st) {
+    vec2 i = floor(st);
+    vec2 f = fract(st);
+
+    // Four corners in 2D of a tile
+    float a = random(i);
+    float b = random(i + vec2(1.0, 0.0));
+    float c = random(i + vec2(0.0, 1.0));
+    float d = random(i + vec2(1.0, 1.0));
+
+    // Smooth Interpolation
+
+    // Cubic Hermine Curve.  Same as SmoothStep()
+    vec2 u = f*f*(3.0-2.0*f);
+    // u = smoothstep(0.,1.,f);
+
+    // Mix 4 coorners percentages
+    return mix(a, b, u.x) +
+            (c - a)* u.y * (1.0 - u.x) +
+            (d - b) * u.x * u.y;
+}
+
+vec4 textureNoTile(in sampler2D samp, uint tile_width, vec2 uv, uint texId ) {
+    float smoothNoise = noise(uv);
+
+    uint layersCount = 5;
+    InterpNodes2 interpNodes = GetNoiseInterpNodes(smoothNoise * layersCount);
+    float moment2 = 0.0;
+    vec4 col = vec4(0);
+    for(int i = 0; i < 2; i++)
+    {
+        float weight = interpNodes.weights[i];
+        moment2 += weight * weight;
+        col += GetTextureSample(samp, tile_width, uv, texId, 1, interpNodes.seeds[i]) * weight;
+    }
+    return col;
+}
+
 void sample_material(uint id, vec2 coord, out SampledMaterial sampled_mat) {
     Material mat = materials[id];
 
@@ -48,10 +125,17 @@ void sample_material(uint id, vec2 coord, out SampledMaterial sampled_mat) {
     sampled_mat.normal = vec3(0);
 
     // Diffuse
-    if (mat.diffuse_tex_id == -1) {
-        sampled_mat.diffuse = mat.diffuse;
-    } else {
-        sampled_mat.diffuse += textureAtlas(albedoAtlas, info.tex_atlas_info.x, coord, mat.diffuse_tex_id);
+//    if (mat.diffuse_tex_id == -1) {
+//        sampled_mat.diffuse = mat.diffuse;
+//    } else {
+//        sampled_mat.diffuse += textureAtlas(albedoAtlas, info.tex_atlas_info.x, coord, mat.diffuse_tex_id);
+//    }
+    for (uint i = 0; i < 3; i++) {
+        if (mat.diffuse_tex_id == -1) {
+            sampled_mat.diffuse = mat.diffuse;
+        } else {
+            sampled_mat.diffuse += textureNoTile(albedoAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.diffuse_tex_id) * triplan_weight[i];
+        }
     }
 
     // Specular
