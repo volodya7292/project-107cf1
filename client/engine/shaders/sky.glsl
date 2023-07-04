@@ -265,13 +265,10 @@ vec3 calculateSky(vec2 fragCoord, vec2 renderSize, vec3 camPos, vec3 camDir, flo
     camPos.y += earth_radius;
 
     ray_t ray = primary_ray(renderSize, fragCoord * renderSize, camPos, fov, camView);
-	vec3 col = vec3(0);
+	vec3 col = get_incident_light(ray, -sun_dir);
 
-    if (dot(ray.direction, vec3(0, 1, 0)) > .0) {
-        col = get_incident_light(ray, -sun_dir);
-    } else {
-        col = get_incident_light(ray, -sun_dir);
-//        col = vec3 (0.333);
+    if (any(isnan(col))) {
+        col = vec3(0);
     }
 
 	return col;
