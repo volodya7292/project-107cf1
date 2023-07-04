@@ -2,8 +2,8 @@ pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData, Sizing,
-    UIEventHandlerC, UILayoutC, UILayoutCacheC,
+    AspectRatio, Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData,
+    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
@@ -14,7 +14,6 @@ use crate::module::EngineModule;
 use crate::EngineContext;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
-use common::types::Bool;
 use common::types::HashSet;
 use entity_data::{Archetype, EntityId, SystemAccess};
 use smallvec::SmallVec;
@@ -129,71 +128,101 @@ impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
 #[derive(Debug)]
 struct ChildFlowSizingInfo {
     entity: EntityId,
-    min: f32,
+    cross_size: f32,
+    min_flow_size: f32,
+    max_flow_size: f32,
     sizing: Sizing,
-    constraint: Constraint,
+    aspect: Option<AspectRatio>,
     overflow: Overflow,
 }
 
 /// Calculates final size for each child in a flow. Outputs pairs of [EntityId] and corresponding size.
 fn flow_calculate_children_sizes(
+    flow_axis: usize,
     parent_size: f32,
     children_sizings: &[ChildFlowSizingInfo],
 ) -> SmallVec<[(EntityId, f32); 128]> {
-    let mut sum_preferred = 0.0;
+    let mut result: SmallVec<[(EntityId, f32); 128]> =
+        children_sizings.iter().map(|info| (info.entity, 0.0)).collect();
+
+    let mut sum_fit_content = 0.0;
     let mut sum_grow_factor = 0.0;
-    let mut max_space_for_preferred = parent_size;
+    let mut min_sum_preferred = 0.0;
+    let mut min_sum_grow = 0.0;
 
     for child in children_sizings {
         match child.sizing {
-            Sizing::Grow(factor) => sum_grow_factor += factor,
-            _ => {}
+            Sizing::Preferred(_) => {
+                min_sum_preferred += child.min_flow_size;
+            }
+            Sizing::Grow(factor) => {
+                sum_grow_factor += factor;
+                min_sum_grow += child.min_flow_size;
+            }
+            Sizing::FitContent => {
+                sum_fit_content += child.min_flow_size;
+            }
         }
+    }
+    sum_grow_factor = sum_grow_factor.max(1.0);
 
-        if let Sizing::Preferred(size) = child.sizing {
-            sum_preferred += child.constraint.clamp(size);
-        } else {
-            max_space_for_preferred = (max_space_for_preferred - child.min).max(0.0);
+    let extra_space = (parent_size - (sum_fit_content + min_sum_preferred + min_sum_grow)).max(0.0);
+
+    // Calculate sizes for `FitContent`-sizing entities
+    for (idx, child) in children_sizings.iter().enumerate() {
+        if let Sizing::FitContent = child.sizing {
+            result[idx].1 = child.min_flow_size;
         }
     }
 
-    max_space_for_preferred = max_space_for_preferred.min(sum_preferred);
-    sum_grow_factor = sum_grow_factor.max(1.0);
+    let mut sum_preferred = 0.0;
+    let mut preferred_space_left = min_sum_preferred + extra_space;
 
-    let max_space_for_grow = (parent_size - max_space_for_preferred).max(0.0);
-    let mut preferred_space_left = max_space_for_preferred;
-    let mut grow_space_left = max_space_for_grow;
+    // Calculate sizes for `Preferred`-sizing entities
+    for (idx, child) in children_sizings.iter().enumerate() {
+        let new_size = if let Sizing::Preferred(size) = child.sizing {
+            size.min(preferred_space_left)
+                .clamp(child.min_flow_size, child.max_flow_size)
+        } else {
+            continue;
+        };
+        sum_preferred += new_size;
+        preferred_space_left -= new_size;
+        result[idx].1 = new_size;
+    }
 
-    children_sizings
-        .iter()
-        .map(move |child| {
-            let final_size = match child.sizing {
-                Sizing::Preferred(size) => {
-                    let min = child.min * (child.overflow == Overflow::Visible).into_f32();
-                    let proportion = size / sum_preferred;
+    let space_for_grow = (parent_size - (sum_fit_content + sum_preferred)).max(0.0);
+    let extra_space_for_grow = (space_for_grow - min_sum_grow).max(0.0);
+    let mut grow_space_left = space_for_grow;
 
-                    let allocated =
-                        (max_space_for_preferred * proportion).clamp(min, preferred_space_left.max(min));
-                    let allocated_constrained = child.constraint.clamp(allocated);
+    // Calculate sizes for `Grow`-sizing entities
+    for (idx, child) in children_sizings.iter().enumerate() {
+        let size = if let Sizing::Grow(factor) = child.sizing {
+            let proportion = factor / sum_grow_factor;
+            let grow_size = proportion * space_for_grow;
+            let extra_grow = proportion * extra_space_for_grow;
 
-                    preferred_space_left -= allocated_constrained.min(preferred_space_left);
-                    allocated_constrained
-                }
-                Sizing::Grow(factor) => {
-                    let min = child.min * (child.overflow == Overflow::Visible).into_f32();
-                    let proportion = factor / sum_grow_factor;
+            let mut size = (child.min_flow_size + extra_grow)
+                .min(grow_size)
+                .min(grow_space_left)
+                .clamp(child.min_flow_size, child.max_flow_size);
 
-                    let allocated = (max_space_for_grow * proportion).clamp(min, grow_space_left.max(min));
-                    let allocated_constrained = child.constraint.clamp(allocated);
+            if let Some(aspect) = child.aspect {
+                size = if flow_axis == 0 {
+                    child.cross_size * aspect
+                } else {
+                    child.cross_size / aspect
+                };
+            }
+            size
+        } else {
+            continue;
+        };
+        grow_space_left -= size;
+        result[idx].1 = size;
+    }
 
-                    grow_space_left -= allocated_constrained.min(grow_space_left);
-                    allocated_constrained
-                }
-                Sizing::FitContent => child.min,
-            };
-            (child.entity, final_size)
-        })
-        .collect()
+    result
 }
 
 struct ChildPositioningInfo {
@@ -243,7 +272,7 @@ impl UIRenderer {
         let ui_layout_changes = scene.change_manager_mut().register_component_flow::<UILayoutC>();
 
         let root_ui_entity = scene
-            .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::new(), ()))
+            .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::column(), ()))
             .unwrap();
 
         Self {
@@ -288,8 +317,10 @@ impl UIRenderer {
                 continue;
             }
 
+            let Some(layout) = layout_comps.get(node) else {
+                continue;
+            };
             let relation = relation_comps.get(node).unwrap();
-            let layout = layout_comps.get(node).unwrap();
             let flow_axis = layout.content_flow.axis();
             let cross_flow_axis = layout.content_flow.cross_axis();
             let mut new_min_size = Vec2::from_element(0.0);
@@ -364,11 +395,13 @@ impl UIRenderer {
                 .iter()
                 .any(|child| dirty_elements.contains(child));
 
-            if !dirty_elements.contains(node) || !contains_dirty_children {
+            if !dirty_elements.contains(node) && !contains_dirty_children {
                 continue;
             }
 
-            let parent_layout = layout_comps.get(node).unwrap();
+            let Some(parent_layout) = layout_comps.get(node) else {
+                continue;
+            };
             let parent_cache = *layout_cache_comps.get(node).unwrap();
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
@@ -402,19 +435,24 @@ impl UIRenderer {
                     dirty_elements.insert(*child);
                 }
 
+                let max_flow_size = child_layout.constraints[flow_axis].max;
+                let min_flow_size = child_cache.final_min_size[flow_axis].min(max_flow_size);
+
                 // Collect info for final size calculation
                 children_flow_sizings.push(ChildFlowSizingInfo {
                     entity: *child,
-                    min: child_cache.final_min_size[flow_axis],
+                    cross_size: child_cache.final_size[cross_flow_axis],
+                    min_flow_size,
+                    max_flow_size,
                     sizing: child_layout.sizing[flow_axis],
-                    constraint: child_layout.constraints[flow_axis],
+                    aspect: child_layout.aspect,
                     overflow: child_layout.overflow[flow_axis],
                 });
             }
 
             // Calculate flow-size of each child
             let calculated_children_flow_sizes =
-                flow_calculate_children_sizes(parent_size[flow_axis], &children_flow_sizings);
+                flow_calculate_children_sizes(flow_axis, parent_size[flow_axis], &children_flow_sizings);
 
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());

@@ -1,12 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
+#include "ui.glsl"
 #include "../../../engine/shaders/text_char_frag_template.glsl"
-
-struct Rect {
-    vec2 min;
-    vec2 max;
-};
 
 layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     mat4 model;

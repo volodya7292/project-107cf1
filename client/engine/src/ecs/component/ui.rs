@@ -6,6 +6,7 @@ use entity_data::EntityId;
 use std::hash::{Hash, Hasher};
 
 pub type Factor = f32;
+pub type AspectRatio = f32;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Position {
@@ -21,13 +22,13 @@ impl Default for Position {
 
 #[derive(Debug, Copy, Clone)]
 pub enum Sizing {
-    /// Uses size as close size as possible to the specified one.
+    /// Minimum size that fits tightly interior contents.
+    FitContent,
+    /// Uses a size as close as possible to the specified one.
     /// Elements of size [Self::Preferred] are expanded before [Self::Grow].
     Preferred(f32),
-    /// The size is proportional to all siblings. Expanded after [Self::Preferred].
+    /// The size is proportional to all siblings.
     Grow(Factor),
-    /// Minimum possible size.
-    FitContent,
 }
 
 impl Default for Sizing {
@@ -80,7 +81,7 @@ impl Padding {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ContentFlow {
     Horizontal,
     Vertical,
@@ -151,6 +152,8 @@ pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
+    /// Ratio defining flow size in form `width/height`.
+    pub aspect: Option<AspectRatio>,
     pub overflow: [Overflow; 2],
     pub align: CrossAlign,
     pub padding: Padding,
@@ -272,6 +275,11 @@ impl UILayoutCacheC {
     /// Returns final clipping rectangle in normalized coordinates.
     pub fn calculated_clip_rect(&self) -> &RectUniformData {
         &self.calculated_clip_rect
+    }
+
+    /// Returns final clipping rectangle in normalized coordinates.
+    pub fn final_size(&self) -> &Vec2 {
+        &self.final_size
     }
 }
 

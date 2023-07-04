@@ -3,7 +3,7 @@ use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::StyledString;
-use engine::ecs::component::ui::{RectUniformData, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::ui::{Constraint, RectUniformData, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{SceneEventHandler, SimpleTextC, TransformC, UniformDataC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, Scene};
