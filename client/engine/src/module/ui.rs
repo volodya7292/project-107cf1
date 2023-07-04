@@ -2,8 +2,8 @@ pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    AspectRatio, Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData,
-    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
+    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData, Sizing,
+    UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
@@ -128,17 +128,14 @@ impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
 #[derive(Debug)]
 struct ChildFlowSizingInfo {
     entity: EntityId,
-    cross_size: f32,
     min_flow_size: f32,
     max_flow_size: f32,
     sizing: Sizing,
-    aspect: Option<AspectRatio>,
     overflow: Overflow,
 }
 
 /// Calculates final size for each child in a flow. Outputs pairs of [EntityId] and corresponding size.
 fn flow_calculate_children_sizes(
-    flow_axis: usize,
     parent_size: f32,
     children_sizings: &[ChildFlowSizingInfo],
 ) -> SmallVec<[(EntityId, f32); 128]> {
@@ -202,19 +199,10 @@ fn flow_calculate_children_sizes(
             let grow_size = proportion * space_for_grow;
             let extra_grow = proportion * extra_space_for_grow;
 
-            let mut size = (child.min_flow_size + extra_grow)
+            (child.min_flow_size + extra_grow)
                 .min(grow_size)
                 .min(grow_space_left)
-                .clamp(child.min_flow_size, child.max_flow_size);
-
-            if let Some(aspect) = child.aspect {
-                size = if flow_axis == 0 {
-                    child.cross_size * aspect
-                } else {
-                    child.cross_size / aspect
-                };
-            }
-            size
+                .clamp(child.min_flow_size, child.max_flow_size)
         } else {
             continue;
         };
@@ -441,18 +429,16 @@ impl UIRenderer {
                 // Collect info for final size calculation
                 children_flow_sizings.push(ChildFlowSizingInfo {
                     entity: *child,
-                    cross_size: child_cache.final_size[cross_flow_axis],
                     min_flow_size,
                     max_flow_size,
                     sizing: child_layout.sizing[flow_axis],
-                    aspect: child_layout.aspect,
                     overflow: child_layout.overflow[flow_axis],
                 });
             }
 
             // Calculate flow-size of each child
             let calculated_children_flow_sizes =
-                flow_calculate_children_sizes(flow_axis, parent_size[flow_axis], &children_flow_sizings);
+                flow_calculate_children_sizes(parent_size[flow_axis], &children_flow_sizings);
 
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());

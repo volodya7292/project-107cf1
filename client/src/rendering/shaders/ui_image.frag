@@ -19,6 +19,14 @@ layout(location = 0) in Input {
 } vs_in;
 
 void main() {
+    vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
+    if (isOutsideCropRegion(normScreenCoord, clip_rect)) {
+        discard;
+    }
+    if (any(lessThan(vs_in.texCoord, vec2(0))) || any(greaterThan(vs_in.texCoord, vec2(1)))) {
+        discard;
+    }
+
     outAlbedo = texture(sourceImage, vs_in.texCoord);
     outSpecular = vec4(0.0);
     outEmission = vec4(0.0);

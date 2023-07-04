@@ -1,4 +1,3 @@
-use crate::ecs::component;
 use crate::ecs::component::render_config::Resource;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
@@ -10,7 +9,6 @@ use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
 use smallvec::{smallvec, SmallVec};
-use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;

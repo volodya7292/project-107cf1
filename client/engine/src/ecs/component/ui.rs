@@ -6,7 +6,6 @@ use entity_data::EntityId;
 use std::hash::{Hash, Hasher};
 
 pub type Factor = f32;
-pub type AspectRatio = f32;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum Position {
@@ -152,8 +151,6 @@ pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
-    /// Ratio defining flow size in form `width/height`.
-    pub aspect: Option<AspectRatio>,
     pub overflow: [Overflow; 2],
     pub align: CrossAlign,
     pub padding: Padding,

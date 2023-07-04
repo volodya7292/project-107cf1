@@ -8,8 +8,7 @@ use std::{mem, slice};
 use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
-    DeviceBuffer, Format, HostBuffer, Image, ImageType, ImageUsageFlags, PipelineSignature,
-    PipelineStageFlags, QueueType,
+    DeviceBuffer, HostBuffer, Image, PipelineSignature, PipelineStageFlags, QueueType,
 };
 
 pub struct OwnedDescriptorSets {

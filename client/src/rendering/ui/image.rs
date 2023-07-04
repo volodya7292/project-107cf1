@@ -38,14 +38,14 @@ impl ImageSource {
 }
 
 #[derive(Copy, Clone)]
-pub enum ImageAspect {
-    Original,
+pub enum ImageFitness {
+    Contain,
     Cover,
 }
 
 pub struct ImageState {
-    aspect: ImageAspect,
-    original_aspect_ratio: f32,
+    fitness: ImageFitness,
+    image_aspect_ratio: f32,
     source: Option<ImageSource>,
 }
 
@@ -83,7 +83,7 @@ pub trait ImageImpl {
         scene.add_resource(ImageImplContext { mat_pipe_id });
     }
 
-    fn new(ui_ctx: &UIContext, aspect: ImageAspect) -> UIImage {
+    fn new(ui_ctx: &UIContext, layout: UILayoutC, fitness: ImageFitness) -> UIImage {
         let impl_ctx = ui_ctx.scene.resource::<ImageImplContext>();
         let renderer = ui_ctx.ctx.module::<MainRenderer>();
         let initial_image = Resource::image(
@@ -94,12 +94,10 @@ pub trait ImageImpl {
         .unwrap();
 
         UIImage::new_raw(
-            UILayoutC::new()
-                .with_width(Sizing::Grow(1.0))
-                .with_height(Sizing::Grow(1.0)),
+            layout,
             ImageState {
-                aspect,
-                original_aspect_ratio: 1.0,
+                fitness,
+                image_aspect_ratio: 1.0,
                 source: None,
             },
         )
@@ -143,17 +141,32 @@ fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContex
     let cache = obj.get::<UILayoutCacheC>();
     let rect_data = *cache.calculated_clip_rect();
     let final_size = *cache.final_size();
-
     let ui_element_aspect_ratio = final_size.x / final_size.y;
-    let shader_aspect_ratio = obj.state().original_aspect_ratio / ui_element_aspect_ratio;
+
+    let state = obj.state();
+    let fitness = state.fitness;
+    let shader_aspect_ratio = state.image_aspect_ratio / ui_element_aspect_ratio;
 
     // Calculate offset and scale for 'cover' image fitness.
-    let (img_offset, img_scale) = if shader_aspect_ratio > 1.0 {
-        let width = shader_aspect_ratio;
-        (Vec2::new(-0.5 * (width - 1.0), 0.0), Vec2::new(width, 1.0))
-    } else {
-        let height = 1.0 / shader_aspect_ratio;
-        (Vec2::new(0.0, -0.5 * (height - 1.0)), Vec2::new(1.0, height))
+    let (img_offset, img_scale) = match fitness {
+        ImageFitness::Contain => {
+            if shader_aspect_ratio > 1.0 {
+                let height = 1.0 / shader_aspect_ratio;
+                (Vec2::new(0.0, 0.5 * (1.0 - height)), Vec2::new(1.0, height))
+            } else {
+                let width = shader_aspect_ratio;
+                (Vec2::new(0.5 * (1.0 - width), 0.0), Vec2::new(width, 1.0))
+            }
+        }
+        ImageFitness::Cover => {
+            if shader_aspect_ratio > 1.0 {
+                let width = shader_aspect_ratio;
+                (Vec2::new(-0.5 * (width - 1.0), 0.0), Vec2::new(width, 1.0))
+            } else {
+                let height = 1.0 / shader_aspect_ratio;
+                (Vec2::new(0.0, -0.5 * (height - 1.0)), Vec2::new(1.0, height))
+            }
+        }
     };
 
     let uniform_data = obj.get_mut::<UniformDataC>();
@@ -166,24 +179,13 @@ fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _dt: f64
     let renderer = ctx.module::<MainRenderer>();
 
     let mut obj = scene.object::<UIImage>(entity);
-    let img_aspect = obj.state().aspect;
     let Some(source) = obj.state_mut().source.take() else {
         return;
     };
     let size = source.size();
 
     let original_aspect_ratio = size.0 as f32 / size.1 as f32;
-    obj.state_mut().original_aspect_ratio = original_aspect_ratio;
-
-    let layout = obj.get_mut::<UILayoutC>();
-    match img_aspect {
-        ImageAspect::Original => {
-            layout.aspect = Some(original_aspect_ratio);
-        }
-        ImageAspect::Cover => {
-            layout.aspect = None;
-        }
-    }
+    obj.state_mut().image_aspect_ratio = original_aspect_ratio;
 
     let res = Resource::image(
         renderer.device(),

@@ -6,7 +6,7 @@ use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
-use crate::rendering::ui::image::{ImageAccess, ImageAspect, ImageImpl, ImageSource, UIImage};
+use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
 use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
 use crate::rendering::ui::{fancy_button, register_ui_elements, text, UIContext};
 use crate::resource_mapping::ResourceMapping;
@@ -316,7 +316,8 @@ impl Application for Game {
                 UIObject::new_raw(
                     UILayoutC::new()
                         .with_width(Sizing::Preferred(300.0))
-                        .with_height(Sizing::FitContent),
+                        .with_height(Sizing::Grow(0.9))
+                        .with_max_height(300.0),
                     (),
                 )
                 .with_renderer(
@@ -335,7 +336,13 @@ impl Application for Game {
         ));
         drop(obj);
 
-        let img_ui = UIImage::new(&ui_ctx, ImageAspect::Original);
+        let img_ui = UIImage::new(
+            &ui_ctx,
+            UILayoutC::new()
+                .with_width(Sizing::Grow(1.0))
+                .with_min_height(200.0),
+            ImageFitness::Cover,
+        );
         let img_ui = ui_ctx.scene().add_object(Some(panel), img_ui).unwrap();
         let mut obj = ui_ctx.scene().object::<UIImage>(&img_ui);
 
