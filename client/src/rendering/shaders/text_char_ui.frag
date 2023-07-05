@@ -1,6 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
+#define ENGINE_PIXEL_SHADER_UI
 #include "ui.glsl"
 #include "../../../engine/shaders/text_char_frag_template.glsl"
 
@@ -31,9 +32,9 @@ void main() {
     }
 
     if (opacity == 1.0) {
-        outEmission = vec4(10) * opacity;
+        writeOutput(vec4(2));
     } else {
-        outEmission = vec4(vec3(opacity), 1);
+        writeOutput(vec4(vec3(1), opacity));
     }
 
 //    writeOutputAlbedo(vec4(color, vs_in.color.a * opacity));

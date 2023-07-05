@@ -30,6 +30,7 @@ pub struct GBufferStage {
     color_with_blending_pipe: PipelineKindId,
     overlay_pipe: PipelineKindId,
     render_pass: Arc<RenderPass>,
+    overlay_render_pass: Arc<RenderPass>,
     frame_infos_indices: Vec<usize>,
 }
 
@@ -40,8 +41,9 @@ impl GBufferStage {
     pub const EMISSIVE_ATTACHMENT_ID: u32 = 3;
     pub const NORMAL_ATTACHMENT_ID: u32 = 4;
     pub const DEPTH_ATTACHMENT_ID: u32 = 5;
-    pub const OVERLAY_DEPTH_ATTACHMENT_ID: u32 = 6;
+    pub const OVERLAY_ALBEDO_ATTACHMENT_ID: u32 = 0;
     pub const RES_FRAMEBUFFER: &'static str = "g-framebuffer";
+    pub const RES_OVERLAY_FRAMEBUFFER: &'static str = "g-overlay_framebuffer";
     pub const RES_TRANSLUCENCY_COLORS_IMAGE: &'static str = "translucency_colors_image";
     pub const RES_OVERLAY_DEPTH_IMAGE: &'static str = "g-overlay-depth";
 
@@ -93,13 +95,6 @@ impl GBufferStage {
                         final_layout: ImageLayout::DEPTH_STENCIL_READ,
                         load_store: LoadStore::InitLoadFinalStore,
                     },
-                    // Overlay depth (read/write)
-                    Attachment {
-                        format: Format::D32_FLOAT,
-                        init_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::DEPTH_STENCIL_READ,
-                        load_store: LoadStore::InitClearFinalStore,
-                    },
                 ],
                 &[
                     // Solid-colors pass
@@ -140,53 +135,46 @@ impl GBufferStage {
                             index: 5,
                             layout: ImageLayout::DEPTH_STENCIL_READ,
                         }),
-                    // Overlay pass
-                    Subpass::new()
-                        .with_color(vec![
-                            AttachmentRef {
-                                index: 0,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 1,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 2,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 3,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                            AttachmentRef {
-                                index: 4,
-                                layout: ImageLayout::COLOR_ATTACHMENT,
-                            },
-                        ])
-                        .with_depth(AttachmentRef {
-                            index: 6,
-                            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
-                        }),
                 ],
+                &[SubpassDependency {
+                    src_subpass: 0,
+                    dst_subpass: 1,
+                    src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                    dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
+                    src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                }],
+            )
+            .unwrap();
+
+        let overlay_render_pass = device
+            .create_render_pass(
                 &[
-                    SubpassDependency {
-                        src_subpass: 0,
-                        dst_subpass: 1,
-                        src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                        dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    // Albedo
+                    Attachment {
+                        format: Format::RGBA16_FLOAT,
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::SHADER_READ,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
-                    SubpassDependency {
-                        src_subpass: 1,
-                        dst_subpass: 2,
-                        src_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                        dst_stage_mask: PipelineStageFlags::PIXEL_SHADER,
-                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    // Overlay depth (read/write)
+                    Attachment {
+                        format: Format::D32_FLOAT,
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::DEPTH_STENCIL_READ,
+                        load_store: LoadStore::InitClearFinalStore,
                     },
                 ],
+                &[Subpass::new()
+                    .with_color(vec![AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    }])
+                    .with_depth(AttachmentRef {
+                        index: 1,
+                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT,
+                    })],
+                &[],
             )
             .unwrap();
 
@@ -196,6 +184,7 @@ impl GBufferStage {
             color_with_blending_pipe: u32::MAX,
             overlay_pipe: u32::MAX,
             render_pass,
+            overlay_render_pass,
             frame_infos_indices: vec![],
         }
     }
@@ -292,7 +281,7 @@ impl GBufferStage {
     fn record_overlay_cmd_list(&self, cl: &mut CmdList, framebuffer: &Framebuffer, ctx: &StageContext) {
         let mat_pipelines = ctx.material_pipelines;
 
-        cl.begin_secondary_graphics(true, &self.render_pass, 2, Some(framebuffer))
+        cl.begin_secondary_graphics(true, &self.overlay_render_pass, 0, Some(framebuffer))
             .unwrap();
 
         for renderable_id in ctx.ordered_entities {
@@ -392,11 +381,11 @@ impl RenderStage for GBufferStage {
         pipeline_set.prepare_pipeline(
             self.overlay_pipe,
             &PipelineConfig {
-                render_pass: &self.render_pass,
+                render_pass: &self.overlay_render_pass,
                 signature: &params.main_signature,
-                subpass_index: 2,
+                subpass_index: 0,
                 cull: params.cull,
-                blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
+                blend_attachments: &[Self::OVERLAY_ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: true,
                 spec_consts: &[(
@@ -519,6 +508,31 @@ impl RenderStage for GBufferStage {
             },
         );
 
+        let overlay_framebuffer = resources.request(
+            Self::RES_OVERLAY_FRAMEBUFFER,
+            (
+                ctx.render_size,
+                Arc::clone(&self.overlay_render_pass),
+                Arc::clone(&overlay_depth_image),
+            ),
+            |(render_size, render_pass, overlay_depth_image), _| {
+                render_pass
+                    .create_framebuffer(
+                        *render_size,
+                        &[
+                            (
+                                0,
+                                ImageMod::AdditionalUsage(
+                                    ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                                ),
+                            ),
+                            (1, ImageMod::OverrideImage(Arc::clone(&overlay_depth_image))),
+                        ],
+                    )
+                    .unwrap()
+            },
+        );
+
         let translucency_colors_image = resources.request_image(
             Self::RES_TRANSLUCENCY_COLORS_IMAGE,
             ImageParams::d2_array(
@@ -548,7 +562,7 @@ impl RenderStage for GBufferStage {
             resources,
             ctx,
         );
-        self.record_overlay_cmd_list(&mut overlay_cmd_list.lock(), &framebuffer, ctx);
+        self.record_overlay_cmd_list(&mut overlay_cmd_list.lock(), &overlay_framebuffer, ctx);
 
         // ------------------------------------------------------------------------------------------
 
@@ -598,12 +612,18 @@ impl RenderStage for GBufferStage {
         // Transparency subpass
         cl.next_subpass(true);
         cl.execute_secondary(translucent_objects_cmd_lists.lock().iter());
-
-        // Overlay subpass
-        cl.next_subpass(true);
-        cl.execute_secondary(iter::once(&*overlay_cmd_list.lock()));
-
         cl.end_render_pass();
+
+        // Overlay pass
+        cl.begin_render_pass(
+            &self.overlay_render_pass,
+            &overlay_framebuffer,
+            &[ClearValue::ColorU32([0; 4]), ClearValue::Depth(0.0)],
+            true,
+        );
+        cl.execute_secondary(iter::once(&*overlay_cmd_list.lock()));
+        cl.end_render_pass();
+
         cl.end().unwrap();
 
         StageRunResult::new()

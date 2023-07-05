@@ -89,11 +89,15 @@ vec4 shadowClipPosMapping(vec4 pos) {
 #ifdef ENGINE_PIXEL_SHADER
 layout(constant_id = CONST_ID_PASS_TYPE) const uint PASS_TYPE = 0;
 
+#ifdef ENGINE_PIXEL_SHADER_UI
+layout(location = 0) out vec4 outAlbedo;
+#else
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outSpecular;
 layout(location = 3) out vec4 outEmission;
 layout(location = 4) out vec4 outNormal;
+#endif
 
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_FRAME_INFO, scalar) uniform FrameData {
     FrameInfo info;
@@ -105,10 +109,12 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_ALBEDO_ATLAS) uniform samp
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_SPECULAR_ATLAS) uniform sampler2D specularAtlas;
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_NORMAL_ATLAS) uniform sampler2D normalAtlas;
 
+#ifndef ENGINE_PIXEL_SHADER_UI
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_DEPTHS, std430) coherent buffer TranslucentDepthsArray {
     uint depthsArray[];
 };
 layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_COLORS, rgba8) uniform image2DArray translucencyColorsArray;
+#endif
 
 /// tile_width: with of single tile in pixels
 /// tex_coord: regular texture coordinates
@@ -137,6 +143,13 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     return textureLod(atlas, tex_coord, lod);
 }
 
+
+
+#ifdef ENGINE_PIXEL_SHADER_UI
+void writeOutput(vec4 albedo) {
+    outAlbedo = albedo;
+}
+#else
 void writeOutputAlbedo(vec4 albedo) {
     if (PASS_TYPE != PASS_TYPE_G_BUFFER_TRANSLUCENCY || albedo.a < ALPHA_BIAS) {
         // Do not render translucency, this is solid colors pass
@@ -185,7 +198,7 @@ void writeOutput(vec3 position, vec4 albedo, vec4 specular, vec3 emission, vec3 
 
     writeOutputAlbedo(albedo);
 }
-
+#endif
 #endif // ENGINE_PIXEL_SHADER
 
 #ifdef ENGINE_VERTEX_SHADER

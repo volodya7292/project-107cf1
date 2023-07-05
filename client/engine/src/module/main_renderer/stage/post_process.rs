@@ -304,10 +304,13 @@ impl PostProcessStage {
             resources.request_descriptors("post-merge-desc", self.merge_pipeline.signature(), 0, 1);
 
         let g_framebuffer: Arc<Framebuffer> = resources.get(GBufferStage::RES_FRAMEBUFFER);
+        let g_overlay_framebuffer: Arc<Framebuffer> = resources.get(GBufferStage::RES_OVERLAY_FRAMEBUFFER);
+
         let translucency_depths_image: Arc<DeviceBuffer> =
             resources.get(DepthStage::RES_TRANSLUCENCY_DEPTHS_IMAGE);
         let translucency_colors_image: Arc<Image> =
             resources.get(GBufferStage::RES_TRANSLUCENCY_COLORS_IMAGE);
+
         let g_position = g_framebuffer
             .get_image(GBufferStage::POSITION_ATTACHMENT_ID)
             .unwrap();
@@ -326,9 +329,11 @@ impl PostProcessStage {
         let g_depth = g_framebuffer
             .get_image(GBufferStage::DEPTH_ATTACHMENT_ID)
             .unwrap();
-        let g_overlay_depth = g_framebuffer
-            .get_image(GBufferStage::OVERLAY_DEPTH_ATTACHMENT_ID)
+
+        let g_overlay_albedo = g_overlay_framebuffer
+            .get_image(GBufferStage::OVERLAY_ALBEDO_ATTACHMENT_ID)
             .unwrap();
+        let g_overlay_depth = resources.get_image(GBufferStage::RES_OVERLAY_DEPTH_IMAGE);
 
         let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
         let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
@@ -380,21 +385,30 @@ impl PostProcessStage {
                     merge_descriptor.create_binding(
                         6,
                         0,
-                        BindingRes::Image(Arc::clone(g_overlay_depth), None, ImageLayout::DEPTH_STENCIL_READ),
+                        BindingRes::Image(Arc::clone(g_overlay_albedo), None, ImageLayout::SHADER_READ),
                     ),
-                    merge_descriptor.create_binding(7, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
                     merge_descriptor.create_binding(
-                        8,
+                        7,
+                        0,
+                        BindingRes::Image(
+                            Arc::clone(&g_overlay_depth),
+                            None,
+                            ImageLayout::DEPTH_STENCIL_READ,
+                        ),
+                    ),
+                    merge_descriptor.create_binding(8, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                    merge_descriptor.create_binding(
+                        9,
                         0,
                         BindingRes::Buffer(translucency_depths_image.handle()),
                     ),
                     merge_descriptor.create_binding(
-                        9,
+                        10,
                         0,
                         BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
                     ),
                     merge_descriptor.create_binding(
-                        10,
+                        11,
                         0,
                         BindingRes::Image(
                             Arc::clone(&main_shadow_map),
@@ -402,7 +416,7 @@ impl PostProcessStage {
                             ImageLayout::SHADER_READ,
                         ),
                     ),
-                    merge_descriptor.create_binding(11, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
+                    merge_descriptor.create_binding(12, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
                 ],
             )
         }

@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #define ENGINE_PIXEL_SHADER
+#define ENGINE_PIXEL_SHADER_UI
 #include "../../../engine/shaders/common.glsl"
 
 layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
@@ -14,8 +15,5 @@ layout(location = 0) in Input {
 } vs_in;
 
 void main() {
-    outAlbedo = color;
-    outSpecular = vec4(0.0);
-    outEmission = vec4(0.0);
-    outNormal = vec4(0.0);
+    writeOutput(color);
 }

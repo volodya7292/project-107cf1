@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #define ENGINE_PIXEL_SHADER
+#define ENGINE_PIXEL_SHADER_UI
 #include "ui.glsl"
 #include "../../../engine/shaders/common.glsl"
 
@@ -27,8 +28,6 @@ void main() {
         discard;
     }
 
-    outAlbedo = texture(sourceImage, vs_in.texCoord);
-    outSpecular = vec4(0.0);
-    outEmission = vec4(0.0);
-    outNormal = vec4(0.0);
+    vec4 col = texture(sourceImage, vs_in.texCoord);
+    writeOutput(col);
 }
