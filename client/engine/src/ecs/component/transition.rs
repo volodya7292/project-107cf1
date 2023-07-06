@@ -1,13 +1,26 @@
-use common::glm::{Vec4};
+use crate::module::ui::color::Color;
+use common::glm::Vec4;
 use std::ops::{Add, Mul, Sub};
 
 /// Maps linear time to function-specific time. In and out are in range [0; 1].
 /// f(0) must return 0 and f(1) must return 1.
 pub type TimeFn = fn(t: f32) -> f32;
 
-pub trait TransValue: Copy + Add<Output = Self> + Sub + Mul<f32, Output = Self> {}
+pub trait TransValue: Copy {
+    fn interpolate(a: Self, b: Self, f: f32) -> Self;
+}
 
-impl TransValue for Vec4 {}
+impl<T: Copy + Add<Output = Self> + Sub + Mul<f32, Output = Self>> TransValue for T {
+    fn interpolate(a: Self, b: Self, f: f32) -> Self {
+        a * (1.0 - f) + b * f
+    }
+}
+
+impl TransValue for Color {
+    fn interpolate(a: Self, b: Self, f: f32) -> Self {
+        Color::from(TransValue::interpolate(a.into_raw(), b.into_raw(), f))
+    }
+}
 
 #[derive(Clone)]
 pub struct Transition<T: TransValue> {
@@ -54,7 +67,7 @@ impl<T: TransValue> Transition<T> {
         let norm_linear_t = (self.time_passed / self.duration) as f32;
         let t = (self.time_fn)(norm_linear_t);
 
-        *value = self.start * (1.0 - t) + self.target * t;
+        *value = T::interpolate(self.start, self.target, t);
 
         self.time_passed == self.duration
     }

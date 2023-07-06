@@ -14,8 +14,20 @@ pub trait ContainerImpl {
         Container::new_raw(layout, Default::default())
     }
 
-    fn width_spacer(fraction: Factor) -> Container {
-        Container::new(UILayoutC::new().with_width(Sizing::Grow(fraction)))
+    fn expander(fraction: Factor) -> Container {
+        Container::new(
+            UILayoutC::new()
+                .with_width(Sizing::Grow(fraction))
+                .with_height(Sizing::Grow(fraction)),
+        )
+    }
+
+    fn spacer(size: f32) -> Container {
+        Container::new(
+            UILayoutC::new()
+                .with_width(Sizing::Preferred(size))
+                .with_height(Sizing::Preferred(size)),
+        )
     }
 }
 

@@ -113,9 +113,16 @@ pub trait ImageImpl {
                 .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
         )
     }
+
+    fn with_source(self, source: ImageSource) -> Self;
 }
 
-impl ImageImpl for UIImage {}
+impl ImageImpl for UIImage {
+    fn with_source(mut self, source: ImageSource) -> Self {
+        self.state.source = Some(source);
+        self
+    }
+}
 
 pub trait ImageAccess {
     fn set_image(&mut self, source: ImageSource);
@@ -137,7 +144,7 @@ struct ObjectUniformData {
 }
 
 fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
-    let mut obj = scene.object::<UIImage>(entity);
+    let mut obj = scene.object::<UIImage>(&entity.into());
     let cache = obj.get::<UILayoutCacheC>();
     let rect_data = *cache.calculated_clip_rect();
     let final_size = *cache.final_size();
@@ -178,7 +185,7 @@ fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContex
 fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _dt: f64) {
     let renderer = ctx.module::<MainRenderer>();
 
-    let mut obj = scene.object::<UIImage>(entity);
+    let mut obj = scene.object::<UIImage>(&entity.into());
     let Some(source) = obj.state_mut().source.take() else {
         return;
     };

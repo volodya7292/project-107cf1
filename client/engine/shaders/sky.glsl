@@ -88,7 +88,7 @@ float henyey_greenstein_phase_func(float mu)
 const float earth_radius = 6360e3; // (m)
 const float atmosphere_radius = 6420e3; // (m)
 
-const float sun_power = 20.0;
+const float sun_power = 40.0;
 
 const sphere_t atmosphere = sphere_t(
 	vec3(0, 0, 0), atmosphere_radius, 0

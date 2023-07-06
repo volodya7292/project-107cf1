@@ -215,7 +215,7 @@ void main() {
 //    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
 //    vec3 diffuse = mat.diffuse.rgb * combined_light * max(0.75, vs_in.ao);
 
-    float aoMin = 0.75;
+    float aoMin = 0.4;
     float ao = 1 - (1 - vs_in.ao) * aoMin;
     vec3 diffuse = mat.diffuse.rgb * ao * combined_light;
     vec3 emission = vec3(0);//mat.diffuse.rgb * combined_light;

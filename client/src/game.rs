@@ -192,10 +192,10 @@ impl Application for Game {
     }
 
     fn initialize_engine(&mut self, ctx: &EngineContext) {
-        let mut scene = Scene::new();
+        let scene = Scene::new();
         ctx.register_module(scene);
 
-        self.root_entity = ctx
+        self.root_entity = *ctx
             .module_mut::<Scene>()
             .add_object(None, SimpleObject::new())
             .unwrap();
@@ -278,7 +278,7 @@ impl Application for Game {
         drop(renderer);
 
         // -------------------------------------------------------
-        let mut ui_ctx = UIContext::new(ctx);
+        let mut ui_ctx = UIContext::new(ctx, &self.resources);
 
         let mut text_renderer = ctx.module_mut::<TextRenderer>();
         let font_id = text_renderer.register_font(
@@ -309,66 +309,7 @@ impl Application for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        let panel = ui_ctx
-            .scene()
-            .add_object(
-                Some(root_ui_entity),
-                UIObject::new_raw(
-                    UILayoutC::new()
-                        .with_width(Sizing::Preferred(300.0))
-                        .with_height(Sizing::Grow(0.9))
-                        .with_max_height(300.0),
-                    (),
-                )
-                .with_renderer(
-                    MeshRenderConfigC::new(mat_pipelines.panel, true).with_render_layer(RenderLayer::Overlay),
-                )
-                .with_mesh(VertexMeshC::without_data(4, 1)),
-            )
-            .unwrap();
-
-        let text = UIText::new(&mut ui_ctx, panel);
-
-        let mut obj = ui_ctx.scene().object::<UIText>(&text);
-        obj.set_text(StyledString::new(
-            "Loremipsumdsadsf dorer",
-            TextStyle::new().with_font(font_id).with_font_size(100.5),
-        ));
-        drop(obj);
-
-        let img_ui = UIImage::new(
-            &ui_ctx,
-            UILayoutC::new()
-                .with_width(Sizing::Grow(1.0))
-                .with_min_height(200.0),
-            ImageFitness::Cover,
-        );
-        let img_ui = ui_ctx.scene().add_object(Some(panel), img_ui).unwrap();
-        let mut obj = ui_ctx.scene().object::<UIImage>(&img_ui);
-
-        let img_source =
-            image::load_from_memory(&self.resources.get("/textures/test.jpg").unwrap().read().unwrap())
-                .unwrap();
-        obj.set_image(ImageSource::Data(img_source.into_rgba8()));
-        drop(obj);
-
-        let fb = FancyButton::new(&mut ui_ctx, panel, mat_pipelines.fancy_button);
-        let mut fb_obj = ui_ctx.scene().object::<FancyButton>(&fb);
-        fb_obj.set_text("GOV");
-
-        // let panel2 = renderer.add_object(
-        //     panel,
-        //     UIObject::new_raw(
-        //         UILayoutC::new()
-        //             .with_min_width(500.0)
-        //             .with_height(Sizing::Preferred(100.0)),
-        //         (),
-        //     )
-        //     .with_renderer(
-        //         MeshRenderConfigC::new(mat_pipelines.panel(), false).with_stage(RenderStage::OVERLAY),
-        //     )
-        //     .with_mesh(VertexMeshC::without_data(4, 1)),
-        // );
+        ui::make_main_menu_screen(&mut ui_ctx, &root_ui_entity);
     }
 
     fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {

@@ -19,7 +19,7 @@ use common::types::{HashMap, HashSet};
 use common::{glm, MO_RELAXED};
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
 use engine::module::main_renderer::VertexMeshObject;
-use engine::module::scene::Scene;
+use engine::module::scene::{ObjectEntityId, Scene};
 use engine::vkw;
 use entity_data::EntityId;
 use smallvec::SmallVec;
@@ -78,8 +78,8 @@ struct RCluster {
 
 #[derive(Default)]
 struct ClusterEntities {
-    solid: EntityId,
-    translucent: EntityId,
+    solid: ObjectEntityId<VertexMeshObject>,
+    translucent: ObjectEntityId<VertexMeshObject>,
 }
 
 async fn build_cluster_mesh(update: PendingUpdate) {

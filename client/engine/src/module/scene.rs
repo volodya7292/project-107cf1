@@ -13,6 +13,7 @@ use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
 use std::any::TypeId;
 use std::cell::{RefCell, RefMut};
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 pub const N_MAX_OBJECTS: usize = 65535;
 
@@ -82,9 +83,9 @@ impl Scene {
         self.entry_checked(entity).unwrap()
     }
 
-    pub fn object<A: StaticArchetype>(&mut self, entity: &EntityId) -> EntityAccess<A> {
+    pub fn object<T: StaticArchetype>(&mut self, entity: &ObjectEntityId<T>) -> EntityAccess<T> {
         assert_eq!(
-            self.storage.type_id_to_archetype_id(&TypeId::of::<A>()),
+            self.storage.type_id_to_archetype_id(&TypeId::of::<T>()),
             Some(entity.archetype_id)
         );
 
@@ -96,7 +97,11 @@ impl Scene {
         }
     }
 
-    pub fn add_object<O: SceneObject>(&mut self, parent: Option<EntityId>, object: O) -> Option<EntityId> {
+    pub fn add_object<O: SceneObject>(
+        &mut self,
+        parent: Option<EntityId>,
+        object: O,
+    ) -> Option<ObjectEntityId<O>> {
         let obj_count = &mut self.object_count;
         let mut change_manager = self.change_manager.borrow_mut();
 
@@ -134,7 +139,7 @@ impl Scene {
             self.entities_to_update.insert(entity);
         }
 
-        Some(entity)
+        Some(ObjectEntityId::new(entity))
     }
 
     // TODO CORE: move to base
@@ -266,5 +271,65 @@ impl<A> EntityAccess<'_, A> {
 
     pub fn request_update(&mut self) {
         self.entities_to_update.insert(*self.entry.entity());
+    }
+}
+
+pub struct ObjectEntityId<T: ?Sized> {
+    entity_id: EntityId,
+    _ty: PhantomData<T>,
+}
+
+impl<T: StaticArchetype> ObjectEntityId<T> {
+    pub fn new(entity_id: EntityId) -> Self {
+        Self {
+            entity_id,
+            _ty: Default::default(),
+        }
+    }
+}
+
+impl<T: StaticArchetype> Deref for ObjectEntityId<T> {
+    type Target = EntityId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entity_id
+    }
+}
+
+impl<T> From<EntityId> for ObjectEntityId<T> {
+    fn from(value: EntityId) -> Self {
+        Self {
+            entity_id: value,
+            _ty: Default::default(),
+        }
+    }
+}
+
+impl<T> From<&EntityId> for ObjectEntityId<T> {
+    fn from(value: &EntityId) -> Self {
+        Self {
+            entity_id: *value,
+            _ty: Default::default(),
+        }
+    }
+}
+
+impl<T> Clone for ObjectEntityId<T> {
+    fn clone(&self) -> Self {
+        Self {
+            entity_id: self.entity_id,
+            _ty: Default::default(),
+        }
+    }
+}
+
+impl<T> Copy for ObjectEntityId<T> {}
+
+impl<T> Default for ObjectEntityId<T> {
+    fn default() -> Self {
+        Self {
+            entity_id: Default::default(),
+            _ty: Default::default(),
+        }
     }
 }

@@ -20,7 +20,7 @@ void main() {
         discard;
     }
 
-    vec3 color = vs_in.color.rgb;
+    vec4 color = vs_in.color;
     float innerShadow = mix(1.0, sd, innerShadowIntensity);
 
     if (sd > 0.01) {
@@ -32,7 +32,7 @@ void main() {
     }
 
     if (opacity == 1.0) {
-        writeOutput(vec4(2));
+        writeOutput(color);
     } else {
         writeOutput(vec4(vec3(1), opacity));
     }

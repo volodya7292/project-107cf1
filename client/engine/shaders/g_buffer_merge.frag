@@ -113,7 +113,6 @@ void main() {
     if (depth < 0.0001) {
         vec3 sun_dir = info.main_light_dir.xyz;
         vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
-        skyCol = 1.0 - exp(-2.0 * skyCol);
         currColor = skyCol;
     }
 

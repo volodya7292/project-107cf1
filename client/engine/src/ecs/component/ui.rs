@@ -74,6 +74,24 @@ pub struct Padding {
 }
 
 impl Padding {
+    pub fn equal(value: f32) -> Self {
+        Self {
+            left: value,
+            right: value,
+            top: value,
+            bottom: value,
+        }
+    }
+
+    pub fn hv(horizontal: f32, vertical: f32) -> Self {
+        Self {
+            left: horizontal,
+            right: horizontal,
+            top: vertical,
+            bottom: vertical,
+        }
+    }
+
     pub(crate) fn size(&self) -> Vec2 {
         Vec2::new(self.left + self.right, self.top + self.bottom)
     }
@@ -225,12 +243,12 @@ impl UILayoutC {
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub struct Rect {
+pub(crate) struct ClipRect {
     pub min: Vec2,
     pub max: Vec2,
 }
 
-impl Rect {
+impl ClipRect {
     pub fn intersection(&self, other: &Self) -> Self {
         Self {
             min: self.min.sup(&other.min),
@@ -264,7 +282,7 @@ pub struct UILayoutCacheC {
     pub(crate) final_size: Vec2,
     pub(crate) relative_position: Vec2,
     pub(crate) global_position: Vec2,
-    pub(crate) clip_rect: Rect,
+    pub(crate) clip_rect: ClipRect,
     pub(crate) calculated_clip_rect: RectUniformData,
 }
 

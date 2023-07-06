@@ -10,7 +10,7 @@ use crate::module::scene::Scene;
 use crate::module::scene::SceneObject;
 use crate::module::EngineModule;
 use crate::{attributes_impl, EngineContext};
-use common::glm::{U8Vec4, Vec2};
+use common::glm::{U8Vec4, Vec2, Vec4};
 use common::lrc::{Lrc, LrcExt, LrcExtSized};
 use common::rayon::prelude::*;
 use common::scene::relation::Relation;
@@ -456,7 +456,7 @@ pub struct TextRenderer {
 struct GlyphInstance {
     glyph_index: u32,
     glyph_size: Vec2,
-    color: U8Vec4,
+    color: Vec4,
     offset: Vec2,
     scale: Vec2,
 }
@@ -619,7 +619,7 @@ impl TextRenderer {
                 &[
                     ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
                     ("inGlyphSize", Format::RG32_FLOAT, VInputRate::INSTANCE),
-                    ("inColor", Format::RGBA8_UNORM, VInputRate::INSTANCE),
+                    ("inColor", Format::RGBA32_FLOAT, VInputRate::INSTANCE),
                     ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
                     ("inScale", Format::RG32_FLOAT, VInputRate::INSTANCE),
                 ],
@@ -792,7 +792,7 @@ impl TextRenderer {
                     Some(GlyphInstance {
                         glyph_index: glyph_loc.index,
                         glyph_size,
-                        color: seq.style.color(),
+                        color: seq.style.color().into_raw(),
                         offset: info.offset,
                         scale: info.scale,
                     })

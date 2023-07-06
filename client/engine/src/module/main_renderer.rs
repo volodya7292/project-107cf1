@@ -51,6 +51,7 @@ use crate::module::main_renderer::stage::post_process::PostProcessStage;
 use crate::module::main_renderer::stage::present_queue_transition::PresentQueueTransitionStage;
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext};
 use crate::module::main_renderer::stage_manager::StageManager;
+use crate::module::main_renderer::texture_atlas::TextureAtlas;
 use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::SceneObject;
 use crate::module::scene::{Scene, N_MAX_OBJECTS};
@@ -154,6 +155,7 @@ pub struct MainRenderer {
     surface_changed: bool,
     surface_size: U32Vec2,
     render_size: U32Vec2,
+    scale_factor: f32,
     settings: Settings,
     last_frame_ts: Instant,
     device: Arc<Device>,
@@ -257,6 +259,7 @@ pub(crate) struct FrameInfo {
     atlas_info: U32Vec4,
     frame_size: UVec2,
     surface_size: UVec2,
+    scale_factor: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -598,7 +601,7 @@ impl MainRenderer {
         let tile_count = max_texture_count;
         let texture_atlases = [
             // albedo
-            texture_atlas::new(
+            TextureAtlas::new(
                 &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
@@ -607,7 +610,7 @@ impl MainRenderer {
             )
             .unwrap(),
             // specular
-            texture_atlas::new(
+            TextureAtlas::new(
                 &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
@@ -616,7 +619,7 @@ impl MainRenderer {
             )
             .unwrap(),
             // emission
-            texture_atlas::new(
+            TextureAtlas::new(
                 &device,
                 Format::BC7_UNORM,
                 settings.textures_mipmaps,
@@ -625,7 +628,7 @@ impl MainRenderer {
             )
             .unwrap(),
             // normal
-            texture_atlas::new(
+            TextureAtlas::new(
                 &device,
                 Format::BC5_RG_UNORM,
                 settings.textures_mipmaps,
@@ -753,6 +756,7 @@ impl MainRenderer {
             surface_changed: false,
             surface_size: glm::convert_unchecked(curr_size.real()),
             render_size: glm::convert_unchecked(curr_size.real()),
+            scale_factor: 1.0,
             settings,
             last_frame_ts: Instant::now(),
             device,
@@ -1240,6 +1244,7 @@ impl MainRenderer {
                 atlas_info: U32Vec4::new(self.res.texture_atlases[0].tile_width(), 0, 0, 0),
                 frame_size: self.render_size,
                 surface_size: self.surface_size,
+                scale_factor: self.scale_factor,
             };
 
             let frame_ctx = FrameContext {
@@ -1288,7 +1293,7 @@ impl MainRenderer {
                     CopyRegion::new(
                         i as u64 * mat_size,
                         id as u64 * mat_size,
-                        (mat_size as u64).try_into().unwrap(),
+                        mat_size.try_into().unwrap(),
                     )
                 })
                 .collect();
@@ -1439,6 +1444,7 @@ impl MainRenderer {
 
     fn on_resize(&mut self, new_wsi_size: WSISize<u32>) {
         self.render_size = new_wsi_size.real();
+        self.scale_factor = new_wsi_size.scale_factor();
 
         let surf_size = self.device.adapter().get_surface_size(&self.surface).unwrap();
         self.surface_size = glm::vec2(surf_size.0, surf_size.1);

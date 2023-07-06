@@ -1,26 +1,29 @@
+pub mod color;
 pub mod management;
 
 use crate::ecs::component::internal::GlobalTransformC;
 use crate::ecs::component::ui::{
-    Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Position, Rect, RectUniformData, Sizing,
-    UIEventHandlerC, UILayoutC, UILayoutCacheC,
+    ClipRect, Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Padding, Position, RectUniformData,
+    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
 use crate::module::scene::change_manager::ComponentChangesHandle;
-use crate::module::scene::{EntityAccess, Scene, SceneObject};
+use crate::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::EngineContext;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
 use common::types::HashSet;
-use entity_data::{Archetype, EntityId, SystemAccess};
+use entity_data::{Archetype, EntityId, StaticArchetype, SystemAccess};
 use smallvec::SmallVec;
+use std::marker::PhantomData;
+use std::ops::Deref;
 use winit::window::Window;
 
 pub struct UIRenderer {
-    root_ui_entity: EntityId,
+    root_ui_entity: ObjectEntityId<StatelessUIObject>,
     root_element_size: Vec2,
     scale_factor: f32,
     root_element_size_dirty: bool,
@@ -109,6 +112,8 @@ impl<E: UIState> SceneObject for UIObject<E> {
         true
     }
 }
+
+pub type StatelessUIObject = UIObject<()>;
 
 pub trait UIObjectEntityImpl<S: UIState> {
     fn state(&self) -> &S;
@@ -222,6 +227,7 @@ struct ChildPositioningInfo {
 /// Calculates relative position for each child in a flow.
 fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
     parent_size: Vec2,
+    parent_padding: Padding,
     flow: ContentFlow,
     flow_align: FlowAlign,
     children_sizes: &[ChildPositioningInfo],
@@ -247,6 +253,9 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
         let mut pos = Vec2::default();
         pos[flow_axis] = curr_flow_pos;
         pos[cross_flow_axis] = cross_flow_pos;
+
+        pos.x += parent_padding.left;
+        pos.y += parent_padding.top;
 
         output(child.entity, pos);
 
@@ -366,7 +375,7 @@ impl UIRenderer {
             let root = linear_tree[0];
             let root_cache = layout_cache_comps.get_mut(&root).unwrap();
             root_cache.final_size = root_cache.final_min_size;
-            root_cache.clip_rect = Rect {
+            root_cache.clip_rect = ClipRect {
                 min: Vec2::from_element(0.0),
                 max: root_cache.final_size,
             }
@@ -464,6 +473,7 @@ impl UIRenderer {
             // Calculate position of each child
             flow_calculate_children_positions(
                 parent_size,
+                parent_layout.padding,
                 parent_layout.content_flow,
                 parent_layout.flow_align,
                 &children_positioning_infos,
@@ -484,14 +494,14 @@ impl UIRenderer {
             for (child, child_final_flow_size) in &calculated_children_flow_sizes {
                 let child_cache = layout_cache_comps.get_mut(child).unwrap();
 
-                let mut local_clip_rect = Rect::default();
+                let mut local_clip_rect = ClipRect::default();
                 local_clip_rect.min = child_cache.relative_position;
                 local_clip_rect.max = local_clip_rect.min;
                 local_clip_rect.max[cross_flow_axis] +=
                     child_cache.final_size[cross_flow_axis].min(parent_size[cross_flow_axis]);
                 local_clip_rect.max[flow_axis] += child_final_flow_size.min(parent_size[flow_axis]);
 
-                let global_clip_rect = Rect {
+                let global_clip_rect = ClipRect {
                     min: parent_cache.global_position + local_clip_rect.min,
                     max: parent_cache.global_position + local_clip_rect.max,
                 };

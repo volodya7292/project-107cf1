@@ -1,6 +1,7 @@
 use crate::ecs::component::render_config::RenderLayer;
 use crate::module::main_renderer::MaterialPipelineId;
-use common::glm::U8Vec4;
+use crate::module::ui::color::Color;
+use common::glm::{U8Vec4, Vec4};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u8)]
@@ -26,7 +27,7 @@ pub struct TextStyle {
     /// Size in world units
     font_size: f32,
     font_style: FontStyle,
-    color: U8Vec4,
+    color: Color,
 }
 
 impl TextStyle {
@@ -49,7 +50,7 @@ impl TextStyle {
         self
     }
 
-    pub fn with_color(mut self, color: U8Vec4) -> Self {
+    pub fn with_color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
@@ -66,11 +67,11 @@ impl TextStyle {
         self.font_style
     }
 
-    pub fn color(&self) -> U8Vec4 {
-        self.color
+    pub fn color(&self) -> &Color {
+        &self.color
     }
 
-    pub fn set_color(&mut self, color: U8Vec4) {
+    pub fn set_color(&mut self, color: Color) {
         self.color = color;
     }
 }
@@ -81,7 +82,7 @@ impl Default for TextStyle {
             font_id: 0,
             font_size: 1.0,
             font_style: FontStyle::Normal,
-            color: U8Vec4::from_element(255),
+            color: Color::grayscale(1.0),
         }
     }
 }

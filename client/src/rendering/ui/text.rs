@@ -6,7 +6,7 @@ use engine::ecs::component::simple_text::StyledString;
 use engine::ecs::component::ui::{Constraint, RectUniformData, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{SceneEventHandler, SimpleTextC, TransformC, UniformDataC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, Scene};
+use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::text_renderer::{RawTextObject, TextRenderer};
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
@@ -33,7 +33,7 @@ pub struct ObjectUniformData {
 
 #[derive(Clone)]
 pub struct TextState {
-    raw_text_entity: EntityId,
+    raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
     inner_shadow_intensity: f32,
 }
@@ -61,14 +61,14 @@ pub trait UITextImpl {
         scene.add_resource(TextImplContext { mat_pipe_id });
     }
 
-    fn new(ctx: &mut UIContext, parent: EntityId) -> EntityId {
+    fn new(ctx: &mut UIContext, parent: EntityId, text: StyledString) -> ObjectEntityId<UIText> {
         let impl_ctx = *ctx.scene.resource::<TextImplContext>();
 
         let main_obj = UIText::new_raw(
             UILayoutC::new().with_shader_inverted_y(true),
             TextState {
                 raw_text_entity: Default::default(),
-                text: Default::default(),
+                text,
                 inner_shadow_intensity: 0.0,
             },
         )
@@ -87,7 +87,7 @@ pub trait UITextImpl {
         );
 
         let text_entity = ctx.scene.add_object(Some(parent), main_obj).unwrap();
-        let raw_text_entity = ctx.scene.add_object(Some(text_entity), raw_text_obj).unwrap();
+        let raw_text_entity = ctx.scene.add_object(Some(*text_entity), raw_text_obj).unwrap();
 
         let mut main_obj = ctx.scene.object::<UIText>(&text_entity);
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
