@@ -164,7 +164,8 @@ fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
     text_obj.set_text(state.text.clone());
 }
 
-fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
+fn on_cursor_enter(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
     state.transition = Transition::new(
@@ -176,7 +177,8 @@ fn on_cursor_enter(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
     entry.request_update();
 }
 
-fn on_cursor_leave(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
+fn on_cursor_leave(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
     state.transition = Transition::new(

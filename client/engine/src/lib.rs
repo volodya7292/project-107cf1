@@ -57,12 +57,14 @@ pub struct Engine {
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
     module_manager: RefCell<ModuleManager>,
+    callbacks: RefCell<Vec<Box<dyn FnOnce(&EngineContext)>>>,
 }
 
 pub struct EngineContext<'a> {
     do_stop: &'a AtomicBool,
     module_manager: &'a RefCell<ModuleManager>,
     window: &'a RefCell<Window>,
+    callbacks: &'a RefCell<Vec<Box<dyn FnOnce(&EngineContext)>>>,
 }
 
 impl EngineContext<'_> {
@@ -80,6 +82,10 @@ impl EngineContext<'_> {
 
     pub fn module_mut<M: EngineModule>(&self) -> OwnedRefMut<dyn EngineModule, M> {
         self.module_manager.borrow().module_mut()
+    }
+
+    pub fn dispatch_callback<F: FnOnce(&EngineContext) + 'static>(&self, callback: F) {
+        self.callbacks.borrow_mut().push(Box::new(callback));
     }
 
     pub fn request_stop(&self) {
@@ -110,6 +116,7 @@ impl Engine {
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
             module_manager: Default::default(),
+            callbacks: RefCell::new(vec![]),
         };
 
         engine
@@ -120,6 +127,7 @@ impl Engine {
             do_stop: &self.do_stop,
             module_manager: &self.module_manager,
             window: &self.main_window,
+            callbacks: &self.callbacks,
         }
     }
 
@@ -146,6 +154,10 @@ impl Engine {
 
                     let t0 = Instant::now();
 
+                    // Call dispatched callbacks here so any module can be borrowed in the handler
+                    for callback in self.callbacks.borrow_mut().drain(..) {
+                        callback(&ctx);
+                    }
                     module_manger.on_update(self.delta_time, &ctx);
 
                     let t1 = Instant::now();

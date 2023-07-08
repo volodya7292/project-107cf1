@@ -4,6 +4,7 @@ use crate::client::utils;
 use crate::default_resources;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
+use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
@@ -73,15 +74,15 @@ const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
 pub struct Game {
     resources: Arc<ResourceFile>,
-    registry: Arc<MainRegistry>,
+    main_registry: Arc<MainRegistry>,
     res_map: Arc<DefaultResourceMapping>,
     default_queue: Arc<SafeThreadPool>,
 
     cursor_rel: Vec2,
     tick_timer: Option<IntervalTimer>,
 
-    main_state: Arc<Mutex<GameProcessState>>,
-    overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
+    material_pipelines: MaterialPipelines,
+    main_state: Option<Arc<Mutex<GameProcessState>>>,
 
     cursor_grab: bool,
     root_entity: EntityId,
@@ -126,56 +127,30 @@ impl Game {
         let main_registry = MainRegistry::init();
         let res_map = DefaultResourceMapping::init(&main_registry, &resources);
 
-        let overworld = Overworld::new(&main_registry, 0);
+        let mat_pipelines;
+        {
+            mat_pipelines = material_pipelines::create(&resources, &ctx);
 
-        let spawn_point = overworld.interface().generator().gen_spawn_point();
-        // dbg!(spawn_point);
+            let mut renderer = ctx.module_mut::<MainRenderer>();
 
-        // crate::proto::make_world_prototype_image(overworld.generator());
-        // crate::proto::make_climate_graph_image(main_registry.registry());
+            for (index, (ty, res_ref)) in res_map.storage().textures().iter().enumerate() {
+                renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
+            }
 
-        let player_pos = glm::convert(spawn_point.0);
-        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
-
-        let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
-        overworld_orchestrator.set_xz_render_distance(256);
-        // overworld_orchestrator.set_xz_render_distance(1024);
-        overworld_orchestrator.set_y_render_distance(256);
-        overworld_orchestrator.set_stream_pos(player_pos);
-
-        let main_state = Arc::new(Mutex::new(GameProcessState {
-            last_tick_start: Instant::now(),
-            tick_count: 0,
-            overworld,
-            overworld_orchestrator: Arc::new(Mutex::new(overworld_orchestrator)),
-            res_map: Arc::clone(&res_map),
-            player_pos,
-            player_orientation: Default::default(),
-            player_direction: Default::default(),
-            player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
-            fall_time: 0.0,
-            curr_jump_force: 0.0,
-            look_at_block: None,
-            block_set_cooldown: 0.0,
-            do_set_block: false,
-            curr_block: main_registry.block_test.into_any(),
-            set_water: false,
-            change_stream_pos: true,
-            player_collision_enabled: false,
-            do_remove_block: false,
-        }));
-
-        // TODO: save tick_count_state to disk
+            for (id, material) in res_map.storage().materials().iter().enumerate() {
+                renderer.set_material(id as u32, material.info());
+            }
+        }
 
         let game = Game {
             resources,
-            registry: Arc::clone(&main_registry),
+            main_registry: Arc::clone(&main_registry),
             res_map,
             default_queue: default_queue().unwrap(),
             cursor_rel: Default::default(),
             tick_timer: None,
-            main_state,
-            overworld_renderer: None,
+            material_pipelines: mat_pipelines,
+            main_state: None,
             cursor_grab: true,
             root_entity,
         };
@@ -218,64 +193,80 @@ impl Game {
         let mut ui_interactor = ctx.module_mut::<UIInteractionManager>();
         ui_interactor.set_active(!self.cursor_grab);
     }
+
+    pub fn start_game_process(&mut self, ctx: &EngineContext) {
+        let overworld = Overworld::new(&self.main_registry, 0);
+        let spawn_point = overworld.interface().generator().gen_spawn_point();
+        // dbg!(spawn_point);
+        // crate::proto::make_world_prototype_image(overworld.generator());
+        // crate::proto::make_climate_graph_image(main_registry.registry());
+        let player_pos = glm::convert(spawn_point.0);
+        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+
+        let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
+        overworld_orchestrator.set_xz_render_distance(256);
+        // overworld_orchestrator.set_xz_render_distance(1024);
+        overworld_orchestrator.set_y_render_distance(256);
+        overworld_orchestrator.set_stream_pos(player_pos);
+        let overworld_orchestrator = Arc::new(Mutex::new(overworld_orchestrator));
+
+        let overworld_renderer = OverworldRenderer::new(
+            Arc::clone(ctx.module::<MainRenderer>().device()),
+            self.material_pipelines.cluster,
+            Arc::clone(self.main_registry.registry()),
+            Arc::clone(self.res_map.storage()),
+            Arc::clone(overworld_orchestrator.lock().loaded_clusters()),
+            self.root_entity,
+        );
+        let overworld_renderer = Arc::new(Mutex::new(overworld_renderer));
+
+        // TODO: save tick_count_state to disk
+
+        let new_game_state = Arc::new(Mutex::new(GameProcessState {
+            last_tick_start: Instant::now(),
+            tick_count: 0,
+            overworld,
+            overworld_orchestrator,
+            overworld_renderer: Arc::clone(&overworld_renderer),
+            res_map: Arc::clone(&self.res_map),
+            player_pos,
+            player_orientation: Default::default(),
+            player_direction: Default::default(),
+            player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
+            fall_time: 0.0,
+            curr_jump_force: 0.0,
+            look_at_block: None,
+            block_set_cooldown: 0.0,
+            do_set_block: false,
+            curr_block: self.main_registry.block_test.into_any(),
+            set_water: false,
+            change_stream_pos: true,
+            player_collision_enabled: false,
+            do_remove_block: false,
+        }));
+
+        self.main_state = Some(Arc::clone(&new_game_state));
+        self.tick_timer = Some(IntervalTimer::start(
+            Duration::from_millis(20),
+            VirtualProcessor::new(&self.default_queue),
+            move || {
+                let t0 = Instant::now();
+                on_tick(new_game_state.clone(), overworld_renderer.clone());
+                let t1 = Instant::now();
+                // println!("tick_inner {}", (t1 - t0).as_millis());
+            },
+        ));
+
+        self.grab_cursor(&*ctx.window(), true, ctx);
+    }
 }
 
 // TODO: Make Application this a module
 
 impl EngineModule for Game {
     fn on_start(&mut self, ctx: &EngineContext) {
-        self.grab_cursor(&*ctx.window(), true, ctx);
-
         // ------------------------------------------------------------------------------------------------
 
-        let mat_pipelines;
-        {
-            mat_pipelines = material_pipelines::create(&self.resources, &ctx);
-
-            let mut renderer = ctx.module_mut::<MainRenderer>();
-
-            for (index, (ty, res_ref)) in self.res_map.storage().textures().iter().enumerate() {
-                renderer.load_texture_into_atlas(index as u32, *ty, res_ref.clone());
-            }
-
-            for (id, material) in self.res_map.storage().materials().iter().enumerate() {
-                renderer.set_material(id as u32, material.info());
-            }
-        }
-
-        let mut renderer = ctx.module_mut::<MainRenderer>();
-        let state = self.main_state.lock();
-
-        let overworld_renderer = OverworldRenderer::new(
-            Arc::clone(renderer.device()),
-            mat_pipelines.cluster,
-            Arc::clone(self.registry.registry()),
-            Arc::clone(self.res_map.storage()),
-            Arc::clone(state.overworld_orchestrator.lock().loaded_clusters()),
-            self.root_entity,
-        );
-        drop(state);
-
-        self.overworld_renderer = Some(Arc::new(Mutex::new(overworld_renderer)));
-
-        {
-            let main_state = Arc::clone(&self.main_state);
-            let overworld_renderer = Arc::clone(&self.overworld_renderer.as_ref().unwrap());
-
-            self.tick_timer = Some(IntervalTimer::start(
-                Duration::from_millis(20),
-                VirtualProcessor::new(&self.default_queue),
-                move || {
-                    let t0 = Instant::now();
-                    on_tick(Arc::clone(&main_state), Arc::clone(&overworld_renderer));
-                    let t1 = Instant::now();
-                    // println!("tick_inner {}", (t1 - t0).as_millis());
-                },
-            ));
-        }
-        drop(renderer);
-
-        // -------------------------------------------------------
         let mut ui_ctx = UIContext::new(ctx, &self.resources);
 
         let mut text_renderer = ctx.module_mut::<TextRenderer>();
@@ -288,20 +279,20 @@ impl EngineModule for Game {
         );
         drop(text_renderer);
 
-        let player_pos = self.main_state.lock().player_pos;
-        let text = ui_ctx.scene().add_object(
-            Some(self.root_entity),
-            RawTextObject::new(
-                TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
-                SimpleTextC::new(mat_pipelines.text_3d)
-                    .with_text(StyledString::new(
-                        "Govno, my is Gmine",
-                        TextStyle::new().with_font(font_id).with_font_size(0.5),
-                    ))
-                    .with_max_width(3.0)
-                    .with_h_align(TextHAlign::LEFT),
-            ),
-        );
+        // let player_pos = self.main_state.lock().player_pos;
+        // let text = ui_ctx.scene().add_object(
+        //     Some(self.root_entity),
+        //     RawTextObject::new(
+        //         TransformC::new().with_position(DVec3::new(player_pos.x, player_pos.y + 60.0, player_pos.z)),
+        //         SimpleTextC::new(self.material_pipelines.text_3d)
+        //             .with_text(StyledString::new(
+        //                 "Govno, my is Gmine",
+        //                 TextStyle::new().with_font(font_id).with_font_size(0.5),
+        //             ))
+        //             .with_max_width(3.0)
+        //             .with_h_align(TextHAlign::LEFT),
+        //     ),
+        // );
 
         let ui_renderer = ctx.module_mut::<UIRenderer>();
         let root_ui_entity = *ui_renderer.root_ui_entity();
@@ -311,11 +302,15 @@ impl EngineModule for Game {
     }
 
     fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {
+        let Some(main_state) = self.main_state.as_ref() else {
+            return;
+        };
+
         let mut renderer = ctx.module_mut::<MainRenderer>();
         let input = ctx.module::<Input>();
 
         let kb = input.keyboard();
-        let mut curr_state = self.main_state.lock();
+        let mut curr_state = main_state.lock();
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
@@ -421,18 +416,23 @@ impl EngineModule for Game {
         curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
         curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
 
+        let overworld_renderer = Arc::clone(&curr_state.overworld_renderer);
+
         drop(curr_state);
         drop(renderer);
         drop(input);
 
-        {
-            let mut overworld_renderer = self.overworld_renderer.as_ref().unwrap().lock();
-            overworld_renderer.update_scene(&mut ctx.module_mut::<Scene>());
-        }
+        overworld_renderer
+            .lock()
+            .update_scene(&mut ctx.module_mut::<Scene>());
     }
 
     fn on_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
         use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
+
+        let Some(main_state) = self.main_state.as_ref() else {
+            return;
+        };
 
         match event {
             WSIEvent::KeyboardInput { input } => {
@@ -440,7 +440,7 @@ impl EngineModule for Game {
                     return;
                 }
                 if input.state == ElementState::Released {
-                    let mut curr_state = self.main_state.lock_arc();
+                    let mut curr_state = main_state.lock_arc();
 
                     match input.virtual_keycode.unwrap() {
                         VirtualKeyCode::Escape => {
@@ -492,11 +492,11 @@ impl EngineModule for Game {
                             // }
                         }
                         VirtualKeyCode::Key1 => {
-                            curr_state.curr_block = self.registry.block_test.into_any();
+                            curr_state.curr_block = self.main_registry.block_test.into_any();
                             curr_state.set_water = false;
                         }
                         VirtualKeyCode::Key2 => {
-                            curr_state.curr_block = self.registry.block_glow.into_any();
+                            curr_state.curr_block = self.main_registry.block_glow.into_any();
                             curr_state.set_water = false;
                         }
                         VirtualKeyCode::Key3 => {
@@ -520,6 +520,7 @@ struct GameProcessState {
     tick_count: u64,
     overworld: Arc<Overworld>,
     overworld_orchestrator: Arc<Mutex<OverworldOrchestrator>>,
+    overworld_renderer: Arc<Mutex<OverworldRenderer>>,
     res_map: Arc<DefaultResourceMapping>,
 
     player_pos: DVec3,

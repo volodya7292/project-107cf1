@@ -1,3 +1,4 @@
+use crate::game::Game;
 use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageFitness, ImageImpl, ImageSource, UIImage};
@@ -59,11 +60,14 @@ fn make_menu_button(
     )
 }
 
-fn start_on_click(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {}
+fn start_on_click(_: &EntityId, ctx: &EngineContext) {
+    let mut game = ctx.module_mut::<Game>();
+    game.start_game_process(ctx);
+}
 
-fn settings_on_click(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {}
+fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
 
-fn exit_on_click(_: &EntityId, _: &mut Scene, ctx: &EngineContext) {
+fn exit_on_click(_: &EntityId, ctx: &EngineContext) {
     ctx.request_stop();
 }
 

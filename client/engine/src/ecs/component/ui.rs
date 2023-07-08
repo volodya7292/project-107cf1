@@ -298,12 +298,12 @@ impl UILayoutCacheC {
     }
 }
 
-pub type BasicEventCallback = fn(&EntityId, &mut Scene, &EngineContext);
+pub type BasicEventCallback = fn(&EntityId, &EngineContext);
 
 #[derive(Copy, Clone)]
-pub struct BasicEventCallbackWrapper(pub fn(&EntityId, &mut Scene, &EngineContext));
+pub struct BasicEventCallbackExt(pub fn(&EntityId, &EngineContext));
 
-impl PartialEq for BasicEventCallbackWrapper {
+impl PartialEq for BasicEventCallbackExt {
     fn eq(&self, other: &Self) -> bool {
         let p1 = self.0 as *const u8;
         let p2 = other.0 as *const u8;
@@ -311,9 +311,9 @@ impl PartialEq for BasicEventCallbackWrapper {
     }
 }
 
-impl Eq for BasicEventCallbackWrapper {}
+impl Eq for BasicEventCallbackExt {}
 
-impl Hash for BasicEventCallbackWrapper {
+impl Hash for BasicEventCallbackExt {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let p = self.0 as *const u8;
         p.hash(state);
@@ -321,11 +321,11 @@ impl Hash for BasicEventCallbackWrapper {
 }
 
 pub struct UIEventHandlerC {
-    pub on_cursor_enter: IndexSet<BasicEventCallbackWrapper>,
-    pub on_cursor_leave: IndexSet<BasicEventCallbackWrapper>,
-    pub on_mouse_press: IndexSet<BasicEventCallbackWrapper>,
-    pub on_mouse_release: IndexSet<BasicEventCallbackWrapper>,
-    pub on_click: IndexSet<BasicEventCallbackWrapper>,
+    pub on_cursor_enter: IndexSet<BasicEventCallbackExt>,
+    pub on_cursor_leave: IndexSet<BasicEventCallbackExt>,
+    pub on_mouse_press: IndexSet<BasicEventCallbackExt>,
+    pub on_mouse_release: IndexSet<BasicEventCallbackExt>,
+    pub on_click: IndexSet<BasicEventCallbackExt>,
     pub enabled: bool,
 }
 
@@ -343,11 +343,11 @@ impl Default for UIEventHandlerC {
 }
 
 pub trait UIEventHandlerI {
-    fn on_cursor_enter(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
-    fn on_cursor_leave(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
-    fn on_mouse_press(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
-    fn on_mouse_release(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
-    fn on_click(_: &EntityId, _: &mut Scene, _: &EngineContext) {}
+    fn on_cursor_enter(_: &EntityId, _: &EngineContext) {}
+    fn on_cursor_leave(_: &EntityId, _: &EngineContext) {}
+    fn on_mouse_press(_: &EntityId, _: &EngineContext) {}
+    fn on_mouse_release(_: &EntityId, _: &EngineContext) {}
+    fn on_click(_: &EntityId, _: &EngineContext) {}
 }
 
 impl UIEventHandlerI for () {}
@@ -370,35 +370,27 @@ impl UIEventHandlerC {
 
     pub fn from_impl<I: UIEventHandlerI + 'static>() -> Self {
         Self {
-            on_cursor_enter: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
-            on_cursor_leave: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
-            on_mouse_press: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
-            on_mouse_release: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
-            on_click: IndexSet::from_iter([BasicEventCallbackWrapper(I::on_cursor_enter)]),
+            on_cursor_enter: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
+            on_cursor_leave: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
+            on_mouse_press: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
+            on_mouse_release: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
+            on_click: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
             enabled: true,
         }
     }
 
     pub fn add_on_cursor_enter(mut self, handler: BasicEventCallback) -> Self {
-        self.on_cursor_enter.insert(BasicEventCallbackWrapper(handler));
+        self.on_cursor_enter.insert(BasicEventCallbackExt(handler));
         self
     }
 
     pub fn add_on_cursor_leave(mut self, handler: BasicEventCallback) -> Self {
-        self.on_cursor_leave.insert(BasicEventCallbackWrapper(handler));
+        self.on_cursor_leave.insert(BasicEventCallbackExt(handler));
         self
     }
 
     pub fn add_on_click(mut self, handler: BasicEventCallback) -> Self {
-        self.on_click.insert(BasicEventCallbackWrapper(handler));
+        self.on_click.insert(BasicEventCallbackExt(handler));
         self
     }
-}
-
-macro_rules! ui_invoke_callback_set {
-    ($callback_set: expr, $($param: expr),* $(,)?) => {
-        for callback in &$callback_set {
-            callback.0($($param,)*);
-        }
-    };
 }

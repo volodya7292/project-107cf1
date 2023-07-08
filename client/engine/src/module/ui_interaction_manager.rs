@@ -1,4 +1,4 @@
-use crate::ecs::component::ui::{UIEventHandlerC, UILayoutC};
+use crate::ecs::component::ui::{BasicEventCallback, UIEventHandlerC, UILayoutC};
 use crate::event::WSIEvent;
 use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
 use crate::module::scene::Scene;
@@ -61,6 +61,17 @@ impl EngineModule for UIInteractionManager {
         let ui_renderer = ctx.module_mut::<UIRenderer>();
         let global_handler = &self.global_event_handler;
 
+        macro_rules! ui_invoke_callback_set {
+            ($callback_set: expr, $entity_id: expr) => {
+                let entity_id = $entity_id;
+                for &callback in &$callback_set {
+                    ctx.dispatch_callback(move |ctx| {
+                        callback.0(&entity_id, ctx);
+                    });
+                }
+            };
+        }
+
         match *event {
             WSIEvent::CursorMoved { position, .. } => {
                 let mut new_hover_entity = EntityId::NULL;
@@ -78,13 +89,8 @@ impl EngineModule for UIInteractionManager {
                         .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_cursor_leave.clone())
                     {
-                        ui_invoke_callback_set!(
-                            global_handler.on_cursor_leave,
-                            &self.curr_hover_entity,
-                            &mut scene,
-                            ctx,
-                        );
-                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(global_handler.on_cursor_leave, self.curr_hover_entity);
+                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
                     }
 
                     self.curr_hover_entity = new_hover_entity;
@@ -93,13 +99,8 @@ impl EngineModule for UIInteractionManager {
                         .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_cursor_enter.clone())
                     {
-                        ui_invoke_callback_set!(
-                            global_handler.on_cursor_enter,
-                            &self.curr_hover_entity,
-                            &mut scene,
-                            ctx,
-                        );
-                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(global_handler.on_cursor_enter, self.curr_hover_entity);
+                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
                     }
                 }
             }
@@ -115,13 +116,8 @@ impl EngineModule for UIInteractionManager {
                         .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_mouse_press.clone())
                     {
-                        ui_invoke_callback_set!(
-                            global_handler.on_mouse_press,
-                            &self.curr_hover_entity,
-                            &mut scene,
-                            ctx,
-                        );
-                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(global_handler.on_mouse_press, self.curr_hover_entity);
+                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
                     }
                 } else if state == ElementState::Released {
                     let on_release_entity = self.curr_hover_entity;
@@ -131,13 +127,8 @@ impl EngineModule for UIInteractionManager {
                             .entry_checked(&self.curr_hover_entity)
                             .map(|e| e.get::<UIEventHandlerC>().on_click.clone())
                         {
-                            ui_invoke_callback_set!(
-                                global_handler.on_click,
-                                &self.curr_hover_entity,
-                                &mut scene,
-                                ctx,
-                            );
-                            ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                            ui_invoke_callback_set!(global_handler.on_click, self.curr_hover_entity);
+                            ui_invoke_callback_set!(handler, self.curr_hover_entity);
                         }
                     }
 
@@ -145,13 +136,8 @@ impl EngineModule for UIInteractionManager {
                         .entry_checked(&self.curr_hover_entity)
                         .map(|e| e.get::<UIEventHandlerC>().on_mouse_release.clone())
                     {
-                        ui_invoke_callback_set!(
-                            global_handler.on_mouse_release,
-                            &self.curr_hover_entity,
-                            &mut scene,
-                            ctx,
-                        );
-                        ui_invoke_callback_set!(handler, &self.curr_hover_entity, &mut scene, ctx);
+                        ui_invoke_callback_set!(global_handler.on_mouse_release, self.curr_hover_entity);
+                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
                     }
 
                     self.mouse_button_press_entity = EntityId::NULL;
