@@ -16,10 +16,8 @@ use crate::EngineContext;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
 use common::types::HashSet;
-use entity_data::{Archetype, EntityId, StaticArchetype, SystemAccess};
+use entity_data::{Archetype, EntityId, SystemAccess};
 use smallvec::SmallVec;
-use std::marker::PhantomData;
-use std::ops::Deref;
 use winit::window::Window;
 
 pub struct UIRenderer {

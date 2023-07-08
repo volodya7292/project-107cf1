@@ -32,7 +32,7 @@ use base::overworld::{Overworld, OverworldOrchestrator};
 use base::physics::aabb::{AABBRayIntersection, AABB};
 use base::physics::MOTION_EPSILON;
 use base::registry::Registry;
-use common::glm::{DVec3, I64Vec3, U8Vec4, Vec2, Vec3};
+use common::glm::{DVec2, DVec3, I64Vec3, U8Vec4, Vec2, Vec3};
 use common::parking_lot::{Mutex, RwLock};
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
@@ -44,19 +44,20 @@ use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use engine::event::WSIEvent;
 use engine::module::input::Input;
-use engine::module::main_renderer;
 use engine::module::main_renderer::{camera, MainRenderer, SimpleObject, VertexMeshObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::{FontSet, RawTextObject, TextRenderer};
 use engine::module::ui::{UIObject, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
+use engine::module::{main_renderer, EngineModule};
 use engine::utils::wsi::find_best_video_mode;
 use engine::winit::dpi::LogicalSize;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::{ControlFlow, EventLoop};
 use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
-use engine::{winit, Application, Engine, EngineContext};
+use engine::{winit, Engine, EngineContext};
 use entity_data::{AnyState, EntityId};
 use std::any::Any;
 use std::collections::hash_map;
@@ -76,10 +77,10 @@ pub struct Game {
     res_map: Arc<DefaultResourceMapping>,
     default_queue: Arc<SafeThreadPool>,
 
-    cursor_rel: (f64, f64),
+    cursor_rel: Vec2,
     tick_timer: Option<IntervalTimer>,
 
-    main_state: Arc<Mutex<MainState>>,
+    main_state: Arc<Mutex<GameProcessState>>,
     overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
 
     cursor_grab: bool,
@@ -89,7 +90,38 @@ pub struct Game {
 impl Game {
     const MOUSE_SENSITIVITY: f64 = 0.2;
 
-    pub fn init() -> Game {
+    pub fn init(ctx: &EngineContext) {
+        ctx.register_module(Scene::new());
+
+        let root_entity = *ctx
+            .module_mut::<Scene>()
+            .add_object(None, SimpleObject::new())
+            .unwrap();
+
+        let renderer = MainRenderer::new(
+            "VulkanRenderer",
+            &*ctx.window(),
+            main_renderer::Settings {
+                fps_limit: main_renderer::FPSLimit::VSync,
+                prefer_triple_buffering: true,
+                textures_mipmaps: true,
+                texture_quality: main_renderer::TextureQuality::STANDARD,
+                textures_max_anisotropy: 1.0,
+            },
+            512,
+            |adapter| 0,
+            root_entity,
+            ctx,
+        );
+        ctx.register_module(renderer);
+
+        ctx.register_module(TextRenderer::new(ctx));
+        ctx.register_module(UIRenderer::new(ctx, root_entity));
+        ctx.register_module(UIInteractionManager::new(ctx));
+        ctx.register_module(Input::new());
+
+        register_ui_elements(ctx);
+
         let resources = ResourceFile::open("resources").unwrap();
         let main_registry = MainRegistry::init();
         let res_map = DefaultResourceMapping::init(&main_registry, &resources);
@@ -111,7 +143,7 @@ impl Game {
         overworld_orchestrator.set_y_render_distance(256);
         overworld_orchestrator.set_stream_pos(player_pos);
 
-        let main_state = Arc::new(Mutex::new(MainState {
+        let main_state = Arc::new(Mutex::new(GameProcessState {
             last_tick_start: Instant::now(),
             tick_count: 0,
             overworld,
@@ -135,19 +167,38 @@ impl Game {
 
         // TODO: save tick_count_state to disk
 
-        let program = Game {
+        let game = Game {
             resources,
             registry: Arc::clone(&main_registry),
             res_map,
             default_queue: default_queue().unwrap(),
-            cursor_rel: (0.0, 0.0),
+            cursor_rel: Default::default(),
             tick_timer: None,
             main_state,
             overworld_renderer: None,
             cursor_grab: true,
-            root_entity: Default::default(),
+            root_entity,
         };
-        program
+        ctx.register_module(game);
+    }
+
+    pub fn create_window(event_loop: &EventLoop<()>) -> Window {
+        let window = WindowBuilder::new()
+            .with_title(PROGRAM_NAME)
+            .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
+            .with_resizable(true)
+            .build(event_loop)
+            .unwrap();
+
+        // Center the window
+        let win_size = window.outer_size();
+        let mon_size = window.current_monitor().unwrap().size();
+        window.set_outer_position(winit::dpi::PhysicalPosition {
+            x: (mon_size.width as i32 - win_size.width as i32) / 2,
+            y: (mon_size.height as i32 - win_size.height as i32) / 2,
+        });
+
+        window
     }
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
@@ -171,61 +222,8 @@ impl Game {
 
 // TODO: Make Application this a module
 
-impl Application for Game {
-    fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window {
-        let window = WindowBuilder::new()
-            .with_title(PROGRAM_NAME)
-            .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
-            .with_resizable(true)
-            .build(event_loop)
-            .unwrap();
-
-        // Center the window
-        let win_size = window.outer_size();
-        let mon_size = window.current_monitor().unwrap().size();
-        window.set_outer_position(winit::dpi::PhysicalPosition {
-            x: (mon_size.width as i32 - win_size.width as i32) / 2,
-            y: (mon_size.height as i32 - win_size.height as i32) / 2,
-        });
-
-        window
-    }
-
-    fn initialize_engine(&mut self, ctx: &EngineContext) {
-        let scene = Scene::new();
-        ctx.register_module(scene);
-
-        self.root_entity = *ctx
-            .module_mut::<Scene>()
-            .add_object(None, SimpleObject::new())
-            .unwrap();
-
-        let mut renderer = MainRenderer::new(
-            "VulkanRenderer",
-            &*ctx.window(),
-            main_renderer::Settings {
-                fps_limit: main_renderer::FPSLimit::VSync,
-                prefer_triple_buffering: true,
-                textures_mipmaps: true,
-                texture_quality: main_renderer::TextureQuality::STANDARD,
-                textures_max_anisotropy: 1.0,
-            },
-            512,
-            |adapter| 0,
-            self.root_entity,
-            ctx,
-        );
-        ctx.register_module(renderer);
-
-        ctx.register_module(TextRenderer::new(ctx));
-        ctx.register_module(UIRenderer::new(ctx, self.root_entity));
-        ctx.register_module(UIInteractionManager::new(ctx));
-        ctx.register_module(Input::new());
-
-        register_ui_elements(ctx);
-
-        // ------------------------------------------------------------------------------------------------
-
+impl EngineModule for Game {
+    fn on_start(&mut self, ctx: &EngineContext) {
         self.grab_cursor(&*ctx.window(), true, ctx);
 
         // ------------------------------------------------------------------------------------------------
@@ -397,8 +395,7 @@ impl Application for Game {
             let camera = renderer.active_camera_mut();
 
             // Handle rotation
-            let cursor_offset = Vec2::new(self.cursor_rel.0 as f32, self.cursor_rel.1 as f32)
-                * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
+            let cursor_offset = self.cursor_rel * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
 
             let mut rotation = *camera.rotation();
             rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
@@ -407,7 +404,7 @@ impl Application for Game {
 
             camera.set_rotation(rotation);
             camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET);
-            self.cursor_rel = (0.0, 0.0);
+            self.cursor_rel = Vec2::new(0.0, 0.0);
 
             curr_state.player_orientation = rotation;
             curr_state.player_direction = camera.direction();
@@ -434,112 +431,91 @@ impl Application for Game {
         }
     }
 
-    fn on_event(
-        &mut self,
-        event: winit::event::Event<()>,
-        main_window: &Window,
-        control_flow: &mut ControlFlow,
-        ctx: &EngineContext,
-    ) {
+    fn on_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
         use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
         match event {
-            Event::WindowEvent {
-                window_id: _window_id,
-                event,
-            } => match event {
-                WindowEvent::KeyboardInput {
-                    device_id: _,
-                    input,
-                    is_synthetic: _,
-                } => {
-                    if input.virtual_keycode.is_none() {
-                        return;
-                    }
-                    if input.state == ElementState::Released {
-                        let mut curr_state = self.main_state.lock_arc();
+            WSIEvent::KeyboardInput { input } => {
+                if input.virtual_keycode.is_none() {
+                    return;
+                }
+                if input.state == ElementState::Released {
+                    let mut curr_state = self.main_state.lock_arc();
 
-                        match input.virtual_keycode.unwrap() {
-                            VirtualKeyCode::Escape => {
-                                *control_flow = ControlFlow::Exit;
-                            }
-                            VirtualKeyCode::L => {
-                                curr_state.change_stream_pos = !curr_state.change_stream_pos;
-                            }
-                            VirtualKeyCode::C => {
-                                curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
-                            }
-                            VirtualKeyCode::F11 => {
-                                if let Some(_) = main_window.fullscreen() {
-                                    main_window.set_fullscreen(None);
-                                } else {
-                                    let mode = find_best_video_mode(&main_window.current_monitor().unwrap());
-                                    main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
-                                }
-                            }
-                            VirtualKeyCode::P => {
-                                println!("{}", curr_state.player_pos);
-                                println!(
-                                    "{:?}",
-                                    curr_state
-                                        .player_pos
-                                        .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
-                                );
-                            }
-                            VirtualKeyCode::T => {
-                                self.grab_cursor(main_window, !self.cursor_grab, &ctx);
-                            }
-                            VirtualKeyCode::J => {
-                                // TODO: move into on_tick
-                                // let camera = renderer.active_camera();
-                                // let mut access = curr_state.overworld.access();
-                                // let block = access.get_block_at_ray(
-                                //     &camera.position(),
-                                //     &glm::convert(camera.direction()),
-                                //     7.0,
-                                // );
-                                // if let Some((pos, facing)) = block {
-                                //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
-                                //     let data = access.get_block(&pos);
-                                //
-                                //     if let Some(data) = data {
-                                //         let level = data.liquid_state().level();
-                                //         println!("LIQ LEVEL: {level}");
-                                //     }
-                                // }
-                            }
-                            VirtualKeyCode::Key1 => {
-                                curr_state.curr_block = self.registry.block_test.into_any();
-                                curr_state.set_water = false;
-                            }
-                            VirtualKeyCode::Key2 => {
-                                curr_state.curr_block = self.registry.block_glow.into_any();
-                                curr_state.set_water = false;
-                            }
-                            VirtualKeyCode::Key3 => {
-                                curr_state.set_water = true;
-                            }
-                            _ => {}
+                    match input.virtual_keycode.unwrap() {
+                        VirtualKeyCode::Escape => {
+                            ctx.request_stop();
                         }
+                        VirtualKeyCode::L => {
+                            curr_state.change_stream_pos = !curr_state.change_stream_pos;
+                        }
+                        VirtualKeyCode::C => {
+                            curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
+                        }
+                        VirtualKeyCode::F11 => {
+                            if let Some(_) = main_window.fullscreen() {
+                                main_window.set_fullscreen(None);
+                            } else {
+                                let mode = find_best_video_mode(&main_window.current_monitor().unwrap());
+                                main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
+                            }
+                        }
+                        VirtualKeyCode::P => {
+                            println!("{}", curr_state.player_pos);
+                            println!(
+                                "{:?}",
+                                curr_state
+                                    .player_pos
+                                    .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
+                            );
+                        }
+                        VirtualKeyCode::T => {
+                            self.grab_cursor(main_window, !self.cursor_grab, &ctx);
+                        }
+                        VirtualKeyCode::J => {
+                            // TODO: move into on_tick
+                            // let camera = renderer.active_camera();
+                            // let mut access = curr_state.overworld.access();
+                            // let block = access.get_block_at_ray(
+                            //     &camera.position(),
+                            //     &glm::convert(camera.direction()),
+                            //     7.0,
+                            // );
+                            // if let Some((pos, facing)) = block {
+                            //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
+                            //     let data = access.get_block(&pos);
+                            //
+                            //     if let Some(data) = data {
+                            //         let level = data.liquid_state().level();
+                            //         println!("LIQ LEVEL: {level}");
+                            //     }
+                            // }
+                        }
+                        VirtualKeyCode::Key1 => {
+                            curr_state.curr_block = self.registry.block_test.into_any();
+                            curr_state.set_water = false;
+                        }
+                        VirtualKeyCode::Key2 => {
+                            curr_state.curr_block = self.registry.block_glow.into_any();
+                            curr_state.set_water = false;
+                        }
+                        VirtualKeyCode::Key3 => {
+                            curr_state.set_water = true;
+                        }
+                        _ => {}
                     }
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                _ => {}
-            },
-            Event::DeviceEvent { device_id: _, event } => match event {
-                DeviceEvent::MouseMotion { delta } => {
-                    self.cursor_rel.0 += delta.0;
-                    self.cursor_rel.1 += delta.1;
-                }
-                _ => {}
-            },
+            }
+            WSIEvent::MouseMotion { delta } => {
+                self.cursor_rel += glm::convert::<_, Vec2>(*delta);
+            }
             _ => {}
         }
     }
 }
 
 #[derive(Clone)]
-struct MainState {
+struct GameProcessState {
     last_tick_start: Instant,
     tick_count: u64,
     overworld: Arc<Overworld>,
@@ -565,7 +541,7 @@ struct MainState {
 
 const MOVEMENT_SPEED: f64 = 16.0;
 
-fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<OverworldRenderer>>) {
+fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mutex<OverworldRenderer>>) {
     let curr_state = main_state.lock().clone();
 
     let curr_tick = curr_state.tick_count;
@@ -586,7 +562,7 @@ fn on_tick(main_state: Arc<Mutex<MainState>>, overworld_renderer: Arc<Mutex<Over
     main_state.lock().tick_count += 1;
 }
 
-fn player_on_update(main_state: &Arc<Mutex<MainState>>, new_actions: &mut OverworldActionsStorage) {
+fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut OverworldActionsStorage) {
     let start_t = Instant::now();
     let curr_state = main_state.lock().clone();
     let registry = curr_state.overworld.main_registry();

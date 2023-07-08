@@ -5,7 +5,9 @@ use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::transition::Transition;
-use engine::ecs::component::ui::{RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::ui::{
+    BasicEventCallback, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
+};
 use engine::ecs::component::{transition, MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
@@ -78,6 +80,7 @@ pub trait FancyButtonImpl {
         parent: EntityId,
         layout: UILayoutC,
         text: StyledString,
+        on_click: BasicEventCallback,
     ) -> ObjectEntityId<FancyButton> {
         let impl_ctx = ui_ctx.scene.resource::<FancyButtonImplContext>();
 
@@ -102,7 +105,8 @@ pub trait FancyButtonImpl {
         .add_event_handler(
             UIEventHandlerC::new()
                 .add_on_cursor_enter(on_cursor_enter)
-                .add_on_cursor_leave(on_cursor_leave),
+                .add_on_cursor_leave(on_cursor_leave)
+                .add_on_click(on_click),
         );
 
         let btn_entity = ui_ctx.scene.add_object(Some(parent), surface_obj).unwrap();

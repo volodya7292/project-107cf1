@@ -9,11 +9,10 @@ mod tests;
 
 use crate::game::Game;
 use base::execution::RuntimeGuard;
-use common::{log, rayon};
-use engine::{utils, Engine};
+use common::log;
+use engine::Engine;
 use simple_logger::SimpleLogger;
 use std::thread;
-use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
 embed_plist::embed_info_plist!("../Info.plist");
@@ -66,8 +65,8 @@ fn main() {
         .init()
         .unwrap();
 
-    let game = Game::init();
-    let engine = Engine::init(game);
+    let engine = Engine::init(Game::create_window);
+    Game::init(&engine.context());
 
     base::execution::spawn_coroutine(async {
         println!("coroutine test!");

@@ -1,5 +1,4 @@
 use crate::module::ui::color::Color;
-use common::glm::Vec4;
 use std::ops::{Add, Mul, Sub};
 
 /// Maps linear time to function-specific time. In and out are in range [0; 1].

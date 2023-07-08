@@ -11,9 +11,8 @@ pub mod utils;
 use crate::event::{WEvent, WSIEvent};
 use crate::module::{EngineModule, ModuleManager};
 use crate::utils::wsi::vec2::WSizingInfo;
-use common::any::AsAny;
 use common::lrc::{OwnedRef, OwnedRefMut};
-use common::MO_RELAXED;
+use common::{MO_RELAXED, MO_SEQCST};
 use lazy_static::lazy_static;
 pub use platform::Platform;
 use std::cell::{Ref, RefCell};
@@ -49,6 +48,7 @@ impl Display for EngineStatistics {
 }
 
 pub struct Engine {
+    do_stop: AtomicBool,
     last_frame_end_time: Instant,
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
@@ -57,12 +57,11 @@ pub struct Engine {
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
     module_manager: RefCell<ModuleManager>,
-    app: RefCell<Box<dyn Application>>,
 }
 
 pub struct EngineContext<'a> {
+    do_stop: &'a AtomicBool,
     module_manager: &'a RefCell<ModuleManager>,
-    app: &'a RefCell<Box<dyn Application>>,
     window: &'a RefCell<Window>,
 }
 
@@ -83,40 +82,26 @@ impl EngineContext<'_> {
         self.module_manager.borrow().module_mut()
     }
 
-    pub fn app<T: Application>(&self) -> Ref<T> {
-        Ref::map(self.app.borrow(), |app| app.as_any().downcast_ref::<T>().unwrap())
+    pub fn request_stop(&self) {
+        self.do_stop.store(true, MO_SEQCST);
     }
 }
 
-// TODO: refactor Application into a module
-
-pub trait Application: AsAny + Send {
-    fn on_engine_start(&mut self, event_loop: &EventLoop<()>) -> Window;
-    fn initialize_engine(&mut self, _: &EngineContext);
-    fn on_update(&mut self, delta_time: f64, ctx: &EngineContext);
-    fn on_event(
-        &mut self,
-        event: winit::event::Event<()>,
-        main_window: &Window,
-        control_flow: &mut ControlFlow,
-        ctx: &EngineContext,
-    );
-}
-
 impl Engine {
-    pub fn init(mut app: impl Application) -> Self {
+    pub fn init<F: FnOnce(&EventLoop<()>) -> Window>(window_init: F) -> Self {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
             panic!("Engine has already been initialized!");
         }
 
         let event_loop = EventLoop::new();
-        let main_window = app.on_engine_start(&event_loop);
+        let main_window = window_init(&event_loop);
         let sizing_info = WSizingInfo::get(&main_window);
 
         let curr_monitor = main_window.current_monitor().unwrap();
         let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
         let engine = Self {
+            do_stop: Default::default(),
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop: Some(event_loop),
@@ -125,27 +110,30 @@ impl Engine {
             curr_mode_refresh_rate,
             curr_statistics: Default::default(),
             module_manager: Default::default(),
-            app: RefCell::new(Box::new(app)),
         };
-
-        engine.app.borrow_mut().initialize_engine(&engine.context());
 
         engine
     }
 
-    fn context(&self) -> EngineContext {
+    pub fn context(&self) -> EngineContext {
         EngineContext {
+            do_stop: &self.do_stop,
             module_manager: &self.module_manager,
-            app: &self.app,
             window: &self.main_window,
         }
     }
 
     pub fn run(mut self) {
+        self.module_manager.borrow().on_start(&self.context());
+
         let mut event_loop = self.event_loop.take().unwrap();
 
         event_loop.run_return(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            *control_flow = if self.do_stop.load(MO_SEQCST) {
+                ControlFlow::ExitWithCode(0)
+            } else {
+                ControlFlow::Poll
+            };
 
             match &event {
                 WEvent::MainEventsCleared => {
@@ -153,13 +141,11 @@ impl Engine {
 
                     // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
-                    let mut app = self.app.borrow_mut();
                     let module_manger = &*self.module_manager.borrow();
                     let ctx = self.context();
 
                     let t0 = Instant::now();
 
-                    app.on_update(self.delta_time, &ctx);
                     module_manger.on_update(self.delta_time, &ctx);
 
                     let t1 = Instant::now();
@@ -204,6 +190,9 @@ impl Engine {
                     WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                         self.curr_sizing_info = WSizingInfo::get(&self.main_window.borrow());
                     }
+                    WindowEvent::CloseRequested => {
+                        self.do_stop.store(true, MO_SEQCST);
+                    }
                     _ => {}
                 },
                 _ => {}
@@ -218,10 +207,6 @@ impl Engine {
                     &self.context(),
                 );
             }
-
-            self.app
-                .borrow_mut()
-                .on_event(event, &*self.main_window.borrow(), control_flow, &self.context());
         });
     }
 }

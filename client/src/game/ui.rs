@@ -5,9 +5,10 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec4;
 use common::resource_file::ResourceFile;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::ui::{Padding, Sizing, UILayoutC};
+use engine::ecs::component::ui::{BasicEventCallback, Padding, Sizing, UILayoutC};
 use engine::module::scene::{ObjectEntityId, Scene};
 use engine::module::ui::color::Color;
+use engine::EngineContext;
 use entity_data::EntityId;
 
 pub fn make_main_menu_screen(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId {
@@ -36,12 +37,17 @@ pub fn make_main_menu_screen(ui_ctx: &mut UIContext, root: &EntityId) -> EntityI
     *container
 }
 
-fn make_menu_button(ui_ctx: &mut UIContext, parent: EntityId, text: &str) -> ObjectEntityId<FancyButton> {
+fn make_menu_button(
+    ui_ctx: &mut UIContext,
+    parent: EntityId,
+    text: &str,
+    on_click: BasicEventCallback,
+) -> ObjectEntityId<FancyButton> {
     FancyButton::new(
         ui_ctx,
         parent,
         UILayoutC::new()
-            .with_min_width(200.0)
+            .with_min_width(240.0)
             .with_padding(Padding::hv(12.0, 6.0)),
         StyledString::new(
             text,
@@ -49,7 +55,16 @@ fn make_menu_button(ui_ctx: &mut UIContext, parent: EntityId, text: &str) -> Obj
                 .with_color(Color::rgb(5.0, 10.0, 5.0))
                 .with_font_size(38.0),
         ),
+        on_click,
     )
+}
+
+fn start_on_click(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {}
+
+fn settings_on_click(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext) {}
+
+fn exit_on_click(_: &EntityId, _: &mut Scene, ctx: &EngineContext) {
+    ctx.request_stop();
 }
 
 fn make_main_menu_controls(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId {
@@ -74,15 +89,15 @@ fn make_main_menu_controls(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId 
         .scene()
         .add_object(Some(*container), Container::expander(1.0));
 
-    make_menu_button(ui_ctx, *container, "START");
+    make_menu_button(ui_ctx, *container, "START", start_on_click);
     ui_ctx
         .scene()
         .add_object(Some(*container), Container::spacer(30.0));
-    make_menu_button(ui_ctx, *container, "SETTINGS");
+    make_menu_button(ui_ctx, *container, "SETTINGS", settings_on_click);
     ui_ctx
         .scene()
         .add_object(Some(*container), Container::spacer(30.0));
-    make_menu_button(ui_ctx, *container, "EXIT");
+    make_menu_button(ui_ctx, *container, "EXIT", exit_on_click);
 
     ui_ctx
         .scene()

@@ -10,7 +10,7 @@ use crate::module::scene::Scene;
 use crate::module::scene::SceneObject;
 use crate::module::EngineModule;
 use crate::{attributes_impl, EngineContext};
-use common::glm::{U8Vec4, Vec2, Vec4};
+use common::glm::{Vec2, Vec4};
 use common::lrc::{Lrc, LrcExt, LrcExtSized};
 use common::rayon::prelude::*;
 use common::scene::relation::Relation;

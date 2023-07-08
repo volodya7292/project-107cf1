@@ -14,6 +14,7 @@ use std::any::TypeId;
 use winit::window::Window;
 
 pub trait EngineModule: AsAny {
+    fn on_start(&mut self, _: &EngineContext) {}
     /// Main loop
     fn on_update(&mut self, _dt: f64, _: &EngineContext) {}
     fn on_wsi_event(&mut self, _: &Window, _: &WSIEvent, _: &EngineContext) {}
@@ -51,6 +52,13 @@ impl ModuleManager {
             let mut module = module.borrow_mut();
             f(&mut *module);
         }
+    }
+
+    #[inline]
+    pub(crate) fn on_start(&self, ctx: &EngineContext) {
+        self.for_every(|module| {
+            module.on_start(ctx);
+        });
     }
 
     #[inline]

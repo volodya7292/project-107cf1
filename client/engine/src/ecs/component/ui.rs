@@ -298,7 +298,7 @@ impl UILayoutCacheC {
     }
 }
 
-type BasicEventCallback = fn(&EntityId, &mut Scene, &EngineContext);
+pub type BasicEventCallback = fn(&EntityId, &mut Scene, &EngineContext);
 
 #[derive(Copy, Clone)]
 pub struct BasicEventCallbackWrapper(pub fn(&EntityId, &mut Scene, &EngineContext));
@@ -386,6 +386,11 @@ impl UIEventHandlerC {
 
     pub fn add_on_cursor_leave(mut self, handler: BasicEventCallback) -> Self {
         self.on_cursor_leave.insert(BasicEventCallbackWrapper(handler));
+        self
+    }
+
+    pub fn add_on_click(mut self, handler: BasicEventCallback) -> Self {
+        self.on_click.insert(BasicEventCallbackWrapper(handler));
         self
     }
 }
