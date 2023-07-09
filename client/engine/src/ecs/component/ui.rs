@@ -164,6 +164,20 @@ impl Default for Overflow {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum Visibility {
+    Visible,
+    Hidden,
+    Collapsed,
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Self::Visible
+    }
+}
+
 #[derive(Default)]
 pub struct UILayoutC {
     pub position: Position,
@@ -175,6 +189,7 @@ pub struct UILayoutC {
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
+    pub visibility: Visibility,
 }
 
 impl UILayoutC {

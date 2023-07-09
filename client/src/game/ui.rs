@@ -1,4 +1,4 @@
-use crate::game::Game;
+use crate::game::MainApp;
 use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageFitness, ImageImpl, ImageSource, UIImage};
@@ -61,7 +61,7 @@ fn make_menu_button(
 }
 
 fn start_on_click(_: &EntityId, ctx: &EngineContext) {
-    let mut game = ctx.module_mut::<Game>();
+    let mut game = ctx.module_mut::<MainApp>();
     game.start_game_process(ctx);
 }
 

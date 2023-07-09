@@ -15,7 +15,9 @@ pub fn collect_relation_tree(access: &SystemAccess, root: &EntityId) -> Vec<Enti
     while let Some(entity) = to_visit.pop() {
         if let Some(relation) = relation_comps.get(&entity) {
             nodes.extend(&relation.children);
-            to_visit.extend(&relation.children);
+            // Because we're popping from the stack, insert in reverse order
+            // to preserve the order of visiting children so the first is popped first.
+            to_visit.extend(relation.children.iter().rev());
         }
     }
 

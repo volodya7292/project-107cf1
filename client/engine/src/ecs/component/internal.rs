@@ -4,15 +4,17 @@ use common::nalgebra::Rotation3;
 use glm::{DVec3, Mat4, Vec3};
 
 #[derive(Copy, Clone)]
-pub struct GlobalTransformC {
+pub struct HierarchyCacheC {
+    pub(crate) active: bool,
     pub(crate) position: DVec3,
     pub(crate) rotation: Vec3,
     pub(crate) scale: Vec3,
 }
 
-impl Default for GlobalTransformC {
+impl Default for HierarchyCacheC {
     fn default() -> Self {
         Self {
+            active: true,
             position: Default::default(),
             rotation: Default::default(),
             scale: Vec3::from_element(1.0),
@@ -20,21 +22,18 @@ impl Default for GlobalTransformC {
     }
 }
 
-impl GlobalTransformC {
-    /// Applies `self` transformation to `transform` and returns the result.
-    pub fn combine(&self, transform: &TransformC) -> GlobalTransformC {
-        if transform.use_parent_transform {
-            GlobalTransformC {
-                position: self.position + transform.position,
-                rotation: (self.rotation + transform.rotation).map(|v| v % (std::f32::consts::PI * 2.0)),
-                scale: self.scale.component_mul(&transform.scale),
-            }
+impl HierarchyCacheC {
+    /// Applies `parent` transformation to `child_transform` and sets the result.
+    pub fn set_transform(&mut self, parent: &Self, child_transform: &TransformC) {
+        if child_transform.use_parent_transform {
+            self.position = parent.position + child_transform.position;
+            self.rotation =
+                (parent.rotation + child_transform.rotation).map(|v| v % (std::f32::consts::PI * 2.0));
+            self.scale = parent.scale.component_mul(&child_transform.scale);
         } else {
-            GlobalTransformC {
-                position: transform.position,
-                rotation: transform.rotation,
-                scale: transform.scale,
-            }
+            self.position = child_transform.position;
+            self.rotation = child_transform.rotation;
+            self.scale = child_transform.scale;
         }
     }
 
@@ -42,7 +41,7 @@ impl GlobalTransformC {
         glm::convert(self.position)
     }
 
-    pub fn matrix_f32(&self) -> Mat4 {
+    pub fn transform_matrix_f32(&self) -> Mat4 {
         let mut mat = Mat4::new_nonuniform_scaling(&self.scale);
         mat = Rotation3::from_axis_angle(&Vec3::x_axis(), self.rotation.x).to_homogeneous() * mat;
         mat = Rotation3::from_axis_angle(&Vec3::y_axis(), self.rotation.y).to_homogeneous() * mat;

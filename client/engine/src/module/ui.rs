@@ -1,10 +1,10 @@
 pub mod color;
 pub mod management;
 
-use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::ui::{
     ClipRect, Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Padding, Position, RectUniformData,
-    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
+    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC, Visibility,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
@@ -35,7 +35,7 @@ where
     S: UIState,
 {
     relation: Relation,
-    global_transform: GlobalTransformC,
+    h_cache: HierarchyCacheC,
 
     transform: TransformC,
     renderer: MeshRenderConfigC,
@@ -54,7 +54,7 @@ impl<E: UIState> UIObject<E> {
     pub fn new_raw(layout: UILayoutC, state: E) -> Self {
         Self {
             relation: Default::default(),
-            global_transform: Default::default(),
+            h_cache: Default::default(),
             transform: TransformC::new().with_use_parent_transform(false),
             renderer: Default::default(),
             uniforms: Default::default(),
@@ -359,7 +359,8 @@ impl UIRenderer {
     }
 
     /// For each element calculates expanded size and its position (starting from the top of the tree).
-    fn expand_sizes_and_set_positions(
+    /// Also hierarchically calculates final visibilities.
+    fn perform_expansion(
         linear_tree: &[EntityId],
         access: &SystemAccess,
         dirty_elements: &mut HashSet<EntityId>,
@@ -376,7 +377,7 @@ impl UIRenderer {
             root_cache.clip_rect = ClipRect {
                 min: Vec2::from_element(0.0),
                 max: root_cache.final_size,
-            }
+            };
         }
 
         // Start from top of the tree
@@ -432,6 +433,10 @@ impl UIRenderer {
 
                 let max_flow_size = child_layout.constraints[flow_axis].max;
                 let min_flow_size = child_cache.final_min_size[flow_axis].min(max_flow_size);
+
+                if child_layout.visibility == Visibility::Collapsed {
+                    continue;
+                }
 
                 // Collect info for final size calculation
                 children_flow_sizings.push(ChildFlowSizingInfo {
@@ -571,6 +576,18 @@ impl UIRenderer {
         }
     }
 
+    fn handle_ui_layout_updates(scene: &mut Scene, dirty_elements: &HashSet<EntityId>) {
+        for entity_id in dirty_elements {
+            let mut entry = scene.entry(entity_id);
+
+            let layout = entry.get::<UILayoutC>();
+            let visible = layout.visibility == Visibility::Visible;
+
+            let relation = entry.get_mut::<Relation>();
+            relation.active = visible;
+        }
+    }
+
     /// Outputs objects that contain the specified point to the specified closure.
     /// If the closure returns `true` the traversal is stopped.
     pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
@@ -619,12 +636,14 @@ impl EngineModule for UIRenderer {
             return;
         }
 
+        Self::handle_ui_layout_updates(&mut scene, &dirty_elements);
+
         let storage = scene.storage_mut();
         let access = storage.access();
         let linear_tree = common::scene::collect_relation_tree(&access, &self.root_ui_entity);
 
         Self::calculate_final_minimum_sizes(&linear_tree, &access, &mut dirty_elements);
-        Self::expand_sizes_and_set_positions(&linear_tree, &access, &mut dirty_elements);
+        Self::perform_expansion(&linear_tree, &access, &mut dirty_elements);
 
         Self::calculate_transforms(
             &linear_tree,

@@ -43,11 +43,11 @@ use common::{glm, MO_RELAXED};
 use engine::ecs::component;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC};
+use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC, Visibility};
 use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
 use engine::event::WSIEvent;
 use engine::module::input::Input;
-use engine::module::main_renderer::{camera, MainRenderer, SimpleObject, VertexMeshObject};
+use engine::module::main_renderer::{camera, MainRenderer, VertexMeshObject, WrapperObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::{FontSet, RawTextObject, TextRenderer};
 use engine::module::ui::{UIObject, UIRenderer};
@@ -72,7 +72,7 @@ const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
-pub struct Game {
+pub struct MainApp {
     resources: Arc<ResourceFile>,
     main_registry: Arc<MainRegistry>,
     res_map: Arc<DefaultResourceMapping>,
@@ -82,13 +82,14 @@ pub struct Game {
     tick_timer: Option<IntervalTimer>,
 
     material_pipelines: MaterialPipelines,
-    main_state: Option<Arc<Mutex<GameProcessState>>>,
+    game_state: Option<Arc<Mutex<GameProcessState>>>,
 
     cursor_grab: bool,
     root_entity: EntityId,
+    main_menu_entity: EntityId,
 }
 
-impl Game {
+impl MainApp {
     const MOUSE_SENSITIVITY: f64 = 0.2;
 
     pub fn init(ctx: &EngineContext) {
@@ -96,7 +97,7 @@ impl Game {
 
         let root_entity = *ctx
             .module_mut::<Scene>()
-            .add_object(None, SimpleObject::new())
+            .add_object(None, WrapperObject::new())
             .unwrap();
 
         let renderer = MainRenderer::new(
@@ -142,7 +143,7 @@ impl Game {
             }
         }
 
-        let game = Game {
+        let game = MainApp {
             resources,
             main_registry: Arc::clone(&main_registry),
             res_map,
@@ -150,9 +151,10 @@ impl Game {
             cursor_rel: Default::default(),
             tick_timer: None,
             material_pipelines: mat_pipelines,
-            main_state: None,
+            game_state: None,
             cursor_grab: true,
             root_entity,
+            main_menu_entity: Default::default(),
         };
         ctx.register_module(game);
     }
@@ -192,6 +194,16 @@ impl Game {
 
         let mut ui_interactor = ctx.module_mut::<UIInteractionManager>();
         ui_interactor.set_active(!self.cursor_grab);
+    }
+
+    pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
+        let mut ui_ctx = UIContext::new(ctx, &self.resources);
+        let mut main_menu = ui_ctx.scene().entry(&self.main_menu_entity);
+        main_menu.get_mut::<UILayoutC>().visibility = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     pub fn start_game_process(&mut self, ctx: &EngineContext) {
@@ -245,7 +257,7 @@ impl Game {
             do_remove_block: false,
         }));
 
-        self.main_state = Some(Arc::clone(&new_game_state));
+        self.game_state = Some(Arc::clone(&new_game_state));
         self.tick_timer = Some(IntervalTimer::start(
             Duration::from_millis(20),
             VirtualProcessor::new(&self.default_queue),
@@ -258,12 +270,13 @@ impl Game {
         ));
 
         self.grab_cursor(&*ctx.window(), true, ctx);
+        self.show_main_menu(ctx, false);
     }
 }
 
 // TODO: Make Application this a module
 
-impl EngineModule for Game {
+impl EngineModule for MainApp {
     fn on_start(&mut self, ctx: &EngineContext) {
         // ------------------------------------------------------------------------------------------------
 
@@ -298,11 +311,11 @@ impl EngineModule for Game {
         let root_ui_entity = *ui_renderer.root_ui_entity();
         drop(ui_renderer);
 
-        ui::make_main_menu_screen(&mut ui_ctx, &root_ui_entity);
+        self.main_menu_entity = ui::make_main_menu_screen(&mut ui_ctx, &root_ui_entity);
     }
 
     fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {
-        let Some(main_state) = self.main_state.as_ref() else {
+        let Some(main_state) = self.game_state.as_ref() else {
             return;
         };
 
@@ -430,7 +443,7 @@ impl EngineModule for Game {
     fn on_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
         use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
 
-        let Some(main_state) = self.main_state.as_ref() else {
+        let Some(main_state) = self.game_state.as_ref() else {
             return;
         };
 

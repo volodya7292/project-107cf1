@@ -77,7 +77,9 @@ impl EngineModule for UIInteractionManager {
                 let mut new_hover_entity = EntityId::NULL;
 
                 ui_renderer.traverse_at_point(&position.logical(), &mut scene, |entry| {
-                    let handler = entry.get::<UIEventHandlerC>();
+                    let Some(handler) = entry.get_checked::<UIEventHandlerC>() else {
+                        return false;
+                    };
                     if handler.enabled {
                         new_hover_entity = *entry.entity();
                     }

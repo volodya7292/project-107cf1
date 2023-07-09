@@ -221,7 +221,9 @@ impl EngineModule for Scene {
 
         for (comp_id, changes) in comp_changes {
             for entity in changes {
-                let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();
+                let Some(event_handler) = self.storage.get::<SceneEventHandler>(&entity) else {
+                    continue;
+                };
                 if let Some(on_update) = event_handler.on_component_update(&comp_id) {
                     on_update(&entity, self, ctx);
                 }

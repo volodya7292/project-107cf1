@@ -1,4 +1,4 @@
-use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::simple_text::{FontStyle, StyledString, TextHAlign, TextStyle};
 use crate::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, UniformDataC, VertexMeshC};
@@ -471,7 +471,7 @@ struct FrameUniformData {
 #[derive(Archetype)]
 pub struct RawTextObject {
     relation: Relation,
-    global_transform: GlobalTransformC,
+    h_cache: HierarchyCacheC,
     transform: TransformC,
     uniforms: UniformDataC,
     renderer: MeshRenderConfigC,
@@ -483,7 +483,7 @@ impl RawTextObject {
     pub fn new(transform: TransformC, text: SimpleTextC) -> Self {
         Self {
             relation: Default::default(),
-            global_transform: Default::default(),
+            h_cache: Default::default(),
             transform,
             uniforms: Default::default(),
             renderer: Default::default(),

@@ -1,3 +1,4 @@
+use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
@@ -285,10 +286,11 @@ impl GBufferStage {
             .unwrap();
 
         for renderable_id in ctx.ordered_entities {
-            let Some(render_config) = ctx.storage.get::<MeshRenderConfigC>(renderable_id) else {
+            let (Some(h_cache), Some(render_config)) =
+                (ctx.storage.get::<HierarchyCacheC>(renderable_id), ctx.storage.get::<MeshRenderConfigC>(renderable_id)) else {
                 continue;
             };
-            if render_config.render_layer != RenderLayer::Overlay {
+            if render_config.render_layer != RenderLayer::Overlay || !h_cache.active {
                 continue;
             }
 

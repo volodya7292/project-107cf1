@@ -5,7 +5,7 @@ mod renderer_component_events;
 mod uniform_data_events;
 mod vertex_mesh_component_events;
 
-pub(crate) use global_transform_events::GlobalTransformEvents;
+pub(crate) use global_transform_events::HierarchyCacheEvents;
 pub(crate) use gpu_buffers_update::CommitBufferUpdates;
 pub(crate) use gpu_buffers_update::GpuBuffersUpdate;
 pub(crate) use hierarchy_propagation::HierarchyPropagation;

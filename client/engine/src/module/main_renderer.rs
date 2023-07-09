@@ -34,7 +34,7 @@ mod stage_manager;
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
-use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::system;
@@ -99,7 +99,7 @@ pub struct UpdateTimings {
     pub batch0_vertex_meshes: f64,
     pub batch0_hierarchy_propag: f64,
     pub systems_batch1: f64,
-    pub batch1_global_transforms: f64,
+    pub batch1_h_cache: f64,
     pub batch1_buffer_updates: f64,
     pub batch1_updates_commit: f64,
     pub uniform_buffers_update: f64,
@@ -141,6 +141,7 @@ pub struct MainRenderer {
     root_entity: EntityId,
     render_config_component_changes: ComponentChangesHandle,
     mesh_component_changes: ComponentChangesHandle,
+    relation_component_changes: ComponentChangesHandle,
     transform_component_changes: ComponentChangesHandle,
     uniform_data_component_changes: ComponentChangesHandle,
 
@@ -471,7 +472,7 @@ fn compose_descriptor_sets(
 
 #[derive(Archetype)]
 pub struct VertexMeshObject {
-    global_transform: GlobalTransformC,
+    h_cache: HierarchyCacheC,
     relation: Relation,
     transform: TransformC,
     uniforms: UniformDataC,
@@ -482,7 +483,7 @@ pub struct VertexMeshObject {
 impl VertexMeshObject {
     pub fn new(transform: TransformC, render_config: MeshRenderConfigC, mesh: VertexMeshC) -> Self {
         Self {
-            global_transform: Default::default(),
+            h_cache: Default::default(),
             relation: Default::default(),
             transform,
             uniforms: Default::default(),
@@ -495,23 +496,23 @@ impl VertexMeshObject {
 impl SceneObject for VertexMeshObject {}
 
 #[derive(Archetype)]
-pub struct SimpleObject {
-    global_transform: GlobalTransformC,
+pub struct WrapperObject {
+    h_cache: HierarchyCacheC,
     relation: Relation,
     transform: TransformC,
 }
 
-impl SimpleObject {
+impl WrapperObject {
     pub fn new() -> Self {
         Self {
-            global_transform: Default::default(),
+            h_cache: Default::default(),
             relation: Default::default(),
             transform: Default::default(),
         }
     }
 }
 
-impl SceneObject for SimpleObject {}
+impl SceneObject for WrapperObject {}
 
 impl MainRenderer {
     pub fn new<F: Fn(&[Arc<vkw::Adapter>]) -> usize>(
@@ -538,6 +539,7 @@ impl MainRenderer {
         let mut change_manager = scene.change_manager_mut();
         let render_config_component_changes = change_manager.register_component_flow::<MeshRenderConfigC>();
         let mesh_component_changes = change_manager.register_component_flow::<VertexMeshC>();
+        let relation_component_changes = change_manager.register_component_flow::<Relation>();
         let transform_component_changes = change_manager.register_component_flow::<TransformC>();
         let uniform_data_component_changes = change_manager.register_component_flow::<UniformDataC>();
 
@@ -744,6 +746,7 @@ impl MainRenderer {
             root_entity,
             render_config_component_changes,
             mesh_component_changes,
+            relation_component_changes,
             transform_component_changes,
             uniform_data_component_changes,
             active_camera,
@@ -1122,9 +1125,10 @@ impl MainRenderer {
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             root_entity: self.root_entity,
-            dirty_components: change_manager.take_new(self.transform_component_changes),
+            dirty_relations: change_manager.take_new(self.relation_component_changes),
+            dirty_transforms: change_manager.take_new(self.transform_component_changes),
             ordered_entities: &mut self.ordered_entities,
-            changed_global_transforms: Vec::with_capacity(4096),
+            changed_h_caches: Vec::with_capacity(4096),
             run_time: 0.0,
         };
 
@@ -1134,7 +1138,7 @@ impl MainRenderer {
             System::new(&mut hierarchy_propagation_system)
                 .with::<Relation>()
                 .with::<TransformC>()
-                .with_mut::<GlobalTransformC>(),
+                .with_mut::<HierarchyCacheC>(),
         ]);
 
         timings.batch0_render_events = renderer_events_system.run_time;
@@ -1150,7 +1154,7 @@ impl MainRenderer {
         let mut sorted_buffer_updates_entities: Vec<_> = {
             // let transforms = self.scene.storage_read::<GlobalTransform>();
             let access = scene.storage_mut().access();
-            let transforms = access.component::<GlobalTransformC>();
+            let transforms = access.component::<HierarchyCacheC>();
             self.new_vertex_mesh_updates
                 .keys()
                 .map(|v| {
@@ -1170,14 +1174,14 @@ impl MainRenderer {
 
         // --------------------------------------------------------------------------------------------------
 
-        let mut global_transform_events_system = system::GlobalTransformEvents {
-            dirty_components: hierarchy_propagation_system.changed_global_transforms,
+        let mut h_cache_events_system = system::HierarchyCacheEvents {
+            dirty_components: hierarchy_propagation_system.changed_h_caches,
             changed_uniforms: Default::default(),
             run_time: 0.0,
         };
-        global_transform_events_system.run(scene.storage_mut().access());
+        h_cache_events_system.run(scene.storage_mut().access());
 
-        for entity in &global_transform_events_system.changed_uniforms {
+        for entity in &h_cache_events_system.changed_uniforms {
             change_manager.record_modification::<UniformDataC>(*entity);
         }
 
@@ -1209,7 +1213,7 @@ impl MainRenderer {
             System::new(&mut commit_buffer_updates_system).with::<VertexMeshC>(),
         ]);
 
-        timings.batch1_global_transforms = global_transform_events_system.run_time;
+        timings.batch1_h_cache = h_cache_events_system.run_time;
         timings.batch1_buffer_updates = buffer_update_system.run_time;
         timings.batch1_updates_commit = commit_buffer_updates_system.run_time;
 

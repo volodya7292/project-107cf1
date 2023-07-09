@@ -72,7 +72,6 @@ pub struct MeshRenderConfigC {
     pub(crate) mat_pipeline: u32,
     pub(crate) resources: SmallVec<[(BindingId, Resource); 4]>,
     pub(crate) translucent: bool,
-    pub(crate) visible: bool,
 }
 
 impl Default for MeshRenderConfigC {
@@ -82,7 +81,6 @@ impl Default for MeshRenderConfigC {
             mat_pipeline: u32::MAX,
             resources: Default::default(),
             translucent: false,
-            visible: false,
         }
     }
 }
@@ -94,7 +92,6 @@ impl MeshRenderConfigC {
             mat_pipeline,
             resources: Default::default(),
             translucent,
-            visible: true,
         }
     }
 
@@ -113,14 +110,6 @@ impl MeshRenderConfigC {
             })
             .collect();
         self
-    }
-
-    pub fn visible(&self) -> bool {
-        self.visible
-    }
-
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
     }
 
     pub fn set_shader_resource(&mut self, idx: usize, res: Resource) {

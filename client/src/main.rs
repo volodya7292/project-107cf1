@@ -7,7 +7,7 @@ mod resource_mapping;
 #[cfg(test)]
 mod tests;
 
-use crate::game::Game;
+use crate::game::MainApp;
 use base::execution::RuntimeGuard;
 use common::log;
 use engine::Engine;
@@ -65,8 +65,8 @@ fn main() {
         .init()
         .unwrap();
 
-    let engine = Engine::init(Game::create_window);
-    Game::init(&engine.context());
+    let engine = Engine::init(MainApp::create_window);
+    MainApp::init(&engine.context());
 
     base::execution::spawn_coroutine(async {
         println!("coroutine test!");

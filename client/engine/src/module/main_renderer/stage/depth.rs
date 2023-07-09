@@ -1,4 +1,4 @@
-use crate::ecs::component::internal::GlobalTransformC;
+use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::camera::Frustum;
@@ -227,18 +227,18 @@ impl DepthStage {
                     let renderable_id = ctx.ordered_entities[entity_index];
                     let entry = ctx.storage.entry(&renderable_id).unwrap();
 
-                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
+                    let (Some(h_cache), Some(render_config), Some(vertex_mesh)) =
+                        (entry.get::<HierarchyCacheC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
                         continue;
                     };
 
-                    if render_config.render_layer != RenderLayer::Main || !render_config.visible || vertex_mesh.is_empty() {
+                    if render_config.render_layer != RenderLayer::Main || !h_cache.active || vertex_mesh.is_empty() {
                         continue;
                     }
 
                     if let Some(sphere) = vertex_mesh.sphere() {
-                        let center = sphere.center() + global_transform.position_f32();
-                        let radius = sphere.radius() * global_transform.scale.max();
+                        let center = sphere.center() + h_cache.position_f32();
+                        let radius = sphere.radius() * h_cache.scale.max();
 
                         if !frustum.is_sphere_visible(&center, radius) {
                             continue;
@@ -317,13 +317,13 @@ impl DepthStage {
                     let renderable_id = ctx.ordered_entities[entity_index];
                     let entry = ctx.storage.entry(&renderable_id).unwrap();
 
-                    let (Some(global_transform), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<GlobalTransformC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
+                    let (Some(h_cache), Some(render_config), Some(vertex_mesh)) =
+                        (entry.get::<HierarchyCacheC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
                         continue;
                     };
 
                     if render_config.render_layer != RenderLayer::Main
-                        || !render_config.visible
+                        || !h_cache.active
                         || render_config.translucent
                         || vertex_mesh.is_empty()
                     {
@@ -331,8 +331,8 @@ impl DepthStage {
                     }
 
                     if let Some(sphere) = vertex_mesh.sphere() {
-                        let center = sphere.center() + global_transform.position_f32();
-                        let radius = sphere.radius() * global_transform.scale.max();
+                        let center = sphere.center() + h_cache.position_f32();
+                        let radius = sphere.radius() * h_cache.scale.max();
 
                         if !frustum.is_sphere_visible(&center, radius) {
                             continue;
