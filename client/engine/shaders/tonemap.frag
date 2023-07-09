@@ -17,12 +17,12 @@ float luminance(vec3 v) {
 
 vec3 change_luminance(vec3 c_in, float l_out) {
     float l_in = luminance(c_in);
-    return c_in * (l_out / l_in);
+    return c_in * (l_out / max(l_in, 0.001));
 }
 
 vec3 tonemap_exp(vec3 v) {
     float l_old = luminance(v);
-    float l_new = 1 - exp(-2 * l_old);
+    float l_new = 1 - exp(-2.0f * l_old);
     return change_luminance(v, l_new);
 }
 
