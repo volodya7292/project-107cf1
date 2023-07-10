@@ -1,14 +1,14 @@
 use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
 use crate::rendering::ui::UIContext;
-use common::glm::{U8Vec4, Vec4};
+use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::transition::Transition;
+use engine::ecs::component::simple_text::StyledString;
+use engine::ecs::component::transition::{AnimatedValue, TransitionTarget};
 use engine::ecs::component::ui::{
     BasicEventCallback, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
-use engine::ecs::component::{transition, MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
+use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::color::Color;
@@ -27,8 +27,7 @@ struct FancyButtonImplContext {
 pub struct FancyButtonState {
     text_entity: ObjectEntityId<UIText>,
     text: StyledString,
-    background_color: Color,
-    transition: Transition<Color>,
+    background_color: AnimatedValue<Color>,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -89,8 +88,7 @@ pub trait FancyButtonImpl {
             FancyButtonState {
                 text_entity: Default::default(),
                 text: text.clone(),
-                background_color: Self::DEFAULT_COLOR,
-                transition: Transition::none(Self::DEFAULT_COLOR),
+                background_color: AnimatedValue::immediate(Self::DEFAULT_COLOR),
             },
         )
         .with_renderer(
@@ -145,14 +143,17 @@ fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
     let state = entry.state_mut();
     let mut update_needed = false;
 
-    if !state.transition.advance(&mut state.background_color, dt) {
+    if !state.background_color.advance(dt) {
         update_needed = true;
     }
 
     let state = state.clone();
 
     let raw_uniform_data = entry.get_mut::<UniformDataC>();
-    raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, background_color), state.background_color);
+    raw_uniform_data.copy_from_with_offset(
+        offset_of!(UniformData, background_color),
+        *state.background_color.current(),
+    );
 
     if update_needed {
         entry.request_update();
@@ -168,12 +169,9 @@ fn on_cursor_enter(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
-    state.transition = Transition::new(
-        state.background_color,
-        FancyButton::ACTIVE_COLOR,
-        0.2,
-        transition::FN_EASE_IN_OUT,
-    );
+    state
+        .background_color
+        .retarget(TransitionTarget::new(FancyButton::ACTIVE_COLOR, 0.2));
     entry.request_update();
 }
 
@@ -181,11 +179,8 @@ fn on_cursor_leave(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
-    state.transition = Transition::new(
-        state.background_color,
-        FancyButton::DEFAULT_COLOR,
-        0.2,
-        transition::FN_EASE_IN_OUT,
-    );
+    state
+        .background_color
+        .retarget(TransitionTarget::new(FancyButton::DEFAULT_COLOR, 0.2));
     entry.request_update();
 }

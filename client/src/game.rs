@@ -180,6 +180,10 @@ impl MainApp {
         ui_interactor.set_active(!self.cursor_grab);
     }
 
+    pub fn is_in_game(&self) -> bool {
+        self.game_state.is_some()
+    }
+
     pub fn is_main_menu_visible(&self, ctx: &EngineContext) -> bool {
         let mut scene = ctx.module_mut::<Scene>();
         let mut main_menu = scene.object(&self.main_menu_entity);
@@ -195,13 +199,16 @@ impl MainApp {
             Visibility::Hidden
         };
 
-        let in_game = self.game_state.is_some();
+        // TODO: implement hierarchical properties 'opacity' and 'enabled'
 
-        main_menu.set_background_color(if in_game {
-            Color::BLACK.with_alpha(0.5)
-        } else {
-            Color::TRANSPARENT
-        });
+        main_menu.set_background_color(
+            if self.is_in_game() {
+                Color::BLACK.with_alpha(0.5)
+            } else {
+                Color::TRANSPARENT
+            }
+            .into(),
+        );
 
         self.grab_cursor(&ctx.window(), !visible, ctx);
     }
@@ -526,7 +533,9 @@ impl EngineModule for MainApp {
             {
                 match input.virtual_keycode.unwrap() {
                     VirtualKeyCode::Escape => {
-                        self.show_main_menu(ctx, !self.is_main_menu_visible(ctx));
+                        if self.is_in_game() {
+                            self.show_main_menu(ctx, !self.is_main_menu_visible(ctx));
+                        }
                     }
                     VirtualKeyCode::F11 => {
                         if let Some(_) = main_window.fullscreen() {

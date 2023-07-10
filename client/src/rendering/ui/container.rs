@@ -2,6 +2,7 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
+use engine::ecs::component::transition::{AnimatedValue, TransitionTarget};
 use engine::ecs::component::ui::{Factor, Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
@@ -25,9 +26,9 @@ struct UniformData {
     background_color: Vec4,
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 pub struct ContainerState {
-    background_color: Color,
+    background_color: AnimatedValue<Color>,
 }
 
 impl UIState for ContainerState {}
@@ -107,25 +108,31 @@ impl ContainerImpl for Container {}
 
 pub trait ContainerAccess {
     fn get_background_color(&self) -> &Color;
-    fn set_background_color(&mut self, color: Color);
+    fn set_background_color(&mut self, color: TransitionTarget<Color>);
 }
 
 impl<'a> ContainerAccess for EntityAccess<'a, Container> {
     fn get_background_color(&self) -> &Color {
-        &self.state().background_color
+        self.state().background_color.current()
     }
 
-    fn set_background_color(&mut self, color: Color) {
-        self.state_mut().background_color = color;
+    fn set_background_color(&mut self, color: TransitionTarget<Color>) {
+        self.state_mut().background_color.retarget(color);
         self.request_update();
     }
 }
 
-fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, _dt: f64) {
-    let mut entry = scene.entry(entity);
-    let state = entry.get::<ContainerState>();
-    let background_color = state.background_color;
+fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
+    let mut entry = scene.object::<Container>(&entity.into());
+    let mut state = entry.state_mut().clone();
+
+    if !state.background_color.advance(dt) {
+        entry.request_update();
+    }
 
     let uniform_data = entry.get_mut::<UniformDataC>();
-    uniform_data.copy_from_with_offset(offset_of!(UniformData, background_color), background_color);
+    uniform_data.copy_from_with_offset(
+        offset_of!(UniformData, background_color),
+        state.background_color.current(),
+    );
 }
