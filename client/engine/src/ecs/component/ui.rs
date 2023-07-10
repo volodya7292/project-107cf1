@@ -1,4 +1,3 @@
-use crate::module::scene::Scene;
 use crate::EngineContext;
 use common::glm::Vec2;
 use common::types::IndexSet;

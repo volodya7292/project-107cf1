@@ -1,6 +1,5 @@
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::TransformC;
-use common::scene;
 use common::scene::relation::Relation;
 use common::types::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
@@ -32,7 +31,6 @@ impl SystemHandler for HierarchyPropagation<'_> {
 
         stack.push(StackEntry {
             entity: self.root_entity,
-            // parent_active: relation_comps.get(&self.root_entity).unwrap().active,
             parent_global_transform_changed: false,
             parent_h_cache: Default::default(),
         });

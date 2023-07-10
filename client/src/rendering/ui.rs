@@ -3,6 +3,7 @@ pub mod fancy_button;
 pub mod image;
 pub mod text;
 
+use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
@@ -12,8 +13,7 @@ use common::resource_file::{ResourceFile, ResourceRef};
 use engine::module::scene::Scene;
 use engine::module::EngineModule;
 use engine::EngineContext;
-use entity_data::{EntityId, StaticArchetype};
-use std::marker::PhantomData;
+use entity_data::StaticArchetype;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -51,6 +51,7 @@ impl<'a> UIContext<'a> {
 }
 
 pub fn register_ui_elements(ctx: &EngineContext) {
+    Container::register(ctx);
     UIText::register(ctx);
     UIImage::register(ctx);
     FancyButton::register(ctx);

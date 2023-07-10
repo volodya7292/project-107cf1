@@ -1,4 +1,3 @@
-use crate::rendering::ui::{fancy_button, text};
 use common::resource_file::ResourceFile;
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::text_renderer::TextRenderer;
@@ -10,7 +9,6 @@ use std::sync::Arc;
 
 pub struct MaterialPipelines {
     pub cluster: MaterialPipelineId,
-    pub panel: MaterialPipelineId,
     pub text_3d: MaterialPipelineId,
 }
 
@@ -78,43 +76,7 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
         text_renderer.register_text_pipeline(&mut renderer, pixel)
     };
 
-    let panel = {
-        let vertex = create_vertex_shader(
-            &device,
-            // &resources
-            //     .get("../../engine/shaders/build/ui_rect.vert.spv")
-            //     .unwrap()
-            //     .read()
-            //     .unwrap(),
-            include_bytes!("../../res/shaders/ui_rect.vert.spv"),
-            &[],
-            "ui_rect.vert",
-        )
-        .unwrap();
-        let pixel = device
-            .create_pixel_shader(
-                include_bytes!("../../engine/shaders/build/panel.frag.spv"),
-                // &resources
-                //     .get("../../engine/shaders/build/panel.frag.spv")
-                //     .unwrap()
-                //     .read()
-                //     .unwrap(),
-                "panel.frag",
-            )
-            .unwrap();
-
-        renderer.register_material_pipeline(
-            &[vertex, pixel],
-            PrimitiveTopology::TRIANGLE_STRIP,
-            CullMode::BACK,
-        )
-    };
-
-    MaterialPipelines {
-        cluster,
-        panel,
-        text_3d,
-    }
+    MaterialPipelines { cluster, text_3d }
 }
 
 #[derive(Default, Copy, Clone)]

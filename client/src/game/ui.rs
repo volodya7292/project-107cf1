@@ -12,30 +12,22 @@ use engine::module::ui::color::Color;
 use engine::EngineContext;
 use entity_data::EntityId;
 
-pub fn make_main_menu_screen(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId {
-    let container = ui_ctx
-        .scene()
-        .add_object(
-            Some(*root),
-            Container::new(
-                UILayoutC::row()
-                    .with_width(Sizing::Grow(1.0))
-                    .with_height(Sizing::Grow(1.0)),
-            ),
-        )
-        .unwrap();
+pub fn make_main_menu_screen(ui_ctx: &mut UIContext, root: &EntityId) -> ObjectEntityId<Container> {
+    let container = Container::new(
+        ui_ctx,
+        *root,
+        UILayoutC::row()
+            .with_width(Sizing::Grow(1.0))
+            .with_height(Sizing::Grow(1.0)),
+    );
 
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::expander(0.2));
+    Container::expander(ui_ctx, *container, 0.2);
 
     make_main_menu_controls(ui_ctx, &container);
 
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::expander(1.0));
+    Container::expander(ui_ctx, *container, 1.0);
 
-    *container
+    container
 }
 
 fn make_menu_button(
@@ -89,23 +81,15 @@ fn make_main_menu_controls(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId 
 
     let container = ui_ctx.scene().add_object(Some(*root), back_ui_img).unwrap();
 
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::expander(1.0));
+    Container::expander(ui_ctx, *container, 1.0);
 
     make_menu_button(ui_ctx, *container, "START", start_on_click);
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::spacer(30.0));
+    Container::spacer(ui_ctx, *container, 30.0);
     make_menu_button(ui_ctx, *container, "SETTINGS", settings_on_click);
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::spacer(30.0));
+    Container::spacer(ui_ctx, *container, 30.0);
     make_menu_button(ui_ctx, *container, "EXIT", exit_on_click);
 
-    ui_ctx
-        .scene()
-        .add_object(Some(*container), Container::expander(2.0));
+    Container::expander(ui_ctx, *container, 2.0);
 
     *container
 }

@@ -51,8 +51,8 @@ pub trait UITextImpl {
         let pixel = renderer
             .device()
             .create_pixel_shader(
-                include_bytes!("../../../res/shaders/text_char_ui.frag.spv"),
-                "text_ui.frag",
+                include_bytes!("../../../res/shaders/ui_text_char.frag.spv"),
+                "ui_text_char.frag",
             )
             .unwrap();
 
@@ -121,6 +121,13 @@ fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _: f64) 
     let layout = entry.get_mut::<UILayoutC>();
     layout.constraints[0].min = size.x;
     layout.constraints[1].min = size.y;
+
+    let uniform_data = entry.get_mut::<UniformDataC>();
+    uniform_data.copy_from_with_offset(
+        offset_of!(ObjectUniformData, inner_shadow_intensity),
+        state.inner_shadow_intensity,
+    );
+
     drop(entry);
 
     let mut raw_text_entry = scene.entry(&state.raw_text_entity);

@@ -5,6 +5,9 @@ use common::glm::Vec4;
 pub struct Color(Vec4);
 
 impl Color {
+    pub const TRANSPARENT: Color = Color::new(0.0, 0.0, 0.0, 0.0);
+    pub const BLACK: Color = Color::grayscale(0.0);
+
     pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self(Vec4::new(r, g, b, a))
     }
@@ -15,6 +18,11 @@ impl Color {
 
     pub const fn grayscale(v: f32) -> Self {
         Self::new(v, v, v, 1.0)
+    }
+
+    pub fn with_alpha(mut self, a: f32) -> Self {
+        self.0.w = a;
+        self
     }
 
     pub fn into_raw(self) -> Vec4 {

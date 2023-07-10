@@ -116,6 +116,8 @@ pub type StatelessUIObject = UIObject<()>;
 pub trait UIObjectEntityImpl<S: UIState> {
     fn state(&self) -> &S;
     fn state_mut(&mut self) -> &mut S;
+    fn layout(&self) -> &UILayoutC;
+    fn layout_mut(&mut self) -> &mut UILayoutC;
 }
 
 impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
@@ -125,6 +127,14 @@ impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
 
     fn state_mut(&mut self) -> &mut S {
         self.get_mut::<S>()
+    }
+
+    fn layout(&self) -> &UILayoutC {
+        self.get::<UILayoutC>()
+    }
+
+    fn layout_mut(&mut self) -> &mut UILayoutC {
+        self.get_mut::<UILayoutC>()
     }
 }
 

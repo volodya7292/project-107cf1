@@ -1,4 +1,4 @@
-use crate::ecs::component::ui::{BasicEventCallback, UIEventHandlerC, UILayoutC};
+use crate::ecs::component::ui::{UIEventHandlerC, UILayoutC};
 use crate::event::WSIEvent;
 use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
 use crate::module::scene::Scene;

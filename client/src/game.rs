@@ -1,71 +1,55 @@
 mod ui;
 
-use crate::client::utils;
-use crate::default_resources;
 use crate::default_resources::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
-use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
-use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
-use crate::rendering::ui::{fancy_button, register_ui_elements, text, UIContext};
-use crate::resource_mapping::ResourceMapping;
+use crate::rendering::ui::container::{Container, ContainerAccess};
+use crate::rendering::ui::fancy_button::{FancyButtonAccess, FancyButtonImpl};
+use crate::rendering::ui::image::{ImageAccess, ImageImpl};
+use crate::rendering::ui::text::{TextAccess, UITextImpl};
+use crate::rendering::ui::{register_ui_elements, UIContext};
 use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
 use base::execution::virtual_processor::VirtualProcessor;
 use base::main_registry::MainRegistry;
-use base::overworld::accessor::ClustersAccessorCache;
-use base::overworld::accessor::ReadOnlyOverworldAccessor;
 use base::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use base::overworld::actions_storage::OverworldActionsStorage;
-use base::overworld::actions_storage::StateChangeInfo;
-use base::overworld::block::{AnyBlockState, Block, BlockState};
+use base::overworld::block::AnyBlockState;
 use base::overworld::facing::Facing;
 use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
-use base::overworld::position::{BlockPos, ClusterPos};
+use base::overworld::position::BlockPos;
 use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
-use base::overworld::ReadOnlyOverworld;
-use base::overworld::{block, block_component, raw_cluster, LoadedClusters};
 use base::overworld::{Overworld, OverworldOrchestrator};
-use base::physics::aabb::{AABBRayIntersection, AABB};
+use base::physics::aabb::AABB;
 use base::physics::MOTION_EPSILON;
-use base::registry::Registry;
-use common::glm::{DVec2, DVec3, I64Vec3, U8Vec4, Vec2, Vec3};
-use common::parking_lot::{Mutex, RwLock};
+use common::glm;
+use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
+use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
 use common::threading::SafeThreadPool;
-use common::types::{HashMap, HashSet};
-use common::{glm, MO_RELAXED};
-use engine::ecs::component;
-use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{Sizing, UIEventHandlerC, UILayoutC, Visibility};
-use engine::ecs::component::{MeshRenderConfigC, SimpleTextC, TransformC, VertexMeshC};
+use engine::ecs::component::ui::Visibility;
 use engine::event::WSIEvent;
 use engine::module::input::Input;
-use engine::module::main_renderer::{camera, MainRenderer, VertexMeshObject, WrapperObject};
-use engine::module::scene::Scene;
-use engine::module::text_renderer::{FontSet, RawTextObject, TextRenderer};
-use engine::module::ui::{UIObject, UIRenderer};
+use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
+use engine::module::scene::{ObjectEntityId, Scene};
+use engine::module::text_renderer::{FontSet, TextRenderer};
+use engine::module::ui::color::Color;
+use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
 use engine::utils::wsi::find_best_video_mode;
-use engine::winit::dpi::LogicalSize;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
-use engine::winit::event_loop::{ControlFlow, EventLoop};
+use engine::winit::event_loop::EventLoop;
 use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
-use engine::{winit, Engine, EngineContext};
-use entity_data::{AnyState, EntityId};
+use engine::{winit, EngineContext};
+use entity_data::EntityId;
 use std::any::Any;
-use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
-use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{atomic, Arc};
-use std::thread;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const PROGRAM_NAME: &str = "project-107cf1";
@@ -86,7 +70,7 @@ pub struct MainApp {
 
     cursor_grab: bool,
     root_entity: EntityId,
-    main_menu_entity: EntityId,
+    main_menu_entity: ObjectEntityId<Container>,
 }
 
 impl MainApp {
@@ -196,14 +180,30 @@ impl MainApp {
         ui_interactor.set_active(!self.cursor_grab);
     }
 
+    pub fn is_main_menu_visible(&self, ctx: &EngineContext) -> bool {
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut main_menu = scene.object(&self.main_menu_entity);
+        main_menu.layout().visibility == Visibility::Visible
+    }
+
     pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
-        let mut ui_ctx = UIContext::new(ctx, &self.resources);
-        let mut main_menu = ui_ctx.scene().entry(&self.main_menu_entity);
-        main_menu.get_mut::<UILayoutC>().visibility = if visible {
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut main_menu = scene.object(&self.main_menu_entity);
+        main_menu.layout_mut().visibility = if visible {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
+
+        let in_game = self.game_state.is_some();
+
+        main_menu.set_background_color(if in_game {
+            Color::BLACK.with_alpha(0.5)
+        } else {
+            Color::TRANSPARENT
+        });
+
+        self.grab_cursor(&ctx.window(), !visible, ctx);
     }
 
     pub fn start_game_process(&mut self, ctx: &EngineContext) {
@@ -269,8 +269,81 @@ impl MainApp {
             },
         ));
 
-        self.grab_cursor(&*ctx.window(), true, ctx);
         self.show_main_menu(ctx, false);
+        self.grab_cursor(&*ctx.window(), true, ctx);
+    }
+
+    fn on_game_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
+        use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
+
+        let main_state = self.game_state.as_ref().unwrap();
+
+        match event {
+            WSIEvent::KeyboardInput { input } => {
+                if input.virtual_keycode.is_none() {
+                    return;
+                }
+                if input.state == ElementState::Released {
+                    let mut curr_state = main_state.lock_arc();
+
+                    match input.virtual_keycode.unwrap() {
+                        VirtualKeyCode::L => {
+                            curr_state.change_stream_pos = !curr_state.change_stream_pos;
+                        }
+                        VirtualKeyCode::C => {
+                            curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
+                        }
+                        VirtualKeyCode::P => {
+                            println!("{}", curr_state.player_pos);
+                            println!(
+                                "{:?}",
+                                curr_state
+                                    .player_pos
+                                    .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
+                            );
+                        }
+                        VirtualKeyCode::T => {
+                            self.grab_cursor(main_window, !self.cursor_grab, &ctx);
+                        }
+                        VirtualKeyCode::J => {
+                            // TODO: move into on_tick
+                            // let camera = renderer.active_camera();
+                            // let mut access = curr_state.overworld.access();
+                            // let block = access.get_block_at_ray(
+                            //     &camera.position(),
+                            //     &glm::convert(camera.direction()),
+                            //     7.0,
+                            // );
+                            // if let Some((pos, facing)) = block {
+                            //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
+                            //     let data = access.get_block(&pos);
+                            //
+                            //     if let Some(data) = data {
+                            //         let level = data.liquid_state().level();
+                            //         println!("LIQ LEVEL: {level}");
+                            //     }
+                            // }
+                        }
+                        VirtualKeyCode::Key1 => {
+                            curr_state.curr_block = self.main_registry.block_test.into_any();
+                            curr_state.set_water = false;
+                        }
+                        VirtualKeyCode::Key2 => {
+                            curr_state.curr_block = self.main_registry.block_glow.into_any();
+                            curr_state.set_water = false;
+                        }
+                        VirtualKeyCode::Key3 => {
+                            curr_state.set_water = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            WSIEvent::MouseMotion { delta } => {
+                self.cursor_rel += glm::convert::<_, Vec2>(*delta);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -441,86 +514,30 @@ impl EngineModule for MainApp {
     }
 
     fn on_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
-        use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
+        use engine::winit::event::ElementState;
 
-        let Some(main_state) = self.game_state.as_ref() else {
-            return;
-        };
+        if !self.is_main_menu_visible(ctx) && self.game_state.is_some() {
+            self.on_game_wsi_event(main_window, event, ctx);
+        }
 
         match event {
-            WSIEvent::KeyboardInput { input } => {
-                if input.virtual_keycode.is_none() {
-                    return;
-                }
-                if input.state == ElementState::Released {
-                    let mut curr_state = main_state.lock_arc();
-
-                    match input.virtual_keycode.unwrap() {
-                        VirtualKeyCode::Escape => {
-                            ctx.request_stop();
-                        }
-                        VirtualKeyCode::L => {
-                            curr_state.change_stream_pos = !curr_state.change_stream_pos;
-                        }
-                        VirtualKeyCode::C => {
-                            curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
-                        }
-                        VirtualKeyCode::F11 => {
-                            if let Some(_) = main_window.fullscreen() {
-                                main_window.set_fullscreen(None);
-                            } else {
-                                let mode = find_best_video_mode(&main_window.current_monitor().unwrap());
-                                main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
-                            }
-                        }
-                        VirtualKeyCode::P => {
-                            println!("{}", curr_state.player_pos);
-                            println!(
-                                "{:?}",
-                                curr_state
-                                    .player_pos
-                                    .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
-                            );
-                        }
-                        VirtualKeyCode::T => {
-                            self.grab_cursor(main_window, !self.cursor_grab, &ctx);
-                        }
-                        VirtualKeyCode::J => {
-                            // TODO: move into on_tick
-                            // let camera = renderer.active_camera();
-                            // let mut access = curr_state.overworld.access();
-                            // let block = access.get_block_at_ray(
-                            //     &camera.position(),
-                            //     &glm::convert(camera.direction()),
-                            //     7.0,
-                            // );
-                            // if let Some((pos, facing)) = block {
-                            //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
-                            //     let data = access.get_block(&pos);
-                            //
-                            //     if let Some(data) = data {
-                            //         let level = data.liquid_state().level();
-                            //         println!("LIQ LEVEL: {level}");
-                            //     }
-                            // }
-                        }
-                        VirtualKeyCode::Key1 => {
-                            curr_state.curr_block = self.main_registry.block_test.into_any();
-                            curr_state.set_water = false;
-                        }
-                        VirtualKeyCode::Key2 => {
-                            curr_state.curr_block = self.main_registry.block_glow.into_any();
-                            curr_state.set_water = false;
-                        }
-                        VirtualKeyCode::Key3 => {
-                            curr_state.set_water = true;
-                        }
-                        _ => {}
+            WSIEvent::KeyboardInput { input }
+                if input.virtual_keycode.is_some() && input.state == ElementState::Released =>
+            {
+                match input.virtual_keycode.unwrap() {
+                    VirtualKeyCode::Escape => {
+                        self.show_main_menu(ctx, !self.is_main_menu_visible(ctx));
                     }
+                    VirtualKeyCode::F11 => {
+                        if let Some(_) = main_window.fullscreen() {
+                            main_window.set_fullscreen(None);
+                        } else {
+                            let mode = find_best_video_mode(&main_window.current_monitor().unwrap());
+                            main_window.set_fullscreen(Some(Fullscreen::Exclusive(mode)))
+                        }
+                    }
+                    _ => {}
                 }
-            }
-            WSIEvent::MouseMotion { delta } => {
-                self.cursor_rel += glm::convert::<_, Vec2>(*delta);
             }
             _ => {}
         }
