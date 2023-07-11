@@ -3,7 +3,6 @@ use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageFitness, ImageImpl, ImageSource, UIImage};
 use crate::rendering::ui::UIContext;
-use common::glm::Vec4;
 use common::resource_file::ResourceFile;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::ui::{BasicEventCallback, Padding, Sizing, UILayoutC};
@@ -69,17 +68,16 @@ fn make_main_menu_controls(ui_ctx: &mut UIContext, root: &EntityId) -> EntityId 
         .unwrap()
         .unwrap();
 
-    let back_ui_img = UIImage::new(
+    let container = UIImage::new(
         ui_ctx,
+        *root,
         UILayoutC::new()
             .with_width(Sizing::Preferred(400.0))
             .with_height(Sizing::Grow(1.0))
             .with_padding(Padding::equal(30.0)),
+        Some(ImageSource::Data(image_source)),
         ImageFitness::Cover,
-    )
-    .with_source(ImageSource::Data(image_source));
-
-    let container = ui_ctx.scene().add_object(Some(*root), back_ui_img).unwrap();
+    );
 
     Container::expander(ui_ctx, *container, 1.0);
 

@@ -2,14 +2,14 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::transition::{AnimatedValue, TransitionTarget};
-use engine::ecs::component::ui::{Factor, Sizing, UILayoutC};
+use engine::ecs::component::ui::{Factor, Sizing, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::color::Color;
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
+use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::PrimitiveTopology;
 use engine::EngineContext;
@@ -31,7 +31,24 @@ pub struct ContainerState {
     background_color: AnimatedValue<Color>,
 }
 
-impl UIState for ContainerState {}
+impl UIState for ContainerState {
+    fn on_update(entity: &EntityId, ctx: &EngineContext, dt: f64) {
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut entry = scene.object::<Container>(&entity.into());
+        let mut state = entry.state().clone();
+
+        if !state.background_color.advance(dt) {
+            entry.request_update();
+        }
+
+        let cache = entry.layout_cache();
+        let mut background_color = state.background_color.current().into_raw();
+        background_color.w *= cache.final_opacity();
+
+        let uniform_data = entry.get_mut::<UniformDataC>();
+        uniform_data.copy_from_with_offset(offset_of!(UniformData, background_color), background_color);
+    }
+}
 
 pub type Container = UIObject<ContainerState>;
 
@@ -78,9 +95,13 @@ pub trait ContainerImpl {
             MeshRenderConfigC::new(impl_ctx.mat_pipe_id, true).with_render_layer(RenderLayer::Overlay),
         )
         .with_mesh(VertexMeshC::without_data(4, 1))
-        .with_scene_event_handler(SceneEventHandler::new().with_on_update(on_update));
+        .with_scene_event_handler(
+            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
+        );
 
-        ui_ctx.scene().add_object(Some(parent), container).unwrap()
+        let entity_id = ui_ctx.scene().add_object(Some(parent), container).unwrap();
+
+        entity_id
     }
 
     fn expander(ui_ctx: &mut UIContext, parent: EntityId, fraction: Factor) -> ObjectEntityId<Container> {
@@ -122,17 +143,8 @@ impl<'a> ContainerAccess for EntityAccess<'a, Container> {
     }
 }
 
-fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
+fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<Container>(&entity.into());
-    let mut state = entry.state_mut().clone();
-
-    if !state.background_color.advance(dt) {
-        entry.request_update();
-    }
-
-    let uniform_data = entry.get_mut::<UniformDataC>();
-    uniform_data.copy_from_with_offset(
-        offset_of!(UniformData, background_color),
-        state.background_color.current(),
-    );
+    entry.request_update();
 }

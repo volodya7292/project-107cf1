@@ -1,3 +1,4 @@
+pub mod transition;
 pub mod wsi;
 
 use crate::module::main_renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};

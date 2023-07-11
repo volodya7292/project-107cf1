@@ -6,7 +6,7 @@
 #include "ui.glsl"
 #include "../../../engine/shaders/common.glsl"
 
-layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
+layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform ObjectData {
     mat4 model;
     vec4 color;
 };

@@ -65,7 +65,7 @@ impl EngineModule for UIInteractionManager {
             ($callback_set: expr, $entity_id: expr) => {
                 let entity_id = $entity_id;
                 for &callback in &$callback_set {
-                    ctx.dispatch_callback(move |ctx| {
+                    ctx.dispatch_callback(move |ctx, _| {
                         callback.0(&entity_id, ctx);
                     });
                 }

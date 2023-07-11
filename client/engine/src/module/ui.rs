@@ -109,6 +109,10 @@ impl<E: UIState> SceneObject for UIObject<E> {
     fn request_update_on_addition() -> bool {
         true
     }
+
+    fn on_update(entity: &EntityId, ctx: &EngineContext, dt: f64) {
+        E::on_update(entity, ctx, dt);
+    }
 }
 
 pub type StatelessUIObject = UIObject<()>;
@@ -118,6 +122,7 @@ pub trait UIObjectEntityImpl<S: UIState> {
     fn state_mut(&mut self) -> &mut S;
     fn layout(&self) -> &UILayoutC;
     fn layout_mut(&mut self) -> &mut UILayoutC;
+    fn layout_cache(&self) -> &UILayoutCacheC;
 }
 
 impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
@@ -135,6 +140,10 @@ impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
 
     fn layout_mut(&mut self) -> &mut UILayoutC {
         self.get_mut::<UILayoutC>()
+    }
+
+    fn layout_cache(&self) -> &UILayoutCacheC {
+        self.get::<UILayoutCacheC>()
     }
 }
 
@@ -586,12 +595,60 @@ impl UIRenderer {
         }
     }
 
-    fn handle_ui_layout_updates(scene: &mut Scene, dirty_elements: &HashSet<EntityId>) {
+    fn handle_ui_layout_updates(
+        scene: &mut Scene,
+        root_entity: &EntityId,
+        dirty_elements: &HashSet<EntityId>,
+    ) {
+        let access = scene.storage_mut().access();
+        let mut layout_components = access.component::<UILayoutC>();
+        let mut layout_cache_components = access.component_mut::<UILayoutCacheC>();
+        let mut dirty_caches = HashSet::with_capacity(1024);
+
+        #[derive(Copy, Clone)]
+        struct ParentInfo {
+            opacity: f32,
+        }
+
+        // Calculate new final opacities
+        common::scene::walk_relation_tree(
+            &access,
+            root_entity,
+            ParentInfo { opacity: 1.0 },
+            |entity, parent_info| {
+                let Some(layout) = layout_components.get(entity) else {
+                    return parent_info;
+                };
+
+                let layout_cache = layout_cache_components.get_mut(entity).unwrap();
+                let new_final_opacity = parent_info.opacity * layout.visibility.opacity();
+
+                if layout_cache.final_opacity != new_final_opacity {
+                    layout_cache.final_opacity = new_final_opacity;
+                    dirty_caches.insert(*entity);
+                }
+
+                ParentInfo {
+                    opacity: new_final_opacity,
+                }
+            },
+        );
+
+        drop(layout_components);
+        drop(layout_cache_components);
+
+        let mut change_manager = scene.change_manager_mut();
+        for entity in dirty_caches {
+            change_manager.record_modification::<UILayoutCacheC>(entity);
+        }
+        drop(change_manager);
+
+        // Calculate new final visibilities
         for entity_id in dirty_elements {
             let mut entry = scene.entry(entity_id);
 
             let layout = entry.get::<UILayoutC>();
-            let visible = layout.visibility == Visibility::Visible;
+            let visible = layout.visibility.is_visible();
 
             let relation = entry.get_mut::<Relation>();
             relation.active = visible;
@@ -646,7 +703,7 @@ impl EngineModule for UIRenderer {
             return;
         }
 
-        Self::handle_ui_layout_updates(&mut scene, &dirty_elements);
+        Self::handle_ui_layout_updates(&mut scene, &self.root_ui_entity, &dirty_elements);
 
         let storage = scene.storage_mut();
         let access = storage.access();

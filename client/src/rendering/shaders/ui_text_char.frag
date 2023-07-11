@@ -8,12 +8,13 @@
 layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     mat4 model;
     Rect clip_rect;
+    float opacity;
     float innerShadowIntensity;
 };
 
 void main() {
-    float opacity, sd;
-    calculateCharShading(opacity, sd);
+    float aa_alpha, sd;
+    calculateCharShading(aa_alpha, sd);
 
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
     if (isOutsideCropRegion(normScreenCoord, clip_rect)) {
@@ -27,14 +28,14 @@ void main() {
        color *= innerShadow;
     }
 
-    if (opacity < ALPHA_BIAS) {
+    if (aa_alpha < ALPHA_BIAS) {
         discard;
     }
 
-    if (opacity == 1.0) {
-        writeOutput(color);
+    if (aa_alpha == 1.0) {
+        writeOutput(vec4(color.rgb, color.a * opacity));
     } else {
-        writeOutput(vec4(vec3(1), opacity));
+        writeOutput(vec4(vec3(1), aa_alpha * opacity));
     }
 
 //    writeOutputAlbedo(vec4(color, vs_in.color.a * opacity));

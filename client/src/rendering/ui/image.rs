@@ -2,10 +2,10 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::{RenderLayer, Resource};
-use engine::ecs::component::ui::{Factor, RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::ui::{RectUniformData, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, Scene};
+use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::vkw::image::ImageParams;
@@ -49,7 +49,32 @@ pub struct ImageState {
     source: Option<ImageSource>,
 }
 
-impl UIState for ImageState {}
+impl UIState for ImageState {
+    fn on_update(entity: &EntityId, ctx: &EngineContext, _dt: f64) {
+        let mut scene = ctx.module_mut::<Scene>();
+        let renderer = ctx.module::<MainRenderer>();
+
+        let mut obj = scene.object::<UIImage>(&entity.into());
+        let Some(source) = obj.state_mut().source.take() else {
+            return;
+        };
+        let size = source.size();
+
+        let original_aspect_ratio = size.0 as f32 / size.1 as f32;
+        obj.state_mut().image_aspect_ratio = original_aspect_ratio;
+
+        let res = Resource::image(
+            renderer.device(),
+            ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, source.size())
+                .with_preferred_mip_levels(1),
+            source.into_raw(),
+        )
+        .unwrap();
+
+        let mesh_cfg = obj.get_mut::<MeshRenderConfigC>();
+        mesh_cfg.set_shader_resource(0, res);
+    }
+}
 
 pub type UIImage = UIObject<ImageState>;
 
@@ -83,7 +108,13 @@ pub trait ImageImpl {
         scene.add_resource(ImageImplContext { mat_pipe_id });
     }
 
-    fn new(ui_ctx: &UIContext, layout: UILayoutC, fitness: ImageFitness) -> UIImage {
+    fn new(
+        ui_ctx: &mut UIContext,
+        parent: EntityId,
+        layout: UILayoutC,
+        source: Option<ImageSource>,
+        fitness: ImageFitness,
+    ) -> ObjectEntityId<UIImage> {
         let impl_ctx = ui_ctx.scene.resource::<ImageImplContext>();
         let renderer = ui_ctx.ctx.module::<MainRenderer>();
         let initial_image = Resource::image(
@@ -93,12 +124,12 @@ pub trait ImageImpl {
         )
         .unwrap();
 
-        UIImage::new_raw(
+        let ui_image = UIImage::new_raw(
             layout,
             ImageState {
                 fitness,
                 image_aspect_ratio: 1.0,
-                source: None,
+                source,
             },
         )
         .with_renderer(
@@ -108,10 +139,12 @@ pub trait ImageImpl {
         )
         .with_mesh(VertexMeshC::without_data(4, 1))
         .with_scene_event_handler(
-            SceneEventHandler::new()
-                .with_on_update(on_update)
-                .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-        )
+            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
+        );
+
+        let entity = ui_ctx.scene().add_object(Some(parent), ui_image).unwrap();
+
+        entity
     }
 
     fn with_source(self, source: ImageSource) -> Self;
@@ -141,13 +174,16 @@ struct ObjectUniformData {
     clip_rect: RectUniformData,
     img_offset: Vec2,
     img_scale: Vec2,
+    opacity: f32,
 }
 
-fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
+fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
     let mut obj = scene.object::<UIImage>(&entity.into());
     let cache = obj.get::<UILayoutCacheC>();
     let rect_data = *cache.calculated_clip_rect();
     let final_size = *cache.final_size();
+    let final_opacity = cache.final_opacity();
     let ui_element_aspect_ratio = final_size.x / final_size.y;
 
     let state = obj.state();
@@ -180,28 +216,5 @@ fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContex
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, clip_rect), rect_data);
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_offset), img_offset);
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_scale), img_scale);
-}
-
-fn on_update(entity: &EntityId, scene: &mut Scene, ctx: &EngineContext, _dt: f64) {
-    let renderer = ctx.module::<MainRenderer>();
-
-    let mut obj = scene.object::<UIImage>(&entity.into());
-    let Some(source) = obj.state_mut().source.take() else {
-        return;
-    };
-    let size = source.size();
-
-    let original_aspect_ratio = size.0 as f32 / size.1 as f32;
-    obj.state_mut().image_aspect_ratio = original_aspect_ratio;
-
-    let res = Resource::image(
-        renderer.device(),
-        ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, source.size())
-            .with_preferred_mip_levels(1),
-        source.into_raw(),
-    )
-    .unwrap();
-
-    let mesh_cfg = obj.get_mut::<MeshRenderConfigC>();
-    mesh_cfg.set_shader_resource(0, res);
+    uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, opacity), final_opacity);
 }

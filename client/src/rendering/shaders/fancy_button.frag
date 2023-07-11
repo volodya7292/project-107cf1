@@ -6,10 +6,11 @@
 #include "ui.glsl"
 #include "../../../engine/shaders/common.glsl"
 
-layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
+layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform ObjectData {
     mat4 model;
     vec4 color;
     Rect clip_rect;
+    float opacity;
 };
 
 layout(location = 0) in Input {
@@ -29,5 +30,8 @@ void main() {
         discard;
     }
 
-    writeOutput(color);
+    vec4 finalColor = color;
+    finalColor.a *= opacity;
+
+    writeOutput(finalColor);
 }

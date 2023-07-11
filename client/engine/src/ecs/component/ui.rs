@@ -1,3 +1,4 @@
+use crate::utils::transition::AnimatedValue;
 use crate::EngineContext;
 use common::glm::Vec2;
 use common::types::IndexSet;
@@ -164,16 +165,49 @@ impl Default for Overflow {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Visibility {
-    Visible,
-    Hidden,
+    Opacity(AnimatedValue<f32>),
     Collapsed,
+}
+
+impl Visibility {
+    pub fn visible() -> Self {
+        Self::Opacity(1.0.into())
+    }
+
+    pub fn hidden() -> Self {
+        Self::Opacity(0.0.into())
+    }
+
+    pub fn opacity(&self) -> f32 {
+        match self {
+            Visibility::Opacity(opacity) => *opacity.current(),
+            Visibility::Collapsed => 0.0,
+        }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        match self {
+            Visibility::Opacity(opacity) if *opacity.current() < 0.001 => false,
+            Visibility::Opacity(_) => true,
+            Visibility::Collapsed => false,
+        }
+    }
+
+    pub fn as_opacity_mut(&mut self) -> &mut AnimatedValue<f32> {
+        match self {
+            Visibility::Opacity(opacity) => opacity,
+            Visibility::Collapsed => {
+                panic!("Invalid value");
+            }
+        }
+    }
 }
 
 impl Default for Visibility {
     fn default() -> Self {
-        Self::Visible
+        Self::visible()
     }
 }
 
@@ -298,6 +332,7 @@ pub struct UILayoutCacheC {
     pub(crate) global_position: Vec2,
     pub(crate) clip_rect: ClipRect,
     pub(crate) calculated_clip_rect: RectUniformData,
+    pub(crate) final_opacity: f32,
 }
 
 impl UILayoutCacheC {
@@ -306,15 +341,18 @@ impl UILayoutCacheC {
         &self.calculated_clip_rect
     }
 
-    /// Returns final clipping rectangle in normalized coordinates.
     pub fn final_size(&self) -> &Vec2 {
         &self.final_size
+    }
+
+    pub fn final_opacity(&self) -> f32 {
+        self.final_opacity
     }
 }
 
 pub type BasicEventCallback = fn(&EntityId, &EngineContext);
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq)]
 pub struct BasicEventCallbackExt(pub fn(&EntityId, &EngineContext));
 
 impl PartialEq for BasicEventCallbackExt {
@@ -324,8 +362,6 @@ impl PartialEq for BasicEventCallbackExt {
         p1 == p2
     }
 }
-
-impl Eq for BasicEventCallbackExt {}
 
 impl Hash for BasicEventCallbackExt {
     fn hash<H: Hasher>(&self, state: &mut H) {

@@ -4,7 +4,6 @@ use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::StyledString;
-use engine::ecs::component::transition::{AnimatedValue, TransitionTarget};
 use engine::ecs::component::ui::{
     BasicEventCallback, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
@@ -14,6 +13,7 @@ use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::color::Color;
 use engine::module::ui::management::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
+use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::PrimitiveTopology;
 use engine::EngineContext;
@@ -35,9 +35,38 @@ pub struct FancyButtonState {
 struct UniformData {
     background_color: Vec4,
     clip_rect: RectUniformData,
+    opacity: f32,
 }
 
-impl UIState for FancyButtonState {}
+impl UIState for FancyButtonState {
+    fn on_update(entity: &EntityId, ctx: &EngineContext, dt: f64) {
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut entry = scene.object::<FancyButton>(&(*entity).into());
+        let state = entry.state_mut();
+        let mut update_needed = false;
+
+        if !state.background_color.advance(dt) {
+            update_needed = true;
+        }
+
+        let state = state.clone();
+
+        let raw_uniform_data = entry.get_mut::<UniformDataC>();
+        raw_uniform_data.copy_from_with_offset(
+            offset_of!(UniformData, background_color),
+            *state.background_color.current(),
+        );
+
+        if update_needed {
+            entry.request_update();
+        }
+
+        drop(entry);
+
+        let mut text_obj = scene.object::<UIText>(&state.text_entity);
+        text_obj.set_text(state.text.clone());
+    }
+}
 
 pub type FancyButton = UIObject<FancyButtonState>;
 
@@ -96,9 +125,7 @@ pub trait FancyButtonImpl {
         )
         .with_mesh(VertexMeshC::without_data(4, 1))
         .with_scene_event_handler(
-            SceneEventHandler::new()
-                .with_on_update(on_update)
-                .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
+            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
         )
         .add_event_handler(
             UIEventHandlerC::new()
@@ -112,6 +139,7 @@ pub trait FancyButtonImpl {
 
         let mut surface_obj = ui_ctx.scene.object::<FancyButton>(&btn_entity);
         surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;
+        drop(surface_obj);
 
         btn_entity
     }
@@ -131,38 +159,14 @@ impl FancyButtonAccess for EntityAccess<'_, FancyButton> {
     }
 }
 
-fn on_layout_cache_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext) {
+fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.entry(entity);
     let clip_rect = *entry.get::<UILayoutCacheC>().calculated_clip_rect();
+    let final_opacity = entry.get::<UILayoutCacheC>().final_opacity();
     let raw_uniform_data = entry.get_mut::<UniformDataC>();
     raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
-}
-
-fn on_update(entity: &EntityId, scene: &mut Scene, _: &EngineContext, dt: f64) {
-    let mut entry = scene.object::<FancyButton>(&(*entity).into());
-    let state = entry.state_mut();
-    let mut update_needed = false;
-
-    if !state.background_color.advance(dt) {
-        update_needed = true;
-    }
-
-    let state = state.clone();
-
-    let raw_uniform_data = entry.get_mut::<UniformDataC>();
-    raw_uniform_data.copy_from_with_offset(
-        offset_of!(UniformData, background_color),
-        *state.background_color.current(),
-    );
-
-    if update_needed {
-        entry.request_update();
-    }
-
-    drop(entry);
-
-    let mut text_obj = scene.object::<UIText>(&state.text_entity);
-    text_obj.set_text(state.text.clone());
+    raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
 }
 
 fn on_cursor_enter(entity: &EntityId, ctx: &EngineContext) {

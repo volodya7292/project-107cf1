@@ -31,7 +31,6 @@ use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
 use common::threading::SafeThreadPool;
-use engine::ecs::component::ui::Visibility;
 use engine::event::WSIEvent;
 use engine::module::input::Input;
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
@@ -41,6 +40,7 @@ use engine::module::ui::color::Color;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
+use engine::utils::transition::{start_transition, TransitionTarget};
 use engine::utils::wsi::find_best_video_mode;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::EventLoop;
@@ -187,19 +187,12 @@ impl MainApp {
     pub fn is_main_menu_visible(&self, ctx: &EngineContext) -> bool {
         let mut scene = ctx.module_mut::<Scene>();
         let mut main_menu = scene.object(&self.main_menu_entity);
-        main_menu.layout().visibility == Visibility::Visible
+        main_menu.layout().visibility.is_visible()
     }
 
     pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
         let mut scene = ctx.module_mut::<Scene>();
         let mut main_menu = scene.object(&self.main_menu_entity);
-        main_menu.layout_mut().visibility = if visible {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-
-        // TODO: implement hierarchical properties 'opacity' and 'enabled'
 
         main_menu.set_background_color(
             if self.is_in_game() {
@@ -208,6 +201,15 @@ impl MainApp {
                 Color::TRANSPARENT
             }
             .into(),
+        );
+        drop(main_menu);
+        drop(scene);
+
+        start_transition(
+            self.main_menu_entity,
+            ctx,
+            |entry| entry.layout_mut().visibility.as_opacity_mut(),
+            TransitionTarget::new(if visible { 0.95 } else { 0.0 }, 0.08),
         );
 
         self.grab_cursor(&ctx.window(), !visible, ctx);
@@ -358,19 +360,17 @@ impl MainApp {
 
 impl EngineModule for MainApp {
     fn on_start(&mut self, ctx: &EngineContext) {
-        // ------------------------------------------------------------------------------------------------
-
         let mut ui_ctx = UIContext::new(ctx, &self.resources);
 
-        let mut text_renderer = ctx.module_mut::<TextRenderer>();
-        let font_id = text_renderer.register_font(
-            FontSet::from_bytes(
-                include_bytes!("../res/fonts/Romanesco-Regular.ttf").to_vec(),
-                None,
-            )
-            .unwrap(),
-        );
-        drop(text_renderer);
+        // let mut text_renderer = ctx.module_mut::<TextRenderer>();
+        // let font_id = text_renderer.register_font(
+        //     FontSet::from_bytes(
+        //         include_bytes!("../res/fonts/Romanesco-Regular.ttf").to_vec(),
+        //         None,
+        //     )
+        //     .unwrap(),
+        // );
+        // drop(text_renderer);
 
         // let player_pos = self.main_state.lock().player_pos;
         // let text = ui_ctx.scene().add_object(

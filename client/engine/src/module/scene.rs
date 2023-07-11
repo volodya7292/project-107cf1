@@ -1,5 +1,6 @@
 pub mod change_manager;
 
+use crate::ecs::component::scene_event_handler::OnUpdateCallback;
 use crate::ecs::component::SceneEventHandler;
 use crate::module::scene::change_manager::{ChangeType, ComponentChangesHandle};
 use crate::module::EngineModule;
@@ -8,8 +9,9 @@ use change_manager::SceneChangeManager;
 use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::scene::relation::Relation;
-use common::types::{HashMap, HashSet};
+use common::types::HashMap;
 use entity_data::{Component, EntityId, EntityStorage, StaticArchetype};
+use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::{RefCell, RefMut};
 use std::marker::PhantomData;
@@ -21,9 +23,11 @@ pub trait SceneObject: StaticArchetype {
     fn request_update_on_addition() -> bool {
         false
     }
+
+    fn on_update(_entity: &EntityId, _ctx: &EngineContext, _dt: f64) {}
 }
 
-pub type EntityUpdateJob = fn(entity: &EntityId, scene: &mut Scene, &EngineContext);
+impl SceneObject for () {}
 
 pub trait Resource: AsAny {}
 
@@ -33,7 +37,7 @@ pub struct Scene {
     storage: EntityStorage,
     object_count: usize,
     change_manager: Lrc<SceneChangeManager>,
-    entities_to_update: HashSet<EntityId>,
+    entity_updaters: HashMap<EntityId, SmallVec<[OnUpdateCallback; 4]>>,
     component_changes: HashMap<TypeId, ComponentChangesHandle>,
     resources: RefCell<HashMap<TypeId, Lrc<dyn Resource>>>,
 }
@@ -45,7 +49,7 @@ impl Scene {
             storage: Default::default(),
             object_count: 0,
             change_manager: Lrc::wrap(change_manager),
-            entities_to_update: HashSet::with_capacity(1024),
+            entity_updaters: HashMap::with_capacity(1024),
             component_changes: Default::default(),
             resources: RefCell::new(Default::default()),
         }
@@ -74,7 +78,7 @@ impl Scene {
         Some(EntityAccess {
             entry: self.storage.entry_mut(entity)?,
             change_manager: self.change_manager.borrow_mut(),
-            entities_to_update: &mut self.entities_to_update,
+            entity_updaters: &mut self.entity_updaters,
             _arch: Default::default(),
         })
     }
@@ -92,7 +96,7 @@ impl Scene {
         EntityAccess {
             entry: self.storage.entry_mut(entity).unwrap(),
             change_manager: self.change_manager.borrow_mut(),
-            entities_to_update: &mut self.entities_to_update,
+            entity_updaters: &mut self.entity_updaters,
             _arch: Default::default(),
         }
     }
@@ -135,11 +139,12 @@ impl Scene {
             self.add_children(parent, &[entity]);
         }
 
+        let entity = ObjectEntityId::new(entity);
         if O::request_update_on_addition() {
-            self.entities_to_update.insert(entity);
+            self.object(&entity).request_update();
         }
 
-        Some(ObjectEntityId::new(entity))
+        Some(entity)
     }
 
     // TODO CORE: move to base
@@ -167,7 +172,7 @@ impl Scene {
             self.storage.remove(&entity);
             self.object_count -= 1;
 
-            self.entities_to_update.remove(&entity);
+            self.entity_updaters.remove(&entity);
         }
     }
 
@@ -206,8 +211,7 @@ impl Scene {
 }
 
 impl EngineModule for Scene {
-    fn on_update(&mut self, dt: f64, ctx: &EngineContext) {
-        let to_update: Vec<_> = self.entities_to_update.drain().collect();
+    fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         let comp_changes: HashMap<_, _> = self
             .component_changes
             .iter()
@@ -219,33 +223,47 @@ impl EngineModule for Scene {
             })
             .collect();
 
-        for (comp_id, changes) in comp_changes {
-            for entity in changes {
-                let Some(event_handler) = self.storage.get::<SceneEventHandler>(&entity) else {
-                    continue;
-                };
-                if let Some(on_update) = event_handler.on_component_update(&comp_id) {
-                    on_update(&entity, self, ctx);
+        let storage = &self.storage;
+        let component_callbacks: Vec<_> = comp_changes
+            .iter()
+            .flat_map(|(comp_id, entities)| {
+                entities.iter().filter_map(move |entity| {
+                    let Some(event_handler) = storage.get::<SceneEventHandler>(entity) else {
+                        return None;
+                    };
+                    let Some(on_comp_update) = event_handler.on_component_update(&comp_id) else {
+                        return None;
+                    };
+                    Some((*entity, *on_comp_update))
+                })
+            })
+            .collect();
+        let entity_updaters: Vec<_> = self.entity_updaters.drain().collect();
+
+        ctx.dispatch_callback(move |ctx, dt| {
+            for (entity, callback) in component_callbacks {
+                callback(&entity, ctx);
+            }
+        });
+
+        ctx.dispatch_callback(move |ctx, dt| {
+            for (entity, on_update_callbacks) in entity_updaters {
+                for on_update in on_update_callbacks {
+                    on_update(&entity, ctx, dt)
                 }
             }
-        }
-
-        for entity in to_update {
-            let event_handler = self.storage.get::<SceneEventHandler>(&entity).unwrap();
-            let on_update = event_handler.on_update();
-            on_update(&entity, self, ctx, dt);
-        }
+        });
     }
 }
 
 pub struct EntityAccess<'a, A> {
     entry: entity_data::EntryMut<'a>,
     change_manager: RefMut<'a, SceneChangeManager>,
-    entities_to_update: &'a mut HashSet<EntityId>,
+    entity_updaters: &'a mut HashMap<EntityId, SmallVec<[OnUpdateCallback; 4]>>,
     _arch: PhantomData<A>,
 }
 
-impl<A> EntityAccess<'_, A> {
+impl<A: SceneObject> EntityAccess<'_, A> {
     pub fn entity(&self) -> &EntityId {
         self.entry.entity()
     }
@@ -271,8 +289,16 @@ impl<A> EntityAccess<'_, A> {
         self.get_mut_checked().unwrap()
     }
 
+    pub fn request_custom_update(&mut self, f: OnUpdateCallback) {
+        let entity_id = *self.entity();
+        let updaters = self.entity_updaters.entry(entity_id).or_default();
+        if !updaters.contains(&f) {
+            updaters.push(f);
+        }
+    }
+
     pub fn request_update(&mut self) {
-        self.entities_to_update.insert(*self.entry.entity());
+        self.request_custom_update(A::on_update);
     }
 }
 
