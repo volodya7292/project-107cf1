@@ -101,6 +101,7 @@ struct StyledGlyphSequence {
     style: TextStyle,
 }
 
+/// Splits a string into words and spaces
 pub struct WordSplitter<'a> {
     glyphs: &'a [GlyphUID],
     space_id: GlyphId,
@@ -115,19 +116,16 @@ impl<'a> Iterator for WordSplitter<'a> {
         }
 
         let mut len = 0;
-        let mut word_found = false;
+        let mut curr_start_symbol = self.glyphs.get(0)?.glyph_id();
 
         for g in self.glyphs {
-            if g.glyph_id() != self.space_id {
-                // `g` is a word-character
-                word_found = true;
+            if (curr_start_symbol != self.space_id && g.glyph_id() != self.space_id)
+                || (curr_start_symbol == self.space_id && g.glyph_id() == self.space_id)
+            {
+                len += 1;
             } else {
-                // `g` is a space
-                if word_found {
-                    break;
-                }
+                break;
             }
-            len += 1;
         }
 
         let slice = &self.glyphs[..len];
@@ -349,10 +347,13 @@ fn layout_glyphs(
         let word_start_x = curr_word[0].offset.x;
 
         // Put the word inside the global layout
+        // --------------------------------------------------------------------
 
-        if (word_start_x + curr_word_width >= max_width) && curr_word_offset_x > 0.0 {
+        if (word_start_x + curr_word_width >= max_width)
+            && curr_word_offset_x > 0.0
+            && segment[0].glyph_id() != space_id
+        {
             // Put the word onto a new line
-            // TODO: remove space before the word (or after)
             line_widths.push(curr_offset.x - curr_word_width);
             curr_offset.x = 0.0;
             curr_offset.y += line_height;
@@ -368,6 +369,11 @@ fn layout_glyphs(
                 line_widths.push(curr_offset.x);
                 curr_offset.x = 0.0;
                 curr_offset.y += line_height;
+
+                if pos_info.uid.glyph_id() == space_id {
+                    // Do not place the rest of the spaces on the new line
+                    break;
+                }
             } else {
                 final_size.x = final_size.x.max(curr_offset.x + glyph_width);
             }
@@ -727,8 +733,16 @@ impl TextRenderer {
         self.glyph_array_initialized = true;
     }
 
-    pub fn calculate_minimum_text_size(&self, seq: &StyledString) -> BlockSize {
-        let (_, size) = layout_glyphs(&self.allocator, seq, TextHAlign::LEFT, false, 0.0, 0.0, false);
+    pub fn calculate_minimum_text_size(&self, seq: &StyledString, max_width: f32) -> BlockSize {
+        let (_, size) = layout_glyphs(
+            &self.allocator,
+            seq,
+            TextHAlign::LEFT,
+            false,
+            max_width,
+            0.0,
+            false,
+        );
         size * seq.style().font_size()
     }
 

@@ -244,6 +244,11 @@ impl UILayoutC {
         }
     }
 
+    pub fn with_position(mut self, position: Position) -> Self {
+        self.position = position;
+        self
+    }
+
     pub fn with_align(mut self, align: CrossAlign) -> Self {
         self.align = align;
         self

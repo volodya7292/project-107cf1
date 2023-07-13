@@ -71,7 +71,7 @@ impl DescriptorPool {
         name: &str,
     ) -> Result<vk::DescriptorPool, vk::Result> {
         let mut pool_sizes = self.signature.descriptor_sizes[set_layout_id as usize].clone();
-        for mut pool_size in &mut pool_sizes {
+        for pool_size in &mut pool_sizes {
             pool_size.descriptor_count *= max_sets;
         }
 
