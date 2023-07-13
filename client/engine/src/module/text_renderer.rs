@@ -116,7 +116,7 @@ impl<'a> Iterator for WordSplitter<'a> {
         }
 
         let mut len = 0;
-        let mut curr_start_symbol = self.glyphs.get(0)?.glyph_id();
+        let curr_start_symbol = self.glyphs.get(0)?.glyph_id();
 
         for g in self.glyphs {
             if (curr_start_symbol != self.space_id && g.glyph_id() != self.space_id)

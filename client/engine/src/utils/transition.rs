@@ -46,6 +46,10 @@ impl<T: Interpolatable> TransitionTarget<T> {
             duration: 0.0,
         }
     }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -103,7 +107,11 @@ impl<T: Interpolatable> AnimatedValue<T> {
     pub fn advance(&mut self, delta_time: f64) -> bool {
         self.time_passed = (self.time_passed + delta_time).min(self.target.duration);
 
-        let norm_linear_t = (self.time_passed / self.target.duration.max(0.00001)) as f32;
+        let norm_linear_t = if self.target.duration == 0.0 {
+            1.0
+        } else {
+            (self.time_passed / self.target.duration) as f32
+        };
         let t = (self.target.time_fn)(norm_linear_t);
 
         self.curr = T::interpolate(self.start, self.target.value, t);
@@ -113,6 +121,10 @@ impl<T: Interpolatable> AnimatedValue<T> {
 
     pub fn current(&self) -> &T {
         &self.curr
+    }
+
+    pub fn target(&self) -> &TransitionTarget<T> {
+        &self.target
     }
 }
 

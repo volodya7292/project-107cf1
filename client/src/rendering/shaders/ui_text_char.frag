@@ -35,8 +35,7 @@ void main() {
     if (aa_alpha == 1.0) {
         writeOutput(vec4(color.rgb, color.a * opacity));
     } else {
-        writeOutput(vec4(vec3(1), aa_alpha * opacity));
+        // Clamp the RGB values so that antialiasing alpha is in SDR
+        writeOutput(vec4(min(color.rgb, 1.0), color.a * aa_alpha * opacity));
     }
-
-//    writeOutputAlbedo(vec4(color, vs_in.color.a * opacity));
 }

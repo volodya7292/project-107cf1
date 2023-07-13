@@ -27,7 +27,9 @@ struct FancyButtonImplContext {
 pub struct FancyButtonState {
     text_entity: ObjectEntityId<UIText>,
     text: StyledString,
-    background_color: AnimatedValue<Color>,
+    text_color: AnimatedValue<Color>,
+    background_color: Color,
+    active_color: Color,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -45,17 +47,15 @@ impl UIState for FancyButtonState {
         let state = entry.state_mut();
         let mut update_needed = false;
 
-        if !state.background_color.advance(dt) {
+        if !state.text_color.advance(dt) {
             update_needed = true;
         }
 
         let state = state.clone();
 
         let raw_uniform_data = entry.get_mut::<UniformDataC>();
-        raw_uniform_data.copy_from_with_offset(
-            offset_of!(UniformData, background_color),
-            *state.background_color.current(),
-        );
+        raw_uniform_data
+            .copy_from_with_offset(offset_of!(UniformData, background_color), state.background_color);
 
         if update_needed {
             entry.request_update();
@@ -64,15 +64,21 @@ impl UIState for FancyButtonState {
         drop(entry);
 
         let mut text_obj = scene.object::<UIText>(&state.text_entity);
-        text_obj.set_text(state.text.clone());
+        text_obj.set_text(
+            state
+                .text
+                .clone()
+                .with_style(state.text.style().clone().with_color(*state.text_color.current())),
+        );
     }
 }
 
 pub type FancyButton = UIObject<FancyButtonState>;
 
 pub trait FancyButtonImpl {
-    const DEFAULT_COLOR: Color = Color::grayscale(0.2);
-    const ACTIVE_COLOR: Color = Color::grayscale(0.8);
+    const DEFAULT_NORMAL_COLOR: Color = Color::grayscale(0.2);
+    const DEFAULT_ACTIVE_COLOR: Color = Color::grayscale(0.8);
+    const ACTIVE_TEXT_COLOR: Color = Color::grayscale(0.8);
 
     fn register(ctx: &EngineContext) {
         let mut renderer = ctx.module_mut::<MainRenderer>();
@@ -117,7 +123,9 @@ pub trait FancyButtonImpl {
             FancyButtonState {
                 text_entity: Default::default(),
                 text: text.clone(),
-                background_color: AnimatedValue::immediate(Self::DEFAULT_COLOR),
+                text_color: (*text.style().color()).into(),
+                background_color: Self::DEFAULT_NORMAL_COLOR.into(),
+                active_color: Self::DEFAULT_ACTIVE_COLOR,
             },
         )
         .with_renderer(
@@ -152,9 +160,10 @@ pub trait FancyButtonAccess {
 }
 
 impl FancyButtonAccess for EntityAccess<'_, FancyButton> {
-    fn set_text(&mut self, text: StyledString) {
-        let state = self.get_mut::<FancyButtonState>();
-        state.text = text;
+    fn set_text(&mut self, mut text: StyledString) {
+        let curr_col = *self.state().text_color.current();
+        *text.style_mut().color_mut() = curr_col;
+        self.get_mut::<FancyButtonState>().text = text;
         self.request_update();
     }
 }
@@ -173,9 +182,15 @@ fn on_cursor_enter(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
+
+    let mut active_color = state.text.style().color().into_raw();
+    active_color.x *= 1.6;
+    active_color.y *= 1.6;
+    active_color.z *= 1.6;
     state
-        .background_color
-        .retarget(TransitionTarget::new(FancyButton::ACTIVE_COLOR, 0.2));
+        .text_color
+        .retarget(TransitionTarget::new(active_color.into(), 0.2));
+
     entry.request_update();
 }
 
@@ -184,7 +199,7 @@ fn on_cursor_leave(entity: &EntityId, ctx: &EngineContext) {
     let mut entry = scene.object::<FancyButton>(&entity.into());
     let state = entry.state_mut();
     state
-        .background_color
-        .retarget(TransitionTarget::new(FancyButton::DEFAULT_COLOR, 0.2));
+        .text_color
+        .retarget(TransitionTarget::new(*state.text.style().color(), 0.2));
     entry.request_update();
 }

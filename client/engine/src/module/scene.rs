@@ -201,6 +201,18 @@ impl Scene {
         parent_relation.children.extend(children);
     }
 
+    pub fn clear_children(&mut self, parent: &EntityId) {
+        let parent_relation = self
+            .storage
+            .get_mut::<Relation>(parent)
+            .expect("parent must have Relation component");
+        let children: Vec<_> = parent_relation.children.drain(..).collect();
+
+        for child in &children {
+            self.remove_object(child);
+        }
+    }
+
     pub fn change_manager(&self) -> &Lrc<SceneChangeManager> {
         &self.change_manager
     }
@@ -240,7 +252,7 @@ impl EngineModule for Scene {
             .collect();
         let entity_updaters: Vec<_> = self.entity_updaters.drain().collect();
 
-        ctx.dispatch_callback(move |ctx, dt| {
+        ctx.dispatch_callback(move |ctx, _| {
             for (entity, callback) in component_callbacks {
                 callback(&entity, ctx);
             }
@@ -263,7 +275,7 @@ pub struct EntityAccess<'a, A> {
     _arch: PhantomData<A>,
 }
 
-impl<A: SceneObject> EntityAccess<'_, A> {
+impl<T: SceneObject> EntityAccess<'_, T> {
     pub fn entity(&self) -> &EntityId {
         self.entry.entity()
     }
@@ -298,7 +310,10 @@ impl<A: SceneObject> EntityAccess<'_, A> {
     }
 
     pub fn request_update(&mut self) {
-        self.request_custom_update(A::on_update);
+        if TypeId::of::<T>() == TypeId::of::<()>() {
+            panic!("Invalid object type ()");
+        }
+        self.request_custom_update(T::on_update);
     }
 }
 

@@ -1,11 +1,8 @@
 #version 450
 
-layout(binding = 0) uniform sampler2D srcTexture;
-layout(binding = 1) uniform sampler2D bloomTexture;
-
-//layout(push_constant) uniform PushConstants {
-//
-//};
+layout(binding = 0) uniform sampler2D mainTexture;
+layout(binding = 1) uniform sampler2D overlayTexture;
+layout(binding = 2) uniform sampler2D bloomTexture;
 
 layout(location = 0) in vec2 texCoord;
 
@@ -27,10 +24,12 @@ vec3 tonemap_exp(vec3 v) {
 }
 
 void main() {
-    vec3 src = texture(srcTexture, texCoord).rgb;
+    vec3 mainColor = texture(mainTexture, texCoord).rgb;
+    vec4 overlayColor = texture(overlayTexture, texCoord);
     vec3 bloom = texture(bloomTexture, texCoord).rgb;
 
-    vec3 src_tonemapped = tonemap_exp(src);
+    vec3 main_tonemapped = tonemap_exp(mainColor);
 
-    outColor = mix(src_tonemapped, bloom, 0.02);
+    outColor = mix(main_tonemapped, overlayColor.rgb, overlayColor.a);
+    outColor.rgb = mix(outColor.rgb, bloom, 0.02);
 }

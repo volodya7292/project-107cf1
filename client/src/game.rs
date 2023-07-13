@@ -49,6 +49,8 @@ use engine::{winit, EngineContext};
 use entity_data::EntityId;
 use std::any::Any;
 use std::f32::consts::FRAC_PI_2;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -141,6 +143,13 @@ impl MainApp {
             main_menu_entity: Default::default(),
         };
         ctx.register_module(game);
+
+        if !Self::data_dir().exists() {
+            fs::create_dir(Self::data_dir()).unwrap();
+        }
+        if !Self::worlds_dir().exists() {
+            fs::create_dir(Self::worlds_dir()).unwrap();
+        }
     }
 
     pub fn create_window(event_loop: &EventLoop<()>) -> Window {
@@ -160,6 +169,10 @@ impl MainApp {
         });
 
         window
+    }
+
+    pub fn resources(&self) -> &Arc<ResourceFile> {
+        &self.resources
     }
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
@@ -282,8 +295,26 @@ impl MainApp {
         self.grab_cursor(&*ctx.window(), true, ctx);
     }
 
+    pub fn data_dir() -> PathBuf {
+        dirs::data_dir().unwrap().join(PROGRAM_NAME)
+    }
+
+    pub fn worlds_dir() -> PathBuf {
+        Self::data_dir().join("overworlds")
+    }
+
+    pub fn get_world_name_list(&self) -> Vec<String> {
+        let dir = Self::worlds_dir();
+        let contents = dir.read_dir().unwrap();
+        contents
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str().map(|v| v.to_string()))
+            .collect()
+    }
+
     fn on_game_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
-        use engine::winit::event::{DeviceEvent, ElementState, Event, WindowEvent};
+        use engine::winit::event::ElementState;
 
         let main_state = self.game_state.as_ref().unwrap();
 

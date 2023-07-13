@@ -10,7 +10,7 @@ use vk_wrapper::image::ImageParams;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentColorBlend, AttachmentRef, BindingRes, CmdList, Device, DeviceBuffer,
-    Format, Framebuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline,
+    Format, Framebuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
     PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler, SamplerFilter, SamplerMipmap, Subpass,
     SubpassDependency,
 };
@@ -59,7 +59,14 @@ impl PostProcessStage {
         let merge_render_pass = device
             .create_render_pass(
                 &[
-                    // Solid-transparent colors merge output
+                    // Combined main and overlay colors
+                    Attachment {
+                        format: Format::RGBA16_FLOAT,
+                        init_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::SHADER_READ,
+                        load_store: LoadStore::FinalSave,
+                    },
+                    // Only main scene colors
                     Attachment {
                         format: Format::RGBA16_FLOAT,
                         init_layout: ImageLayout::UNDEFINED,
@@ -67,10 +74,16 @@ impl PostProcessStage {
                         load_store: LoadStore::FinalSave,
                     },
                 ],
-                &[Subpass::new().with_color(vec![AttachmentRef {
-                    index: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT,
-                }])],
+                &[Subpass::new().with_color(vec![
+                    AttachmentRef {
+                        index: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                    AttachmentRef {
+                        index: 1,
+                        layout: ImageLayout::COLOR_ATTACHMENT,
+                    },
+                ])],
                 &[SubpassDependency {
                     src_subpass: 0,
                     dst_subpass: Subpass::EXTERNAL,
@@ -295,7 +308,10 @@ impl PostProcessStage {
                 self.merge_render_pass
                     .create_framebuffer(
                         *render_size,
-                        &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
+                        &[
+                            (0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED)),
+                            (1, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED)),
+                        ],
                     )
                     .unwrap()
             },
@@ -449,7 +465,7 @@ impl PostProcessStage {
         // FINAL = mix(SOURCE, I1, factor)
 
         let merge_fb: Arc<Framebuffer> = resources.get(Self::RES_MERGE_FRAMEBUFFER);
-        let source_image = merge_fb.get_image(0).unwrap();
+        let combined_source_image = merge_fb.get_image(0).unwrap();
 
         const BLURRED_MAX_SIZE: u32 = 2_u32.pow(9);
         const BLURRED_MAX_MIPS: u32 = 6;
@@ -509,19 +525,6 @@ impl PostProcessStage {
             },
         );
 
-        let tonemap_fb = resources.request(
-            Self::RES_OUTPUT_FRAMEBUFFER,
-            (ctx.render_size,),
-            |(render_size,), _| {
-                self.tonemap_render_pass
-                    .create_framebuffer(
-                        *render_size,
-                        &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
-                    )
-                    .unwrap()
-            },
-        );
-
         let downscale_descs = resources.request_descriptors(
             "post-downscale-desc",
             self.bloom_downscale_pipeline.signature(),
@@ -534,8 +537,6 @@ impl PostProcessStage {
             0,
             bloom_image.mip_levels() as usize - 1,
         );
-        let tonemap_desc =
-            resources.request_descriptors("post-tonemap-desc", self.tonemap_pipeline.signature(), 0, 1);
 
         unsafe {
             for (i, set) in downscale_descs.sets().iter().enumerate() {
@@ -546,7 +547,7 @@ impl PostProcessStage {
                         0,
                         BindingRes::ImageView(
                             if i == 0 {
-                                Arc::clone(source_image.view())
+                                Arc::clone(combined_source_image.view())
                             } else {
                                 Arc::clone(&bloom_image_views[i - 1])
                             },
@@ -570,25 +571,6 @@ impl PostProcessStage {
                     )],
                 );
             }
-            self.device.update_descriptor_set(
-                tonemap_desc.get(0),
-                &[
-                    tonemap_desc.create_binding(
-                        0,
-                        0,
-                        BindingRes::Image(Arc::clone(&source_image), None, ImageLayout::SHADER_READ),
-                    ),
-                    tonemap_desc.create_binding(
-                        1,
-                        0,
-                        BindingRes::ImageView(
-                            Arc::clone(&bloom_image_views[0]),
-                            None,
-                            ImageLayout::SHADER_READ,
-                        ),
-                    ),
-                ],
-            );
         }
 
         // ------------------------------------------------------------------------------------
@@ -601,7 +583,7 @@ impl PostProcessStage {
             cl.bind_graphics_inputs(self.bloom_downscale_pipeline.signature(), 0, &[*desc], &[]);
 
             let src_size = if i == 0 {
-                source_image.size_2d()
+                combined_source_image.size_2d()
             } else {
                 bloom_image.mip_size((i - 1) as u32)
             };
@@ -633,6 +615,59 @@ impl PostProcessStage {
             cl.draw(3, 0);
             cl.end_render_pass();
         }
+    }
+
+    fn tonemap_stage(&self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {
+        let g_overlay_framebuffer: Arc<Framebuffer> = resources.get(GBufferStage::RES_OVERLAY_FRAMEBUFFER);
+        let g_overlay_albedo = g_overlay_framebuffer
+            .get_image(GBufferStage::OVERLAY_ALBEDO_ATTACHMENT_ID)
+            .unwrap();
+        let merge_fb: Arc<Framebuffer> = resources.get(Self::RES_MERGE_FRAMEBUFFER);
+        let main_source_image = merge_fb.get_image(1).unwrap();
+        let bloom_image_views = resources.get::<Vec<Arc<ImageView>>>("post-blurred-image-view");
+
+        let tonemap_desc =
+            resources.request_descriptors("post-tonemap-desc", self.tonemap_pipeline.signature(), 0, 1);
+
+        unsafe {
+            self.device.update_descriptor_set(
+                tonemap_desc.get(0),
+                &[
+                    tonemap_desc.create_binding(
+                        0,
+                        0,
+                        BindingRes::Image(Arc::clone(&main_source_image), None, ImageLayout::SHADER_READ),
+                    ),
+                    tonemap_desc.create_binding(
+                        1,
+                        0,
+                        BindingRes::Image(Arc::clone(&g_overlay_albedo), None, ImageLayout::SHADER_READ),
+                    ),
+                    tonemap_desc.create_binding(
+                        2,
+                        0,
+                        BindingRes::ImageView(
+                            Arc::clone(&bloom_image_views[0]),
+                            None,
+                            ImageLayout::SHADER_READ,
+                        ),
+                    ),
+                ],
+            );
+        }
+
+        let tonemap_fb = resources.request(
+            Self::RES_OUTPUT_FRAMEBUFFER,
+            (ctx.render_size,),
+            |(render_size,), _| {
+                self.tonemap_render_pass
+                    .create_framebuffer(
+                        *render_size,
+                        &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
+                    )
+                    .unwrap()
+            },
+        );
 
         // Mix source and bloom
         cl.bind_pipeline(&self.tonemap_pipeline);
@@ -662,6 +697,7 @@ impl RenderStage for PostProcessStage {
 
         self.g_buffer_merge_stage(cl, resources, ctx);
         self.bloom_stage(cl, resources, ctx);
+        self.tonemap_stage(cl, resources, ctx);
 
         cl.end().unwrap();
 

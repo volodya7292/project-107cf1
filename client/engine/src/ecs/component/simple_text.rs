@@ -70,8 +70,8 @@ impl TextStyle {
         &self.color
     }
 
-    pub fn set_color(&mut self, color: Color) {
-        self.color = color;
+    pub fn color_mut(&mut self) -> &mut Color {
+        &mut self.color
     }
 }
 
@@ -98,6 +98,11 @@ impl StyledString {
             data: data.into(),
             text_style,
         }
+    }
+
+    pub fn with_style(mut self, style: TextStyle) -> Self {
+        self.text_style = style;
+        self
     }
 
     pub fn data(&self) -> &str {

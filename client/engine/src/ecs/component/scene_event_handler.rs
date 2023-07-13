@@ -1,4 +1,3 @@
-use crate::module::scene::Scene;
 use crate::EngineContext;
 use common::types::HashMap;
 use entity_data::{Component, EntityId};

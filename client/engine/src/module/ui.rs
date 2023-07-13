@@ -13,6 +13,7 @@ use crate::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
 use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::EngineContext;
+use common::glm;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
 use common::types::HashSet;
@@ -420,7 +421,7 @@ impl UIRenderer {
             let parent_cache = *layout_cache_comps.get(node).unwrap();
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
-            let parent_size = parent_cache.final_size;
+            let parent_size = glm::max(&(parent_cache.final_size - parent_layout.padding.size()), 0.0);
             let parent_clip = &parent_cache.clip_rect;
 
             let mut children_flow_sizings: SmallVec<[ChildFlowSizingInfo; 128]> =
@@ -601,7 +602,7 @@ impl UIRenderer {
         dirty_elements: &HashSet<EntityId>,
     ) {
         let access = scene.storage_mut().access();
-        let mut layout_components = access.component::<UILayoutC>();
+        let layout_components = access.component::<UILayoutC>();
         let mut layout_cache_components = access.component_mut::<UILayoutCacheC>();
         let mut dirty_caches = HashSet::with_capacity(1024);
 

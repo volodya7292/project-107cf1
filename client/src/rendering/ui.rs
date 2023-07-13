@@ -3,6 +3,7 @@ pub mod fancy_button;
 pub mod image;
 pub mod text;
 
+use crate::game::MainApp;
 use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageImpl, UIImage};
@@ -13,8 +14,6 @@ use common::resource_file::{ResourceFile, ResourceRef};
 use engine::module::scene::Scene;
 use engine::module::EngineModule;
 use engine::EngineContext;
-use entity_data::StaticArchetype;
-use std::ops::Deref;
 use std::sync::Arc;
 
 pub struct UIContext<'a> {
@@ -30,6 +29,14 @@ impl<'a> UIContext<'a> {
             ctx,
             resources: Arc::clone(resources),
         }
+    }
+
+    pub fn ctx(&self) -> &EngineContext {
+        self.ctx
+    }
+
+    pub fn app(&mut self) -> OwnedRefMut<dyn EngineModule, MainApp> {
+        self.ctx.module_mut::<MainApp>()
     }
 
     pub fn scene(&mut self) -> &mut Scene {

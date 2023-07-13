@@ -2,7 +2,7 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::ui::{Factor, Sizing, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::ui::{Factor, RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
@@ -23,6 +23,7 @@ struct ContainerImplContext {
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 struct UniformData {
+    clip_rect: RectUniformData,
     background_color: Vec4,
 }
 
@@ -42,10 +43,12 @@ impl UIState for ContainerState {
         }
 
         let cache = entry.layout_cache();
+        let clip_rect = *cache.calculated_clip_rect();
         let mut background_color = state.background_color.current().into_raw();
         background_color.w *= cache.final_opacity();
 
         let uniform_data = entry.get_mut::<UniformDataC>();
+        uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
         uniform_data.copy_from_with_offset(offset_of!(UniformData, background_color), background_color);
     }
 }
@@ -114,14 +117,12 @@ pub trait ContainerImpl {
         )
     }
 
-    fn spacer(ui_ctx: &mut UIContext, parent: EntityId, size: f32) -> ObjectEntityId<Container> {
-        Container::new(
-            ui_ctx,
-            parent,
-            UILayoutC::new()
-                .with_width(Sizing::Preferred(size))
-                .with_height(Sizing::Preferred(size)),
-        )
+    fn width_spacer(ui_ctx: &mut UIContext, parent: EntityId, size: f32) -> ObjectEntityId<Container> {
+        Container::new(ui_ctx, parent, UILayoutC::new().with_min_width(size))
+    }
+
+    fn height_spacer(ui_ctx: &mut UIContext, parent: EntityId, size: f32) -> ObjectEntityId<Container> {
+        Container::new(ui_ctx, parent, UILayoutC::new().with_min_height(size))
     }
 }
 

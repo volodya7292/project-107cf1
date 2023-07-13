@@ -4,7 +4,8 @@
 
 layout(location = 0) in vec2 inUV;
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec4 outCombinedColor;
+layout(location = 1) out vec4 outMainColor;
 
 layout(binding = 0) uniform sampler2D gPosition;
 layout(binding = 1) uniform sampler2D gAlbedo;
@@ -109,21 +110,23 @@ void main() {
 //    float areaLightCosImportance = 0.1;
 //    float cosFactor = 1 - (1 - dot(normal, -sun_dir)) * areaLightCosImportance;
 
-    vec3 currColor = vec3(0);
+    vec3 mainColor = vec3(0);
     if (depth < 0.0001) {
         vec3 sun_dir = info.main_light_dir.xyz;
         vec3 skyCol = calculateSky(inUV, info.frame_size, info.camera.pos.xyz, info.camera.dir.xyz, info.camera.fovy, info.camera.view, sun_dir);
-        currColor = skyCol;
+        mainColor = skyCol;
     }
 
     // Blend in solid color into sky color
-    currColor = mix(currColor, solidColor.rgb, solidColor.a);
+    mainColor = mix(mainColor, solidColor.rgb, solidColor.a);
     // Blend transparent with solid colors
-    currColor = mix(currColor.rgb, transpColor.rgb, transpColor.a);
+    mainColor = mix(mainColor.rgb, transpColor.rgb, transpColor.a);
     // Apply additional emission
-    currColor.rgb += emission.rgb;
-    // Apply overlay color
-    currColor = mix(currColor.rgb, overlayColor.rgb, overlayColor.a);
+    mainColor.rgb += emission.rgb;
 
-    outColor = vec4(currColor, 1);
+    // Apply overlay color
+    vec3 combinedColor = mix(mainColor.rgb, overlayColor.rgb, overlayColor.a);
+
+    outMainColor = vec4(mainColor, 1);
+    outCombinedColor = vec4(combinedColor, 1);
 }

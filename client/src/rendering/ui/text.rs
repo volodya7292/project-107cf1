@@ -34,6 +34,7 @@ pub struct TextState {
     wrapper_entity: ObjectEntityId<Container>,
     raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
+    wrap: bool,
     inner_shadow_intensity: f32,
 }
 
@@ -48,22 +49,28 @@ impl UIState for TextState {
         let final_opacity = cache.final_opacity();
         let final_size = *cache.final_size();
 
-        let min_text_size = {
+        let text_block_size = {
             let text_renderer = ctx.module_mut::<TextRenderer>();
-            text_renderer.calculate_minimum_text_size(&state.text, final_size.x)
+            text_renderer.calculate_minimum_text_size(
+                &state.text,
+                if state.wrap { final_size.x } else { f32::INFINITY },
+            )
         };
 
         drop(entry);
 
         let mut wrapper = scene.entry(&state.wrapper_entity);
         let layout = wrapper.get_mut::<UILayoutC>();
-        layout.constraints[0].min = min_text_size.x;
-        layout.constraints[1].min = min_text_size.y;
+        layout.constraints[0].min = text_block_size.x;
+        layout.constraints[1].min = text_block_size.y;
         drop(wrapper);
 
         let mut entry = scene.entry(entity);
         let layout = entry.get_mut::<UILayoutC>();
-        layout.constraints[1].min = min_text_size.y;
+        if !state.wrap {
+            layout.constraints[0].min = text_block_size.x;
+        }
+        layout.constraints[1].min = text_block_size.y;
         drop(entry);
 
         let mut raw_text_entry = scene.entry(&state.raw_text_entity);
@@ -114,6 +121,7 @@ pub trait UITextImpl {
                 wrapper_entity: Default::default(),
                 raw_text_entity: Default::default(),
                 text,
+                wrap: false,
                 inner_shadow_intensity: 0.0,
             },
         )
@@ -125,7 +133,7 @@ pub trait UITextImpl {
         let raw_text_obj = RawTextObject::new(
             TransformC::new(),
             SimpleTextC::new(impl_ctx.mat_pipe_id)
-                .with_max_width(0.0)
+                .with_max_width(f32::INFINITY)
                 .with_render_type(RenderLayer::Overlay),
         );
 
@@ -162,12 +170,14 @@ impl UITextImpl for UIText {}
 
 fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
-    scene.entry(entity).request_custom_update(UIText::on_update);
+    scene.object::<UIText>(&entity.into()).request_update();
 }
 
 pub trait TextAccess {
     fn get_text(&self) -> &StyledString;
     fn set_text(&mut self, text: StyledString);
+    fn get_wrap(&self) -> bool;
+    fn set_wrap(&mut self, wrap: bool);
 }
 
 impl<'a> TextAccess for EntityAccess<'a, UIText> {
@@ -176,8 +186,16 @@ impl<'a> TextAccess for EntityAccess<'a, UIText> {
     }
 
     fn set_text(&mut self, text: StyledString) {
-        let simple_text = self.state_mut();
-        simple_text.text = text;
+        self.state_mut().text = text;
+        self.request_update();
+    }
+
+    fn get_wrap(&self) -> bool {
+        self.state().wrap
+    }
+
+    fn set_wrap(&mut self, wrap: bool) {
+        self.state_mut().wrap = wrap;
         self.request_update();
     }
 }
