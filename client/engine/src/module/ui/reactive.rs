@@ -21,36 +21,119 @@ struct StateUID(EntityId, &'static str);
 
 /// Provides reactive ui management
 pub struct UIReactor {
-    root: EntityId,
     scopes: HashMap<EntityId, UIScope>,
     modified_states: HashSet<StateUID>,
+    dirty_scopes: HashSet<EntityId>,
     state_subscribers: HashMap<StateUID, HashSet<EntityId>>,
 }
 
 impl UIReactor {
-    pub fn new(root: EntityId) -> Self {
+    pub fn new<F>(root: EntityId, root_scope_fn: F) -> Self
+    where
+        F: Fn(&mut UIScopeContext) + 'static,
+    {
         let mut this = Self {
-            root,
             scopes: Default::default(),
             modified_states: Default::default(),
+            dirty_scopes: Default::default(),
             state_subscribers: Default::default(),
         };
+        this.scopes.insert(
+            root,
+            UIScope {
+                children_func: Rc::new(root_scope_fn),
+                on_remove_func: Box::new(|_| {}),
+                children: vec![],
+                states: Default::default(),
+                subscribed_to: Default::default(),
+            },
+        );
+        this.dirty_scopes.insert(root);
         this
     }
 
-    pub fn on_update<F: Fn(&mut UIScopeContext) + 'static>(&mut self, ctx: EngineContext, scope_fn: F) {
-        let root = self.root;
-        let mut ctx = UIScopeContext {
+    pub fn on_update(&mut self, ctx: EngineContext) {
+        let dirty_scopes: HashSet<_> = self
+            .dirty_scopes
+            .drain()
+            .chain(
+                self.modified_states
+                    .drain()
+                    .filter_map(|uid| self.state_subscribers.get(&uid))
+                    .map(|uid| uid.iter().cloned())
+                    .flatten(),
+            )
+            .collect();
+
+        for entity in dirty_scopes {
+            self.rebuild(entity, ctx);
+        }
+    }
+
+    /// Performs rebuilding of the specified scope of `parent`.
+    fn rebuild(&mut self, parent: EntityId, ctx: EngineContext) {
+        let scope = self.scopes.get(&parent).unwrap();
+        let func = Rc::clone(&scope.children_func);
+
+        let mut child_ctx = UIScopeContext {
             ctx,
             reactor: self,
-            parent: Default::default(),
+            parent,
             used_children: vec![],
             used_states: Default::default(),
         };
-        ctx.descend(root, scope_fn, |_| {});
+        func(&mut child_ctx);
+
+        Self::remove_unused_children(&mut child_ctx);
+        Self::remove_unused_states(&mut child_ctx);
     }
 
-    fn remove_element(&mut self, ctx: &EngineContext, element: EntityId) {
+    fn remove_unused_children(ctx: &mut UIScopeContext) {
+        let scope = ctx.reactor.scopes.get_mut(&ctx.parent).unwrap();
+
+        let unused_children: Vec<_> = scope
+            .children
+            .iter()
+            .filter(|child| !ctx.used_children.contains(child))
+            .cloned()
+            .collect();
+
+        scope.children.clear();
+        scope.children.extend(&ctx.used_children);
+
+        for child in unused_children {
+            ctx.reactor.remove_element(child, &ctx.ctx);
+        }
+    }
+
+    fn remove_unused_states(ctx: &mut UIScopeContext) {
+        let scope = ctx.reactor.scopes.get_mut(&ctx.parent).unwrap();
+
+        let states_to_remove: Vec<_> = scope
+            .states
+            .keys()
+            .filter(|key| !ctx.used_states.contains(**key))
+            .cloned()
+            .collect();
+
+        for name in &states_to_remove {
+            scope.states.remove(name);
+        }
+
+        for name in states_to_remove {
+            let state_uid = StateUID(ctx.parent, name);
+            ctx.reactor.modified_states.remove(&state_uid);
+
+            if let Some(subscribers) = ctx.reactor.state_subscribers.remove(&state_uid) {
+                for subscriber in subscribers {
+                    let subscriber_scope = ctx.reactor.scopes.get_mut(&subscriber).unwrap();
+                    subscriber_scope.subscribed_to.remove(&state_uid);
+                }
+            }
+        }
+    }
+
+    fn remove_element(&mut self, element: EntityId, ctx: &EngineContext) {
         let mut to_visit = vec![element];
         let mut queue = vec![];
 
@@ -64,6 +147,7 @@ impl UIReactor {
         for elem in queue.into_iter().rev() {
             let scope = self.scopes.remove(&elem).unwrap();
             (scope.on_remove_func)(ctx);
+            self.dirty_scopes.remove(&elem);
         }
     }
 }
@@ -163,90 +247,19 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     {
         self.used_children.push(parent);
 
-        let needs_redescent = match self.reactor.scopes.entry(parent) {
-            hash_map::Entry::Vacant(e) => {
-                e.insert(UIScope {
-                    children_func: Rc::new(scope_fn),
-                    on_remove_func: Box::new(on_remove_fn),
-                    children: vec![],
-                    states: Default::default(),
-                    subscribed_to: Default::default(),
-                });
-                true
-            }
-            hash_map::Entry::Occupied(mut e) => {
-                let some_state_changed = e
-                    .get()
-                    .subscribed_to
-                    .iter()
-                    .any(|uid| self.reactor.modified_states.contains(&uid));
-                some_state_changed
-            }
-        };
-
-        if !needs_redescent {
+        if let hash_map::Entry::Vacant(e) = self.reactor.scopes.entry(parent) {
+            e.insert(UIScope {
+                children_func: Rc::new(scope_fn),
+                on_remove_func: Box::new(on_remove_fn),
+                children: vec![],
+                states: Default::default(),
+                subscribed_to: Default::default(),
+            });
+        } else {
             return;
-        }
-
-        let scope = self.reactor.scopes.get(&parent).unwrap();
-        let func = Rc::clone(&scope.children_func);
-
-        let mut child_ctx = UIScopeContext {
-            ctx: self.ctx,
-            reactor: self.reactor,
-            parent,
-            used_children: vec![],
-            used_states: Default::default(),
         };
-        func(&mut child_ctx);
 
-        child_ctx.remove_unused_children();
-        child_ctx.remove_unused_states();
-    }
-
-    fn remove_unused_children(&mut self) {
-        let scope = self.reactor.scopes.get_mut(&self.parent).unwrap();
-
-        let unused_children: Vec<_> = scope
-            .children
-            .iter()
-            .filter(|child| !self.used_children.contains(child))
-            .cloned()
-            .collect();
-
-        scope.children.clear();
-        scope.children.extend(&self.used_children);
-
-        for child in unused_children {
-            self.reactor.remove_element(&self.ctx, child);
-        }
-    }
-
-    fn remove_unused_states(&mut self) {
-        let scope = self.reactor.scopes.get_mut(&self.parent).unwrap();
-
-        let states_to_remove: Vec<_> = scope
-            .states
-            .keys()
-            .filter(|key| !self.used_states.contains(**key))
-            .cloned()
-            .collect();
-
-        for name in &states_to_remove {
-            scope.states.remove(name);
-        }
-
-        for name in states_to_remove {
-            let state_uid = StateUID(self.parent, name);
-            self.reactor.modified_states.remove(&state_uid);
-
-            if let Some(subscribers) = self.reactor.state_subscribers.remove(&state_uid) {
-                for subscriber in subscribers {
-                    let subscriber_scope = self.reactor.scopes.get_mut(&subscriber).unwrap();
-                    subscriber_scope.subscribed_to.remove(&state_uid);
-                }
-            }
-        }
+        self.reactor.rebuild(parent, self.ctx);
     }
 }
 
