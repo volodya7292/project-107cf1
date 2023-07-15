@@ -60,6 +60,7 @@ pub struct Engine {
     callbacks: RefCell<Vec<Box<dyn FnOnce(&EngineContext, f64)>>>,
 }
 
+#[derive(Copy, Clone)]
 pub struct EngineContext<'a> {
     do_stop: &'a AtomicBool,
     module_manager: &'a RefCell<ModuleManager>,

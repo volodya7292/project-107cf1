@@ -11,7 +11,7 @@ use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC,
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::color::Color;
-use engine::module::ui::management::UIState;
+use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::vkw::pipeline::CullMode;

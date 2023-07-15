@@ -9,9 +9,9 @@ use engine::ecs::component::ui::{
 };
 use engine::ecs::component::{SceneEventHandler, SimpleTextC, TransformC, UniformDataC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
+use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::text_renderer::{RawTextObject, TextRenderer};
-use engine::module::ui::management::UIState;
+use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::EngineContext;
 use entity_data::EntityId;

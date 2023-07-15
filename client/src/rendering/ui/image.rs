@@ -6,7 +6,7 @@ use engine::ecs::component::ui::{RectUniformData, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
-use engine::module::ui::management::UIState;
+use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::vkw::image::ImageParams;
 use engine::vkw::pipeline::CullMode;

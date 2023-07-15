@@ -1,5 +1,5 @@
 pub mod color;
-pub mod management;
+pub mod reactive;
 
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::ui::{
@@ -10,7 +10,6 @@ use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, Un
 use crate::event::WSIEvent;
 use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
-use crate::module::ui::management::UIState;
 use crate::module::EngineModule;
 use crate::EngineContext;
 use common::glm;
@@ -29,6 +28,12 @@ pub struct UIRenderer {
     force_update_transforms: bool,
     ui_layout_changes: ComponentChangesHandle,
 }
+
+pub trait UIState: Send + Sync + 'static {
+    fn on_update(_entity: &EntityId, _ctx: &EngineContext, _dt: f64) {}
+}
+
+impl UIState for () {}
 
 #[derive(Archetype)]
 pub struct UIObject<S>
