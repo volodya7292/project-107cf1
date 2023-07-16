@@ -173,7 +173,8 @@ impl GlyphAllocator {
             let g_uid = self.chart_to_glyph_uid(c, font_id, style);
 
             // Check if glyph is already allocated
-            if self.char_locations.contains_key(&g_uid) {
+            if let Some(loc) = self.char_locations.get_mut(&g_uid) {
+                loc.ref_count += 1;
                 glyphs.push(g_uid);
                 continue;
             }
