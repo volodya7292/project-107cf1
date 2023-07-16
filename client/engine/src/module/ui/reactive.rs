@@ -7,12 +7,13 @@ use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::Arc;
 
 struct UIScope {
     children_func: Rc<dyn Fn(&mut UIScopeContext)>,
     on_remove_func: Box<dyn FnOnce(&EngineContext)>,
     children: Vec<EntityId>,
-    states: HashMap<&'static str, RefCell<Rc<dyn Any>>>,
+    states: HashMap<&'static str, RefCell<Arc<dyn Any + Send + Sync>>>,
     subscribed_to: HashSet<StateUID>,
 }
 
@@ -70,10 +71,27 @@ impl UIReactor {
         }
     }
 
+    pub fn set_state<T: Send + Sync + 'static, F: FnOnce(&T) -> T>(
+        &mut self,
+        state: &ReactiveState<T>,
+        new: F,
+    ) {
+        let state_scope = self.scopes.get_mut(&state.owner).unwrap();
+        let mut state_value = state_scope.states.get(state.name).unwrap();
+
+        let mut curr_value = state_value.borrow_mut();
+        let new_value = new(curr_value.downcast_ref::<T>().unwrap());
+
+        *curr_value = Arc::new(new_value);
+        self.modified_states.insert(state.uid());
+    }
+
     /// Performs rebuilding of the specified scope of `parent`.
     fn rebuild(&mut self, parent: EntityId, ctx: EngineContext) {
-        let scope = self.scopes.get(&parent).unwrap();
+        let mut scope = self.scopes.get_mut(&parent).unwrap();
         let func = Rc::clone(&scope.children_func);
+
+        scope.subscribed_to.clear();
 
         let mut child_ctx = UIScopeContext {
             ctx,
@@ -152,23 +170,15 @@ impl UIReactor {
     }
 }
 
-pub struct UIScopeContext<'a, 'b> {
-    ctx: EngineContext<'a>,
-    reactor: &'b mut UIReactor,
-    parent: EntityId,
-    used_children: Vec<EntityId>,
-    used_states: HashSet<&'static str>,
-}
-
 #[derive(Clone)]
-pub struct State<T> {
+pub struct ReactiveState<T> {
     owner: EntityId,
     name: &'static str,
-    value: Rc<T>,
+    value: Arc<T>,
     _ty: PhantomData<T>,
 }
 
-impl<T> State<T> {
+impl<T> ReactiveState<T> {
     fn uid(&self) -> StateUID {
         StateUID(self.owner, self.name)
     }
@@ -179,7 +189,7 @@ impl<T> State<T> {
 }
 
 pub struct StateReceiver<T> {
-    value: Rc<T>,
+    value: Arc<T>,
     _ty: PhantomData<T>,
 }
 
@@ -191,24 +201,43 @@ impl<T: 'static> Deref for StateReceiver<T> {
     }
 }
 
+pub struct UIScopeContext<'a, 'b> {
+    ctx: EngineContext<'a>,
+    reactor: &'b mut UIReactor,
+    parent: EntityId,
+    used_children: Vec<EntityId>,
+    used_states: HashSet<&'static str>,
+}
+
 impl<'a, 'b> UIScopeContext<'a, 'b> {
     pub fn ctx(&self) -> &EngineContext<'a> {
         &self.ctx
+    }
+
+    pub fn reactor(&mut self) -> &mut UIReactor {
+        self.reactor
     }
 
     pub fn parent(&self) -> EntityId {
         self.parent
     }
 
-    pub fn request_state<T: 'static, F: FnOnce() -> T>(&mut self, name: &'static str, init: F) -> State<T> {
+    /// Returns the state identified by `name`. If the state doesn't exist,
+    /// creates a new one with the return value from `init` closure.
+    pub fn request_state<T: Send + Sync + 'static, F: FnOnce() -> T>(
+        &mut self,
+        name: &'static str,
+        init: F,
+    ) -> ReactiveState<T> {
         let scope = self.reactor.scopes.get_mut(&self.parent).unwrap();
+        self.used_states.insert(name);
 
         let state_value = scope
             .states
             .entry(name)
-            .or_insert_with(|| RefCell::new(Rc::new(init())));
+            .or_insert_with(|| RefCell::new(Arc::new(init())));
 
-        State {
+        ReactiveState {
             owner: self.parent,
             name,
             value: state_value.borrow().clone().downcast::<T>().unwrap(),
@@ -216,14 +245,8 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         }
     }
 
-    pub fn set_state<T: 'static>(&mut self, state: &State<T>, new_value: T) {
-        let state_scope = self.reactor.scopes.get_mut(&state.owner).unwrap();
-        let state_value = state_scope.states.get(state.name).unwrap();
-        *state_value.borrow_mut() = Rc::new(new_value);
-        self.reactor.modified_states.insert(state.uid());
-    }
-
-    pub fn subscribe<T: 'static>(&mut self, state: &State<T>) -> StateReceiver<T> {
+    /// Subscribes this scope to updates of the state. This scope will be rebuild it `state` changes.
+    pub fn subscribe<T: 'static>(&mut self, state: &ReactiveState<T>) -> StateReceiver<T> {
         let scope = self.reactor.scopes.get_mut(&self.parent).unwrap();
         scope.subscribed_to.insert(state.uid());
 
@@ -240,30 +263,38 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     }
 
     /// Performs descent of `scope` if the `parent` hasn't been descended earlier.
-    pub fn descend<F, R>(&mut self, parent: EntityId, scope_fn: F, on_remove_fn: R)
+    pub fn descend<F, R>(&mut self, parent: EntityId, children_fn: F, on_remove_fn: R, force_rebuild: bool)
     where
         F: Fn(&mut UIScopeContext) + 'static,
         R: FnOnce(&EngineContext) + 'static,
     {
         self.used_children.push(parent);
 
-        if let hash_map::Entry::Vacant(e) = self.reactor.scopes.entry(parent) {
-            e.insert(UIScope {
-                children_func: Rc::new(scope_fn),
-                on_remove_func: Box::new(on_remove_fn),
-                children: vec![],
-                states: Default::default(),
-                subscribed_to: Default::default(),
-            });
-        } else {
-            return;
-        };
+        match self.reactor.scopes.entry(parent) {
+            hash_map::Entry::Vacant(e) => {
+                e.insert(UIScope {
+                    children_func: Rc::new(children_fn),
+                    on_remove_func: Box::new(on_remove_fn),
+                    children: vec![],
+                    states: Default::default(),
+                    subscribed_to: Default::default(),
+                });
+            }
+            hash_map::Entry::Occupied(mut e) => {
+                e.get_mut().children_func = Rc::new(children_fn);
+
+                if !force_rebuild {
+                    return;
+                }
+            }
+        }
 
         self.reactor.rebuild(parent, self.ctx);
     }
 }
 
 /// Requests a state and subscribes to it creating a variable with respective name.
+#[macro_export]
 macro_rules! remember_state {
     ($ctx: expr, $name: ident, $init: expr) => {
         let $name = $ctx.request_state(stringify!($name), || $init);
