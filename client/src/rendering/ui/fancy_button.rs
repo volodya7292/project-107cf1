@@ -160,9 +160,8 @@ pub trait FancyButtonAccess {
 }
 
 impl FancyButtonAccess for EntityAccess<'_, FancyButton> {
-    fn set_text(&mut self, mut text: StyledString) {
-        let curr_col = *self.state().text_color.current();
-        *text.style_mut().color_mut() = curr_col;
+    fn set_text(&mut self, text: StyledString) {
+        self.state_mut().text_color = (*text.style().color()).into();
         self.get_mut::<FancyButtonState>().text = text;
         self.request_update();
     }
