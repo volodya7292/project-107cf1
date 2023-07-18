@@ -33,3 +33,23 @@ pub const MO_RELAXED: atomic::Ordering = atomic::Ordering::Relaxed;
 pub const MO_ACQUIRE: atomic::Ordering = atomic::Ordering::Acquire;
 pub const MO_RELEASE: atomic::Ordering = atomic::Ordering::Release;
 pub const MO_SEQCST: atomic::Ordering = atomic::Ordering::SeqCst;
+
+/// `make_static_id()` returns unique identifier (a `String` consisting of file name, line and column numbers)
+/// of in-code position of the call to this macro.
+/// `make_static_id(additional_id)` returns the same static
+/// identifier but parametrized with `additional_id`.
+#[macro_export]
+macro_rules! make_static_id {
+    () => {
+        format!("{}-{}-{}", std::file!(), std::line!(), std::column!())
+    };
+    ($additional_id: expr) => {
+        format!(
+            "{}-{}-{}-{}",
+            std::file!(),
+            std::line!(),
+            std::column!(),
+            $additional_id
+        )
+    };
+}

@@ -1,43 +1,26 @@
+use crate::game::EngineCtxGameExt;
 use crate::game::MainApp;
-use crate::rendering::ui::container::{Container, ContainerAccess, ContainerImpl};
-use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
-use crate::rendering::ui::image::{ImageFitness, ImageImpl, ImageSource, UIImage};
-use crate::rendering::ui::text::{UIText, UITextImpl};
-use crate::rendering::ui::UIContext;
+use crate::rendering::ui::container::reactive::{
+    container, expander, height_spacer, width_spacer, ContainerProps,
+};
+use crate::rendering::ui::fancy_button::reactive::fancy_button;
+use crate::rendering::ui::image::reactive::ui_image;
+use crate::rendering::ui::image::{ImageFitness, ImageSource};
+use crate::rendering::ui::text::reactive::ui_text;
+use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::ui::{BasicEventCallback, Padding, Sizing, UILayoutC};
-use engine::module::scene::ObjectEntityId;
+use engine::ecs::component::ui::{BasicEventCallback2, Padding, Position, Sizing, UILayoutC, Visibility};
 use engine::module::ui::color::Color;
-use engine::EngineContext;
+use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+use engine::utils::transition::{AnimatedValue, TransitionTarget};
+use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
 
-pub fn make_main_menu_screen(ui_ctx: &mut UIContext, root: &EntityId) -> ObjectEntityId<Container> {
-    let container = Container::new(
-        ui_ctx,
-        *root,
-        UILayoutC::row()
-            .with_width(Sizing::Grow(1.0))
-            .with_height(Sizing::Grow(1.0)),
-    );
-
-    Container::expander(ui_ctx, *container, 0.2);
-
-    make_main_menu_controls(ui_ctx, &container);
-
-    Container::expander(ui_ctx, *container, 1.0);
-
-    container
-}
-
-fn make_menu_button(
-    ui_ctx: &mut UIContext,
-    parent: EntityId,
-    text: &str,
-    on_click: BasicEventCallback,
-) -> ObjectEntityId<FancyButton> {
-    FancyButton::new(
-        ui_ctx,
-        parent,
+fn menu_button(id: ScopeId, ctx: &mut UIScopeContext, text: &str, on_click: impl BasicEventCallback2) {
+    fancy_button(
+        id,
+        ctx,
         UILayoutC::new()
             .with_min_width(240.0)
             .with_padding(Padding::hv(12.0, 6.0)),
@@ -48,18 +31,18 @@ fn make_menu_button(
                 .with_font_size(38.0),
         ),
         on_click,
-    )
+    );
 }
 
-fn make_world_control_button(
-    ui_ctx: &mut UIContext,
-    parent: EntityId,
+fn world_control_button(
+    id: ScopeId,
+    ctx: &mut UIScopeContext,
     text: &str,
-    on_click: BasicEventCallback,
-) -> ObjectEntityId<FancyButton> {
-    let btn = FancyButton::new(
-        ui_ctx,
-        parent,
+    on_click: impl BasicEventCallback2,
+) {
+    fancy_button(
+        id,
+        ctx,
         UILayoutC::new()
             .with_min_height(24.0)
             .with_padding(Padding::hv(8.0, 6.0)),
@@ -71,99 +54,161 @@ fn make_world_control_button(
         ),
         on_click,
     );
-    btn
 }
 
-fn start_on_click(_: &EntityId, ctx: &EngineContext) {
-    let mut game = ctx.module_mut::<MainApp>();
-    game.start_game_process(ctx);
+fn world_item(id: ScopeId, ctx: &mut UIScopeContext, name: String) {
+    container(
+        id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::column()
+                .with_width(Sizing::Grow(1.0))
+                .with_padding(Padding::equal(10.0)),
+            background_color: Color::WHITE.with_alpha(0.02).into(),
+            ..Default::default()
+        },
+        move |ctx| {
+            ui_text(
+                make_static_id!(),
+                ctx,
+                StyledString::new(name.clone(), TextStyle::new().with_font_size(24.0)),
+            );
+            height_spacer(make_static_id!(), ctx, 4.0);
+
+            container(
+                make_static_id!(),
+                ctx,
+                ContainerProps {
+                    layout: UILayoutC::row().with_width(Sizing::Grow(1.0)),
+                    ..Default::default()
+                },
+                |ctx| {
+                    world_control_button(make_static_id!(), ctx, "Continue", |entity, ctx| {});
+                    width_spacer(make_static_id!(), ctx, 20.0);
+                    world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx| {});
+                },
+            )
+        },
+    );
 }
 
-fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
+fn world_selection_list(ctx: &mut UIScopeContext) {
+    container(
+        make_static_id!(),
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::column()
+                .with_width(Sizing::Grow(1.0))
+                .with_height(Sizing::FitContent),
+            ..Default::default()
+        },
+        |ctx| {
+            let mut ui_ctx = UIContext::new(*ctx.ctx());
+            let world_names = ui_ctx.app().get_world_name_list();
+            drop(ui_ctx);
 
-fn exit_on_click(_: &EntityId, ctx: &EngineContext) {
-    ctx.request_stop();
+            for (i, name) in world_names.iter().enumerate() {
+                world_item(make_static_id!(i), ctx, name.clone());
+                height_spacer(make_static_id!(i), ctx, 10.0);
+            }
+        },
+    );
 }
 
-fn make_main_menu_controls(ui_ctx: &mut UIContext, parent: &EntityId) -> EntityId {
-    let image_source = ui_ctx
-        .resource_image("/textures/main_menu_background.jpg")
+fn main_menu_controls(ctx: &mut UIScopeContext) {
+    let resources = ctx.ctx().resources();
+
+    // TODO: implement resource caching
+
+    let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
         .unwrap()
         .unwrap();
 
-    let container = UIImage::new(
-        ui_ctx,
-        *parent,
-        UILayoutC::new()
+    fn start_on_click(_: &EntityId, ctx: &EngineContext) {
+        let mut game = ctx.module_mut::<MainApp>();
+        game.start_game_process(ctx);
+    }
+
+    fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
+
+    fn exit_on_click(_: &EntityId, ctx: &EngineContext) {
+        ctx.request_stop();
+    }
+
+    ui_image(
+        make_static_id!(),
+        ctx,
+        UILayoutC::column()
+            .with_position(Position::Relative(Default::default()))
             .with_width(Sizing::Preferred(400.0))
             .with_height(Sizing::Grow(1.0))
             .with_padding(Padding::equal(30.0)),
         Some(ImageSource::Data(image_source)),
         ImageFitness::Cover,
+        |ctx| {
+            expander(make_static_id!(), ctx, 1.0);
+
+            world_selection_list(ctx);
+
+            height_spacer(make_static_id!(), ctx, 30.0);
+
+            menu_button(make_static_id!(), ctx, "START", start_on_click);
+            height_spacer(make_static_id!(), ctx, 30.0);
+            menu_button(make_static_id!(), ctx, "SETTINGS", settings_on_click);
+            height_spacer(make_static_id!(), ctx, 30.0);
+            menu_button(make_static_id!(), ctx, "EXIT", exit_on_click);
+
+            expander(make_static_id!(), ctx, 0.5);
+        },
     );
-
-    Container::expander(ui_ctx, *container, 1.0);
-
-    make_world_list(ui_ctx, *container);
-
-    Container::height_spacer(ui_ctx, *container, 30.0);
-
-    make_menu_button(ui_ctx, *container, "START", start_on_click);
-    Container::height_spacer(ui_ctx, *container, 30.0);
-    make_menu_button(ui_ctx, *container, "SETTINGS", settings_on_click);
-    Container::height_spacer(ui_ctx, *container, 30.0);
-    make_menu_button(ui_ctx, *container, "EXIT", exit_on_click);
-
-    Container::expander(ui_ctx, *container, 0.5);
-
-    *container
 }
 
-fn make_world_list(ui_ctx: &mut UIContext, parent: EntityId) {
-    let container = Container::new(
-        ui_ctx,
-        parent,
-        UILayoutC::column()
-            .with_width(Sizing::Grow(1.0))
-            .with_height(Sizing::FitContent),
+pub mod ui_root_states {
+    pub const MENU_VISIBLE: &'static str = "menu_visible";
+}
+
+pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
+    let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
+    let menu_visible = ctx.subscribe(&menu_visible);
+
+    ctx.request_state(STATE_ENTITY_ID, || root_entity);
+
+    remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
+
+    let menu_opacity2 = menu_opacity.state().clone();
+    ctx.descend(
+        make_static_id!(),
+        move |ctx| {
+            let menu_visible = ctx.subscribe(menu_visible.state());
+
+            ctx.set_state(&menu_opacity2, |prev| {
+                let mut d = *prev;
+                let opacity = if *menu_visible { 1.0 } else { 0.0 };
+                d.retarget(TransitionTarget::new(opacity, 0.07));
+                d
+            });
+        },
+        |_, _| {},
+        false,
     );
 
-    ui_ctx.ctx().dispatch_callback(move |ctx, _| {
-        let mut ui_ctx = UIContext::new(ctx, ctx.module::<MainApp>().resources());
-        let world_names = ui_ctx.app().get_world_name_list();
+    ctx.drive_transition(&menu_opacity);
 
-        ui_ctx.scene().clear_children(&*container);
+    container(
+        make_static_id!(),
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::row()
+                .with_grow()
+                .with_visibility(Visibility::Opacity(*menu_opacity)),
+            ..Default::default()
+        },
+        move |ctx| {
+            expander(make_static_id!(), ctx, 0.2);
 
-        for name in world_names {
-            let item = Container::new(
-                &mut ui_ctx,
-                *container,
-                UILayoutC::column()
-                    .with_width(Sizing::Grow(1.0))
-                    .with_padding(Padding::equal(10.0)),
-            );
-            ui_ctx
-                .scene()
-                .object(&item)
-                .set_background_color(Color::WHITE.with_alpha(0.02).into());
+            main_menu_controls(ctx);
 
-            UIText::new(
-                &mut ui_ctx,
-                *item,
-                StyledString::new(name, TextStyle::new().with_font_size(24.0)),
-            );
-            Container::height_spacer(&mut ui_ctx, *item, 4.0);
-
-            let buttons = Container::new(&mut ui_ctx, *item, UILayoutC::row().with_width(Sizing::Grow(1.0)));
-            make_world_control_button(&mut ui_ctx, *buttons, "Continue", |entity, ctx| {});
-            Container::width_spacer(&mut ui_ctx, *buttons, 20.0);
-            make_world_control_button(&mut ui_ctx, *buttons, "Delete", |entity, ctx| {});
-
-            Container::height_spacer(&mut ui_ctx, *container, 10.0);
-        }
-    });
-
-    // worlds
-
-    // let resources = ui_ctx.
+            expander(make_static_id!(), ctx, 1.0);
+        },
+    );
 }

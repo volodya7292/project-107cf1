@@ -55,7 +55,7 @@ impl Scene {
         }
     }
 
-    pub fn add_resource<R: Resource>(&self, resource: R) {
+    pub fn register_resource<R: Resource>(&self, resource: R) {
         self.resources
             .borrow_mut()
             .insert(TypeId::of::<R>(), Lrc::wrap(resource));

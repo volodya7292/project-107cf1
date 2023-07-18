@@ -107,7 +107,7 @@ pub trait UITextImpl {
 
         let mat_pipe_id = text_renderer.register_text_pipeline(&mut renderer, pixel);
 
-        scene.add_resource(TextImplContext { mat_pipe_id });
+        scene.register_resource(TextImplContext { mat_pipe_id });
     }
 
     fn new(ui_ctx: &mut UIContext, parent: EntityId, text: StyledString) -> ObjectEntityId<UIText> {
@@ -197,5 +197,42 @@ impl<'a> TextAccess for EntityAccess<'a, UIText> {
     fn set_wrap(&mut self, wrap: bool) {
         self.state_mut().wrap = wrap;
         self.request_update();
+    }
+}
+
+pub mod reactive {
+    use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
+    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use engine::ecs::component::simple_text::StyledString;
+    use engine::module::scene::Scene;
+    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use entity_data::EntityId;
+
+    pub fn ui_text(id: ScopeId, ctx: &mut UIScopeContext, text: StyledString) {
+        let parent = ctx.scope_id().clone();
+        let parent_entity = *ctx
+            .reactor()
+            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+            .unwrap()
+            .value();
+
+        ctx.descend(
+            id,
+            move |ctx| {
+                let mut ui_ctx = UIContext::new(*ctx.ctx());
+                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                    *UIText::new(&mut ui_ctx, parent_entity, Default::default())
+                });
+                let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
+
+                obj.set_text(text.clone());
+            },
+            move |ctx, scope| {
+                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+                let mut scene = ctx.module_mut::<Scene>();
+                scene.remove_object(&entity);
+            },
+            true,
+        );
     }
 }

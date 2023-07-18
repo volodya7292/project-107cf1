@@ -16,23 +16,29 @@ use engine::module::EngineModule;
 use engine::EngineContext;
 use std::sync::Arc;
 
+pub const STATE_ENTITY_ID: &'static str = "__entity_id";
+
+pub struct UIResources(pub Arc<ResourceFile>);
+
 pub struct UIContext<'a> {
     scene: OwnedRefMut<dyn EngineModule, Scene>,
-    ctx: &'a EngineContext<'a>,
+    ctx: EngineContext<'a>,
     resources: Arc<ResourceFile>,
 }
 
 impl<'a> UIContext<'a> {
-    pub fn new(ctx: &'a EngineContext, resources: &Arc<ResourceFile>) -> Self {
+    pub fn new(ctx: EngineContext<'a>) -> Self {
+        let scene = ctx.module_mut::<Scene>();
+        let resources = Arc::clone(&scene.resource::<UIResources>().0);
         Self {
-            scene: ctx.module_mut::<Scene>(),
+            scene,
             ctx,
-            resources: Arc::clone(resources),
+            resources,
         }
     }
 
     pub fn ctx(&self) -> &EngineContext {
-        self.ctx
+        &self.ctx
     }
 
     pub fn app(&mut self) -> OwnedRefMut<dyn EngineModule, MainApp> {
@@ -48,10 +54,10 @@ impl<'a> UIContext<'a> {
     }
 
     pub fn resource_image(
-        &mut self,
+        resources: &Arc<ResourceFile>,
         filename: &str,
     ) -> Result<ImageResult<::image::RgbaImage>, common::resource_file::Error> {
-        let res = self.resources.get(filename)?;
+        let res = resources.get(filename)?;
         let dyn_img = ::image::load_from_memory(&res.read()?);
         Ok(dyn_img.map(|img| img.into_rgba8()))
     }

@@ -1,6 +1,7 @@
 mod ui;
 
 use crate::default_resources::DefaultResourceMapping;
+use crate::game::ui::ui_root_states;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
@@ -8,7 +9,7 @@ use crate::rendering::ui::container::{Container, ContainerAccess};
 use crate::rendering::ui::fancy_button::{FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageAccess, ImageImpl};
 use crate::rendering::ui::text::{TextAccess, UITextImpl};
-use crate::rendering::ui::{register_ui_elements, UIContext};
+use crate::rendering::ui::{register_ui_elements, UIResources};
 use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
@@ -27,6 +28,7 @@ use base::physics::aabb::AABB;
 use base::physics::MOTION_EPSILON;
 use common::glm;
 use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
+use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::resource_file::ResourceFile;
@@ -36,11 +38,10 @@ use engine::module::input::Input;
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
 use engine::module::scene::{ObjectEntityId, Scene};
 use engine::module::text_renderer::{FontSet, TextRenderer};
-use engine::module::ui::color::Color;
+use engine::module::ui::reactive::UIReactor;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
-use engine::utils::transition::{start_transition, TransitionTarget};
 use engine::utils::wsi::find_best_video_mode;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::EventLoop;
@@ -58,6 +59,22 @@ const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
+pub trait EngineCtxGameExt {
+    fn app(&self) -> OwnedRefMut<dyn EngineModule, MainApp>;
+    fn resources(&self) -> Arc<ResourceFile>;
+}
+
+impl EngineCtxGameExt for EngineContext<'_> {
+    fn app(&self) -> OwnedRefMut<dyn EngineModule, MainApp> {
+        self.module_mut::<MainApp>()
+    }
+
+    fn resources(&self) -> Arc<ResourceFile> {
+        let scene = self.module::<Scene>();
+        Arc::clone(&scene.resource::<Arc<ResourceFile>>())
+    }
+}
+
 pub struct MainApp {
     resources: Arc<ResourceFile>,
     main_registry: Arc<MainRegistry>,
@@ -72,6 +89,7 @@ pub struct MainApp {
 
     cursor_grab: bool,
     root_entity: EntityId,
+    ui_reactor: Lrc<UIReactor>,
     main_menu_entity: ObjectEntityId<Container>,
 }
 
@@ -129,8 +147,15 @@ impl MainApp {
             }
         }
 
+        let ui_root_element = {
+            let ui_renderer = ctx.module_mut::<UIRenderer>();
+            *ui_renderer.root_ui_entity()
+        };
+
+        let ui_reactor = { UIReactor::new(move |ctx| ui::ui_root(ctx, ui_root_element)) };
+
         let game = MainApp {
-            resources,
+            resources: Arc::clone(&resources),
             main_registry: Arc::clone(&main_registry),
             res_map,
             default_queue: default_queue().unwrap(),
@@ -140,9 +165,12 @@ impl MainApp {
             game_state: None,
             cursor_grab: true,
             root_entity,
+            ui_reactor: Lrc::wrap(ui_reactor),
             main_menu_entity: Default::default(),
         };
         ctx.register_module(game);
+
+        ctx.module::<Scene>().register_resource(resources);
 
         if !Self::data_dir().exists() {
             fs::create_dir(Self::data_dir()).unwrap();
@@ -197,33 +225,28 @@ impl MainApp {
         self.game_state.is_some()
     }
 
-    pub fn is_main_menu_visible(&self, ctx: &EngineContext) -> bool {
-        let mut scene = ctx.module_mut::<Scene>();
-        let mut main_menu = scene.object(&self.main_menu_entity);
-        main_menu.layout().visibility.is_visible()
+    pub fn is_main_menu_visible(&self, _: &EngineContext) -> bool {
+        let mut ui_reactor = self.ui_reactor.borrow_mut();
+        let visible_state = ui_reactor
+            .get_state::<bool>(
+                UIReactor::ROOT_SCOPE_ID.to_string(),
+                ui_root_states::MENU_VISIBLE.to_string(),
+            )
+            .map_or(false, |v| *v.value());
+
+        visible_state
     }
 
     pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
-        let mut scene = ctx.module_mut::<Scene>();
-        let mut main_menu = scene.object(&self.main_menu_entity);
-
-        main_menu.set_background_color(
-            if self.is_in_game() {
-                Color::BLACK.with_alpha(0.5)
-            } else {
-                Color::TRANSPARENT
-            }
-            .into(),
-        );
-        drop(main_menu);
-        drop(scene);
-
-        start_transition(
-            self.main_menu_entity,
-            ctx,
-            |entry| entry.layout_mut().visibility.as_opacity_mut(),
-            TransitionTarget::new(if visible { 0.95 } else { 0.0 }, 0.08),
-        );
+        let mut ui_reactor = self.ui_reactor.borrow_mut();
+        let visible_state = ui_reactor
+            .get_state::<bool>(
+                UIReactor::ROOT_SCOPE_ID.to_string(),
+                ui_root_states::MENU_VISIBLE.to_string(),
+            )
+            .unwrap();
+        ui_reactor.set_state(&visible_state, |_| visible);
+        drop(ui_reactor);
 
         self.grab_cursor(&ctx.window(), !visible, ctx);
     }
@@ -391,7 +414,7 @@ impl MainApp {
 
 impl EngineModule for MainApp {
     fn on_start(&mut self, ctx: &EngineContext) {
-        let mut ui_ctx = UIContext::new(ctx, &self.resources);
+        // let mut ui_ctx = UIContext::new(ctx, &self.resources);
 
         // let mut text_renderer = ctx.module_mut::<TextRenderer>();
         // let font_id = text_renderer.register_font(
@@ -418,14 +441,20 @@ impl EngineModule for MainApp {
         //     ),
         // );
 
-        let ui_renderer = ctx.module_mut::<UIRenderer>();
-        let root_ui_entity = *ui_renderer.root_ui_entity();
-        drop(ui_renderer);
-
-        self.main_menu_entity = ui::make_main_menu_screen(&mut ui_ctx, &root_ui_entity);
+        {
+            let scene = ctx.module::<Scene>();
+            scene.register_resource(UIResources(Arc::clone(&self.resources)));
+        }
     }
 
     fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {
+        {
+            let ui_reactor = self.ui_reactor.clone();
+            ctx.dispatch_callback(move |ctx, _| {
+                ui_reactor.borrow_mut().on_update(*ctx, delta_time);
+            });
+        }
+
         let Some(main_state) = self.game_state.as_ref() else {
             return;
         };

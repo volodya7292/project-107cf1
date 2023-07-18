@@ -19,6 +19,7 @@ struct ImageImplContext {
     mat_pipe_id: MaterialPipelineId,
 }
 
+#[derive(Clone)]
 pub enum ImageSource {
     Data(image::RgbaImage),
 }
@@ -105,7 +106,7 @@ pub trait ImageImpl {
             CullMode::BACK,
         );
 
-        scene.add_resource(ImageImplContext { mat_pipe_id });
+        scene.register_resource(ImageImplContext { mat_pipe_id });
     }
 
     fn new(
@@ -217,4 +218,53 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_offset), img_offset);
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_scale), img_scale);
     uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, opacity), final_opacity);
+}
+
+pub mod reactive {
+    use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
+    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use engine::ecs::component::ui::UILayoutC;
+    use engine::module::scene::Scene;
+    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use entity_data::EntityId;
+
+    pub fn ui_image<F: Fn(&mut UIScopeContext) + 'static>(
+        id: ScopeId,
+        ctx: &mut UIScopeContext,
+        layout: UILayoutC,
+        source: Option<ImageSource>,
+        fitness: ImageFitness,
+        children: F,
+    ) {
+        let parent = ctx.scope_id().clone();
+        let parent_entity = *ctx
+            .reactor()
+            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+            .unwrap()
+            .value();
+
+        ctx.descend(
+            id,
+            move |ctx| {
+                {
+                    let mut ui_ctx = UIContext::new(*ctx.ctx());
+                    let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                        *UIImage::new(&mut ui_ctx, parent_entity, layout, None, fitness)
+                    });
+                    let mut obj = ui_ctx.scene().object::<UIImage>(&entity_state.value().into());
+
+                    if let Some(source) = source.clone() {
+                        obj.set_image(source);
+                    }
+                }
+                children(ctx);
+            },
+            move |ctx, scope| {
+                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+                let mut scene = ctx.module_mut::<Scene>();
+                scene.remove_object(&*entity);
+            },
+            true,
+        );
+    }
 }

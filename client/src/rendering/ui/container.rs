@@ -82,7 +82,7 @@ pub trait ContainerImpl {
             CullMode::BACK,
         );
 
-        scene.add_resource(ContainerImplContext { mat_pipe_id });
+        scene.register_resource(ContainerImplContext { mat_pipe_id });
     }
 
     fn new(ui_ctx: &mut UIContext, parent: EntityId, layout: UILayoutC) -> ObjectEntityId<Container> {
@@ -148,4 +148,97 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<Container>(&entity.into());
     entry.request_update();
+}
+
+pub mod reactive {
+    use crate::rendering::ui::container::{Container, ContainerAccess, ContainerImpl};
+    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use engine::ecs::component::ui::{Sizing, UILayoutC};
+    use engine::module::scene::Scene;
+    use engine::module::ui::color::Color;
+    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use engine::module::ui::UIObjectEntityImpl;
+    use engine::utils::transition::TransitionTarget;
+    use entity_data::EntityId;
+
+    #[derive(Default)]
+    pub struct ContainerProps {
+        pub layout: UILayoutC,
+        pub background_color: TransitionTarget<Color>,
+    }
+
+    pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
+        id: ScopeId,
+        ctx: &mut UIScopeContext,
+        props: ContainerProps,
+        children_fn: F,
+    ) {
+        let parent = ctx.scope_id().clone();
+        let parent_entity = *ctx
+            .reactor()
+            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+            .unwrap()
+            .value();
+
+        ctx.descend(
+            id,
+            move |ctx| {
+                {
+                    let mut ui_ctx = UIContext::new(*ctx.ctx());
+                    let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                        *Container::new(&mut ui_ctx, parent_entity, Default::default())
+                    });
+                    let mut obj = ui_ctx.scene().object::<Container>(&entity_state.value().into());
+
+                    *obj.layout_mut() = props.layout;
+                    obj.set_background_color(props.background_color.into());
+                }
+                children_fn(ctx);
+            },
+            move |ctx, scope| {
+                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+                let mut scene = ctx.module_mut::<Scene>();
+                scene.remove_object(&*entity);
+            },
+            true,
+        );
+    }
+
+    pub fn expander(id: ScopeId, ctx: &mut UIScopeContext, fraction: f32) {
+        container(
+            id,
+            ctx,
+            ContainerProps {
+                layout: UILayoutC::new()
+                    .with_width(Sizing::Grow(fraction))
+                    .with_height(Sizing::Grow(fraction)),
+                ..Default::default()
+            },
+            |_| {},
+        );
+    }
+
+    pub fn width_spacer(id: ScopeId, ctx: &mut UIScopeContext, width: f32) {
+        container(
+            id,
+            ctx,
+            ContainerProps {
+                layout: UILayoutC::new().with_min_width(width),
+                ..Default::default()
+            },
+            |_| {},
+        );
+    }
+
+    pub fn height_spacer(id: ScopeId, ctx: &mut UIScopeContext, height: f32) {
+        container(
+            id,
+            ctx,
+            ContainerProps {
+                layout: UILayoutC::new().with_min_height(height),
+                ..Default::default()
+            },
+            |_| {},
+        );
+    }
 }

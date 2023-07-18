@@ -5,7 +5,7 @@ use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::StyledString;
 use engine::ecs::component::ui::{
-    BasicEventCallback, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
+    BasicEventCallback2, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
@@ -106,7 +106,7 @@ pub trait FancyButtonImpl {
             CullMode::BACK,
         );
 
-        scene.add_resource(FancyButtonImplContext { mat_pipe_id });
+        scene.register_resource(FancyButtonImplContext { mat_pipe_id });
     }
 
     fn new(
@@ -114,7 +114,7 @@ pub trait FancyButtonImpl {
         parent: EntityId,
         layout: UILayoutC,
         text: StyledString,
-        on_click: BasicEventCallback,
+        on_click: impl BasicEventCallback2,
     ) -> ObjectEntityId<FancyButton> {
         let impl_ctx = ui_ctx.scene.resource::<FancyButtonImplContext>();
 
@@ -201,4 +201,58 @@ fn on_cursor_leave(entity: &EntityId, ctx: &EngineContext) {
         .text_color
         .retarget(TransitionTarget::new(*state.text.style().color(), 0.2));
     entry.request_update();
+}
+
+pub mod reactive {
+    use crate::rendering::ui::container::ContainerImpl;
+    use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
+    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use engine::ecs::component::simple_text::StyledString;
+    use engine::ecs::component::ui::{BasicEventCallback2, UILayoutC};
+    use engine::module::scene::Scene;
+    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use entity_data::EntityId;
+    use std::sync::Arc;
+
+    pub fn fancy_button(
+        id: ScopeId,
+        ctx: &mut UIScopeContext,
+        layout: UILayoutC,
+        text: StyledString,
+        on_click: impl BasicEventCallback2,
+    ) {
+        let parent = ctx.scope_id().clone();
+        let parent_entity = *ctx
+            .reactor()
+            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+            .unwrap()
+            .value();
+        let on_click = Arc::new(on_click);
+
+        ctx.descend(
+            id,
+            move |ctx| {
+                let mut ui_ctx = UIContext::new(*ctx.ctx());
+                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                    let on_click = on_click.clone();
+                    *FancyButton::new(
+                        &mut ui_ctx,
+                        parent_entity,
+                        layout,
+                        Default::default(),
+                        move |entity, ctx| on_click(entity, ctx),
+                    )
+                });
+                let mut obj = ui_ctx.scene().object::<FancyButton>(&entity_state.value().into());
+
+                obj.set_text(text.clone());
+            },
+            move |ctx, scope| {
+                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+                let mut scene = ctx.module_mut::<Scene>();
+                scene.remove_object(&*entity);
+            },
+            true,
+        );
+    }
 }

@@ -1,9 +1,9 @@
 use crate::utils::transition::AnimatedValue;
 use crate::EngineContext;
 use common::glm::Vec2;
-use common::types::IndexSet;
 use entity_data::EntityId;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 pub type Factor = f32;
 
@@ -211,7 +211,7 @@ impl Default for Visibility {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
@@ -269,6 +269,10 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_grow(self) -> Self {
+        self.with_width(Sizing::Grow(1.0)).with_height(Sizing::Grow(1.0))
+    }
+
     pub fn with_min_width(mut self, min_width: f32) -> Self {
         self.constraints[0].min = min_width;
         self
@@ -286,6 +290,11 @@ impl UILayoutC {
 
     pub fn with_max_height(mut self, max_height: f32) -> Self {
         self.constraints[1].max = max_height;
+        self
+    }
+
+    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility = visibility;
         self
     }
 
@@ -357,6 +366,9 @@ impl UILayoutCacheC {
 
 pub type BasicEventCallback = fn(&EntityId, &EngineContext);
 
+pub trait BasicEventCallback2: Fn(&EntityId, &EngineContext) + Send + Sync + 'static {}
+impl<F: Fn(&EntityId, &EngineContext) + Send + Sync + 'static> BasicEventCallback2 for F {}
+
 #[derive(Copy, Clone, Eq)]
 pub struct BasicEventCallbackExt(pub fn(&EntityId, &EngineContext));
 
@@ -375,12 +387,39 @@ impl Hash for BasicEventCallbackExt {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct CallbackSet {
+    funcs: Vec<Arc<dyn Fn(&EntityId, &EngineContext) + Send + Sync>>,
+}
+
+impl CallbackSet {
+    pub fn from_single(func: impl Fn(&EntityId, &EngineContext) + Send + Sync + 'static) -> Self {
+        Self {
+            funcs: vec![Arc::new(func)],
+        }
+    }
+
+    pub fn add(&mut self, func: impl Fn(&EntityId, &EngineContext) + Send + Sync + 'static) {
+        self.funcs.push(Arc::new(func));
+    }
+
+    pub fn extend(&mut self, other: &CallbackSet) {
+        self.funcs.extend(other.funcs.iter().cloned());
+    }
+
+    pub fn call_all(&self, entity: &EntityId, ctx: &EngineContext) {
+        for func in &self.funcs {
+            func(entity, ctx);
+        }
+    }
+}
+
 pub struct UIEventHandlerC {
-    pub on_cursor_enter: IndexSet<BasicEventCallbackExt>,
-    pub on_cursor_leave: IndexSet<BasicEventCallbackExt>,
-    pub on_mouse_press: IndexSet<BasicEventCallbackExt>,
-    pub on_mouse_release: IndexSet<BasicEventCallbackExt>,
-    pub on_click: IndexSet<BasicEventCallbackExt>,
+    pub on_cursor_enter: CallbackSet,
+    pub on_cursor_leave: CallbackSet,
+    pub on_mouse_press: CallbackSet,
+    pub on_mouse_release: CallbackSet,
+    pub on_click: CallbackSet,
     pub enabled: bool,
 }
 
@@ -414,38 +453,34 @@ impl UIEventHandlerC {
 
     pub fn passthrough() -> Self {
         Self {
-            on_cursor_enter: Default::default(),
-            on_cursor_leave: Default::default(),
-            on_mouse_press: Default::default(),
-            on_mouse_release: Default::default(),
-            on_click: Default::default(),
             enabled: false,
+            ..Default::default()
         }
     }
 
     pub fn from_impl<I: UIEventHandlerI + 'static>() -> Self {
         Self {
-            on_cursor_enter: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
-            on_cursor_leave: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
-            on_mouse_press: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
-            on_mouse_release: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
-            on_click: IndexSet::from_iter([BasicEventCallbackExt(I::on_cursor_enter)]),
+            on_cursor_enter: CallbackSet::from_single(I::on_cursor_enter),
+            on_cursor_leave: CallbackSet::from_single(I::on_cursor_enter),
+            on_mouse_press: CallbackSet::from_single(I::on_cursor_enter),
+            on_mouse_release: CallbackSet::from_single(I::on_cursor_enter),
+            on_click: CallbackSet::from_single(I::on_cursor_enter),
             enabled: true,
         }
     }
 
     pub fn add_on_cursor_enter(mut self, handler: BasicEventCallback) -> Self {
-        self.on_cursor_enter.insert(BasicEventCallbackExt(handler));
+        self.on_cursor_enter.add(handler);
         self
     }
 
     pub fn add_on_cursor_leave(mut self, handler: BasicEventCallback) -> Self {
-        self.on_cursor_leave.insert(BasicEventCallbackExt(handler));
+        self.on_cursor_leave.add(handler);
         self
     }
 
-    pub fn add_on_click(mut self, handler: BasicEventCallback) -> Self {
-        self.on_click.insert(BasicEventCallbackExt(handler));
+    pub fn add_on_click(mut self, handler: impl BasicEventCallback2) -> Self {
+        self.on_click.add(handler);
         self
     }
 }

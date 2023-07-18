@@ -64,11 +64,10 @@ impl EngineModule for UIInteractionManager {
         macro_rules! ui_invoke_callback_set {
             ($callback_set: expr, $entity_id: expr) => {
                 let entity_id = $entity_id;
-                for &callback in &$callback_set {
-                    ctx.dispatch_callback(move |ctx, _| {
-                        callback.0(&entity_id, ctx);
-                    });
-                }
+                let callback_set = $callback_set.clone();
+                ctx.dispatch_callback(move |ctx, _| {
+                    callback_set.call_all(&entity_id, ctx);
+                });
             };
         }
 
@@ -87,22 +86,22 @@ impl EngineModule for UIInteractionManager {
                 });
 
                 if self.curr_hover_entity != new_hover_entity {
-                    if let Some(handler) = scene
-                        .entry_checked(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_leave.clone())
-                    {
+                    if let Some(e) = scene.entry_checked(&self.curr_hover_entity) {
                         ui_invoke_callback_set!(global_handler.on_cursor_leave, self.curr_hover_entity);
-                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
+                        ui_invoke_callback_set!(
+                            &e.get::<UIEventHandlerC>().on_cursor_leave,
+                            self.curr_hover_entity
+                        );
                     }
 
                     self.curr_hover_entity = new_hover_entity;
 
-                    if let Some(handler) = scene
-                        .entry_checked(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_cursor_enter.clone())
-                    {
+                    if let Some(e) = scene.entry_checked(&self.curr_hover_entity) {
                         ui_invoke_callback_set!(global_handler.on_cursor_enter, self.curr_hover_entity);
-                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
+                        ui_invoke_callback_set!(
+                            e.get::<UIEventHandlerC>().on_cursor_enter,
+                            self.curr_hover_entity
+                        );
                     }
                 }
             }
@@ -114,32 +113,32 @@ impl EngineModule for UIInteractionManager {
                 if state == ElementState::Pressed {
                     self.mouse_button_press_entity = self.curr_hover_entity;
 
-                    if let Some(handler) = scene
-                        .entry_checked(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_press.clone())
-                    {
+                    if let Some(e) = scene.entry_checked(&self.curr_hover_entity) {
                         ui_invoke_callback_set!(global_handler.on_mouse_press, self.curr_hover_entity);
-                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
+                        ui_invoke_callback_set!(
+                            e.get::<UIEventHandlerC>().on_mouse_press,
+                            self.curr_hover_entity
+                        );
                     }
                 } else if state == ElementState::Released {
                     let on_release_entity = self.curr_hover_entity;
 
                     if self.mouse_button_press_entity == on_release_entity {
-                        if let Some(handler) = scene
-                            .entry_checked(&self.curr_hover_entity)
-                            .map(|e| e.get::<UIEventHandlerC>().on_click.clone())
-                        {
+                        if let Some(e) = scene.entry_checked(&self.curr_hover_entity) {
                             ui_invoke_callback_set!(global_handler.on_click, self.curr_hover_entity);
-                            ui_invoke_callback_set!(handler, self.curr_hover_entity);
+                            ui_invoke_callback_set!(
+                                e.get::<UIEventHandlerC>().on_click.clone(),
+                                self.curr_hover_entity
+                            );
                         }
                     }
 
-                    if let Some(handler) = scene
-                        .entry_checked(&self.curr_hover_entity)
-                        .map(|e| e.get::<UIEventHandlerC>().on_mouse_release.clone())
-                    {
+                    if let Some(e) = scene.entry_checked(&self.curr_hover_entity) {
                         ui_invoke_callback_set!(global_handler.on_mouse_release, self.curr_hover_entity);
-                        ui_invoke_callback_set!(handler, self.curr_hover_entity);
+                        ui_invoke_callback_set!(
+                            e.get::<UIEventHandlerC>().on_mouse_release.clone(),
+                            self.curr_hover_entity
+                        );
                     }
 
                     self.mouse_button_press_entity = EntityId::NULL;

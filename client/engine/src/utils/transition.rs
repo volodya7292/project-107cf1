@@ -52,6 +52,12 @@ impl<T: Interpolatable> TransitionTarget<T> {
     }
 }
 
+impl<T: Interpolatable + Default> Default for TransitionTarget<T> {
+    fn default() -> Self {
+        Self::immediate(Default::default())
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct AnimatedValue<T: Interpolatable> {
     start: T,
