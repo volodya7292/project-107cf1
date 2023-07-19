@@ -41,7 +41,7 @@ pub const MO_SEQCST: atomic::Ordering = atomic::Ordering::SeqCst;
 #[macro_export]
 macro_rules! make_static_id {
     () => {
-        format!("{}-{}-{}", std::file!(), std::line!(), std::column!())
+        concat!(std::file!(), "-", std::line!(), "-", std::column!())
     };
     ($additional_id: expr) => {
         format!(

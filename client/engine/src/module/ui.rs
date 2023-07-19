@@ -92,23 +92,6 @@ impl<E: UIState> UIObject<E> {
         self.ui_event_handler.enabled = false;
         self
     }
-
-    pub fn add_event_handler(mut self, handler: UIEventHandlerC) -> Self {
-        self.ui_event_handler
-            .on_cursor_enter
-            .extend(&handler.on_cursor_enter);
-        self.ui_event_handler
-            .on_cursor_leave
-            .extend(&handler.on_cursor_leave);
-        self.ui_event_handler
-            .on_mouse_press
-            .extend(&handler.on_mouse_press);
-        self.ui_event_handler
-            .on_mouse_release
-            .extend(&handler.on_mouse_release);
-        self.ui_event_handler.on_click.extend(&handler.on_click);
-        self
-    }
 }
 
 impl<E: UIState> SceneObject for UIObject<E> {
@@ -128,6 +111,7 @@ pub trait UIObjectEntityImpl<S: UIState> {
     fn state_mut(&mut self) -> &mut S;
     fn layout(&self) -> &UILayoutC;
     fn layout_mut(&mut self) -> &mut UILayoutC;
+    fn event_handler_mut(&mut self) -> &mut UIEventHandlerC;
     fn layout_cache(&self) -> &UILayoutCacheC;
 }
 
@@ -146,6 +130,10 @@ impl<S: UIState> UIObjectEntityImpl<S> for EntityAccess<'_, UIObject<S>> {
 
     fn layout_mut(&mut self) -> &mut UILayoutC {
         self.get_mut::<UILayoutC>()
+    }
+
+    fn event_handler_mut(&mut self) -> &mut UIEventHandlerC {
+        self.get_mut::<UIEventHandlerC>()
     }
 
     fn layout_cache(&self) -> &UILayoutCacheC {

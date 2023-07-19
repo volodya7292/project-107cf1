@@ -255,7 +255,9 @@ impl DepthStage {
                         });
                     }
 
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
+                    let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
+                        continue;
+                    };
                     let renderable = &ctx.renderables[&renderable_id];
 
                     let (cl, pipeline_id) = if render_config.translucent {
@@ -339,7 +341,9 @@ impl DepthStage {
                         }
                     }
 
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
+                    let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
+                        continue;
+                    };
                     let renderable = &ctx.renderables[&renderable_id];
 
                     let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();

@@ -62,12 +62,14 @@ impl EngineModule for UIInteractionManager {
         let global_handler = &self.global_event_handler;
 
         macro_rules! ui_invoke_callback_set {
-            ($callback_set: expr, $entity_id: expr) => {
+            ($callback: expr, $entity_id: expr) => {
                 let entity_id = $entity_id;
-                let callback_set = $callback_set.clone();
-                ctx.dispatch_callback(move |ctx, _| {
-                    callback_set.call_all(&entity_id, ctx);
-                });
+                let callback = $callback.clone();
+                if let Some(callback) = $callback.clone() {
+                    ctx.dispatch_callback(move |ctx, _| {
+                        callback(&entity_id, ctx);
+                    });
+                }
             };
         }
 

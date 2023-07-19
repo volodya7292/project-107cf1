@@ -1,258 +1,132 @@
-use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
-use crate::rendering::ui::UIContext;
+use crate::game::EngineCtxGameExt;
+use crate::rendering::ui::container::ContainerBackground;
+use crate::rendering::ui::container::{container, ContainerProps};
+use crate::rendering::ui::text::reactive::ui_text;
+use crate::rendering::ui::text::UITextImpl;
+use crate::rendering::ui::UICallbacks;
 use common::glm::Vec4;
-use common::memoffset::offset_of;
-use engine::ecs::component::render_config::RenderLayer;
+use common::make_static_id;
 use engine::ecs::component::simple_text::StyledString;
-use engine::ecs::component::ui::{
-    BasicEventCallback2, RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC,
-};
-use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
-use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
+use engine::ecs::component::ui::{BasicEventCallback2, UILayoutC};
+use engine::module::main_renderer::MainRenderer;
+use engine::module::scene::Scene;
 use engine::module::ui::color::Color;
-use engine::module::ui::UIState;
-use engine::module::ui::{UIObject, UIObjectEntityImpl};
+use engine::module::ui::reactive::UIScopeContext;
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::PrimitiveTopology;
 use engine::EngineContext;
 use entity_data::EntityId;
-
-struct FancyButtonImplContext {
-    mat_pipe_id: MaterialPipelineId,
-}
-
-#[derive(Clone)]
-pub struct FancyButtonState {
-    text_entity: ObjectEntityId<UIText>,
-    text: StyledString,
-    text_color: AnimatedValue<Color>,
-    background_color: Color,
-    active_color: Color,
-}
+use std::sync::Arc;
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 struct UniformData {
     background_color: Vec4,
-    clip_rect: RectUniformData,
-    opacity: f32,
 }
 
-impl UIState for FancyButtonState {
-    fn on_update(entity: &EntityId, ctx: &EngineContext, dt: f64) {
-        let mut scene = ctx.module_mut::<Scene>();
-        let mut entry = scene.object::<FancyButton>(&(*entity).into());
-        let state = entry.state_mut();
-        let mut update_needed = false;
+const DEFAULT_NORMAL_COLOR: Color = Color::grayscale(0.2);
+const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
-        if !state.text_color.advance(dt) {
-            update_needed = true;
-        }
+pub fn register(ctx: &EngineContext) {
+    let mut renderer = ctx.module_mut::<MainRenderer>();
+    let scene = ctx.module_mut::<Scene>();
 
-        let state = state.clone();
+    let vertex = renderer
+        .device()
+        .create_vertex_shader(
+            include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            &[],
+            "ui_rect.vert",
+        )
+        .unwrap();
+    let pixel = renderer
+        .device()
+        .create_pixel_shader(
+            include_bytes!("../../../res/shaders/fancy_button.frag.spv"),
+            "fancy_button.frag",
+        )
+        .unwrap();
 
-        let raw_uniform_data = entry.get_mut::<UniformDataC>();
-        raw_uniform_data
-            .copy_from_with_offset(offset_of!(UniformData, background_color), state.background_color);
+    let mat_pipe_id = renderer.register_material_pipeline(
+        &[vertex, pixel],
+        PrimitiveTopology::TRIANGLE_STRIP,
+        CullMode::BACK,
+    );
 
-        if update_needed {
-            entry.request_update();
-        }
-
-        drop(entry);
-
-        let mut text_obj = scene.object::<UIText>(&state.text_entity);
-        text_obj.set_text(
-            state
-                .text
-                .clone()
-                .with_style(state.text.style().clone().with_color(*state.text_color.current())),
-        );
-    }
+    scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
 }
 
-pub type FancyButton = UIObject<FancyButtonState>;
+pub fn fancy_button(
+    local_id: &str,
+    ctx: &mut UIScopeContext,
+    layout: UILayoutC,
+    text: StyledString,
+    on_click: impl BasicEventCallback2,
+) {
+    let on_click = Arc::new(on_click);
 
-pub trait FancyButtonImpl {
-    const DEFAULT_NORMAL_COLOR: Color = Color::grayscale(0.2);
-    const DEFAULT_ACTIVE_COLOR: Color = Color::grayscale(0.8);
-    const ACTIVE_TEXT_COLOR: Color = Color::grayscale(0.8);
+    let uniform_data = UniformData {
+        background_color: DEFAULT_NORMAL_COLOR.into_raw(),
+    };
 
-    fn register(ctx: &EngineContext) {
-        let mut renderer = ctx.module_mut::<MainRenderer>();
-        let scene = ctx.module_mut::<Scene>();
+    let text_color = ctx.request_state(format!("{}_{}", local_id, "text_color"), || {
+        AnimatedValue::immediate(*text.style().color())
+    });
+    let curr_text_color = *text.style().color();
 
-        let vertex = renderer
-            .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
-                &[],
-                "ui_rect.vert",
-            )
-            .unwrap();
-        let pixel = renderer
-            .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/fancy_button.frag.spv"),
-                "fancy_button.frag",
-            )
-            .unwrap();
+    let text_color2 = text_color.clone();
+    let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
+        let app = ctx.app();
+        let mut reactor = app.ui_reactor().borrow_mut();
 
-        let mat_pipe_id = renderer.register_material_pipeline(
-            &[vertex, pixel],
-            PrimitiveTopology::TRIANGLE_STRIP,
-            CullMode::BACK,
-        );
+        let mut active_color = curr_text_color.into_raw();
+        active_color.x *= 1.6;
+        active_color.y *= 1.6;
+        active_color.z *= 1.6;
 
-        scene.register_resource(FancyButtonImplContext { mat_pipe_id });
-    }
+        reactor.set_state(&text_color2, |prev| {
+            let mut new = prev.clone();
+            new.retarget(TransitionTarget::new(active_color.into(), 0.2));
+            new
+        });
+    });
 
-    fn new(
-        ui_ctx: &mut UIContext,
-        parent: EntityId,
-        layout: UILayoutC,
-        text: StyledString,
-        on_click: impl BasicEventCallback2,
-    ) -> ObjectEntityId<FancyButton> {
-        let impl_ctx = ui_ctx.scene.resource::<FancyButtonImplContext>();
+    let text_color2 = text_color.clone();
+    let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
+        let app = ctx.app();
+        let mut reactor = app.ui_reactor().borrow_mut();
 
-        let surface_obj = FancyButton::new_raw(
+        reactor.set_state(&text_color2, |prev| {
+            let mut new = prev.clone();
+            new.retarget(TransitionTarget::new(curr_text_color, 0.2));
+            new
+        });
+    });
+
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
             layout,
-            FancyButtonState {
-                text_entity: Default::default(),
-                text: text.clone(),
-                text_color: (*text.style().color()).into(),
-                background_color: Self::DEFAULT_NORMAL_COLOR.into(),
-                active_color: Self::DEFAULT_ACTIVE_COLOR,
-            },
-        )
-        .with_renderer(
-            MeshRenderConfigC::new(impl_ctx.mat_pipe_id, true).with_render_layer(RenderLayer::Overlay),
-        )
-        .with_mesh(VertexMeshC::without_data(4, 1))
-        .with_scene_event_handler(
-            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-        )
-        .add_event_handler(
-            UIEventHandlerC::new()
-                .add_on_cursor_enter(on_cursor_enter)
-                .add_on_cursor_leave(on_cursor_leave)
-                .add_on_click(on_click),
-        );
+            background: Some(ContainerBackground::new_raw(MATERIAL_PIPE_RES_NAME, uniform_data)),
+            callbacks: UICallbacks::new()
+                .with_on_click(on_click.clone())
+                .with_on_cursor_enter(on_cursor_enter)
+                .with_on_cursor_leave(on_cursor_leave),
+            ..Default::default()
+        },
+        move |ctx| {
+            let text_color = ctx.subscribe(&text_color);
 
-        let btn_entity = ui_ctx.scene.add_object(Some(parent), surface_obj).unwrap();
-        let text_entity = UIText::new(ui_ctx, *btn_entity, text);
+            ctx.drive_transition(&text_color);
 
-        let mut surface_obj = ui_ctx.scene.object::<FancyButton>(&btn_entity);
-        surface_obj.get_mut::<FancyButtonState>().text_entity = text_entity;
-        drop(surface_obj);
-
-        btn_entity
-    }
-}
-
-impl FancyButtonImpl for FancyButton {}
-
-pub trait FancyButtonAccess {
-    fn set_text(&mut self, text: StyledString);
-}
-
-impl FancyButtonAccess for EntityAccess<'_, FancyButton> {
-    fn set_text(&mut self, text: StyledString) {
-        self.state_mut().text_color = (*text.style().color()).into();
-        self.get_mut::<FancyButtonState>().text = text;
-        self.request_update();
-    }
-}
-
-fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.entry(entity);
-    let clip_rect = *entry.get::<UILayoutCacheC>().calculated_clip_rect();
-    let final_opacity = entry.get::<UILayoutCacheC>().final_opacity();
-    let raw_uniform_data = entry.get_mut::<UniformDataC>();
-    raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
-    raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
-}
-
-fn on_cursor_enter(entity: &EntityId, ctx: &EngineContext) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.object::<FancyButton>(&entity.into());
-    let state = entry.state_mut();
-
-    let mut active_color = state.text.style().color().into_raw();
-    active_color.x *= 1.6;
-    active_color.y *= 1.6;
-    active_color.z *= 1.6;
-    state
-        .text_color
-        .retarget(TransitionTarget::new(active_color.into(), 0.2));
-
-    entry.request_update();
-}
-
-fn on_cursor_leave(entity: &EntityId, ctx: &EngineContext) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.object::<FancyButton>(&entity.into());
-    let state = entry.state_mut();
-    state
-        .text_color
-        .retarget(TransitionTarget::new(*state.text.style().color(), 0.2));
-    entry.request_update();
-}
-
-pub mod reactive {
-    use crate::rendering::ui::container::ContainerImpl;
-    use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonAccess, FancyButtonImpl};
-    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
-    use engine::ecs::component::simple_text::StyledString;
-    use engine::ecs::component::ui::{BasicEventCallback2, UILayoutC};
-    use engine::module::scene::Scene;
-    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
-    use entity_data::EntityId;
-    use std::sync::Arc;
-
-    pub fn fancy_button(
-        id: ScopeId,
-        ctx: &mut UIScopeContext,
-        layout: UILayoutC,
-        text: StyledString,
-        on_click: impl BasicEventCallback2,
-    ) {
-        let parent = ctx.scope_id().clone();
-        let parent_entity = *ctx
-            .reactor()
-            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
-            .unwrap()
-            .value();
-        let on_click = Arc::new(on_click);
-
-        ctx.descend(
-            id,
-            move |ctx| {
-                let mut ui_ctx = UIContext::new(*ctx.ctx());
-                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                    let on_click = on_click.clone();
-                    *FancyButton::new(
-                        &mut ui_ctx,
-                        parent_entity,
-                        layout,
-                        Default::default(),
-                        move |entity, ctx| on_click(entity, ctx),
-                    )
-                });
-                let mut obj = ui_ctx.scene().object::<FancyButton>(&entity_state.value().into());
-
-                obj.set_text(text.clone());
-            },
-            move |ctx, scope| {
-                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
-                let mut scene = ctx.module_mut::<Scene>();
-                scene.remove_object(&*entity);
-            },
-            true,
-        );
-    }
+            ui_text(
+                make_static_id!(),
+                ctx,
+                text.clone()
+                    .with_style(text.style().clone().with_color(*text_color.current())),
+            );
+        },
+    );
 }

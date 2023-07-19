@@ -5,8 +5,6 @@ use crate::game::ui::ui_root_states;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::container::{Container, ContainerAccess};
-use crate::rendering::ui::fancy_button::{FancyButtonAccess, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageAccess, ImageImpl};
 use crate::rendering::ui::text::{TextAccess, UITextImpl};
 use crate::rendering::ui::{register_ui_elements, UIResources};
@@ -90,7 +88,6 @@ pub struct MainApp {
     cursor_grab: bool,
     root_entity: EntityId,
     ui_reactor: Lrc<UIReactor>,
-    main_menu_entity: ObjectEntityId<Container>,
 }
 
 impl MainApp {
@@ -166,7 +163,6 @@ impl MainApp {
             cursor_grab: true,
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
-            main_menu_entity: Default::default(),
         };
         ctx.register_module(game);
 
@@ -201,6 +197,10 @@ impl MainApp {
 
     pub fn resources(&self) -> &Arc<ResourceFile> {
         &self.resources
+    }
+
+    pub fn ui_reactor(&self) -> &Lrc<UIReactor> {
+        &self.ui_reactor
     }
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {

@@ -344,7 +344,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     }
 
     /// Performs descent of `scope` if the `parent` hasn't been descended earlier.
-    pub fn descend<F, R>(&mut self, scope_name: String, children_fn: F, on_remove_fn: R, force_rebuild: bool)
+    pub fn descend<F, R>(&mut self, scope_name: &str, children_fn: F, on_remove_fn: R, force_rebuild: bool)
     where
         F: Fn(&mut UIScopeContext) + 'static,
         R: FnOnce(&EngineContext, &UIScope) + 'static,

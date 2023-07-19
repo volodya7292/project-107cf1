@@ -1,7 +1,7 @@
 use common::glm::Vec4;
 
 /// `r`,`g`,`b` are in range [0; inf]; `a` is in range [0; 1].
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq)]
 pub struct Color(Vec4);
 
 impl Color {

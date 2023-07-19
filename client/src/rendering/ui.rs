@@ -4,13 +4,12 @@ pub mod image;
 pub mod text;
 
 use crate::game::MainApp;
-use crate::rendering::ui::container::{Container, ContainerImpl};
-use crate::rendering::ui::fancy_button::{FancyButton, FancyButtonImpl};
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
 use ::image::ImageResult;
 use common::lrc::OwnedRefMut;
 use common::resource_file::{ResourceFile, ResourceRef};
+use engine::ecs::component::ui::BasicEventCallback2;
 use engine::module::scene::Scene;
 use engine::module::EngineModule;
 use engine::EngineContext;
@@ -64,8 +63,53 @@ impl<'a> UIContext<'a> {
 }
 
 pub fn register_ui_elements(ctx: &EngineContext) {
-    Container::register(ctx);
+    container::background::register_backgrounds(ctx);
     UIText::register(ctx);
     UIImage::register(ctx);
-    FancyButton::register(ctx);
+    fancy_button::register(ctx);
+}
+
+pub struct UICallbacks {
+    pub interaction_enabled: bool,
+    pub on_click: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
+    pub on_cursor_enter: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
+    pub on_cursor_leave: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
+}
+
+impl UICallbacks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_on_click(mut self, on_click: Arc<dyn BasicEventCallback2<Output = ()>>) -> Self {
+        self.on_click = Some(on_click);
+        self
+    }
+
+    pub fn with_on_cursor_enter(
+        mut self,
+        on_cursor_enter: Arc<dyn BasicEventCallback2<Output = ()>>,
+    ) -> Self {
+        self.on_cursor_enter = Some(on_cursor_enter);
+        self
+    }
+
+    pub fn with_on_cursor_leave(
+        mut self,
+        on_cursor_leave: Arc<dyn BasicEventCallback2<Output = ()>>,
+    ) -> Self {
+        self.on_cursor_leave = Some(on_cursor_leave);
+        self
+    }
+}
+
+impl Default for UICallbacks {
+    fn default() -> Self {
+        Self {
+            interaction_enabled: true,
+            on_click: None,
+            on_cursor_enter: None,
+            on_cursor_leave: None,
+        }
+    }
 }

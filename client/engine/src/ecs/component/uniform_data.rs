@@ -24,6 +24,12 @@ impl UniformDataC {
     }
 
     #[inline]
+    pub fn copy_from_slice(&mut self, dst_offset: usize, slice: &[u8]) {
+        let offset = MODEL_MATRIX_OFFSET + MODEL_MATRIX_SIZE + dst_offset;
+        self.0[offset..(offset + slice.len())].copy_from_slice(slice);
+    }
+
+    #[inline]
     pub fn copy_from<T: Copy>(&mut self, value: T) {
         self.copy_from_with_offset(0, value)
     }

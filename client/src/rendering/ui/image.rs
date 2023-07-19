@@ -229,7 +229,7 @@ pub mod reactive {
     use entity_data::EntityId;
 
     pub fn ui_image<F: Fn(&mut UIScopeContext) + 'static>(
-        id: ScopeId,
+        local_id: &str,
         ctx: &mut UIScopeContext,
         layout: UILayoutC,
         source: Option<ImageSource>,
@@ -244,7 +244,7 @@ pub mod reactive {
             .value();
 
         ctx.descend(
-            id,
+            local_id,
             move |ctx| {
                 {
                     let mut ui_ctx = UIContext::new(*ctx.ctx());

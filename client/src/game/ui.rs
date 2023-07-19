@@ -1,9 +1,9 @@
 use crate::game::EngineCtxGameExt;
 use crate::game::MainApp;
-use crate::rendering::ui::container::reactive::{
-    container, expander, height_spacer, width_spacer, ContainerProps,
+use crate::rendering::ui::container::{
+    background, container, expander, height_spacer, width_spacer, ContainerProps,
 };
-use crate::rendering::ui::fancy_button::reactive::fancy_button;
+use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::image::reactive::ui_image;
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::text::reactive::ui_text;
@@ -17,9 +17,9 @@ use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
 
-fn menu_button(id: ScopeId, ctx: &mut UIScopeContext, text: &str, on_click: impl BasicEventCallback2) {
+fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl BasicEventCallback2) {
     fancy_button(
-        id,
+        local_id,
         ctx,
         UILayoutC::new()
             .with_min_width(240.0)
@@ -35,13 +35,13 @@ fn menu_button(id: ScopeId, ctx: &mut UIScopeContext, text: &str, on_click: impl
 }
 
 fn world_control_button(
-    id: ScopeId,
+    local_id: &str,
     ctx: &mut UIScopeContext,
     text: &str,
     on_click: impl BasicEventCallback2,
 ) {
     fancy_button(
-        id,
+        local_id,
         ctx,
         UILayoutC::new()
             .with_min_height(24.0)
@@ -56,15 +56,15 @@ fn world_control_button(
     );
 }
 
-fn world_item(id: ScopeId, ctx: &mut UIScopeContext, name: String) {
+fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
     container(
-        id,
+        local_id,
         ctx,
         ContainerProps {
             layout: UILayoutC::column()
                 .with_width(Sizing::Grow(1.0))
                 .with_padding(Padding::equal(10.0)),
-            background_color: Color::WHITE.with_alpha(0.02).into(),
+            background: Some(background::solid_color(Color::WHITE.with_alpha(0.02))),
             ..Default::default()
         },
         move |ctx| {
@@ -108,8 +108,8 @@ fn world_selection_list(ctx: &mut UIScopeContext) {
             drop(ui_ctx);
 
             for (i, name) in world_names.iter().enumerate() {
-                world_item(make_static_id!(i), ctx, name.clone());
-                height_spacer(make_static_id!(i), ctx, 10.0);
+                world_item(&make_static_id!(i), ctx, name.clone());
+                height_spacer(&make_static_id!(i), ctx, 10.0);
             }
         },
     );

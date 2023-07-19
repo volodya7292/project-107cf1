@@ -1,4 +1,3 @@
-use crate::rendering::ui::container::{Container, ContainerImpl};
 use crate::rendering::ui::UIContext;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
@@ -23,7 +22,7 @@ struct TextImplContext {
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
-pub struct ObjectUniformData {
+pub struct UniformData {
     clip_rect: RectUniformData,
     opacity: f32,
     inner_shadow_intensity: f32,
@@ -31,7 +30,7 @@ pub struct ObjectUniformData {
 
 #[derive(Clone)]
 pub struct TextState {
-    wrapper_entity: ObjectEntityId<Container>,
+    wrapper_entity: ObjectEntityId<UIObject<()>>,
     raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
     wrap: bool,
@@ -79,10 +78,10 @@ impl UIState for TextState {
         simple_text.text = state.text;
 
         let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
-        uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, clip_rect), rect_data);
-        uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, opacity), final_opacity);
+        uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
+        uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
         uniform_data.copy_from_with_offset(
-            offset_of!(ObjectUniformData, inner_shadow_intensity),
+            offset_of!(UniformData, inner_shadow_intensity),
             state.inner_shadow_intensity,
         );
         drop(raw_text_entry);
@@ -138,15 +137,15 @@ pub trait UITextImpl {
         );
 
         let main_entity = ui_ctx.scene.add_object(Some(parent), main_obj).unwrap();
-        let wrapper_entity = Container::new(
-            ui_ctx,
-            *main_entity,
+        let wrapper_obj = UIObject::new_raw(
             UILayoutC::new()
                 .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
                 .with_width(Sizing::FitContent)
                 .with_height(Sizing::FitContent)
                 .with_shader_inverted_y(true),
+            (),
         );
+        let wrapper_entity = ui_ctx.scene.add_object(Some(*main_entity), wrapper_obj).unwrap();
         {
             let mut wrapper = ui_ctx.scene().object(&wrapper_entity);
             wrapper.get_mut::<UIEventHandlerC>().enabled = false;
@@ -205,10 +204,10 @@ pub mod reactive {
     use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
     use engine::ecs::component::simple_text::StyledString;
     use engine::module::scene::Scene;
-    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
-    pub fn ui_text(id: ScopeId, ctx: &mut UIScopeContext, text: StyledString) {
+    pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, text: StyledString) {
         let parent = ctx.scope_id().clone();
         let parent_entity = *ctx
             .reactor()
@@ -217,7 +216,7 @@ pub mod reactive {
             .value();
 
         ctx.descend(
-            id,
+            local_name,
             move |ctx| {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {

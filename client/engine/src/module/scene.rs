@@ -40,6 +40,7 @@ pub struct Scene {
     entity_updaters: HashMap<EntityId, SmallVec<[OnUpdateCallback; 4]>>,
     component_changes: HashMap<TypeId, ComponentChangesHandle>,
     resources: RefCell<HashMap<TypeId, Lrc<dyn Resource>>>,
+    named_resources: RefCell<HashMap<String, Lrc<dyn Resource>>>,
 }
 
 impl Scene {
@@ -52,6 +53,7 @@ impl Scene {
             entity_updaters: HashMap::with_capacity(1024),
             component_changes: Default::default(),
             resources: RefCell::new(Default::default()),
+            named_resources: RefCell::new(Default::default()),
         }
     }
 
@@ -61,8 +63,19 @@ impl Scene {
             .insert(TypeId::of::<R>(), Lrc::wrap(resource));
     }
 
+    pub fn register_named_resource<R: Resource>(&self, name: impl Into<String>, resource: R) {
+        self.named_resources
+            .borrow_mut()
+            .insert(name.into(), Lrc::wrap(resource));
+    }
+
     pub fn resource<R: Resource>(&self) -> OwnedRef<dyn Resource, R> {
         let res = self.resources.borrow().get(&TypeId::of::<R>()).unwrap().clone();
+        OwnedRef::map(res.borrow_owned(), |v| v.as_any().downcast_ref::<R>().unwrap())
+    }
+
+    pub fn named_resource<R: Resource>(&self, name: &str) -> OwnedRef<dyn Resource, R> {
+        let res = self.named_resources.borrow().get(name).unwrap().clone();
         OwnedRef::map(res.borrow_owned(), |v| v.as_any().downcast_ref::<R>().unwrap())
     }
 

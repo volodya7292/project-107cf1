@@ -22,6 +22,10 @@ impl SceneEventHandler {
         self
     }
 
+    pub fn set_handler<C: Component>(&mut self, on_update: ComponentChangedCallback) {
+        self.on_component_update.insert(TypeId::of::<C>(), on_update);
+    }
+
     #[inline]
     pub fn on_component_update(&self, ty: &TypeId) -> Option<&ComponentChangedCallback> {
         self.on_component_update.get(ty)

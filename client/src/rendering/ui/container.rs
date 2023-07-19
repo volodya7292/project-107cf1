@@ -1,62 +1,73 @@
-use crate::rendering::ui::UIContext;
+use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::ui::{Factor, RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
-use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
-use engine::module::ui::color::Color;
+use engine::module::main_renderer::MaterialPipelineId;
+use engine::module::scene::Scene;
+use engine::module::ui::reactive::UIScopeContext;
+use engine::module::ui::UIObject;
+use engine::module::ui::UIObjectEntityImpl;
 use engine::module::ui::UIState;
-use engine::module::ui::{UIObject, UIObjectEntityImpl};
-use engine::utils::transition::{AnimatedValue, TransitionTarget};
-use engine::vkw::pipeline::CullMode;
-use engine::vkw::PrimitiveTopology;
+use engine::utils::U8SliceHelper;
 use engine::EngineContext;
 use entity_data::EntityId;
+use smallvec::{smallvec, SmallVec};
+use std::mem;
 
 #[derive(Copy, Clone)]
-struct ContainerImplContext {
-    mat_pipe_id: MaterialPipelineId,
+#[repr(C)]
+pub struct SolidColorUniformData {
+    color: Vec4,
+}
+
+#[derive(Default)]
+pub struct ContainerBackground {
+    mat_pipe_res_name: &'static str,
+    uniform_data: SmallVec<[u8; 128]>,
+}
+
+impl ContainerBackground {
+    pub fn new_raw<U: Copy>(mat_pipe_res_name: &'static str, data: U) -> Self {
+        let mut uniform_data: SmallVec<[u8; 128]> = smallvec![0; mem::size_of::<U>()];
+        uniform_data.raw_copy_from(data);
+
+        Self {
+            mat_pipe_res_name,
+            uniform_data,
+        }
+    }
 }
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
 struct UniformData {
     clip_rect: RectUniformData,
-    background_color: Vec4,
+    opacity: f32,
+    // ...custom properties
 }
 
-#[derive(Clone)]
-pub struct ContainerState {
-    background_color: AnimatedValue<Color>,
+#[derive(Default)]
+pub struct ContainerProps {
+    pub layout: UILayoutC,
+    pub callbacks: UICallbacks,
+    pub background: Option<ContainerBackground>,
 }
 
-impl UIState for ContainerState {
-    fn on_update(entity: &EntityId, ctx: &EngineContext, dt: f64) {
-        let mut scene = ctx.module_mut::<Scene>();
-        let mut entry = scene.object::<Container>(&entity.into());
-        let mut state = entry.state().clone();
+pub mod background {
+    use crate::rendering::ui::container::{ContainerBackground, SolidColorUniformData};
+    use common::make_static_id;
+    use engine::module::main_renderer::MainRenderer;
+    use engine::module::scene::Scene;
+    use engine::module::ui::color::Color;
+    use engine::vkw::pipeline::CullMode;
+    use engine::vkw::PrimitiveTopology;
+    use engine::EngineContext;
 
-        if !state.background_color.advance(dt) {
-            entry.request_update();
-        }
+    const SOLID_COLOR_MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
-        let cache = entry.layout_cache();
-        let clip_rect = *cache.calculated_clip_rect();
-        let mut background_color = state.background_color.current().into_raw();
-        background_color.w *= cache.final_opacity();
-
-        let uniform_data = entry.get_mut::<UniformDataC>();
-        uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
-        uniform_data.copy_from_with_offset(offset_of!(UniformData, background_color), background_color);
-    }
-}
-
-pub type Container = UIObject<ContainerState>;
-
-pub trait ContainerImpl {
-    fn register(ctx: &EngineContext) {
+    pub fn register_backgrounds(ctx: &EngineContext) {
         let mut renderer = ctx.module_mut::<MainRenderer>();
         let scene = ctx.module_mut::<Scene>();
 
@@ -82,163 +93,131 @@ pub trait ContainerImpl {
             CullMode::BACK,
         );
 
-        scene.register_resource(ContainerImplContext { mat_pipe_id });
+        scene.register_named_resource(SOLID_COLOR_MATERIAL_PIPE_RES_NAME, mat_pipe_id);
     }
 
-    fn new(ui_ctx: &mut UIContext, parent: EntityId, layout: UILayoutC) -> ObjectEntityId<Container> {
-        let impl_ctx = ui_ctx.scene.resource::<ContainerImplContext>();
-
-        let container = Container::new_raw(
-            layout,
-            ContainerState {
-                background_color: Default::default(),
+    pub fn solid_color(color: Color) -> ContainerBackground {
+        ContainerBackground::new_raw(
+            SOLID_COLOR_MATERIAL_PIPE_RES_NAME,
+            SolidColorUniformData {
+                color: color.into_raw(),
             },
         )
-        .with_renderer(
-            MeshRenderConfigC::new(impl_ctx.mat_pipe_id, true).with_render_layer(RenderLayer::Overlay),
-        )
-        .with_mesh(VertexMeshC::without_data(4, 1))
-        .with_scene_event_handler(
-            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-        );
-
-        let entity_id = ui_ctx.scene().add_object(Some(parent), container).unwrap();
-
-        entity_id
-    }
-
-    fn expander(ui_ctx: &mut UIContext, parent: EntityId, fraction: Factor) -> ObjectEntityId<Container> {
-        Self::new(
-            ui_ctx,
-            parent,
-            UILayoutC::new()
-                .with_width(Sizing::Grow(fraction))
-                .with_height(Sizing::Grow(fraction)),
-        )
-    }
-
-    fn width_spacer(ui_ctx: &mut UIContext, parent: EntityId, size: f32) -> ObjectEntityId<Container> {
-        Container::new(ui_ctx, parent, UILayoutC::new().with_min_width(size))
-    }
-
-    fn height_spacer(ui_ctx: &mut UIContext, parent: EntityId, size: f32) -> ObjectEntityId<Container> {
-        Container::new(ui_ctx, parent, UILayoutC::new().with_min_height(size))
-    }
-}
-
-impl ContainerImpl for Container {}
-
-pub trait ContainerAccess {
-    fn get_background_color(&self) -> &Color;
-    fn set_background_color(&mut self, color: TransitionTarget<Color>);
-}
-
-impl<'a> ContainerAccess for EntityAccess<'a, Container> {
-    fn get_background_color(&self) -> &Color {
-        self.state().background_color.current()
-    }
-
-    fn set_background_color(&mut self, color: TransitionTarget<Color>) {
-        self.state_mut().background_color.retarget(color);
-        self.request_update();
     }
 }
 
 fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.object::<Container>(&entity.into());
-    entry.request_update();
+    let mut entry = scene.object::<UIObject<()>>(&entity.into());
+
+    let cache = entry.layout_cache();
+    let clip_rect = *cache.calculated_clip_rect();
+    let final_opacity = cache.final_opacity();
+
+    let uniform_data = entry.get_mut::<UniformDataC>();
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
 }
 
-pub mod reactive {
-    use crate::rendering::ui::container::{Container, ContainerAccess, ContainerImpl};
-    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
-    use engine::ecs::component::ui::{Sizing, UILayoutC};
-    use engine::module::scene::Scene;
-    use engine::module::ui::color::Color;
-    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
-    use engine::module::ui::UIObjectEntityImpl;
-    use engine::utils::transition::TransitionTarget;
-    use entity_data::EntityId;
+pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
+    local_id: &str,
+    ctx: &mut UIScopeContext,
+    props: ContainerProps,
+    children_fn: F,
+) {
+    let parent = ctx.scope_id().clone();
+    let parent_entity = *ctx
+        .reactor()
+        .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+        .unwrap()
+        .value();
 
-    #[derive(Default)]
-    pub struct ContainerProps {
-        pub layout: UILayoutC,
-        pub background_color: TransitionTarget<Color>,
-    }
+    ctx.descend(
+        local_id,
+        move |ctx| {
+            {
+                let mut ui_ctx = UIContext::new(*ctx.ctx());
+                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                    let obj = UIObject::new_raw(props.layout, ())
+                        .with_mesh(VertexMeshC::without_data(4, 1))
+                        .with_scene_event_handler(
+                            SceneEventHandler::new()
+                                .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
+                        );
+                    *ui_ctx.scene().add_object(Some(parent_entity), obj).unwrap()
+                });
 
-    pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
-        id: ScopeId,
-        ctx: &mut UIScopeContext,
-        props: ContainerProps,
-        children_fn: F,
-    ) {
-        let parent = ctx.scope_id().clone();
-        let parent_entity = *ctx
-            .reactor()
-            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
-            .unwrap()
-            .value();
+                let new_render_config = if let Some(background) = &props.background {
+                    let mat_pipe_id = ui_ctx
+                        .scene()
+                        .named_resource::<MaterialPipelineId>(background.mat_pipe_res_name);
+                    MeshRenderConfigC::new(*mat_pipe_id, true).with_render_layer(RenderLayer::Overlay)
+                } else {
+                    Default::default()
+                };
 
-        ctx.descend(
-            id,
-            move |ctx| {
-                {
-                    let mut ui_ctx = UIContext::new(*ctx.ctx());
-                    let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                        *Container::new(&mut ui_ctx, parent_entity, Default::default())
-                    });
-                    let mut obj = ui_ctx.scene().object::<Container>(&entity_state.value().into());
+                let mut obj = ui_ctx
+                    .scene()
+                    .object::<UIObject<()>>(&entity_state.value().into());
+                *obj.get_mut::<MeshRenderConfigC>() = new_render_config;
+                *obj.layout_mut() = props.layout;
 
-                    *obj.layout_mut() = props.layout;
-                    obj.set_background_color(props.background_color.into());
+                if let Some(background) = &props.background {
+                    let raw_uniform_data = obj.get_mut::<UniformDataC>();
+                    raw_uniform_data.copy_from_slice(mem::size_of::<UniformData>(), &background.uniform_data);
                 }
-                children_fn(ctx);
-            },
-            move |ctx, scope| {
-                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
-                let mut scene = ctx.module_mut::<Scene>();
-                scene.remove_object(&*entity);
-            },
-            true,
-        );
-    }
 
-    pub fn expander(id: ScopeId, ctx: &mut UIScopeContext, fraction: f32) {
-        container(
-            id,
-            ctx,
-            ContainerProps {
-                layout: UILayoutC::new()
-                    .with_width(Sizing::Grow(fraction))
-                    .with_height(Sizing::Grow(fraction)),
-                ..Default::default()
-            },
-            |_| {},
-        );
-    }
+                let event_handler = obj.event_handler_mut();
+                event_handler.enabled = props.callbacks.interaction_enabled;
+                event_handler.on_click = props.callbacks.on_click.clone();
+                event_handler.on_cursor_enter = props.callbacks.on_cursor_enter.clone();
+                event_handler.on_cursor_leave = props.callbacks.on_cursor_leave.clone();
+            }
+            children_fn(ctx);
+        },
+        move |ctx, scope| {
+            let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+            let mut scene = ctx.module_mut::<Scene>();
+            scene.remove_object(&*entity);
+        },
+        true,
+    );
+}
 
-    pub fn width_spacer(id: ScopeId, ctx: &mut UIScopeContext, width: f32) {
-        container(
-            id,
-            ctx,
-            ContainerProps {
-                layout: UILayoutC::new().with_min_width(width),
-                ..Default::default()
-            },
-            |_| {},
-        );
-    }
+pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::new()
+                .with_width(Sizing::Grow(fraction))
+                .with_height(Sizing::Grow(fraction)),
+            ..Default::default()
+        },
+        |_| {},
+    );
+}
 
-    pub fn height_spacer(id: ScopeId, ctx: &mut UIScopeContext, height: f32) {
-        container(
-            id,
-            ctx,
-            ContainerProps {
-                layout: UILayoutC::new().with_min_height(height),
-                ..Default::default()
-            },
-            |_| {},
-        );
-    }
+pub fn width_spacer(local_id: &str, ctx: &mut UIScopeContext, width: f32) {
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::new().with_min_width(width),
+            ..Default::default()
+        },
+        |_| {},
+    );
+}
+
+pub fn height_spacer(local_id: &str, ctx: &mut UIScopeContext, height: f32) {
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::new().with_min_height(height),
+            ..Default::default()
+        },
+        |_| {},
+    );
 }

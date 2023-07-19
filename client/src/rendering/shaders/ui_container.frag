@@ -9,6 +9,7 @@
 layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform ObjectData {
     mat4 model;
     Rect clip_rect;
+    float opacity;
     vec4 color;
 };
 
@@ -17,5 +18,8 @@ void main() {
     if (isOutsideCropRegion(normScreenCoord, clip_rect)) {
         discard;
     }
-    writeOutput(color);
+
+    vec4 finalColor = vec4(color.rgb, color.a * opacity);
+
+    writeOutput(finalColor);
 }

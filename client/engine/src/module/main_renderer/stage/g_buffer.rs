@@ -242,9 +242,11 @@ impl GBufferStage {
                         continue;
                     }
 
+                    let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
+                        continue;
+                    };
                     let renderable = ctx.renderables.get(&renderable_id).unwrap();
 
-                    let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
                     let (cl, pipeline_id) = if render_config.translucent {
                         (&mut *cl_trans, self.color_with_blending_pipe)
                     } else {
