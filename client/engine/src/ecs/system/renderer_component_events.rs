@@ -142,26 +142,22 @@ impl SystemHandler for RenderConfigComponentEvents<'_> {
         for change in &self.component_changes {
             let entity = change.entity();
 
+            if change.ty() == ChangeType::Removed || change.ty() == ChangeType::Modified {
+                if let Some(renderable) = self.renderables.remove(entity) {
+                    Self::renderer_comp_removed(
+                        &renderable,
+                        self.material_pipelines,
+                        self.uniform_buffer_offsets,
+                    );
+                }
+            }
             if change.ty() == ChangeType::Removed {
-                Self::renderer_comp_removed(
-                    &self.renderables.remove(entity).unwrap(),
-                    self.material_pipelines,
-                    self.uniform_buffer_offsets,
-                );
                 continue;
             }
 
             let config = renderer_comps.get_mut(entity).unwrap();
             if config.mat_pipeline == u32::MAX {
                 continue;
-            }
-
-            if change.ty() == ChangeType::Modified {
-                Self::renderer_comp_removed(
-                    &self.renderables.remove(&entity).unwrap(),
-                    self.material_pipelines,
-                    self.uniform_buffer_offsets,
-                );
             }
 
             let mut renderable = Renderable {

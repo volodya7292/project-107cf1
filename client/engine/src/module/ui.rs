@@ -205,7 +205,6 @@ fn flow_calculate_children_sizes(
     }
 
     let space_for_grow = (parent_size - (sum_fit_content + sum_preferred)).max(0.0);
-    let extra_space_for_grow = (space_for_grow - min_sum_grow).max(0.0);
     let mut grow_space_left = space_for_grow;
 
     // Calculate sizes for `Grow`-sizing entities
@@ -213,10 +212,8 @@ fn flow_calculate_children_sizes(
         let size = if let Sizing::Grow(factor) = child.sizing {
             let proportion = factor / sum_grow_factor;
             let grow_size = proportion * space_for_grow;
-            let extra_grow = proportion * extra_space_for_grow;
 
-            (child.min_flow_size + extra_grow)
-                .min(grow_size)
+            grow_size
                 .min(grow_space_left)
                 .clamp(child.min_flow_size, child.max_flow_size)
         } else {
