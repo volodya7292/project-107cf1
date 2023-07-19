@@ -10,7 +10,8 @@ pub(crate) struct VertexMeshCompEvents<'a> {
     pub component_changes: Vec<ComponentChange>,
     pub curr_vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub completed_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
-    pub new_buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub to_update_buffers: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub to_immediately_update_buffers: HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,
 }
 
@@ -27,12 +28,18 @@ impl SystemHandler for VertexMeshCompEvents<'_> {
                 self.curr_vertex_meshes.remove(entity);
                 self.completed_updates.remove(entity);
                 // New vertex mesh doesn't need to be uploaded to the GPU
-                self.new_buffer_updates.remove(entity);
+                self.to_update_buffers.remove(entity);
                 continue;
             }
 
             if let Some(comp) = vertex_mesh_comps.get(entity) {
-                self.new_buffer_updates.insert(*entity, Arc::clone(&comp.0));
+                let raw_mesh = Arc::clone(&comp.raw_mesh);
+
+                if comp.load_immediate || raw_mesh.staging_buffer.is_none() {
+                    self.to_immediately_update_buffers.insert(*entity, raw_mesh);
+                } else {
+                    self.to_update_buffers.insert(*entity, raw_mesh);
+                }
             }
         }
 

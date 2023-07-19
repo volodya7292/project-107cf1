@@ -824,7 +824,7 @@ impl TextRenderer {
                 )
                 .unwrap();
 
-            *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw());
+            *entry.get_mut::<VertexMeshC>() = VertexMeshC::new(&mesh.raw()).with_load_immediate();
             *entry.get_mut::<MeshRenderConfigC>() =
                 MeshRenderConfigC::new(mat_pipeline, true).with_render_layer(stage)
         }

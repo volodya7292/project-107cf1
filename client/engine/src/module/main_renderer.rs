@@ -166,8 +166,8 @@ pub struct MainRenderer {
     staging_job: GPUJob,
 
     material_updates: HashMap<u32, MaterialInfo>,
-    new_vertex_mesh_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
-    vertex_mesh_pending_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
+    vertex_meshes_to_update: HashMap<EntityId, Arc<RawVertexMesh>>,
+    vertex_meshes_pending_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
 
     /// Entities ordered in respect to children order inside `Children` components:
     /// global parents are not in order, but all the children are.
@@ -317,6 +317,14 @@ pub(crate) struct BufferUpdate2 {
     pub regions: Vec<CopyRegion>,
 }
 
+pub(crate) struct BufferUpdate3 {
+    pub src_buffer: BufferHandle,
+    pub dst_buffer: BufferHandle,
+    pub src_offset: u64,
+    pub dst_offset: u64,
+    pub size: u64,
+}
+
 pub(crate) struct ImageUpdate {
     pub image: Arc<Image>,
     pub data: Vec<u8>,
@@ -325,6 +333,7 @@ pub(crate) struct ImageUpdate {
 pub(crate) enum BufferUpdate {
     WithOffset(BufferUpdate1),
     Regions(BufferUpdate2),
+    FromStaging(BufferUpdate3),
     Image(ImageUpdate),
 }
 
@@ -767,8 +776,8 @@ impl MainRenderer {
             transfer_jobs,
             staging_job,
             material_updates: Default::default(),
-            new_vertex_mesh_updates: HashMap::with_capacity(1024),
-            vertex_mesh_pending_updates: HashMap::with_capacity(1024),
+            vertex_meshes_to_update: HashMap::with_capacity(1024),
+            vertex_meshes_pending_updates: HashMap::with_capacity(1024),
             ordered_entities: Vec::with_capacity(N_MAX_OBJECTS as usize),
             res: resources,
             update_handlers: vec![],
@@ -932,10 +941,25 @@ impl MainRenderer {
             while i < update_count {
                 let update = &updates[i];
 
+                if let BufferUpdate::FromStaging(update) = update {
+                    cl.copy_buffer(
+                        &update.src_buffer,
+                        update.src_offset,
+                        &update.dst_buffer,
+                        update.dst_offset,
+                        update.size,
+                    );
+                    i += 1;
+                    continue;
+                }
+
                 let (copy_size, used_size) = {
                     let copy_size = match update {
                         BufferUpdate::WithOffset(update) => update.data.len(),
                         BufferUpdate::Regions(update) => update.data.len(),
+                        BufferUpdate::FromStaging(_) => {
+                            unreachable!()
+                        }
                         BufferUpdate::Image(update) => update.data.len(),
                     } as u64;
                     assert!(copy_size <= staging_size);
@@ -978,6 +1002,9 @@ impl MainRenderer {
                             &update.buffer,
                             &regions,
                         );
+                    }
+                    BufferUpdate::FromStaging(_) => {
+                        unreachable!()
                     }
                     BufferUpdate::Image(update) => {
                         let size_2d = update.image.size_2d();
@@ -1091,7 +1118,7 @@ impl MainRenderer {
         let mut buffer_updates = vec![];
 
         // Wait for transfer and acquire buffers from transfer queue to render queue
-        if !self.vertex_mesh_pending_updates.is_empty() {
+        if !self.vertex_meshes_pending_updates.is_empty() {
             unsafe {
                 self.device
                     .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.transfer_jobs.sync)
@@ -1101,8 +1128,8 @@ impl MainRenderer {
         }
 
         // Before updating new buffers, collect all the completed updates to commit them
-        let mut completed_updates = self.vertex_mesh_pending_updates.clone();
-        self.vertex_mesh_pending_updates.clear();
+        let mut completed_updates = self.vertex_meshes_pending_updates.clone();
+        self.vertex_meshes_pending_updates.clear();
 
         let t00 = Instant::now();
 
@@ -1120,7 +1147,8 @@ impl MainRenderer {
             component_changes: change_manager.take(self.mesh_component_changes),
             curr_vertex_meshes: &mut self.res.curr_vertex_meshes,
             completed_updates: &mut completed_updates,
-            new_buffer_updates: &mut self.new_vertex_mesh_updates,
+            to_update_buffers: &mut self.vertex_meshes_to_update,
+            to_immediately_update_buffers: HashMap::with_capacity(1024),
             run_time: 0.0,
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
@@ -1150,12 +1178,30 @@ impl MainRenderer {
 
         let t00 = Instant::now();
 
+        // --------------------------------------------------------------------------------------------------
+
+        // Collect immediate vertex mesh updates
+        for (entity, mesh) in vertex_mesh_system.to_immediately_update_buffers {
+            if let Some(staging_buffer) = &mesh.staging_buffer {
+                buffer_updates.push(BufferUpdate::FromStaging(BufferUpdate3 {
+                    src_buffer: staging_buffer.handle(),
+                    dst_buffer: mesh.buffer.as_ref().unwrap().handle(),
+                    dst_offset: 0,
+                    src_offset: 0,
+                    size: staging_buffer.size(),
+                }));
+            }
+            completed_updates.insert(entity, mesh);
+        }
+
+        // --------------------------------------------------------------------------------------------------
+
         // Sort by distance to perform updates of the nearest vertex meshes first
         let mut sorted_buffer_updates_entities: Vec<_> = {
             // let transforms = self.scene.storage_read::<GlobalTransform>();
             let access = scene.storage_mut().access();
             let transforms = access.component::<HierarchyCacheC>();
-            self.new_vertex_mesh_updates
+            self.vertex_meshes_to_update
                 .keys()
                 .map(|v| {
                     if let Some(transform) = transforms.get(v) {
@@ -1196,13 +1242,13 @@ impl MainRenderer {
         let mut buffer_update_system = system::GpuBuffersUpdate {
             device: Arc::clone(&self.device),
             transfer_jobs: &mut self.transfer_jobs,
-            buffer_updates: &mut self.new_vertex_mesh_updates,
+            vertex_meshes_to_update: &mut self.vertex_meshes_to_update,
             sorted_buffer_updates_entities: &sorted_buffer_updates_entities,
-            pending_buffer_updates: &mut self.vertex_mesh_pending_updates,
+            pending_vertex_mesh_updates: &mut self.vertex_meshes_pending_updates,
             run_time: 0.0,
         };
         let mut commit_buffer_updates_system = system::CommitBufferUpdates {
-            updates: completed_updates,
+            completed_updates,
             vertex_meshes: &mut self.res.curr_vertex_meshes,
             run_time: 0.0,
         };
