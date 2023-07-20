@@ -78,7 +78,7 @@ pub fn fancy_button(
     let text_color2 = text_color.clone();
     let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
         let app = ctx.app();
-        let mut reactor = app.ui_reactor().borrow_mut();
+        let mut reactor = app.ui_reactor();
 
         let mut active_color = curr_text_color.into_raw();
         active_color.x *= 1.6;
@@ -95,7 +95,7 @@ pub fn fancy_button(
     let text_color2 = text_color.clone();
     let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
         let app = ctx.app();
-        let mut reactor = app.ui_reactor().borrow_mut();
+        let mut reactor = app.ui_reactor();
 
         reactor.set_state(&text_color2, |prev| {
             let mut new = prev.clone();

@@ -301,7 +301,9 @@ impl GBufferStage {
             };
             let renderable = ctx.renderables.get(renderable_id).unwrap();
 
-            let mat_pipeline = &mat_pipelines[render_config.mat_pipeline as usize];
+            let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
+                continue;
+            };
             let pipeline = mat_pipeline.get_pipeline(self.overlay_pipe).unwrap();
             let signature = pipeline.signature();
             cl.bind_pipeline(pipeline);

@@ -28,10 +28,20 @@ impl UIScope {
 #[derive(Clone, Eq, PartialEq, Hash)]
 struct StateUID(ScopeId, StateId);
 
+impl StateUID {
+    pub fn scope_id(&self) -> &ScopeId {
+        &self.0
+    }
+
+    pub fn state_id(&self) -> &StateId {
+        &self.1
+    }
+}
+
 /// Provides reactive ui management
 pub struct UIReactor {
     scopes: HashMap<ScopeId, UIScope>,
-    modified_states: HashSet<StateUID>,
+    modified_states: HashMap<StateUID, Arc<dyn Any + Send + Sync>>,
     dirty_scopes: HashSet<ScopeId>,
     state_subscribers: HashMap<StateUID, HashSet<ScopeId>>,
 }
@@ -65,17 +75,23 @@ impl UIReactor {
     }
 
     pub fn on_update(&mut self, ctx: EngineContext, delta_time: f64) {
-        let dirty_scopes: HashSet<_> = self
-            .dirty_scopes
-            .drain()
-            .chain(
-                self.modified_states
-                    .drain()
-                    .filter_map(|uid| self.state_subscribers.get(&uid))
-                    .map(|uid| uid.iter().cloned())
-                    .flatten(),
-            )
-            .collect();
+        let mut dirty_scopes: HashSet<_> = self.dirty_scopes.drain().collect();
+
+        // Update states and collect corresponding subscribers
+        for (uid, new_value) in self.modified_states.drain() {
+            let state_value = self
+                .scopes
+                .get_mut(uid.scope_id())
+                .unwrap()
+                .states
+                .get_mut(uid.state_id())
+                .unwrap();
+            *state_value = new_value;
+
+            if let Some(subs) = self.state_subscribers.get(&uid) {
+                dirty_scopes.extend(subs.iter().cloned());
+            }
+        }
 
         for entity in dirty_scopes {
             self.rebuild(entity, ctx, delta_time);
@@ -105,12 +121,10 @@ impl UIReactor {
         new: F,
     ) {
         let state_scope = self.scopes.get_mut(&state.owner).unwrap();
-        let state_value = state_scope.states.get_mut(&state.name).unwrap();
+        let curr_value = state_scope.states.get(&state.name).unwrap();
 
-        let new_value = new(state_value.downcast_ref::<T>().unwrap());
-
-        *state_value = Arc::new(new_value);
-        self.modified_states.insert(state.uid());
+        let new_value = new(curr_value.downcast_ref::<T>().unwrap());
+        self.modified_states.insert(state.uid(), Arc::new(new_value));
     }
 
     /// Performs rebuilding of the specified scope of `parent`.

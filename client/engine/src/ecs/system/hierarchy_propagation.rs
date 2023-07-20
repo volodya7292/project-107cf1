@@ -9,7 +9,6 @@ use std::time::Instant;
 // Propagates transform hierarchy and calculates global transforms
 pub(crate) struct HierarchyPropagation<'a> {
     pub root_entity: EntityId,
-    pub dirty_relations: HashSet<EntityId>,
     pub dirty_transforms: HashSet<EntityId>,
     pub ordered_entities: &'a mut Vec<EntityId>,
     pub changed_h_caches: Vec<EntityId>,

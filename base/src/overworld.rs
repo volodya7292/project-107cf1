@@ -26,8 +26,6 @@ pub mod structure;
 use crate::main_registry::MainRegistry;
 use crate::overworld::accessor::ReadOnlyOverworldAccessor;
 use crate::overworld::cluster_part_set::ClusterPartSet;
-use crate::overworld::generator::OverworldGenerator;
-use crate::overworld::interface::local_interface::LocalOverworldInterface;
 use crate::overworld::interface::OverworldInterface;
 pub use crate::overworld::orchestrator::OverworldOrchestrator;
 use crate::overworld::position::{ClusterBlockPos, ClusterPos};
@@ -40,6 +38,7 @@ use common::types::HashMap;
 use common::{glm, MO_RELAXED};
 use fixedbitset::FixedBitSet;
 use glm::{I64Vec3, U32Vec3};
+use serde::{Deserialize, Serialize};
 use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
@@ -278,19 +277,20 @@ impl OverworldCluster {
 pub type LoadedClusters = Arc<RwLock<HashMap<ClusterPos, OverworldCluster>>>;
 
 pub struct Overworld {
-    seed: u64,
     main_registry: Arc<MainRegistry>,
     loaded_clusters: LoadedClusters,
     interface: Arc<dyn OverworldInterface>,
 }
 
-impl Overworld {
-    pub fn new(registry: &Arc<MainRegistry>, seed: u64) -> Arc<Overworld> {
-        let generator = Arc::new(OverworldGenerator::new(seed, registry));
-        let interface = Arc::new(LocalOverworldInterface::new("test_overworld", generator));
+#[derive(Serialize, Deserialize)]
+pub struct OverworldParams {
+    pub seed: u64,
+    pub tick_count: u64,
+}
 
+impl Overworld {
+    pub fn new(registry: &Arc<MainRegistry>, interface: Arc<dyn OverworldInterface>) -> Arc<Overworld> {
         Arc::new(Overworld {
-            seed,
             main_registry: Arc::clone(registry),
             loaded_clusters: Default::default(),
             interface,

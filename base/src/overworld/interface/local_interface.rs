@@ -1,11 +1,12 @@
 use crate::execution::default_queue;
 use crate::execution::timer::IntervalTimer;
 use crate::execution::virtual_processor::VirtualProcessor;
+use crate::main_registry::MainRegistry;
 use crate::overworld::generator::OverworldGenerator;
 use crate::overworld::interface::{LoadedType, OverworldInterface, BINCODE_OPTIONS};
 use crate::overworld::position::ClusterPos;
 use crate::overworld::raw_cluster::{deserialize_cluster, serialize_cluster, RawCluster};
-use crate::overworld::ClusterState;
+use crate::overworld::{ClusterState, OverworldParams};
 use crate::registry::Registry;
 use common::glm::{I64Vec3, TVec3};
 use common::moka;
@@ -20,6 +21,7 @@ use std::{fs, io};
 const SECTOR_SIZE_1D: usize = 5;
 const SECTOR_SIZE_CELLS_1D: usize = SECTOR_SIZE_1D * RawCluster::SIZE;
 const SECTORS_DIR_NAME: &'static str = "matter";
+const OVERWORLD_PARAMS_FILE_NAME: &'static str = "params.json";
 
 fn make_sector_file_name(pos: &SectorPos) -> String {
     let raw_pos = pos.get();
@@ -75,6 +77,7 @@ pub struct LocalOverworldInterface {
     generator: Arc<OverworldGenerator>,
     sectors_cache: Arc<SectorsCache>,
     to_save: Arc<Mutex<HashMap<ClusterPos, Arc<RwLock<ClusterState>>>>>,
+    params: OverworldParams,
     _save_worker: IntervalTimer,
 }
 
@@ -113,19 +116,31 @@ impl SectorsCache {
 }
 
 impl LocalOverworldInterface {
-    pub fn new(folder: impl Into<PathBuf>, generator: Arc<OverworldGenerator>) -> Self {
+    pub fn create_overworld(folder: impl Into<PathBuf>, params: OverworldParams) {
         let folder = folder.into();
+        if !folder.exists() {
+            fs::create_dir(&folder).unwrap();
+        }
+
+        let params_path = folder.join(OVERWORLD_PARAMS_FILE_NAME);
+
+        fs::write(params_path, serde_json::to_string(&params).unwrap()).unwrap();
+    }
+
+    pub fn new(folder: impl Into<PathBuf>, main_registry: &Arc<MainRegistry>) -> Self {
+        let folder = folder.into();
+        let sectors_dir_path = folder.join(SECTORS_DIR_NAME);
+        let params_path = folder.join(OVERWORLD_PARAMS_FILE_NAME);
+
         let to_save = Arc::new(Mutex::new(HashMap::new()));
         let sectors_cache = Arc::new(SectorsCache::new(folder.clone()));
 
-        if !folder.exists() {
-            fs::create_dir(&folder).unwrap();
-
-            let sectors_dir_path = folder.join(SECTORS_DIR_NAME);
-            if !sectors_dir_path.exists() {
-                fs::create_dir(sectors_dir_path).unwrap();
-            }
+        if !sectors_dir_path.exists() {
+            fs::create_dir(sectors_dir_path).unwrap();
         }
+
+        let params: OverworldParams = serde_json::from_slice(&fs::read(params_path).unwrap()).unwrap();
+        let generator = Arc::new(OverworldGenerator::new(params.seed, main_registry));
 
         let save_worker = {
             let folder = folder.clone();
@@ -144,6 +159,7 @@ impl LocalOverworldInterface {
             generator,
             sectors_cache,
             to_save,
+            params,
             _save_worker: save_worker,
         }
     }

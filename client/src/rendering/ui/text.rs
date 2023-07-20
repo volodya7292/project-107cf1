@@ -6,7 +6,7 @@ use engine::ecs::component::simple_text::StyledString;
 use engine::ecs::component::ui::{
     Position, RectUniformData, Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
-use engine::ecs::component::{SceneEventHandler, SimpleTextC, TransformC, UniformDataC};
+use engine::ecs::component::{SimpleTextC, TransformC, UniformDataC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::text_renderer::{RawTextObject, TextRenderer};
@@ -30,62 +30,99 @@ pub struct UniformData {
 
 #[derive(Clone)]
 pub struct TextState {
-    wrapper_entity: ObjectEntityId<UIObject<()>>,
+    wrapper_entity: ObjectEntityId<UIObject<WrapperState>>,
     raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
     wrap: bool,
     inner_shadow_intensity: f32,
 }
 
+#[derive(Clone)]
+struct WrapperState {
+    text: StyledString,
+    wrap: bool,
+}
+
+impl UIState for WrapperState {}
+
 impl UIState for TextState {
     fn on_update(entity: &EntityId, ctx: &EngineContext, _: f64) {
         let mut scene = ctx.module_mut::<Scene>();
+
         let mut entry = scene.entry(entity);
         let state = entry.get_mut::<TextState>().clone();
-
-        let cache = entry.get::<UILayoutCacheC>();
-        let rect_data = *cache.calculated_clip_rect();
-        let final_opacity = cache.final_opacity();
-        let final_size = *cache.final_size();
-
-        let text_block_size = {
-            let text_renderer = ctx.module_mut::<TextRenderer>();
-            text_renderer.calculate_minimum_text_size(
-                &state.text,
-                if state.wrap { final_size.x } else { f32::INFINITY },
-            )
-        };
-
         drop(entry);
 
-        let mut wrapper = scene.entry(&state.wrapper_entity);
-        let layout = wrapper.get_mut::<UILayoutC>();
-        layout.constraints[0].min = text_block_size.x;
-        layout.constraints[1].min = text_block_size.y;
+        let mut wrapper = scene.object(&state.wrapper_entity);
+        wrapper.state_mut().text = state.text.clone();
+        wrapper.state_mut().wrap = state.wrap;
         drop(wrapper);
-
-        let mut entry = scene.entry(entity);
-        let layout = entry.get_mut::<UILayoutC>();
-        if !state.wrap {
-            layout.constraints[0].min = text_block_size.x;
-        }
-        layout.constraints[1].min = text_block_size.y;
-        drop(entry);
 
         let mut raw_text_entry = scene.entry(&state.raw_text_entity);
         let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
-        simple_text.max_width = final_size.x;
         simple_text.text = state.text;
 
         let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
-        uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
-        uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
         uniform_data.copy_from_with_offset(
             offset_of!(UniformData, inner_shadow_intensity),
             state.inner_shadow_intensity,
         );
         drop(raw_text_entry);
     }
+}
+
+fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
+    let mut scene = ctx.module_mut::<Scene>();
+    let mut entry = scene.entry(entity);
+    let state = entry.get_mut::<TextState>().clone();
+
+    let cache = entry.get::<UILayoutCacheC>();
+    let rect_data = *cache.calculated_clip_rect();
+    let final_opacity = cache.final_opacity();
+    let final_size = *cache.final_size();
+
+    let text_block_size = {
+        let text_renderer = ctx.module_mut::<TextRenderer>();
+        text_renderer
+            .calculate_minimum_text_size(&state.text, if state.wrap { final_size.x } else { f32::INFINITY })
+    };
+
+    let layout = entry.get_mut::<UILayoutC>();
+    if !state.wrap {
+        layout.constraints[0].min = text_block_size.x;
+    }
+    layout.constraints[1].min = text_block_size.y;
+    drop(entry);
+
+    let mut raw_text_entry = scene.entry(&state.raw_text_entity);
+    let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
+    simple_text.max_width = final_size.x;
+
+    let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
+
+    drop(raw_text_entry);
+}
+
+fn wrapper_width_calc(entry: &EntityAccess<()>, ctx: &EngineContext, parent_size: &Vec2) -> f32 {
+    let state = entry.get::<WrapperState>();
+    let text_renderer = ctx.module_mut::<TextRenderer>();
+    let block_size = text_renderer.calculate_minimum_text_size(
+        &state.text,
+        if state.wrap { parent_size.x } else { f32::INFINITY },
+    );
+    block_size.x
+}
+
+fn wrapper_height_calc(entry: &EntityAccess<()>, ctx: &EngineContext, parent_size: &Vec2) -> f32 {
+    let state = entry.get::<WrapperState>();
+    let text_renderer = ctx.module_mut::<TextRenderer>();
+    let block_size = text_renderer.calculate_minimum_text_size(
+        &state.text,
+        if state.wrap { parent_size.x } else { f32::INFINITY },
+    );
+    block_size.y
 }
 
 pub type UIText = UIObject<TextState>;
@@ -119,19 +156,17 @@ pub trait UITextImpl {
             TextState {
                 wrapper_entity: Default::default(),
                 raw_text_entity: Default::default(),
-                text,
+                text: text.clone(),
                 wrap: false,
                 inner_shadow_intensity: 0.0,
             },
-        )
-        .with_scene_event_handler(
-            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
         )
         .disable_pointer_events();
 
         let raw_text_obj = RawTextObject::new(
             TransformC::new(),
             SimpleTextC::new(impl_ctx.mat_pipe_id)
+                .with_text(text.clone())
                 .with_max_width(f32::INFINITY)
                 .with_render_type(RenderLayer::Overlay),
         );
@@ -140,10 +175,10 @@ pub trait UITextImpl {
         let wrapper_obj = UIObject::new_raw(
             UILayoutC::new()
                 .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
-                .with_width(Sizing::FitContent)
-                .with_height(Sizing::FitContent)
+                .with_width(Sizing::ParentBased(wrapper_width_calc))
+                .with_height(Sizing::ParentBased(wrapper_height_calc))
                 .with_shader_inverted_y(true),
-            (),
+            WrapperState { text, wrap: false },
         );
         let wrapper_entity = ui_ctx.scene.add_object(Some(*main_entity), wrapper_obj).unwrap();
         {
@@ -159,18 +194,18 @@ pub trait UITextImpl {
         let mut main_obj = ui_ctx.scene.object::<UIText>(&main_entity);
         main_obj.get_mut::<TextState>().wrapper_entity = wrapper_entity;
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
+        main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(on_size_update);
         drop(main_obj);
+
+        ui_ctx.ctx.dispatch_callback(move |ctx, _| {
+            on_size_update(&main_entity, ctx);
+        });
 
         main_entity
     }
 }
 
 impl UITextImpl for UIText {}
-
-fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
-    let mut scene = ctx.module_mut::<Scene>();
-    scene.object::<UIText>(&entity.into()).request_update();
-}
 
 pub trait TextAccess {
     fn get_text(&self) -> &StyledString;
@@ -220,7 +255,7 @@ pub mod reactive {
             move |ctx| {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                    *UIText::new(&mut ui_ctx, parent_entity, Default::default())
+                    *UIText::new(&mut ui_ctx, parent_entity, text.clone())
                 });
                 let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
 

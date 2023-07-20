@@ -46,32 +46,28 @@ impl ModuleManager {
         })
     }
 
-    #[inline]
-    fn for_every<F: Fn(&mut dyn EngineModule)>(&self, f: F) {
-        for module in self.modules.values().rev() {
-            let mut module = module.borrow_mut();
-            f(&mut *module);
-        }
+    pub(crate) fn modules(&self) -> impl Iterator<Item = &Lrc<dyn EngineModule>> {
+        self.modules.values().rev()
     }
 
     #[inline]
     pub(crate) fn on_start(&self, ctx: &EngineContext) {
-        self.for_every(|module| {
-            module.on_start(ctx);
-        });
+        for module in self.modules() {
+            module.borrow_mut().on_start(ctx);
+        }
     }
 
     #[inline]
     pub(crate) fn on_update(&self, dt: f64, ctx: &EngineContext) {
-        self.for_every(|module| {
-            module.on_update(dt, ctx);
-        });
+        for module in self.modules() {
+            module.borrow_mut().on_update(dt, ctx);
+        }
     }
 
     #[inline]
     pub(crate) fn on_wsi_event(&self, window: &Window, event: &WSIEvent, ctx: &EngineContext) {
-        self.for_every(|module| {
-            module.on_wsi_event(window, event, ctx);
-        });
+        for module in self.modules() {
+            module.borrow_mut().on_wsi_event(window, event, ctx);
+        }
     }
 }

@@ -17,11 +17,12 @@ use base::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use base::overworld::actions_storage::OverworldActionsStorage;
 use base::overworld::block::AnyBlockState;
 use base::overworld::facing::Facing;
+use base::overworld::interface::local_interface::LocalOverworldInterface;
 use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
 use base::overworld::position::BlockPos;
 use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
-use base::overworld::{Overworld, OverworldOrchestrator};
+use base::overworld::{Overworld, OverworldOrchestrator, OverworldParams};
 use base::physics::aabb::AABB;
 use base::physics::MOTION_EPSILON;
 use common::glm;
@@ -47,6 +48,7 @@ use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 use engine::{winit, EngineContext};
 use entity_data::EntityId;
 use std::any::Any;
+use std::cell::RefMut;
 use std::f32::consts::FRAC_PI_2;
 use std::fs;
 use std::path::PathBuf;
@@ -199,8 +201,8 @@ impl MainApp {
         &self.resources
     }
 
-    pub fn ui_reactor(&self) -> &Lrc<UIReactor> {
-        &self.ui_reactor
+    pub fn ui_reactor(&self) -> RefMut<UIReactor> {
+        self.ui_reactor.borrow_mut()
     }
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
@@ -251,8 +253,21 @@ impl MainApp {
         self.grab_cursor(&ctx.window(), !visible, ctx);
     }
 
-    pub fn start_game_process(&mut self, ctx: &EngineContext) {
-        let overworld = Overworld::new(&self.main_registry, 0);
+    pub fn create_overworld(&mut self, overworld_name: &str) {
+        let world_path = Self::worlds_dir().join(overworld_name);
+        LocalOverworldInterface::create_overworld(
+            world_path,
+            OverworldParams {
+                seed: 0,
+                tick_count: 0,
+            },
+        );
+    }
+
+    pub fn start_game_process(&mut self, ctx: &EngineContext, world_path: impl Into<PathBuf>) {
+        let interface = LocalOverworldInterface::new(world_path, &self.main_registry);
+        let overworld = Overworld::new(&self.main_registry, Arc::new(interface));
+
         let spawn_point = overworld.interface().generator().gen_spawn_point();
         // dbg!(spawn_point);
         // crate::proto::make_world_prototype_image(overworld.generator());

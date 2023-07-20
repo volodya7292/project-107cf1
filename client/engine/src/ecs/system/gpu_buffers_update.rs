@@ -13,9 +13,9 @@ const MAX_TRANSFER_SIZE_PER_RUN: u64 = 3145728; // 3M ~ 1ms
 pub(crate) struct GpuBuffersUpdate<'a> {
     pub device: Arc<vkw::Device>,
     pub transfer_jobs: &'a mut ParallelJob,
-    pub buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub vertex_meshes_to_update: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub sorted_buffer_updates_entities: &'a Vec<(EntityId, f32)>,
-    pub pending_buffer_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub pending_vertex_mesh_updates: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,
 }
 
@@ -38,14 +38,14 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
             g_cl.begin(true).unwrap();
 
             let mut total_copy_size = 0;
-            let mut transfer_barriers = Vec::with_capacity(self.buffer_updates.len());
+            let mut transfer_barriers = Vec::with_capacity(self.vertex_meshes_to_update.len());
             let mut graphics_barriers = Vec::with_capacity(transfer_barriers.len());
 
             for (entity, _) in self.sorted_buffer_updates_entities {
-                let mesh = self.buffer_updates.remove(entity).unwrap();
+                let mesh = self.vertex_meshes_to_update.remove(entity).unwrap();
 
                 if mesh.staging_buffer.is_none() {
-                    self.pending_buffer_updates.insert(*entity, mesh);
+                    self.pending_vertex_mesh_updates.insert(*entity, mesh);
                     continue;
                 }
 
@@ -74,7 +74,7 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
                 );
 
                 total_copy_size += src_buffer.size();
-                self.pending_buffer_updates.insert(*entity, mesh);
+                self.pending_vertex_mesh_updates.insert(*entity, mesh);
 
                 if total_copy_size >= MAX_TRANSFER_SIZE_PER_RUN {
                     break;
@@ -108,7 +108,7 @@ impl SystemHandler for GpuBuffersUpdate<'_> {
 }
 
 pub(crate) struct CommitBufferUpdates<'a> {
-    pub updates: HashMap<EntityId, Arc<RawVertexMesh>>,
+    pub completed_vertex_mesh_updates: HashMap<EntityId, Arc<RawVertexMesh>>,
     pub vertex_meshes: &'a mut HashMap<EntityId, Arc<RawVertexMesh>>,
     pub run_time: f64,
 }
@@ -118,7 +118,7 @@ impl SystemHandler for CommitBufferUpdates<'_> {
         let t0 = Instant::now();
         let vertex_mesh_comps = data.component::<VertexMeshC>();
 
-        for (entity, updated_mesh) in self.updates.drain() {
+        for (entity, updated_mesh) in self.completed_vertex_mesh_updates.drain() {
             if vertex_mesh_comps.contains(&entity) {
                 self.vertex_meshes.insert(entity, updated_mesh);
             }

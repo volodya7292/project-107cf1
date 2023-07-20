@@ -1,3 +1,4 @@
+use crate::module::scene::EntityAccess;
 use crate::utils::transition::AnimatedValue;
 use crate::EngineContext;
 use common::glm::Vec2;
@@ -28,6 +29,7 @@ pub enum Sizing {
     Preferred(f32),
     /// The size is proportional to all siblings.
     Grow(Factor),
+    ParentBased(fn(&EntityAccess<()>, &EngineContext, parent_size: &Vec2) -> f32),
 }
 
 impl Default for Sizing {
@@ -393,17 +395,19 @@ pub struct UIEventHandlerC {
     pub on_mouse_press: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
     pub on_mouse_release: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
     pub on_click: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
+    pub on_size_update: Option<fn(&EntityId, &EngineContext)>,
     pub enabled: bool,
 }
 
 impl Default for UIEventHandlerC {
     fn default() -> Self {
         Self {
-            on_cursor_enter: Default::default(),
-            on_cursor_leave: Default::default(),
-            on_mouse_press: Default::default(),
-            on_mouse_release: Default::default(),
-            on_click: Default::default(),
+            on_cursor_enter: None,
+            on_cursor_leave: None,
+            on_mouse_press: None,
+            on_mouse_release: None,
+            on_click: None,
+            on_size_update: None,
             enabled: true,
         }
     }
@@ -415,6 +419,7 @@ pub trait UIEventHandlerI {
     fn on_mouse_press(_: &EntityId, _: &EngineContext) {}
     fn on_mouse_release(_: &EntityId, _: &EngineContext) {}
     fn on_click(_: &EntityId, _: &EngineContext) {}
+    fn on_size_update(_: &EntityId, _: &EngineContext) {}
 }
 
 impl UIEventHandlerI for () {}
@@ -438,6 +443,7 @@ impl UIEventHandlerC {
             on_mouse_press: Some(Arc::new(I::on_cursor_enter)),
             on_mouse_release: Some(Arc::new(I::on_cursor_enter)),
             on_click: Some(Arc::new(I::on_cursor_enter)),
+            on_size_update: Some(I::on_size_update),
             enabled: true,
         }
     }

@@ -161,6 +161,7 @@ dependencies = [
  "rstar",
  "serde",
  "serde_bytes",
+ "serde_json",
  "smallvec",
 ]
 

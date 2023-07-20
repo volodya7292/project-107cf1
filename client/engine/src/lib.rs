@@ -155,12 +155,15 @@ impl Engine {
 
                     let t0 = Instant::now();
 
-                    // Call dispatched callbacks here so any module can be borrowed in the handler
-                    let callbacks: Vec<_> = self.callbacks.borrow_mut().drain(..).collect();
-                    for callback in callbacks {
-                        callback(&ctx, self.delta_time);
+                    for module in module_manger.modules() {
+                        module.borrow_mut().on_update(self.delta_time, &ctx);
+
+                        // Call dispatched callbacks as soon as possible
+                        let callbacks: Vec<_> = self.callbacks.borrow_mut().drain(..).collect();
+                        for callback in callbacks {
+                            callback(&ctx, self.delta_time);
+                        }
                     }
-                    module_manger.on_update(self.delta_time, &ctx);
 
                     let t1 = Instant::now();
                     self.curr_statistics.update_time = (t1 - t0).as_secs_f64();

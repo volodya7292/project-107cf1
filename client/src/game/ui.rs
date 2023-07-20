@@ -1,5 +1,4 @@
 use crate::game::EngineCtxGameExt;
-use crate::game::MainApp;
 use crate::rendering::ui::container::{
     background, container, expander, height_spacer, width_spacer, ContainerProps,
 };
@@ -10,9 +9,9 @@ use crate::rendering::ui::text::reactive::ui_text;
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::ui::{BasicEventCallback2, Padding, Position, Sizing, UILayoutC, Visibility};
+use engine::ecs::component::ui::{BasicEventCallback2, Padding, Sizing, UILayoutC, Visibility};
 use engine::module::ui::color::Color;
-use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
@@ -115,7 +114,7 @@ fn world_selection_list(ctx: &mut UIScopeContext) {
     );
 }
 
-fn main_menu_controls(ctx: &mut UIScopeContext) {
+fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: ReactiveState<&'static str>) {
     let resources = ctx.ctx().resources();
 
     // TODO: implement resource caching
@@ -124,11 +123,6 @@ fn main_menu_controls(ctx: &mut UIScopeContext) {
         .unwrap()
         .unwrap();
 
-    fn start_on_click(_: &EntityId, ctx: &EngineContext) {
-        let mut game = ctx.module_mut::<MainApp>();
-        game.start_game_process(ctx);
-    }
-
     fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
 
     fn exit_on_click(_: &EntityId, ctx: &EngineContext) {
@@ -136,29 +130,118 @@ fn main_menu_controls(ctx: &mut UIScopeContext) {
     }
 
     ui_image(
-        make_static_id!(),
+        local_id,
         ctx,
         UILayoutC::column()
-            .with_position(Position::Relative(Default::default()))
             .with_width(Sizing::Preferred(400.0))
             .with_height(Sizing::Grow(1.0))
             .with_padding(Padding::equal(30.0)),
         Some(ImageSource::Data(image_source)),
         ImageFitness::Cover,
-        |ctx| {
+        move |ctx| {
             expander(make_static_id!(), ctx, 1.0);
 
             world_selection_list(ctx);
 
             height_spacer(make_static_id!(), ctx, 30.0);
 
-            menu_button(make_static_id!(), ctx, "START", start_on_click);
+            let curr_tab_state2 = curr_tab_state.clone();
+            menu_button(
+                make_static_id!(),
+                ctx,
+                "START",
+                move |_: &EntityId, ctx: &EngineContext| {
+                    let mut app = ctx.app();
+                    let mut reactor = app.ui_reactor();
+                    reactor.set_state(&curr_tab_state2.clone(), |_| TAB_WORLD_CREATION);
+                },
+            );
             height_spacer(make_static_id!(), ctx, 30.0);
-            menu_button(make_static_id!(), ctx, "SETTINGS", settings_on_click);
+
+            let curr_tab_state2 = curr_tab_state.clone();
+            menu_button(
+                make_static_id!(),
+                ctx,
+                "SETTINGS",
+                move |_: &EntityId, ctx: &EngineContext| {
+                    let mut app = ctx.app();
+                    let mut reactor = app.ui_reactor();
+                    reactor.set_state(&curr_tab_state2.clone(), |_| TAB_SETTINGS);
+                },
+            );
             height_spacer(make_static_id!(), ctx, 30.0);
-            menu_button(make_static_id!(), ctx, "EXIT", exit_on_click);
+
+            menu_button(
+                make_static_id!(),
+                ctx,
+                "EXIT",
+                move |_: &EntityId, ctx: &EngineContext| ctx.request_stop(),
+            );
 
             expander(make_static_id!(), ctx, 0.5);
+        },
+    );
+}
+
+const TAB_WORLD_CREATION: &str = "world_creation";
+const TAB_SETTINGS: &str = "settings";
+
+fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::column(),
+            ..Default::default()
+        },
+        |ctx| {
+            ui_text(
+                make_static_id!(),
+                ctx,
+                StyledString::new("GOV", TextStyle::new().with_font_size(30.0)),
+            )
+        },
+    );
+}
+
+fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
+    container(
+        local_id,
+        ctx,
+        ContainerProps {
+            layout: UILayoutC::column(),
+            ..Default::default()
+        },
+        |ctx| {
+            ui_text(
+                make_static_id!(),
+                ctx,
+                StyledString::new("SETT sdf sdjf djsa", TextStyle::new().with_font_size(30.0)),
+            )
+        },
+    );
+}
+
+fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static str) {
+    let resources = ctx.ctx().resources();
+    let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
+        .unwrap()
+        .unwrap();
+
+    ui_image(
+        local_id,
+        ctx,
+        UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)),
+        Some(ImageSource::Data(image_source)),
+        ImageFitness::Cover,
+        move |ctx| match tab_id {
+            TAB_WORLD_CREATION => {
+                world_creation_view(make_static_id!(), ctx);
+            }
+            TAB_SETTINGS => {
+                settings_view(make_static_id!(), ctx);
+            }
+            _ => {}
         },
     );
 }
@@ -204,9 +287,26 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             ..Default::default()
         },
         move |ctx| {
+            remember_state!(ctx, curr_nav_view, "");
+
             expander(make_static_id!(), ctx, 0.2);
 
-            main_menu_controls(ctx);
+            main_menu_controls(make_static_id!(), ctx, curr_nav_view.state().clone());
+            width_spacer(make_static_id!(), ctx, 50.0);
+
+            container(
+                make_static_id!(),
+                ctx,
+                ContainerProps {
+                    layout: UILayoutC::new()
+                        .with_width(Sizing::Grow(1.5))
+                        .with_height(Sizing::Grow(1.0)),
+                    ..Default::default()
+                },
+                move |ctx| {
+                    navigation_view(make_static_id!(), ctx, *curr_nav_view);
+                },
+            );
 
             expander(make_static_id!(), ctx, 1.0);
         },

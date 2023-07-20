@@ -141,7 +141,6 @@ pub struct MainRenderer {
     root_entity: EntityId,
     render_config_component_changes: ComponentChangesHandle,
     mesh_component_changes: ComponentChangesHandle,
-    relation_component_changes: ComponentChangesHandle,
     transform_component_changes: ComponentChangesHandle,
     uniform_data_component_changes: ComponentChangesHandle,
 
@@ -548,7 +547,6 @@ impl MainRenderer {
         let mut change_manager = scene.change_manager_mut();
         let render_config_component_changes = change_manager.register_component_flow::<MeshRenderConfigC>();
         let mesh_component_changes = change_manager.register_component_flow::<VertexMeshC>();
-        let relation_component_changes = change_manager.register_component_flow::<Relation>();
         let transform_component_changes = change_manager.register_component_flow::<TransformC>();
         let uniform_data_component_changes = change_manager.register_component_flow::<UniformDataC>();
 
@@ -755,7 +753,6 @@ impl MainRenderer {
             root_entity,
             render_config_component_changes,
             mesh_component_changes,
-            relation_component_changes,
             transform_component_changes,
             uniform_data_component_changes,
             active_camera,
@@ -1153,7 +1150,6 @@ impl MainRenderer {
         };
         let mut hierarchy_propagation_system = system::HierarchyPropagation {
             root_entity: self.root_entity,
-            dirty_relations: change_manager.take_new(self.relation_component_changes),
             dirty_transforms: change_manager.take_new(self.transform_component_changes),
             ordered_entities: &mut self.ordered_entities,
             changed_h_caches: Vec::with_capacity(4096),
@@ -1248,7 +1244,7 @@ impl MainRenderer {
             run_time: 0.0,
         };
         let mut commit_buffer_updates_system = system::CommitBufferUpdates {
-            completed_updates,
+            completed_vertex_mesh_updates: completed_updates,
             vertex_meshes: &mut self.res.curr_vertex_meshes,
             run_time: 0.0,
         };
