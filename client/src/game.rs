@@ -6,8 +6,8 @@ use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::image::{ImageAccess, ImageImpl};
+use crate::rendering::ui::register_ui_elements;
 use crate::rendering::ui::text::{TextAccess, UITextImpl};
-use crate::rendering::ui::{register_ui_elements, UIResources};
 use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
@@ -30,7 +30,7 @@ use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
 use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
-use common::resource_file::ResourceFile;
+use common::resource_file::{BufferedResourceReader, ResourceFile};
 use common::threading::SafeThreadPool;
 use engine::event::WSIEvent;
 use engine::module::input::Input;
@@ -61,7 +61,7 @@ const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
 pub trait EngineCtxGameExt {
     fn app(&self) -> OwnedRefMut<dyn EngineModule, MainApp>;
-    fn resources(&self) -> Arc<ResourceFile>;
+    fn resources(&self) -> Arc<BufferedResourceReader>;
 }
 
 impl EngineCtxGameExt for EngineContext<'_> {
@@ -69,14 +69,14 @@ impl EngineCtxGameExt for EngineContext<'_> {
         self.module_mut::<MainApp>()
     }
 
-    fn resources(&self) -> Arc<ResourceFile> {
+    fn resources(&self) -> Arc<BufferedResourceReader> {
         let scene = self.module::<Scene>();
-        Arc::clone(&scene.resource::<Arc<ResourceFile>>())
+        Arc::clone(&scene.resource::<Arc<BufferedResourceReader>>())
     }
 }
 
 pub struct MainApp {
-    resources: Arc<ResourceFile>,
+    resources: Arc<BufferedResourceReader>,
     main_registry: Arc<MainRegistry>,
     res_map: Arc<DefaultResourceMapping>,
     default_queue: Arc<SafeThreadPool>,
@@ -127,13 +127,14 @@ impl MainApp {
 
         register_ui_elements(ctx);
 
-        let resources = ResourceFile::open("resources").unwrap();
+        let resources = BufferedResourceReader::new(ResourceFile::open("resources").unwrap());
+
         let main_registry = MainRegistry::init();
-        let res_map = DefaultResourceMapping::init(&main_registry, &resources);
+        let res_map = DefaultResourceMapping::init(&main_registry, resources.file());
 
         let mat_pipelines;
         {
-            mat_pipelines = material_pipelines::create(&resources, &ctx);
+            mat_pipelines = material_pipelines::create(resources.file(), &ctx);
 
             let mut renderer = ctx.module_mut::<MainRenderer>();
 
@@ -197,7 +198,7 @@ impl MainApp {
         window
     }
 
-    pub fn resources(&self) -> &Arc<ResourceFile> {
+    pub fn resources(&self) -> &Arc<BufferedResourceReader> {
         &self.resources
     }
 
@@ -455,11 +456,6 @@ impl EngineModule for MainApp {
         //             .with_h_align(TextHAlign::LEFT),
         //     ),
         // );
-
-        {
-            let scene = ctx.module::<Scene>();
-            scene.register_resource(UIResources(Arc::clone(&self.resources)));
-        }
     }
 
     fn on_update(&mut self, delta_time: f64, ctx: &EngineContext) {

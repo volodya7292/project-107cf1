@@ -3,12 +3,12 @@ pub mod fancy_button;
 pub mod image;
 pub mod text;
 
-use crate::game::MainApp;
+use crate::game::{EngineCtxGameExt, MainApp};
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
 use ::image::ImageResult;
 use common::lrc::OwnedRefMut;
-use common::resource_file::{ResourceFile, ResourceRef};
+use common::resource_file::BufferedResourceReader;
 use engine::ecs::component::ui::BasicEventCallback2;
 use engine::module::scene::Scene;
 use engine::module::EngineModule;
@@ -17,18 +17,16 @@ use std::sync::Arc;
 
 pub const STATE_ENTITY_ID: &'static str = "__entity_id";
 
-pub struct UIResources(pub Arc<ResourceFile>);
-
 pub struct UIContext<'a> {
     scene: OwnedRefMut<dyn EngineModule, Scene>,
     ctx: EngineContext<'a>,
-    resources: Arc<ResourceFile>,
+    resources: Arc<BufferedResourceReader>,
 }
 
 impl<'a> UIContext<'a> {
     pub fn new(ctx: EngineContext<'a>) -> Self {
         let scene = ctx.module_mut::<Scene>();
-        let resources = Arc::clone(&scene.resource::<UIResources>().0);
+        let resources = Arc::clone(&scene.resource::<Arc<BufferedResourceReader>>());
         Self {
             scene,
             ctx,
@@ -48,16 +46,16 @@ impl<'a> UIContext<'a> {
         &mut *self.scene
     }
 
-    pub fn resource(&mut self, filename: &str) -> Result<ResourceRef, common::resource_file::Error> {
+    pub fn resource(&mut self, filename: &str) -> Result<Arc<[u8]>, common::resource_file::Error> {
         self.resources.get(filename)
     }
 
     pub fn resource_image(
-        resources: &Arc<ResourceFile>,
+        resources: &Arc<BufferedResourceReader>,
         filename: &str,
     ) -> Result<ImageResult<::image::RgbaImage>, common::resource_file::Error> {
         let res = resources.get(filename)?;
-        let dyn_img = ::image::load_from_memory(&res.read()?);
+        let dyn_img = ::image::load_from_memory(&res);
         Ok(dyn_img.map(|img| img.into_rgba8()))
     }
 }
