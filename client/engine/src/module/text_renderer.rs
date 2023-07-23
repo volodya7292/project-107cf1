@@ -283,7 +283,9 @@ fn layout_glyphs(
     max_height: f32,
     normalize_transforms: bool,
 ) -> (Vec<PositioningInfo>, BlockSize) {
-    let mut glyph_positions = Vec::with_capacity(seq.data().chars().count());
+    let max_width_norm = max_width / style.font_size();
+
+    let mut glyph_positions = Vec::with_capacity(seq.chars().count());
     let mut line_widths = Vec::with_capacity(32);
     let mut final_size = Vec2::new(0.0, 0.0);
 
@@ -350,7 +352,7 @@ fn layout_glyphs(
         // Put the word inside the global layout
         // --------------------------------------------------------------------
 
-        if (word_start_x + curr_word_width >= max_width)
+        if (word_start_x + curr_word_width >= max_width_norm)
             && curr_word_offset_x > 0.0
             && segment[0].glyph_id() != space_id
         {
@@ -365,7 +367,7 @@ fn layout_glyphs(
             .zip(curr_word.drain(..))
             .enumerate()
         {
-            if long_word_breaking && i > 0 && (curr_offset.x + glyph_width) > max_width {
+            if long_word_breaking && i > 0 && (curr_offset.x + glyph_width) > max_width_norm {
                 // The width of the word exceeds the maximum line width => break it into two parts.
                 line_widths.push(curr_offset.x);
                 curr_offset.x = 0.0;
@@ -403,10 +405,10 @@ fn layout_glyphs(
             match h_align {
                 TextHAlign::LEFT => { /* The text is already in this state */ }
                 TextHAlign::CENTER => {
-                    curr_diff = (max_width - line_widths[curr_line]) / 2.0;
+                    curr_diff = (max_width_norm - line_widths[curr_line]) / 2.0;
                 }
                 TextHAlign::RIGHT => {
-                    curr_diff = max_width - line_widths[curr_line];
+                    curr_diff = max_width_norm - line_widths[curr_line];
                 }
             }
 
