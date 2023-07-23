@@ -3,7 +3,7 @@ pub mod relation;
 use crate::scene::relation::Relation;
 use entity_data::{EntityId, SystemAccess};
 
-/// Walks all `Relation`-entities in breadth-first order (parents are visited before children).
+/// Walks all `Relation`-entities in depth-first order.
 /// Implements stack management using parent info `PI` for each visit.
 /// `F` returns `PI` that is be fed info `F` when visiting its children.
 pub fn walk_relation_tree<PI: Clone, F: FnMut(&EntityId, PI) -> PI>(
@@ -27,17 +27,17 @@ pub fn walk_relation_tree<PI: Clone, F: FnMut(&EntityId, PI) -> PI>(
     }
 }
 
-/// Collects all `Relation`-entities in breadth-first order (parents are ordered before children).
+/// Collects all `Relation`-entities in depth-first order.
 pub fn collect_relation_tree_out(access: &SystemAccess, root: &EntityId, out_nodes: &mut Vec<EntityId>) {
     let relation_comps = access.component::<Relation>();
     let mut to_visit = Vec::<EntityId>::with_capacity(out_nodes.capacity());
 
-    out_nodes.push(*root);
     to_visit.push(*root);
 
     while let Some(entity) = to_visit.pop() {
+        out_nodes.push(entity);
+
         if let Some(relation) = relation_comps.get(&entity) {
-            out_nodes.extend(&relation.children);
             // Because we're popping from the stack, insert in reverse order
             // to preserve the order of visiting children so the first is popped first.
             to_visit.extend(relation.children.iter().rev());
@@ -45,7 +45,7 @@ pub fn collect_relation_tree_out(access: &SystemAccess, root: &EntityId, out_nod
     }
 }
 
-/// Collects all `Relation`-entities in breadth-first order (parents are ordered before children).
+/// Collects all `Relation`-entities in depth-first order.
 pub fn collect_relation_tree(access: &SystemAccess, root: &EntityId) -> Vec<EntityId> {
     let mut out = Vec::with_capacity(1024);
     collect_relation_tree_out(access, root, &mut out);
