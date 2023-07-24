@@ -93,8 +93,8 @@ impl UIReactor {
             }
         }
 
-        for entity in dirty_scopes {
-            self.rebuild(entity, ctx, delta_time);
+        for scope_id in dirty_scopes {
+            self.rebuild(scope_id, ctx, delta_time);
         }
     }
 
@@ -129,7 +129,9 @@ impl UIReactor {
 
     /// Performs rebuilding of the specified scope of `parent`.
     fn rebuild(&mut self, scope_id: ScopeId, ctx: EngineContext, dt: f64) {
-        let scope = self.scopes.get_mut(&scope_id).unwrap();
+        let Some(scope) = self.scopes.get_mut(&scope_id) else {
+            return;
+        };
         let func = Rc::clone(&scope.children_func);
 
         scope.subscribed_to.clear();
@@ -159,12 +161,21 @@ impl UIReactor {
             queue.push(next);
         }
 
-        for elem in queue.into_iter().rev() {
-            let mut scope = self.scopes.remove(&elem).unwrap();
+        for scope_id in queue.into_iter().rev() {
+            let mut scope = self.scopes.remove(&scope_id).unwrap();
             let on_remove = scope.on_remove_func.take().unwrap();
             on_remove(ctx, &scope);
 
-            self.dirty_scopes.remove(&elem);
+            self.dirty_scopes.remove(&scope_id);
+
+            for state_id in scope.states.keys() {
+                if let Some(subscribers) = self
+                    .state_subscribers
+                    .get_mut(&StateUID(scope_id.clone(), state_id.clone()))
+                {
+                    subscribers.remove(&scope_id);
+                }
+            }
         }
     }
 
@@ -357,13 +368,17 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         }
     }
 
+    pub fn descendant_scope_id(&self, scope_name: &str) -> ScopeId {
+        format!("{}_{}", &self.scope_id, scope_name)
+    }
+
     /// Performs descent of `scope` if the `parent` hasn't been descended earlier.
     pub fn descend<F, R>(&mut self, scope_name: &str, children_fn: F, on_remove_fn: R, force_rebuild: bool)
     where
         F: Fn(&mut UIScopeContext) + 'static,
         R: FnOnce(&EngineContext, &UIScope) + 'static,
     {
-        let scope_id = format!("{}_{}", &self.scope_id, scope_name);
+        let scope_id = self.descendant_scope_id(scope_name);
 
         self.used_children.push(scope_id.clone());
 
