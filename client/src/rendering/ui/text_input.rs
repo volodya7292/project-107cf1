@@ -41,7 +41,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
         local_name,
         ctx,
         ContainerProps {
-            layout: props.layout,
+            layout: UILayoutC::new().with_width_grow(),
             ..Default::default()
         },
         move |ctx| {
@@ -126,14 +126,19 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 let mut reactor = app.ui_reactor();
                 let mut scene = ctx.module_mut::<Scene>();
                 let entry = scene.entry(entity);
+                let layout = entry.get::<UILayoutC>();
                 let cache = entry.get::<UILayoutCacheC>();
                 let global_pos = *cache.global_position();
                 let size = *cache.final_size();
                 let clip_rect = *cache.clip_rect();
 
-                reactor.set_state(&text_global_pos_state.clone(), |_| global_pos);
-                reactor.set_state(&text_size_state.clone(), |_| size);
-                reactor.set_state(&container_size_state.clone(), |_| clip_rect.size());
+                reactor.set_state(&text_global_pos_state.clone(), |_| {
+                    global_pos + Vec2::new(layout.padding.left, layout.padding.top)
+                });
+                reactor.set_state(&text_size_state.clone(), |_| size - layout.padding.size());
+                reactor.set_state(&container_size_state.clone(), |_| {
+                    clip_rect.size() - layout.padding.size()
+                });
             };
 
             let container_size_state = container_size.state().clone();
@@ -142,6 +147,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             let props2 = props.clone();
             let on_click = move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
                 let text_renderer = ctx.module::<TextRenderer>();
+
                 let char_idx = text_renderer.find_char_index(
                     &text2,
                     &props2.style,
@@ -234,7 +240,8 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 make_static_id!(),
                 ctx,
                 ContainerProps {
-                    layout: UILayoutC::new()
+                    layout: props
+                        .layout
                         .with_content_transform(UITransform::new().with_offset(*text_offset))
                         .with_grow(),
                     // .with_min_width(800.0),

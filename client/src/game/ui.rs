@@ -3,10 +3,10 @@ use crate::rendering::ui::container::{
     background, container, expander, height_spacer, width_spacer, ContainerProps,
 };
 use crate::rendering::ui::fancy_button::fancy_button;
+use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
 use crate::rendering::ui::image::reactive::ui_image;
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
-use crate::rendering::ui::text_input::{ui_text_input, TextInputProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
@@ -220,13 +220,13 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     ..Default::default()
                 },
             );
-            ui_text_input(
+            fancy_text_input(
                 make_static_id!(),
                 ctx,
-                TextInputProps {
-                    layout: UILayoutC::new().with_grow().with_max_width(300.0),
+                FancyTextInputProps {
+                    layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
                     multiline: false,
-                    initial_text:"---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string(),
+                    initial_text: "---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string(),
                     style: TextStyle::new().with_font_size(20.0),
                     on_change: Some(Arc::new(on_change)),
                 },

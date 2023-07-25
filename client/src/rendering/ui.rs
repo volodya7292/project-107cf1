@@ -1,5 +1,7 @@
+pub mod backgrounds;
 pub mod container;
 pub mod fancy_button;
+pub mod fancy_text_input;
 pub mod image;
 pub mod text;
 pub mod text_input;
@@ -65,7 +67,7 @@ pub fn register_ui_elements(ctx: &EngineContext) {
     container::background::register_backgrounds(ctx);
     UIText::register(ctx);
     UIImage::register(ctx);
-    fancy_button::register(ctx);
+    backgrounds::register(ctx);
 }
 
 pub struct UICallbacks {

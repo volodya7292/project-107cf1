@@ -94,7 +94,7 @@ impl Padding {
         }
     }
 
-    pub(crate) fn size(&self) -> Vec2 {
+    pub fn size(&self) -> Vec2 {
         Vec2::new(self.left + self.right, self.top + self.bottom)
     }
 }
@@ -311,8 +311,16 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_width_grow(self) -> Self {
+        self.with_width(Sizing::Grow(1.0))
+    }
+
+    pub fn with_height_grow(self) -> Self {
+        self.with_height(Sizing::Grow(1.0))
+    }
+
     pub fn with_grow(self) -> Self {
-        self.with_width(Sizing::Grow(1.0)).with_height(Sizing::Grow(1.0))
+        self.with_width_grow().with_height_grow()
     }
 
     pub fn with_width_constraint(mut self, constraint: Constraint) -> Self {
