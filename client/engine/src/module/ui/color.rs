@@ -35,6 +35,13 @@ impl Color {
         self
     }
 
+    pub fn with_brightness(mut self, brightness: f32) -> Self {
+        self.0.x *= brightness;
+        self.0.y *= brightness;
+        self.0.z *= brightness;
+        self
+    }
+
     pub fn into_raw(self) -> Vec4 {
         self.0
     }

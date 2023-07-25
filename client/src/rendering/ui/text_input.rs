@@ -50,10 +50,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             remember_state!(ctx, text, props.initial_text.clone());
             remember_state!(ctx, cursor_pos, 1);
             remember_state!(ctx, cursor_opacity, AnimatedValue::immediate(1.0));
-            remember_state!(ctx, text_offset, Vec2::new(-100.0, 0.0));
+            remember_state!(ctx, text_offset, Vec2::new(0.0, 0.0));
             remember_state!(ctx, text_size, Vec2::new(0.0, 0.0));
             remember_state!(ctx, text_global_pos, Vec2::new(0.0, 0.0));
-            remember_state!(ctx, container_size, Vec2::new(0.0, 0.0));
+            remember_state!(ctx, container_size, None::<Vec2>);
             remember_state!(ctx, focused, false);
 
             let cursor_pos_state = cursor_pos.state().clone();
@@ -86,7 +86,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     &*text,
                     &props.style,
                     if props.multiline {
-                        container_size.x
+                        container_size.map_or(0.0, |v| v.x)
                     } else {
                         f32::INFINITY
                     },
@@ -104,21 +104,23 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             };
 
             let relative_cursor_offset = cursor_offset + *text_offset;
-            let text_offset_x_min = (-text_size.x.max(container_size.x - CURSOR_X_PADDING)
-                + (container_size.x - CURSOR_X_PADDING));
+            if let Some(container_size) = *container_size {
+                let text_offset_x_min = (-text_size.x.max(container_size.x - CURSOR_X_PADDING)
+                    + (container_size.x - CURSOR_X_PADDING));
 
-            if relative_cursor_offset.x > container_size.x - CURSOR_X_PADDING {
-                ctx.reactor().set_state(text_offset.state(), |prev| {
-                    Vec2::new(-cursor_offset.x + container_size.x - CURSOR_X_PADDING, prev.y)
-                });
-            } else if relative_cursor_offset.x < CURSOR_X_PADDING {
-                ctx.reactor().set_state(text_offset.state(), |prev| {
-                    Vec2::new((-cursor_offset.x + CURSOR_X_PADDING).min(0.0), prev.y)
-                });
-            }
-            if text_offset.x < text_offset_x_min {
-                ctx.reactor()
-                    .set_state(text_offset.state(), |prev| Vec2::new(text_offset_x_min, prev.y));
+                if relative_cursor_offset.x > container_size.x - CURSOR_X_PADDING {
+                    ctx.reactor().set_state(text_offset.state(), |prev| {
+                        Vec2::new(-cursor_offset.x + container_size.x - CURSOR_X_PADDING, prev.y)
+                    });
+                } else if relative_cursor_offset.x < CURSOR_X_PADDING {
+                    ctx.reactor().set_state(text_offset.state(), |prev| {
+                        Vec2::new((-cursor_offset.x + CURSOR_X_PADDING).min(0.0), prev.y)
+                    });
+                }
+                if text_offset.x < text_offset_x_min {
+                    ctx.reactor()
+                        .set_state(text_offset.state(), |prev| Vec2::new(text_offset_x_min, prev.y));
+                }
             }
 
             let on_text_size_update = move |entity: &EntityId, ctx: &EngineContext| {
@@ -137,7 +139,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 });
                 reactor.set_state(&text_size_state.clone(), |_| size - layout.padding.size());
                 reactor.set_state(&container_size_state.clone(), |_| {
-                    clip_rect.size() - layout.padding.size()
+                    Some(clip_rect.size() - layout.padding.size())
                 });
             };
 
@@ -152,7 +154,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     &text2,
                     &props2.style,
                     if props2.multiline {
-                        container_size_state.value().x
+                        container_size_state.value().map_or(0.0, |v| v.x)
                     } else {
                         f32::INFINITY
                     },

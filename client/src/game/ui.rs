@@ -224,6 +224,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 make_static_id!(),
                 ctx,
                 FancyTextInputProps {
+                    label: "Name".to_string(),
                     layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
                     multiline: false,
                     initial_text: "---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string(),
