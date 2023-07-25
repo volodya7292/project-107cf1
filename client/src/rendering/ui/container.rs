@@ -111,7 +111,7 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     let mut entry = scene.object::<UIObject<()>>(&entity.into());
 
     let cache = entry.layout_cache();
-    let clip_rect = *cache.calculated_clip_rect();
+    let clip_rect = *cache.normalized_clip_rect();
     let final_opacity = cache.final_opacity();
 
     let uniform_data = entry.get_mut::<UniformDataC>();
@@ -120,7 +120,7 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
 }
 
 pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
-    local_id: &str,
+    local_name: &str,
     ctx: &mut UIScopeContext,
     props: ContainerProps,
     children_fn: F,
@@ -133,7 +133,7 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
         .value();
 
     ctx.descend(
-        local_id,
+        local_name,
         move |ctx| {
             {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
@@ -168,10 +168,7 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
                 }
 
                 let event_handler = obj.event_handler_mut();
-                event_handler.enabled = props.callbacks.interaction_enabled;
-                event_handler.on_click = props.callbacks.on_click.clone();
-                event_handler.on_cursor_enter = props.callbacks.on_cursor_enter.clone();
-                event_handler.on_cursor_leave = props.callbacks.on_cursor_leave.clone();
+                props.callbacks.apply_to_event_handler(event_handler);
             }
             children_fn(ctx);
         },

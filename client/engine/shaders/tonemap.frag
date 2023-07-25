@@ -23,13 +23,20 @@ vec3 tonemap_exp(vec3 v) {
     return change_luminance(v, l_new);
 }
 
+vec3 normalize_balance(vec3 v) {
+    float max_comp = max(v.r, max(v.g, v.b));
+    float max_norm = max(1.0, max_comp);
+    return v / max_norm;
+}
+
 void main() {
     vec3 mainColor = texture(mainTexture, texCoord).rgb;
     vec4 overlayColor = texture(overlayTexture, texCoord);
     vec3 bloom = texture(bloomTexture, texCoord).rgb;
 
     vec3 main_tonemapped = tonemap_exp(mainColor);
+    vec3 overlay_normalized = normalize_balance(overlayColor.rgb);
 
-    outColor = mix(main_tonemapped, overlayColor.rgb, overlayColor.a);
+    outColor = mix(main_tonemapped, overlay_normalized, overlayColor.a);
     outColor.rgb = mix(outColor.rgb, bloom, 0.02);
 }

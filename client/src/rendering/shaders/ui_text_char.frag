@@ -12,9 +12,22 @@ layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
     float innerShadowIntensity;
 };
 
+// `value` and `midpoint` are in range [0, 1]; `strength`: [0, +inf]
+float localize(float value, float midpoint, float strength) {
+    float hp;
+
+    if (value > midpoint) {
+        hp = 1.0 / (1.0 + 2.0 * (value - midpoint) * strength);
+    } else {
+        hp = 1.0 + 2.0 * (midpoint - value) * strength;
+    }
+
+    return pow(value, hp);
+}
+
 void main() {
     float aa_alpha, sd;
-    calculateCharShading(aa_alpha, sd);
+    calculateCharShading(0.5, aa_alpha, sd);
 
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
     if (isOutsideCropRegion(normScreenCoord, clip_rect)) {
@@ -24,9 +37,7 @@ void main() {
     vec4 color = vs_in.color;
     float innerShadow = mix(1.0, sd, innerShadowIntensity);
 
-    if (sd > 0.01) {
-       color *= innerShadow;
-    }
+//    color.rgb *= 1.0 - localize(sd, 0.100, 10.0);
 
     if (aa_alpha < ALPHA_BIAS) {
         discard;

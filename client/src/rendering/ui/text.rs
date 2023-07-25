@@ -14,6 +14,7 @@ use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::EngineContext;
 use entity_data::EntityId;
+use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 struct TextImplContext {
@@ -77,18 +78,23 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
     let state = entry.get_mut::<TextState>().clone();
 
     let cache = entry.get::<UILayoutCacheC>();
-    let rect_data = *cache.calculated_clip_rect();
+    let rect_data = *cache.normalized_clip_rect();
     let final_opacity = cache.final_opacity();
     let final_size = *cache.final_size();
 
     let text_block_size = {
         let text_renderer = ctx.module_mut::<TextRenderer>();
-        text_renderer
-            .calculate_minimum_text_size(&state.text, if state.wrap { final_size.x } else { f32::INFINITY })
+        text_renderer.calculate_minimum_text_size(
+            state.text.data(),
+            state.text.style(),
+            if state.wrap { final_size.x } else { f32::INFINITY },
+        )
     };
 
     let layout = entry.get_mut::<UILayoutC>();
-    if !state.wrap {
+    if state.wrap {
+        layout.constraints[0].min = 0.0;
+    } else {
         layout.constraints[0].min = text_block_size.x;
     }
     layout.constraints[1].min = text_block_size.y;
@@ -96,7 +102,8 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
 
     let mut raw_text_entry = scene.entry(&state.raw_text_entity);
     let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
-    simple_text.max_width = final_size.x;
+
+    simple_text.max_width = if state.wrap { final_size.x } else { f32::INFINITY };
 
     let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
@@ -109,7 +116,8 @@ fn wrapper_width_calc(entry: &EntityAccess<()>, ctx: &EngineContext, parent_size
     let state = entry.get::<WrapperState>();
     let text_renderer = ctx.module_mut::<TextRenderer>();
     let block_size = text_renderer.calculate_minimum_text_size(
-        &state.text,
+        state.text.data(),
+        state.text.style(),
         if state.wrap { parent_size.x } else { f32::INFINITY },
     );
     block_size.x
@@ -119,7 +127,8 @@ fn wrapper_height_calc(entry: &EntityAccess<()>, ctx: &EngineContext, parent_siz
     let state = entry.get::<WrapperState>();
     let text_renderer = ctx.module_mut::<TextRenderer>();
     let block_size = text_renderer.calculate_minimum_text_size(
-        &state.text,
+        state.text.data(),
+        state.text.style(),
         if state.wrap { parent_size.x } else { f32::INFINITY },
     );
     block_size.y
@@ -146,7 +155,12 @@ pub trait UITextImpl {
         scene.register_resource(TextImplContext { mat_pipe_id });
     }
 
-    fn new(ui_ctx: &mut UIContext, parent: EntityId, text: StyledString) -> ObjectEntityId<UIText> {
+    fn new(
+        ui_ctx: &mut UIContext,
+        parent: EntityId,
+        text: StyledString,
+        wrap: bool,
+    ) -> ObjectEntityId<UIText> {
         let impl_ctx = *ui_ctx.scene.resource::<TextImplContext>();
 
         let main_obj = UIText::new_raw(
@@ -157,7 +171,7 @@ pub trait UITextImpl {
                 wrapper_entity: Default::default(),
                 raw_text_entity: Default::default(),
                 text: text.clone(),
-                wrap: false,
+                wrap,
                 inner_shadow_intensity: 0.0,
             },
         )
@@ -175,10 +189,11 @@ pub trait UITextImpl {
         let wrapper_obj = UIObject::new_raw(
             UILayoutC::new()
                 .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
+                .with_grow()
                 .with_width(Sizing::ParentBased(wrapper_width_calc))
                 .with_height(Sizing::ParentBased(wrapper_height_calc))
                 .with_shader_inverted_y(true),
-            WrapperState { text, wrap: false },
+            WrapperState { text, wrap },
         );
         let wrapper_entity = ui_ctx.scene.add_object(Some(*main_entity), wrapper_obj).unwrap();
         {
@@ -194,7 +209,7 @@ pub trait UITextImpl {
         let mut main_obj = ui_ctx.scene.object::<UIText>(&main_entity);
         main_obj.get_mut::<TextState>().wrapper_entity = wrapper_entity;
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
-        main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(on_size_update);
+        main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(on_size_update));
         drop(main_obj);
 
         ui_ctx.ctx.dispatch_callback(move |ctx, _| {
@@ -237,12 +252,19 @@ impl<'a> TextAccess for EntityAccess<'a, UIText> {
 pub mod reactive {
     use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
     use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
-    use engine::ecs::component::simple_text::StyledString;
+    use engine::ecs::component::simple_text::{StyledString, TextStyle};
     use engine::module::scene::Scene;
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
-    pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, text: StyledString) {
+    #[derive(Default)]
+    pub struct UITextProps {
+        pub text: String,
+        pub style: TextStyle,
+        pub wrap: bool,
+    }
+
+    pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, props: UITextProps) {
         let parent = ctx.scope_id().clone();
         let parent_entity = *ctx
             .reactor()
@@ -253,13 +275,16 @@ pub mod reactive {
         ctx.descend(
             local_name,
             move |ctx| {
+                let styled_string = StyledString::new(props.text.clone(), props.style);
+
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                    *UIText::new(&mut ui_ctx, parent_entity, text.clone())
+                    *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), props.wrap)
                 });
                 let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
 
-                obj.set_text(text.clone());
+                obj.set_text(styled_string.clone());
+                obj.set_wrap(props.wrap);
             },
             move |ctx, scope| {
                 let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

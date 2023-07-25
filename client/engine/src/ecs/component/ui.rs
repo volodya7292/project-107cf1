@@ -1,9 +1,9 @@
+use crate::event::WSIKeyboardInput;
 use crate::module::scene::EntityAccess;
 use crate::utils::transition::AnimatedValue;
 use crate::EngineContext;
 use common::glm::Vec2;
 use entity_data::EntityId;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub type Factor = f32;
@@ -213,12 +213,37 @@ impl Default for Visibility {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct UITransform {
+    pub offset: Vec2,
+}
+
+impl UITransform {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_offset(mut self, offset: Vec2) -> Self {
+        self.offset = offset;
+        self
+    }
+}
+
+impl Default for UITransform {
+    fn default() -> Self {
+        Self {
+            offset: Vec2::from_element(0.0),
+        }
+    }
+}
+
 #[derive(Default, Copy, Clone)]
 pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
     pub constraints: [Constraint; 2],
     pub overflow: [Overflow; 2],
+    pub content_transform: UITransform,
     pub align: CrossAlign,
     pub padding: Padding,
     pub content_flow: ContentFlow,
@@ -251,6 +276,11 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_content_transform(mut self, transform: UITransform) -> Self {
+        self.content_transform = transform;
+        self
+    }
+
     pub fn with_align(mut self, align: CrossAlign) -> Self {
         self.align = align;
         self
@@ -266,6 +296,16 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_fixed_width(mut self, width: f32) -> Self {
+        self.constraints[0] = Constraint::exact(width);
+        self
+    }
+
+    pub fn with_fixed_height(mut self, height: f32) -> Self {
+        self.constraints[1] = Constraint::exact(height);
+        self
+    }
+
     pub fn with_height(mut self, height: Sizing) -> Self {
         self.sizing[1] = height;
         self
@@ -273,6 +313,16 @@ impl UILayoutC {
 
     pub fn with_grow(self) -> Self {
         self.with_width(Sizing::Grow(1.0)).with_height(Sizing::Grow(1.0))
+    }
+
+    pub fn with_width_constraint(mut self, constraint: Constraint) -> Self {
+        self.constraints[0] = constraint;
+        self
+    }
+
+    pub fn with_height_constraint(mut self, constraint: Constraint) -> Self {
+        self.constraints[1] = constraint;
+        self
     }
 
     pub fn with_min_width(mut self, min_width: f32) -> Self {
@@ -307,7 +357,7 @@ impl UILayoutC {
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
-pub(crate) struct ClipRect {
+pub struct ClipRect {
     pub min: Vec2,
     pub max: Vec2,
 }
@@ -318,6 +368,10 @@ impl ClipRect {
             min: self.min.sup(&other.min),
             max: self.max.inf(&other.max),
         }
+    }
+
+    pub fn size(&self) -> Vec2 {
+        self.max - self.min
     }
 
     pub fn size_by_axis(&self, axis: usize) -> f32 {
@@ -352,9 +406,18 @@ pub struct UILayoutCacheC {
 }
 
 impl UILayoutCacheC {
+    /// Returns final clipping rectangle.
+    pub fn clip_rect(&self) -> &ClipRect {
+        &self.clip_rect
+    }
+
     /// Returns final clipping rectangle in normalized coordinates.
-    pub fn calculated_clip_rect(&self) -> &RectUniformData {
+    pub fn normalized_clip_rect(&self) -> &RectUniformData {
         &self.calculated_clip_rect
+    }
+
+    pub fn global_position(&self) -> &Vec2 {
+        &self.global_position
     }
 
     pub fn final_size(&self) -> &Vec2 {
@@ -366,36 +429,29 @@ impl UILayoutCacheC {
     }
 }
 
-pub type BasicEventCallback = fn(&EntityId, &EngineContext);
-
-pub trait BasicEventCallback2: Fn(&EntityId, &EngineContext) + Send + Sync + 'static {}
-impl<F: Fn(&EntityId, &EngineContext) + Send + Sync + 'static> BasicEventCallback2 for F {}
-
-#[derive(Copy, Clone, Eq)]
-pub struct BasicEventCallbackExt(pub fn(&EntityId, &EngineContext));
-
-impl PartialEq for BasicEventCallbackExt {
-    fn eq(&self, other: &Self) -> bool {
-        let p1 = self.0 as *const u8;
-        let p2 = other.0 as *const u8;
-        p1 == p2
-    }
+#[macro_export]
+macro_rules! define_callback {
+    ($name: ident ($($params: ty $(,)?)*)) => {
+        pub trait $name: Fn($($params,)*) + Send + Sync + 'static {}
+        impl<F: Fn($($params,)*) + Send + Sync + 'static> $name for F {}
+    };
 }
 
-impl Hash for BasicEventCallbackExt {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let p = self.0 as *const u8;
-        p.hash(state);
-    }
-}
+define_callback!(BasicEventCallback(&EntityId, &EngineContext));
+define_callback!(ClickedCallback(&EntityId, &EngineContext, Vec2));
+define_callback!(KeyPressedCallback(&EntityId, &EngineContext, WSIKeyboardInput));
 
 pub struct UIEventHandlerC {
-    pub on_cursor_enter: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
-    pub on_cursor_leave: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
-    pub on_mouse_press: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
-    pub on_mouse_release: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
-    pub on_click: Option<Arc<dyn BasicEventCallback2<Output = ()>>>,
-    pub on_size_update: Option<fn(&EntityId, &EngineContext)>,
+    pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_mouse_press: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_mouse_release: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
+    pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_click: Option<Arc<dyn ClickedCallback<Output = ()>>>,
+    pub on_size_update: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub focusable: bool,
     pub enabled: bool,
 }
 
@@ -406,23 +462,16 @@ impl Default for UIEventHandlerC {
             on_cursor_leave: None,
             on_mouse_press: None,
             on_mouse_release: None,
+            on_key_press: None,
+            on_focus_in: None,
+            on_focus_out: None,
             on_click: None,
             on_size_update: None,
+            focusable: false,
             enabled: true,
         }
     }
 }
-
-pub trait UIEventHandlerI {
-    fn on_cursor_enter(_: &EntityId, _: &EngineContext) {}
-    fn on_cursor_leave(_: &EntityId, _: &EngineContext) {}
-    fn on_mouse_press(_: &EntityId, _: &EngineContext) {}
-    fn on_mouse_release(_: &EntityId, _: &EngineContext) {}
-    fn on_click(_: &EntityId, _: &EngineContext) {}
-    fn on_size_update(_: &EntityId, _: &EngineContext) {}
-}
-
-impl UIEventHandlerI for () {}
 
 impl UIEventHandlerC {
     pub fn new() -> Self {
@@ -433,18 +482,6 @@ impl UIEventHandlerC {
         Self {
             enabled: false,
             ..Default::default()
-        }
-    }
-
-    pub fn from_impl<I: UIEventHandlerI + 'static>() -> Self {
-        Self {
-            on_cursor_enter: Some(Arc::new(I::on_cursor_enter)),
-            on_cursor_leave: Some(Arc::new(I::on_cursor_enter)),
-            on_mouse_press: Some(Arc::new(I::on_cursor_enter)),
-            on_mouse_release: Some(Arc::new(I::on_cursor_enter)),
-            on_click: Some(Arc::new(I::on_cursor_enter)),
-            on_size_update: Some(I::on_size_update),
-            enabled: true,
         }
     }
 }

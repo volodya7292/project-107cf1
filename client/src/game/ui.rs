@@ -5,18 +5,26 @@ use crate::rendering::ui::container::{
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::image::reactive::ui_image;
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
-use crate::rendering::ui::text::reactive::ui_text;
+use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
+use crate::rendering::ui::text_input::{ui_text_input, TextInputProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::ui::{BasicEventCallback2, Padding, Sizing, UILayoutC, Visibility};
+use engine::ecs::component::ui::{
+    BasicEventCallback, ClickedCallback, Padding, Sizing, UILayoutC, Visibility,
+};
 use engine::module::ui::color::Color;
 use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
+use std::sync::Arc;
 
-fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl BasicEventCallback2) {
+const MENU_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
+// const BUTTON_TEXT_COLOR: Color = Color::rgb(3.0, 6.0, 3.0);
+const BUTTON_TEXT_COLOR: Color = Color::rgb(0.8, 2.0, 0.8);
+
+fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
     fancy_button(
         local_id,
         ctx,
@@ -26,7 +34,7 @@ fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: i
         StyledString::new(
             text,
             TextStyle::new()
-                .with_color(Color::rgb(3.0, 5.0, 3.0))
+                .with_color(BUTTON_TEXT_COLOR)
                 .with_font_size(38.0),
         ),
         on_click,
@@ -37,7 +45,7 @@ fn world_control_button(
     local_id: &str,
     ctx: &mut UIScopeContext,
     text: &str,
-    on_click: impl BasicEventCallback2,
+    on_click: impl ClickedCallback,
 ) {
     fancy_button(
         local_id,
@@ -48,7 +56,7 @@ fn world_control_button(
         StyledString::new(
             text,
             TextStyle::new()
-                .with_color(Color::grayscale(0.8))
+                .with_color(BUTTON_TEXT_COLOR)
                 .with_font_size(24.0),
         ),
         on_click,
@@ -70,7 +78,11 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
             ui_text(
                 make_static_id!(),
                 ctx,
-                StyledString::new(name.clone(), TextStyle::new().with_font_size(24.0)),
+                UITextProps {
+                    text: name.clone(),
+                    style: TextStyle::new().with_font_size(24.0),
+                    ..Default::default()
+                },
             );
             height_spacer(make_static_id!(), ctx, 4.0);
 
@@ -82,9 +94,9 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
                     ..Default::default()
                 },
                 |ctx| {
-                    world_control_button(make_static_id!(), ctx, "Continue", |entity, ctx| {});
+                    world_control_button(make_static_id!(), ctx, "Continue", |entity, ctx, _| {});
                     width_spacer(make_static_id!(), ctx, 20.0);
-                    world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx| {});
+                    world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx, _| {});
                 },
             )
         },
@@ -117,8 +129,6 @@ fn world_selection_list(ctx: &mut UIScopeContext) {
 fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: ReactiveState<&'static str>) {
     let resources = ctx.ctx().resources();
 
-    // TODO: implement resource caching
-
     let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
         .unwrap()
         .unwrap();
@@ -150,7 +160,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "START",
-                move |_: &EntityId, ctx: &EngineContext| {
+                move |_: &EntityId, ctx: &EngineContext, _| {
                     let mut app = ctx.app();
                     let mut reactor = app.ui_reactor();
                     reactor.set_state(&curr_tab_state2.clone(), |_| TAB_WORLD_CREATION);
@@ -163,7 +173,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "SETTINGS",
-                move |_: &EntityId, ctx: &EngineContext| {
+                move |_: &EntityId, ctx: &EngineContext, _| {
                     let mut app = ctx.app();
                     let mut reactor = app.ui_reactor();
                     reactor.set_state(&curr_tab_state2.clone(), |_| TAB_SETTINGS);
@@ -175,7 +185,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "EXIT",
-                move |_: &EntityId, ctx: &EngineContext| ctx.request_stop(),
+                move |_: &EntityId, ctx: &EngineContext, _| ctx.request_stop(),
             );
 
             expander(make_static_id!(), ctx, 0.5);
@@ -191,15 +201,36 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
         local_id,
         ctx,
         ContainerProps {
-            layout: UILayoutC::column(),
+            layout: UILayoutC::column().with_grow(),
             ..Default::default()
         },
         |ctx| {
+            let on_change = move |ctx: &EngineContext, text: String| {
+                // let app = ctx.app();
+                // let mut reactor = app.ui_reactor();
+                // reactor.set_state(&text_state, |_| text);
+            };
+
             ui_text(
                 make_static_id!(),
                 ctx,
-                StyledString::new("GOV", TextStyle::new().with_font_size(30.0)),
-            )
+                UITextProps {
+                    text: "New Overworld".to_string(),
+                    style: TextStyle::new().with_color(MENU_TITLE_COLOR).with_font_size(30.0),
+                    ..Default::default()
+                },
+            );
+            ui_text_input(
+                make_static_id!(),
+                ctx,
+                TextInputProps {
+                    layout: UILayoutC::new().with_grow().with_max_width(300.0),
+                    multiline: false,
+                    initial_text:"---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string(),
+                    style: TextStyle::new().with_font_size(20.0),
+                    on_change: Some(Arc::new(on_change)),
+                },
+            );
         },
     );
 }
@@ -216,7 +247,11 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
             ui_text(
                 make_static_id!(),
                 ctx,
-                StyledString::new("SETT sdf sdjf djsa", TextStyle::new().with_font_size(30.0)),
+                UITextProps {
+                    text: "SETT sdf sdjf djsa".to_string(),
+                    style: TextStyle::new().with_color(MENU_TITLE_COLOR).with_font_size(30.0),
+                    ..Default::default()
+                },
             )
         },
     );

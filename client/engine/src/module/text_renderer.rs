@@ -10,6 +10,7 @@ use crate::module::scene::Scene;
 use crate::module::scene::SceneObject;
 use crate::module::EngineModule;
 use crate::{attributes_impl, EngineContext};
+use common::glm;
 use common::glm::{Vec2, Vec4};
 use common::lrc::{Lrc, LrcExt, LrcExtSized};
 use common::rayon::prelude::*;
@@ -241,47 +242,43 @@ impl GlyphAllocator {
     }
 }
 
-fn calculate_string_width(string: &str, font: &Font) -> f32 {
-    let scale = rusttype::Scale::uniform(1.0);
-    let mut prev_glyph = None::<GlyphId>;
-    let mut curr_word_width = 0.0;
-
-    // Layout single word
-    for ch in string.chars() {
-        let glyph = font.glyph(ch).scaled(scale);
-        let h_metrics = glyph.h_metrics();
-        let g_id = glyph.id();
-
-        let kerning = prev_glyph
-            .map(|prev| font.pair_kerning(scale, prev, g_id))
-            .unwrap_or(0.0);
-
-        let glyph_width = kerning + h_metrics.advance_width;
-
-        curr_word_width += glyph_width;
-        prev_glyph = Some(g_id);
-    }
-    curr_word_width
-}
-
 pub type BlockSize = Vec2;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct PositioningInfo {
     uid: GlyphUID,
     offset: Vec2,
     scale: Vec2,
+    size: Vec2,
+}
+
+/// Transform of a char assuming origin at top-Left corner.
+pub struct CharTransform {
+    offset: Vec2,
+    size: Vec2,
+}
+
+impl CharTransform {
+    pub fn offset(&self) -> &Vec2 {
+        &self.offset
+    }
+
+    pub fn size(&self) -> &Vec2 {
+        &self.size
+    }
 }
 
 /// Returns glyph instances and resulting block size.
 fn layout_glyphs(
     allocator: &GlyphAllocator,
-    seq: &StyledString,
+    seq: &str,
+    style: &TextStyle,
     h_align: TextHAlign,
     long_word_breaking: bool,
     max_width: f32,
     max_height: f32,
     normalize_transforms: bool,
+    apply_reverse_fitness_transform: bool,
 ) -> (Vec<PositioningInfo>, BlockSize) {
     let max_width_norm = max_width / style.font_size();
 
@@ -290,10 +287,10 @@ fn layout_glyphs(
     let mut final_size = Vec2::new(0.0, 0.0);
 
     let scale = rusttype::Scale::uniform(1.0);
-    let style = &seq.style();
     let font = allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
     let space_id = font.glyph(' ').id();
     let v_metrics = font.v_metrics(scale);
+    let glyph_height = v_metrics.ascent - v_metrics.descent;
     let line_height = v_metrics.line_gap + (v_metrics.ascent - v_metrics.descent);
 
     // The origin (0,0) is at top-left corner
@@ -304,7 +301,6 @@ fn layout_glyphs(
     let mut curr_word_glyph_widths = Vec::<f32>::with_capacity(32);
 
     let glyph_uids: Vec<_> = seq
-        .data()
         .chars()
         .map(|ch| allocator.chart_to_glyph_uid(ch, style.font_id(), style.font_style()))
         .collect();
@@ -336,6 +332,7 @@ fn layout_glyphs(
                 uid: *g,
                 offset: curr_offset,
                 scale: Vec2::from_element(1.0),
+                size: Vec2::new(glyph_width, glyph_height),
             });
 
             curr_word_glyph_widths.push(glyph_width);
@@ -425,10 +422,12 @@ fn layout_glyphs(
         let g_uid = inst.uid;
         let glyph = font.glyph(g_uid.glyph_id());
 
-        if let Some(trans) = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
-            inst.scale *= trans.scale;
-            inst.offset.x += trans.offset_x;
-            inst.offset.y -= trans.offset_y;
+        if apply_reverse_fitness_transform {
+            if let Some(trans) = msdfgen::glyph_reverse_transform(glyph, GLYPH_SIZE, MSDF_PX_RANGE) {
+                inst.scale *= trans.scale;
+                inst.offset.x += trans.offset_x;
+                inst.offset.y -= trans.offset_y;
+            }
         }
 
         if normalize_transforms {
@@ -736,17 +735,89 @@ impl TextRenderer {
         self.glyph_array_initialized = true;
     }
 
-    pub fn calculate_minimum_text_size(&self, seq: &StyledString, max_width: f32) -> BlockSize {
+    pub fn calculate_minimum_text_size(&self, seq: &str, style: &TextStyle, max_width: f32) -> BlockSize {
         let (_, size) = layout_glyphs(
             &self.allocator,
             seq,
+            style,
             TextHAlign::LEFT,
             false,
             max_width,
             0.0,
             false,
+            false,
         );
-        size * seq.style().font_size()
+        size * style.font_size()
+    }
+
+    pub fn calculate_char_offset(
+        &self,
+        seq: &str,
+        style: &TextStyle,
+        max_width: f32,
+        char_idx: usize,
+    ) -> CharTransform {
+        let (positions, _) = layout_glyphs(
+            &self.allocator,
+            seq,
+            style,
+            TextHAlign::LEFT,
+            false,
+            max_width,
+            0.0,
+            false,
+            false,
+        );
+
+        let font = self.allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
+        let v_metrics = font.v_metrics(rusttype::Scale::uniform(1.0));
+        let info = positions[char_idx];
+
+        CharTransform {
+            offset: Vec2::new(info.offset.x, info.offset.y - v_metrics.ascent) * style.font_size(),
+            size: info.size * style.font_size(),
+        }
+    }
+
+    pub fn find_char_index(
+        &self,
+        seq: &str,
+        style: &TextStyle,
+        max_width: f32,
+        position: Vec2,
+    ) -> Option<usize> {
+        let (positions, _) = layout_glyphs(
+            &self.allocator,
+            seq,
+            style,
+            TextHAlign::LEFT,
+            false,
+            max_width,
+            0.0,
+            false,
+            false,
+        );
+
+        let font = self.allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
+        let v_metrics = font.v_metrics(rusttype::Scale::uniform(1.0));
+
+        let (min_elem_idx, _) = positions
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, v)| {
+                let offset = (v.offset - glm::vec2(0.0, v_metrics.ascent)) * style.font_size();
+                let size = v.size * style.font_size();
+
+                (position >= offset && position <= (offset + size)).then(|| {
+                    let center = offset + size * 0.5;
+                    let dist = glm::distance2(&center, &position);
+                    let idx = if position.x > center.x { idx + 1 } else { idx };
+                    (idx, dist)
+                })
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))?;
+
+        Some(min_elem_idx)
     }
 
     fn on_render_update(&mut self, ctx: &EngineContext) -> Option<Lrc<GPUJob>> {
@@ -774,12 +845,14 @@ impl TextRenderer {
 
             let (positions, _) = layout_glyphs(
                 &self.allocator,
-                &simple_text.text,
+                simple_text.text.data(),
+                simple_text.text.style(),
                 simple_text.h_align,
                 simple_text.long_word_breaking,
                 simple_text.max_width,
                 simple_text.max_height,
                 normalize_transforms,
+                true,
             );
             let instances: Vec<_> = positions
                 .into_iter()

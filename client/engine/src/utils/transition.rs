@@ -47,8 +47,22 @@ impl<T: Interpolatable> TransitionTarget<T> {
         }
     }
 
+    pub fn with_time_fn(mut self, time_fn: TimeFn) -> Self {
+        self.time_fn = time_fn;
+        self
+    }
+
+    pub fn with_value(mut self, value: T) -> Self {
+        self.value = value;
+        self
+    }
+
     pub fn value(&self) -> &T {
         &self.value
+    }
+
+    pub fn duration(&self) -> f64 {
+        self.duration
     }
 }
 
@@ -123,6 +137,14 @@ impl<T: Interpolatable> AnimatedValue<T> {
         self.curr = T::interpolate(self.start, self.target.value, t);
 
         self.time_passed == self.target.duration
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.time_passed == self.target.duration
+    }
+
+    pub fn time_passed(&self) -> f64 {
+        self.time_passed
     }
 
     pub fn current(&self) -> &T {

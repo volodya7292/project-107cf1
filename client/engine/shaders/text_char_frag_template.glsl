@@ -23,10 +23,11 @@ float screenPxRange() {
 }
 
 // `aa_alpha` is antialiasing alpha value
-void calculateCharShading(out float aa_alpha, out float signed_distance) {
+void calculateCharShading(in float boldness, out float aa_alpha, out float signed_distance) {
     vec4 msdt = texture(msdfArray, vec3(vs_in.texCoord, vs_in.glyphIndex));
     float sd = median(msdt.r, msdt.g, msdt.b);
-    float screenPxDistance = screenPxRange() * (sd - 0.5);
-    aa_alpha = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-    signed_distance = msdt.a;
+    float invBoldness = 1.0 - boldness;
+    float screenPxDistance = screenPxRange() * (sd - invBoldness);
+    aa_alpha = clamp(screenPxDistance + invBoldness, 0.0, 1.0);
+    signed_distance = 1.0 - msdt.a;
 }

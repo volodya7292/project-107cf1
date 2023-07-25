@@ -182,7 +182,7 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut obj = scene.object::<UIImage>(&entity.into());
     let cache = obj.get::<UILayoutCacheC>();
-    let rect_data = *cache.calculated_clip_rect();
+    let rect_data = *cache.normalized_clip_rect();
     let final_size = *cache.final_size();
     let final_opacity = cache.final_opacity();
     let ui_element_aspect_ratio = final_size.x / final_size.y;

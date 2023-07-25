@@ -79,13 +79,12 @@ impl UIReactor {
 
         // Update states and collect corresponding subscribers
         for (uid, new_value) in self.modified_states.drain() {
-            let state_value = self
+            let Some(scope) = self
                 .scopes
-                .get_mut(uid.scope_id())
-                .unwrap()
-                .states
-                .get_mut(uid.state_id())
-                .unwrap();
+                .get_mut(uid.scope_id()) else {
+                continue;
+            };
+            let state_value = scope.states.get_mut(uid.state_id()).unwrap();
             *state_value = new_value;
 
             if let Some(subs) = self.state_subscribers.get(&uid) {
@@ -96,6 +95,12 @@ impl UIReactor {
         for scope_id in dirty_scopes {
             self.rebuild(scope_id, ctx, delta_time);
         }
+    }
+
+    pub fn contains_state<T: Send + Sync + 'static>(&self, state: &ReactiveState<T>) -> bool {
+        self.scopes
+            .get(&state.owner)
+            .is_some_and(|scope| scope.states.contains_key(&state.name))
     }
 
     pub fn get_state<T: Send + Sync + 'static>(
@@ -363,7 +368,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         let mut new_value = **value;
         new_value.advance(self.delta_time);
 
-        if value.state().value().current() != new_value.current() {
+        if *value.state().value() != new_value {
             self.set_state(value.state(), |_| new_value);
         }
     }

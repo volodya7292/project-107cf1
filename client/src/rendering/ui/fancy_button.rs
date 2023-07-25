@@ -1,13 +1,13 @@
 use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::container::ContainerBackground;
 use crate::rendering::ui::container::{container, ContainerProps};
-use crate::rendering::ui::text::reactive::ui_text;
+use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::text::UITextImpl;
 use crate::rendering::ui::UICallbacks;
 use common::glm::Vec4;
 use common::make_static_id;
 use engine::ecs::component::simple_text::StyledString;
-use engine::ecs::component::ui::{BasicEventCallback2, UILayoutC};
+use engine::ecs::component::ui::{ClickedCallback, UILayoutC};
 use engine::module::main_renderer::MainRenderer;
 use engine::module::scene::Scene;
 use engine::module::ui::color::Color;
@@ -62,7 +62,7 @@ pub fn fancy_button(
     ctx: &mut UIScopeContext,
     layout: UILayoutC,
     text: StyledString,
-    on_click: impl BasicEventCallback2,
+    on_click: impl ClickedCallback,
 ) {
     let on_click = Arc::new(on_click);
 
@@ -80,10 +80,11 @@ pub fn fancy_button(
         let app = ctx.app();
         let mut reactor = app.ui_reactor();
 
+        const MUL_FACTOR: f32 = 3.0;
         let mut active_color = curr_text_color.into_raw();
-        active_color.x *= 1.6;
-        active_color.y *= 1.6;
-        active_color.z *= 1.6;
+        active_color.x *= MUL_FACTOR;
+        active_color.y *= MUL_FACTOR;
+        active_color.z *= MUL_FACTOR;
 
         reactor.set_state(&text_color2, |prev| {
             let mut new = prev.clone();
@@ -124,8 +125,11 @@ pub fn fancy_button(
             ui_text(
                 make_static_id!(),
                 ctx,
-                text.clone()
-                    .with_style(text.style().clone().with_color(*text_color.current())),
+                UITextProps {
+                    text: text.data().to_string(),
+                    style: text.style().clone().with_color(*text_color.current()),
+                    ..Default::default()
+                },
             );
         },
     );

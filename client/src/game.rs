@@ -32,7 +32,7 @@ use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::resource_file::{BufferedResourceReader, ResourceFile};
 use common::threading::SafeThreadPool;
-use engine::event::WSIEvent;
+use engine::event::{WSIEvent, WSIKeyboardInput};
 use engine::module::input::Input;
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
 use engine::module::scene::{ObjectEntityId, Scene};
@@ -359,63 +359,66 @@ impl MainApp {
 
         match event {
             WSIEvent::KeyboardInput { input } => {
-                if input.virtual_keycode.is_none() {
+                let WSIKeyboardInput::Virtual(virtual_keycode, state) = input else {
+                    return;
+                };
+
+                if *state != ElementState::Released {
                     return;
                 }
-                if input.state == ElementState::Released {
-                    let mut curr_state = main_state.lock_arc();
 
-                    match input.virtual_keycode.unwrap() {
-                        VirtualKeyCode::L => {
-                            curr_state.change_stream_pos = !curr_state.change_stream_pos;
-                        }
-                        VirtualKeyCode::C => {
-                            curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
-                        }
-                        VirtualKeyCode::P => {
-                            println!("{}", curr_state.player_pos);
-                            println!(
-                                "{:?}",
-                                curr_state
-                                    .player_pos
-                                    .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
-                            );
-                        }
-                        VirtualKeyCode::T => {
-                            self.grab_cursor(main_window, !self.cursor_grab, &ctx);
-                        }
-                        VirtualKeyCode::J => {
-                            // TODO: move into on_tick
-                            // let camera = renderer.active_camera();
-                            // let mut access = curr_state.overworld.access();
-                            // let block = access.get_block_at_ray(
-                            //     &camera.position(),
-                            //     &glm::convert(camera.direction()),
-                            //     7.0,
-                            // );
-                            // if let Some((pos, facing)) = block {
-                            //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
-                            //     let data = access.get_block(&pos);
-                            //
-                            //     if let Some(data) = data {
-                            //         let level = data.liquid_state().level();
-                            //         println!("LIQ LEVEL: {level}");
-                            //     }
-                            // }
-                        }
-                        VirtualKeyCode::Key1 => {
-                            curr_state.curr_block = self.main_registry.block_test.into_any();
-                            curr_state.set_water = false;
-                        }
-                        VirtualKeyCode::Key2 => {
-                            curr_state.curr_block = self.main_registry.block_glow.into_any();
-                            curr_state.set_water = false;
-                        }
-                        VirtualKeyCode::Key3 => {
-                            curr_state.set_water = true;
-                        }
-                        _ => {}
+                let mut curr_state = main_state.lock_arc();
+
+                match virtual_keycode {
+                    VirtualKeyCode::L => {
+                        curr_state.change_stream_pos = !curr_state.change_stream_pos;
                     }
+                    VirtualKeyCode::C => {
+                        curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
+                    }
+                    VirtualKeyCode::P => {
+                        println!("{}", curr_state.player_pos);
+                        println!(
+                            "{:?}",
+                            curr_state
+                                .player_pos
+                                .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
+                        );
+                    }
+                    VirtualKeyCode::T => {
+                        self.grab_cursor(main_window, !self.cursor_grab, &ctx);
+                    }
+                    VirtualKeyCode::J => {
+                        // TODO: move into on_tick
+                        // let camera = renderer.active_camera();
+                        // let mut access = curr_state.overworld.access();
+                        // let block = access.get_block_at_ray(
+                        //     &camera.position(),
+                        //     &glm::convert(camera.direction()),
+                        //     7.0,
+                        // );
+                        // if let Some((pos, facing)) = block {
+                        //     let pos = pos.offset_i32(&Facing::PositiveY.direction());
+                        //     let data = access.get_block(&pos);
+                        //
+                        //     if let Some(data) = data {
+                        //         let level = data.liquid_state().level();
+                        //         println!("LIQ LEVEL: {level}");
+                        //     }
+                        // }
+                    }
+                    VirtualKeyCode::Key1 => {
+                        curr_state.curr_block = self.main_registry.block_test.into_any();
+                        curr_state.set_water = false;
+                    }
+                    VirtualKeyCode::Key2 => {
+                        curr_state.curr_block = self.main_registry.block_glow.into_any();
+                        curr_state.set_water = false;
+                    }
+                    VirtualKeyCode::Key3 => {
+                        curr_state.set_water = true;
+                    }
+                    _ => {}
                 }
             }
             WSIEvent::MouseMotion { delta } => {
@@ -599,10 +602,15 @@ impl EngineModule for MainApp {
         }
 
         match event {
-            WSIEvent::KeyboardInput { input }
-                if input.virtual_keycode.is_some() && input.state == ElementState::Released =>
-            {
-                match input.virtual_keycode.unwrap() {
+            WSIEvent::KeyboardInput { input } => {
+                let WSIKeyboardInput::Virtual(virtual_keycode, state) = input else {
+                    return;
+                };
+                if *state != ElementState::Released {
+                    return;
+                }
+
+                match virtual_keycode {
                     VirtualKeyCode::Escape => {
                         if self.is_in_game() {
                             self.show_main_menu(ctx, !self.is_main_menu_visible(ctx));

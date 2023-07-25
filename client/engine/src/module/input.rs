@@ -1,4 +1,4 @@
-use crate::event::WSIEvent;
+use crate::event::{WSIEvent, WSIKeyboardInput};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use common::types::HashSet;
@@ -62,11 +62,11 @@ impl EngineModule for Input {
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
         match event {
             WSIEvent::KeyboardInput { input, .. } => {
-                if let Some(keycode) = input.virtual_keycode {
-                    if input.state == ElementState::Pressed {
-                        self.keyboard.pressed_keys.insert(keycode);
+                if let WSIKeyboardInput::Virtual(keycode, state) = input {
+                    if *state == ElementState::Pressed {
+                        self.keyboard.pressed_keys.insert(*keycode);
                     } else {
-                        self.keyboard.pressed_keys.remove(&keycode);
+                        self.keyboard.pressed_keys.remove(keycode);
                     }
                 }
             }

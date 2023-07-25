@@ -66,6 +66,28 @@ impl<I: Iterator> AllSameBy<I> for I {
     }
 }
 
+pub trait StringExt {
+    fn insert_char(&mut self, char_idx: usize, ch: char);
+    fn remove_char(&mut self, char_idx: usize);
+}
+
+impl StringExt for String {
+    fn insert_char(&mut self, char_idx: usize, ch: char) {
+        let byte_idx = self
+            .char_indices()
+            .skip(char_idx)
+            .next()
+            .map(|v| v.0)
+            .unwrap_or(self.len());
+        self.insert(byte_idx, ch);
+    }
+
+    fn remove_char(&mut self, char_idx: usize) {
+        let (byte_idx, _) = self.char_indices().skip(char_idx).next().unwrap();
+        self.remove(byte_idx);
+    }
+}
+
 pub fn high_precision_sleep(duration: Duration, single_sleep_period: Duration) {
     let end_t = Instant::now() + duration;
 

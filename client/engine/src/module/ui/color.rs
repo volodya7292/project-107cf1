@@ -17,6 +17,15 @@ impl Color {
         Self::new(r, g, b, 1.0)
     }
 
+    pub fn from_hex(hex: u32) -> Self {
+        Self::new(
+            (hex >> 24 & 0xff) as f32 / 255.0,
+            (hex >> 16 & 0xff) as f32 / 255.0,
+            (hex >> 8 & 0xff) as f32 / 255.0,
+            (hex >> 0 & 0xff) as f32 / 255.0,
+        )
+    }
+
     pub const fn grayscale(v: f32) -> Self {
         Self::new(v, v, v, 1.0)
     }
@@ -28,6 +37,12 @@ impl Color {
 
     pub fn into_raw(self) -> Vec4 {
         self.0
+    }
+}
+
+impl From<u32> for Color {
+    fn from(value: u32) -> Self {
+        Self::from_hex(value)
     }
 }
 

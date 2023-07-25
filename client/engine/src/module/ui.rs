@@ -16,8 +16,9 @@ use common::glm;
 use common::glm::{DVec3, Vec2, Vec3};
 use common::scene::relation::Relation;
 use common::types::HashSet;
-use entity_data::{Archetype, EntityId, SystemAccess};
+use entity_data::{Archetype, EntityId};
 use smallvec::SmallVec;
+use std::sync::Arc;
 use winit::window::Window;
 
 pub struct UIRenderer {
@@ -156,8 +157,6 @@ fn flow_calculate_children_sizes(
     parent_size: Vec2,
     flow_axis: usize,
     children_sizings: &[ChildFlowSizingInfo],
-    scene: &mut Scene,
-    ctx: &EngineContext,
 ) -> SmallVec<[(EntityId, f32); 128]> {
     let flow_parent_size = parent_size[flow_axis];
 
@@ -222,6 +221,10 @@ fn flow_calculate_children_sizes(
     // Calculate sizes for `Grow`-sizing entities
     for (idx, child) in children_sizings.iter().enumerate() {
         if child.relatively_positioned {
+            if let Sizing::Grow(factor) = child.sizing {
+                result[idx].1 =
+                    (parent_size[flow_axis] * factor).clamp(child.min_flow_size, child.max_flow_size);
+            }
             continue;
         }
         let size = if let Sizing::Grow(factor) = child.sizing {
@@ -243,6 +246,7 @@ fn flow_calculate_children_sizes(
 
 struct ChildPositioningInfo {
     entity: EntityId,
+    positioning: Position,
     cross_align: CrossAlign,
     size: Vec2,
 }
@@ -258,7 +262,11 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
 ) {
     let flow_axis = flow.axis();
     let cross_flow_axis = flow.cross_axis();
-    let flow_size_sum: f32 = children_sizes.iter().map(|child| child.size[flow_axis]).sum();
+    let flow_size_sum: f32 = children_sizes
+        .iter()
+        .filter(|child| child.positioning == Position::Auto)
+        .map(|child| child.size[flow_axis])
+        .sum();
 
     let mut curr_flow_pos = match flow_align {
         FlowAlign::Start => 0.0,
@@ -274,15 +282,25 @@ fn flow_calculate_children_positions<F: FnMut(EntityId, Vec2)>(
         };
 
         let mut pos = Vec2::default();
-        pos[flow_axis] = curr_flow_pos;
-        pos[cross_flow_axis] = cross_flow_pos;
+
+        match child.positioning {
+            Position::Auto => {
+                pos[flow_axis] = curr_flow_pos;
+                pos[cross_flow_axis] = cross_flow_pos;
+            }
+            Position::Relative(offset) => {
+                pos = offset;
+            }
+        }
 
         pos.x += parent_padding.left;
         pos.y += parent_padding.top;
 
         output(child.entity, pos);
 
-        curr_flow_pos += child.size[flow_axis];
+        if child.positioning == Position::Auto {
+            curr_flow_pos += child.size[flow_axis];
+        }
     }
 }
 
@@ -333,7 +351,7 @@ impl UIRenderer {
                 continue;
             }
 
-            let mut entry = scene.storage().entry(node).unwrap();
+            let entry = scene.storage().entry(node).unwrap();
             let Some(layout) = entry.get::<UILayoutC>() else {
                 continue;
             };
@@ -441,25 +459,39 @@ impl UIRenderer {
                 };
                 let child_cache = *child_entry.get::<UILayoutCacheC>();
 
+                let child_cross_min_size = child_layout.constraints[cross_flow_axis]
+                    .min
+                    .max(child_cache.final_min_size[cross_flow_axis]);
+                let child_cross_max_size = child_layout.constraints[cross_flow_axis]
+                    .max
+                    .max(child_cross_min_size);
+
                 // Calculate cross-flow-size for `child`
-                let child_new_cross_size = child_layout.constraints[cross_flow_axis].clamp(
-                    match child_layout.sizing[cross_flow_axis] {
-                        Sizing::Preferred(size) => size.clamp(
-                            child_cache.final_min_size[cross_flow_axis],
-                            parent_size[cross_flow_axis],
-                        ),
-                        Sizing::FitContent => child_cache.final_min_size[cross_flow_axis],
-                        Sizing::Grow(factor) => parent_size[cross_flow_axis] * factor.min(1.0),
-                        Sizing::ParentBased(calc_func) => calc_func(&child_entry, ctx, &parent_size),
-                    },
-                );
+                let child_new_cross_size = match child_layout.sizing[cross_flow_axis] {
+                    Sizing::Preferred(size) => size.clamp(
+                        child_cache.final_min_size[cross_flow_axis],
+                        parent_size[cross_flow_axis],
+                    ),
+                    Sizing::FitContent => child_cache.final_min_size[cross_flow_axis],
+                    Sizing::Grow(factor) => parent_size[cross_flow_axis] * factor.min(1.0),
+                    Sizing::ParentBased(calc_func) => calc_func(&child_entry, ctx, &parent_size),
+                }
+                .clamp(child_cross_min_size, child_cross_max_size);
 
                 // Set new cross-flow size
                 if child_new_cross_size != child_cache.final_size[cross_flow_axis] {
-                    let mut child_cache = child_entry.get_mut::<UILayoutCacheC>();
+                    let child_cache = child_entry.get_mut::<UILayoutCacheC>();
                     child_cache.final_size[cross_flow_axis] = child_new_cross_size;
                     dirty_elements.insert(*child);
                 }
+
+                // if child_layout.content_transform.offset.x < 0.0 {
+                //     dbg!(
+                //         child_new_cross_size,
+                //         child_layout.constraints[cross_flow_axis],
+                //         child_cache.final_min_size
+                //     );
+                // }
 
                 let max_flow_size = child_layout.constraints[flow_axis].max;
                 let min_flow_size = if let Sizing::ParentBased(calc_func) = &child_layout.sizing[flow_axis] {
@@ -485,7 +517,7 @@ impl UIRenderer {
 
             // Calculate flow-size of each child
             let calculated_children_flow_sizes =
-                flow_calculate_children_sizes(parent_size, flow_axis, &children_flow_sizings, scene, ctx);
+                flow_calculate_children_sizes(parent_size, flow_axis, &children_flow_sizings);
 
             let mut children_positioning_infos: SmallVec<[ChildPositioningInfo; 128]> =
                 SmallVec::with_capacity(children_flow_sizings.len());
@@ -493,6 +525,7 @@ impl UIRenderer {
             // Set children flow sizes
             for (child, child_new_flow_size) in &calculated_children_flow_sizes {
                 let mut child_entry = scene.entry(child);
+                let child_layout_positioning = child_entry.get::<UILayoutC>().position;
                 let child_layout_align = child_entry.get::<UILayoutC>().align;
                 let child_cache = child_entry.get_mut::<UILayoutCacheC>();
 
@@ -504,6 +537,7 @@ impl UIRenderer {
                 // Collect info for position calculation
                 children_positioning_infos.push(ChildPositioningInfo {
                     entity: *child,
+                    positioning: child_layout_positioning,
                     cross_align: child_layout_align,
                     size: child_cache.final_size,
                 });
@@ -518,33 +552,34 @@ impl UIRenderer {
                 &children_positioning_infos,
                 |child, position| {
                     let mut child_entry = scene.entry(&child);
+                    let ui_transform = child_entry.get_mut::<UILayoutC>().content_transform;
                     let child_cache = child_entry.get_mut::<UILayoutCacheC>();
-                    let new_global_pos = parent_cache.global_position + position;
+
+                    child_cache.relative_position = position + ui_transform.offset;
+                    let new_global_pos = parent_cache.global_position + child_cache.relative_position;
 
                     if child_cache.global_position != new_global_pos {
                         child_cache.global_position = new_global_pos;
                         dirty_elements.insert(child);
                     }
-
-                    child_cache.relative_position = position;
                 },
             );
 
             // Calculate clipping regions
             for (child, child_final_flow_size) in &calculated_children_flow_sizes {
                 let mut child_entry = scene.entry(&child);
+                let ui_transform = child_entry.get::<UILayoutC>().content_transform;
                 let child_cache = child_entry.get_mut::<UILayoutCacheC>();
 
                 let mut local_clip_rect = ClipRect::default();
                 local_clip_rect.min = child_cache.relative_position;
-                local_clip_rect.max = child_cache.relative_position;
-                local_clip_rect.max[cross_flow_axis] +=
-                    child_cache.final_size[cross_flow_axis].min(parent_size[cross_flow_axis]);
-                local_clip_rect.max[flow_axis] += child_final_flow_size.min(parent_size[flow_axis]);
+                local_clip_rect.max = local_clip_rect.min;
+                local_clip_rect.max[cross_flow_axis] += child_cache.final_size[cross_flow_axis];
+                local_clip_rect.max[flow_axis] += child_final_flow_size;
 
                 let global_clip_rect = ClipRect {
-                    min: parent_cache.global_position + local_clip_rect.min,
-                    max: parent_cache.global_position + local_clip_rect.max,
+                    min: parent_cache.global_position + local_clip_rect.min - ui_transform.offset,
+                    max: parent_cache.global_position + local_clip_rect.max - ui_transform.offset,
                 };
 
                 let new_clip_rect = parent_clip.intersection(&global_clip_rect);
@@ -747,7 +782,7 @@ impl EngineModule for UIRenderer {
                     let handler = scene
                         .entry(entity)
                         .get_checked::<UIEventHandlerC>()
-                        .map(|v| v.on_size_update)
+                        .map(|v| v.on_size_update.as_ref().map(|v| Arc::clone(v)))
                         .flatten()?;
                     Some((*entity, handler))
                 })
