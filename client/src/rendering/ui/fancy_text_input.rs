@@ -31,7 +31,7 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
             let label = props.label.clone();
             let label_style = props
                 .style
-                .with_font_size(props.style.font_size() * 0.8)
+                .with_font_size(props.style.font_size() * 0.9)
                 .with_color(props.style.color().with_brightness(0.7));
 
             container(
@@ -57,9 +57,12 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
                 make_static_id!(),
                 ctx,
                 TextInputProps {
-                    layout: UILayoutC::new()
-                        .with_width_grow()
-                        .with_padding(Padding::equal(10.0)),
+                    layout: UILayoutC::new().with_width_grow().with_padding(Padding {
+                        left: 10.0,
+                        right: 10.0,
+                        top: 5.0,
+                        bottom: 10.0,
+                    }),
                     multiline: props.multiline,
                     initial_text: props.initial_text.clone(),
                     style: props.style,
