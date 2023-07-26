@@ -161,9 +161,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 ctx,
                 "START",
                 move |_: &EntityId, ctx: &EngineContext, _| {
-                    let mut app = ctx.app();
-                    let mut reactor = app.ui_reactor();
-                    reactor.set_state(&curr_tab_state2.clone(), |_| TAB_WORLD_CREATION);
+                    curr_tab_state2.update(TAB_WORLD_CREATION);
                 },
             );
             height_spacer(make_static_id!(), ctx, 30.0);
@@ -174,9 +172,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 ctx,
                 "SETTINGS",
                 move |_: &EntityId, ctx: &EngineContext, _| {
-                    let mut app = ctx.app();
-                    let mut reactor = app.ui_reactor();
-                    reactor.set_state(&curr_tab_state2.clone(), |_| TAB_SETTINGS);
+                    curr_tab_state2.update(TAB_SETTINGS);
                 },
             );
             height_spacer(make_static_id!(), ctx, 30.0);
@@ -205,11 +201,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx| {
-            let on_change = move |ctx: &EngineContext, text: String| {
-                // let app = ctx.app();
-                // let mut reactor = app.ui_reactor();
-                // reactor.set_state(&text_state, |_| text);
-            };
+            remember_state!(ctx, text, "---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string());
 
             ui_text(
                 make_static_id!(),
@@ -227,9 +219,8 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     label: "Name".to_string(),
                     layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
                     multiline: false,
-                    initial_text: "---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string(),
+                    text_state: text.state().clone(),
                     style: TextStyle::new().with_font_size(20.0),
-                    on_change: Some(Arc::new(on_change)),
                 },
             );
         },
@@ -298,11 +289,10 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.descend(
         make_static_id!(),
         move |ctx| {
-            let menu_visible = ctx.subscribe(menu_visible.state());
-
-            ctx.set_state(&menu_opacity2, |prev| {
+            let menu_visible = ctx.subscribe(menu_visible.state()).state().clone();
+            menu_opacity2.update_with(move |prev| {
                 let mut d = *prev;
-                let opacity = if *menu_visible { 1.0 } else { 0.0 };
+                let opacity = if *menu_visible.value() { 1.0 } else { 0.0 };
                 d.retarget(TransitionTarget::new(opacity, 0.07));
                 d
             });

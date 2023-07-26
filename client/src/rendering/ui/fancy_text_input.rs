@@ -2,20 +2,18 @@ use crate::rendering::ui::backgrounds;
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
 use crate::rendering::ui::container::{container, ContainerProps};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
-use crate::rendering::ui::text_input::{ui_text_input, TextChangeCallback, TextInputProps};
+use crate::rendering::ui::text_input::{ui_text_input, TextInputProps};
 use common::make_static_id;
 use engine::ecs::component::simple_text::TextStyle;
 use engine::ecs::component::ui::{Padding, UILayoutC};
-use engine::module::ui::reactive::UIScopeContext;
-use std::sync::Arc;
+use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 
 pub struct FancyTextInputProps {
     pub label: String,
     pub layout: UILayoutC,
     pub multiline: bool,
-    pub initial_text: String,
+    pub text_state: ReactiveState<String>,
     pub style: TextStyle,
-    pub on_change: Option<Arc<dyn TextChangeCallback<Output = ()>>>,
 }
 
 pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: FancyTextInputProps) {
@@ -64,9 +62,8 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
                         bottom: 10.0,
                     }),
                     multiline: props.multiline,
-                    initial_text: props.initial_text.clone(),
+                    text_state: props.text_state.clone(),
                     style: props.style,
-                    on_change: props.on_change.clone(),
                 },
             );
         },

@@ -1,11 +1,13 @@
 use crate::utils::transition::{AnimatedValue, Interpolatable};
 use crate::EngineContext;
+use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::any::Any;
 use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync;
 use std::sync::Arc;
 
 pub type ScopeId = String;
@@ -38,10 +40,14 @@ impl StateUID {
     }
 }
 
+type AnyState = Arc<dyn Any + Send + Sync>;
+type ModifierFunctions = Vec<Box<dyn FnOnce(&AnyState) -> AnyState + Sync + Send>>;
+type ModifiedStates = HashMap<StateUID, ModifierFunctions>;
+
 /// Provides reactive ui management
 pub struct UIReactor {
     scopes: HashMap<ScopeId, UIScope>,
-    modified_states: HashMap<StateUID, Arc<dyn Any + Send + Sync>>,
+    modified_states: Arc<Mutex<ModifiedStates>>,
     dirty_scopes: HashSet<ScopeId>,
     state_subscribers: HashMap<StateUID, HashSet<ScopeId>>,
 }
@@ -77,15 +83,20 @@ impl UIReactor {
     pub fn on_update(&mut self, ctx: EngineContext, delta_time: f64) {
         let mut dirty_scopes: HashSet<_> = self.dirty_scopes.drain().collect();
 
+        let modified_states: Vec<_> = self.modified_states.lock().drain().collect();
+
         // Update states and collect corresponding subscribers
-        for (uid, new_value) in self.modified_states.drain() {
+        for (uid, modifiers) in modified_states {
             let Some(scope) = self
                 .scopes
                 .get_mut(uid.scope_id()) else {
                 continue;
             };
             let state_value = scope.states.get_mut(uid.state_id()).unwrap();
-            *state_value = new_value;
+
+            for modifier in modifiers {
+                *state_value = modifier(state_value);
+            }
 
             if let Some(subs) = self.state_subscribers.get(&uid) {
                 dirty_scopes.extend(subs.iter().cloned());
@@ -115,21 +126,10 @@ impl UIReactor {
         Some(ReactiveState {
             owner: scope_id,
             name: state_id,
+            modified_states: Arc::downgrade(&self.modified_states),
             value,
             _ty: Default::default(),
         })
-    }
-
-    pub fn set_state<T: Send + Sync + 'static, F: FnOnce(&T) -> T>(
-        &mut self,
-        state: &ReactiveState<T>,
-        new: F,
-    ) {
-        let state_scope = self.scopes.get_mut(&state.owner).unwrap();
-        let curr_value = state_scope.states.get(&state.name).unwrap();
-
-        let new_value = new(curr_value.downcast_ref::<T>().unwrap());
-        self.modified_states.insert(state.uid(), Arc::new(new_value));
     }
 
     /// Performs rebuilding of the specified scope of `parent`.
@@ -218,7 +218,7 @@ impl UIReactor {
 
         for name in states_to_remove {
             let state_uid = StateUID(ctx.scope_id.clone(), name);
-            ctx.reactor.modified_states.remove(&state_uid);
+            ctx.reactor.modified_states.lock().remove(&state_uid);
 
             if let Some(subscribers) = ctx.reactor.state_subscribers.remove(&state_uid) {
                 for subscriber in subscribers {
@@ -233,8 +233,37 @@ impl UIReactor {
 pub struct ReactiveState<T> {
     owner: ScopeId,
     name: String,
+    modified_states: sync::Weak<Mutex<ModifiedStates>>,
     value: Arc<T>,
     _ty: PhantomData<T>,
+}
+
+impl<T: Send + Sync + 'static> ReactiveState<T> {
+    fn uid(&self) -> StateUID {
+        StateUID(self.owner.clone(), self.name.clone())
+    }
+
+    /// Enqueues a new state update.
+    pub fn update_with<F: FnOnce(&T) -> T + Send + Sync + 'static>(&self, new_state_fn: F) {
+        let Some(modified_states) = self.modified_states.upgrade() else {
+            return;
+        };
+        let mut modified_states = modified_states.lock();
+
+        let modifiers = modified_states.entry(self.uid()).or_default();
+        modifiers.push(Box::new(|prev| {
+            Arc::new(new_state_fn(prev.downcast_ref::<T>().unwrap()))
+        }));
+    }
+
+    /// Enqueues a new state update.
+    pub fn update(&self, new_value: T) {
+        self.update_with(move |_| new_value);
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
 }
 
 impl<T> Clone for ReactiveState<T> {
@@ -242,19 +271,22 @@ impl<T> Clone for ReactiveState<T> {
         Self {
             owner: self.owner.clone(),
             name: self.name.clone(),
+            modified_states: self.modified_states.clone(),
             value: Arc::clone(&self.value),
             _ty: Default::default(),
         }
     }
 }
 
-impl<T> ReactiveState<T> {
-    fn uid(&self) -> StateUID {
-        StateUID(self.owner.clone(), self.name.clone())
-    }
-
-    pub fn value(&self) -> &T {
-        &self.value
+impl<T: Default> Default for ReactiveState<T> {
+    fn default() -> Self {
+        Self {
+            owner: "".to_string(),
+            name: "".to_string(),
+            modified_states: Default::default(),
+            value: Default::default(),
+            _ty: Default::default(),
+        }
     }
 }
 
@@ -325,17 +357,10 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         ReactiveState {
             owner: self.scope_id.clone(),
             name,
+            modified_states: Arc::downgrade(&self.reactor.modified_states),
             value: state_value.clone().downcast::<T>().unwrap(),
             _ty: Default::default(),
         }
-    }
-
-    pub fn set_state<T: Send + Sync + 'static, F: FnOnce(&T) -> T>(
-        &mut self,
-        state: &ReactiveState<T>,
-        new: F,
-    ) {
-        self.reactor.set_state(state, new);
     }
 
     /// Subscribes this scope to updates of the state. This scope will be rebuild it `state` changes.
@@ -369,7 +394,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         new_value.advance(self.delta_time);
 
         if *value.state().value() != new_value {
-            self.set_state(value.state(), |_| new_value);
+            value.state().update(new_value);
         }
     }
 

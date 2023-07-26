@@ -82,7 +82,6 @@ impl EngineModule for Input {
                     }
                 }
                 if let WSIKeyboardInput::Modifiers(state) = input {
-                    dbg!(state);
                     self.keyboard.modifiers = *state;
                 }
             }

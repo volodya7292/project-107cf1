@@ -1,4 +1,3 @@
-use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::container::{container, ContainerProps};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{container, UICallbacks};
@@ -13,7 +12,7 @@ use engine::module::input::Input;
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
 use engine::module::ui::color::Color;
-use engine::module::ui::reactive::UIScopeContext;
+use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::AnimatedValue;
 use engine::utils::transition::TransitionTarget;
 use engine::winit::event::{ElementState, VirtualKeyCode};
@@ -27,9 +26,8 @@ define_callback!(TextChangeCallback(&EngineContext, String));
 pub struct TextInputProps {
     pub layout: UILayoutC,
     pub multiline: bool,
-    pub initial_text: String,
+    pub text_state: ReactiveState<String>,
     pub style: TextStyle,
-    pub on_change: Option<Arc<dyn TextChangeCallback<Output = ()>>>,
 }
 
 const CURSOR_X_PADDING: f32 = 10.0;
@@ -49,7 +47,6 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
         move |ctx| {
             let char_height = props.style.font_size();
 
-            remember_state!(ctx, text, props.initial_text.clone());
             remember_state!(ctx, cursor_pos, 1);
             remember_state!(ctx, cursor_opacity, AnimatedValue::immediate(1.0));
             remember_state!(ctx, text_offset, Vec2::new(0.0, 0.0));
@@ -58,16 +55,16 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             remember_state!(ctx, container_size, None::<Vec2>);
             remember_state!(ctx, focused, false);
 
-            let cursor_pos_state = cursor_pos.state().clone();
             let container_size_state = container_size.state().clone();
             let text_size_state = text_size.state().clone();
             let text_global_pos_state = text_global_pos.state().clone();
             let cursor_opacity_state = cursor_opacity.state().clone();
 
+            let text = ctx.subscribe(&props.text_state);
             let n_chars = text.chars().count();
 
             if cursor_opacity.is_finished() {
-                ctx.reactor().set_state(&cursor_opacity_state, |prev| {
+                cursor_opacity_state.update_with(|prev| {
                     let mut new = *prev;
                     new.retarget(
                         TransitionTarget::new(1.0 - *prev.target().value(), 0.5)
@@ -79,7 +76,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             ctx.drive_transition(&cursor_opacity);
 
             if *cursor_pos > n_chars {
-                ctx.reactor().set_state(cursor_pos.state(), |prev| n_chars);
+                cursor_pos.state().update(n_chars);
             }
 
             let cursor_offset = if n_chars > 0 {
@@ -111,42 +108,39 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     + (container_size.x - CURSOR_X_PADDING));
 
                 if relative_cursor_offset.x > container_size.x - CURSOR_X_PADDING {
-                    ctx.reactor().set_state(text_offset.state(), |prev| {
+                    text_offset.state().update_with(move |prev| {
                         Vec2::new(-cursor_offset.x + container_size.x - CURSOR_X_PADDING, prev.y)
                     });
                 } else if relative_cursor_offset.x < CURSOR_X_PADDING {
-                    ctx.reactor().set_state(text_offset.state(), |prev| {
+                    text_offset.state().update_with(move |prev| {
                         Vec2::new((-cursor_offset.x + CURSOR_X_PADDING).min(0.0), prev.y)
                     });
                 }
                 if text_offset.x < text_offset_x_min {
-                    ctx.reactor()
-                        .set_state(text_offset.state(), |prev| Vec2::new(text_offset_x_min, prev.y));
+                    text_offset
+                        .state()
+                        .update_with(move |prev| Vec2::new(text_offset_x_min, prev.y));
                 }
             }
 
             let on_text_size_update = move |entity: &EntityId, ctx: &EngineContext| {
-                let app = ctx.app();
-                let mut reactor = app.ui_reactor();
                 let mut scene = ctx.module_mut::<Scene>();
                 let entry = scene.entry(entity);
                 let layout = entry.get::<UILayoutC>();
+                let layout_padding = layout.padding;
                 let cache = entry.get::<UILayoutCacheC>();
                 let global_pos = *cache.global_position();
                 let size = *cache.final_size();
                 let clip_rect = *cache.clip_rect();
 
-                reactor.set_state(&text_global_pos_state.clone(), |_| {
-                    global_pos + Vec2::new(layout.padding.left, layout.padding.top)
-                });
-                reactor.set_state(&text_size_state.clone(), |_| size - layout.padding.size());
-                reactor.set_state(&container_size_state.clone(), |_| {
-                    Some(clip_rect.size() - layout.padding.size())
-                });
+                text_global_pos_state.update(global_pos + Vec2::new(layout_padding.left, layout_padding.top));
+                text_size_state.update(size - layout_padding.size());
+                container_size_state.update(Some(clip_rect.size() - layout_padding.size()));
             };
 
             let container_size_state = container_size.state().clone();
             let text_global_pos_state = text_global_pos.state().clone();
+            let cursor_pos_state = cursor_pos.state().clone();
             let text2 = text.clone();
             let props2 = props.clone();
             let on_click = move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
@@ -164,41 +158,37 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 );
 
                 if let Some(char_idx) = char_idx {
-                    let app = ctx.app();
-                    let mut reactor = app.ui_reactor();
-                    reactor.set_state(&cursor_pos_state, |_| char_idx);
+                    cursor_pos_state.update(char_idx);
                 }
             };
 
             let focused_state = focused.state().clone();
             let on_focus_in = move |entity: &EntityId, ctx: &EngineContext| {
-                let app = ctx.app();
-                let mut reactor = app.ui_reactor();
-                reactor.set_state(&focused_state.clone(), |_| true);
+                focused_state.update(true);
             };
 
             let focused_state = focused.state().clone();
             let on_focus_out = move |entity: &EntityId, ctx: &EngineContext| {
-                let app = ctx.app();
-                let mut reactor = app.ui_reactor();
-                reactor.set_state(&focused_state.clone(), |_| false);
+                focused_state.update(false);
             };
 
             let cursor_pos_state = cursor_pos.state().clone();
             let cursor_opacity_state = cursor_opacity.state().clone();
             let text_state = text.state().clone();
-            let on_change = props.on_change.clone();
             let on_key_press = move |entity: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput| {
-                let mut new_cursor_offset = 0_isize;
-                let mut new_text = text_state.value().clone();
-
                 let super_key_pressed = {
                     let input_manager = ctx.module::<Input>();
                     input_manager.keyboard().is_super_key_pressed()
                 };
 
-                match input {
-                    WSIKeyboardInput::Virtual(keycode, state) => {
+                let cursor_pos_state = cursor_pos_state.clone();
+                let text_state = text_state.clone();
+
+                text_state.update_with(move |prev| {
+                    let mut new_text = prev.clone();
+                    let mut new_cursor_offset = 0_isize;
+
+                    if let WSIKeyboardInput::Virtual(keycode, state) = input {
                         if state == ElementState::Pressed {
                             if keycode == VirtualKeyCode::Left {
                                 new_cursor_offset = -1;
@@ -226,34 +216,25 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                             }
                         }
                     }
-                    WSIKeyboardInput::Char(ch) => {
+                    if let WSIKeyboardInput::Char(ch) = input {
                         if ch.is_control() || super_key_pressed {
-                            return;
+                            return new_text;
                         }
-                        println!("{}", super_key_pressed);
                         new_text.insert_at_char(*cursor_pos_state.value(), ch);
                         new_cursor_offset = 1;
                     }
-                    _ => {}
-                }
 
-                if &new_text != text_state.value() {
-                    if let Some(on_change) = &on_change {
-                        on_change(ctx, new_text.clone());
-                    }
-                }
+                    cursor_pos_state
+                        .update_with(move |prev| (*prev as isize + new_cursor_offset).max(0) as usize);
 
-                let app = ctx.app();
-                let mut reactor = app.ui_reactor();
-                reactor.set_state(&cursor_pos_state, |prev| {
-                    (*prev as isize + new_cursor_offset).max(0) as usize
+                    new_text
                 });
-                reactor.set_state(&cursor_opacity_state, |prev| {
+
+                cursor_opacity_state.update_with(|prev| {
                     let mut new = *prev;
                     new.retarget(prev.target().clone().with_value(1.0));
                     new
                 });
-                reactor.set_state(&text_state, |prev| new_text);
             };
 
             container(

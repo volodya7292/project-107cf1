@@ -248,7 +248,7 @@ impl MainApp {
                 ui_root_states::MENU_VISIBLE.to_string(),
             )
             .unwrap();
-        ui_reactor.set_state(&visible_state, |_| visible);
+        visible_state.update(visible);
         drop(ui_reactor);
 
         self.grab_cursor(&ctx.window(), !visible, ctx);

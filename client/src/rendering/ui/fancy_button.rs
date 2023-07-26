@@ -1,4 +1,3 @@
-use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
 use crate::rendering::ui::container::{container, ContainerProps};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
@@ -29,16 +28,13 @@ pub fn fancy_button(
 
     let text_color2 = text_color.clone();
     let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
-        let app = ctx.app();
-        let mut reactor = app.ui_reactor();
-
         const MUL_FACTOR: f32 = 3.0;
         let mut active_color = curr_text_color.into_raw();
         active_color.x *= MUL_FACTOR;
         active_color.y *= MUL_FACTOR;
         active_color.z *= MUL_FACTOR;
 
-        reactor.set_state(&text_color2, |prev| {
+        text_color2.update_with(move |prev| {
             let mut new = prev.clone();
             new.retarget(TransitionTarget::new(active_color.into(), 0.2));
             new
@@ -47,10 +43,7 @@ pub fn fancy_button(
 
     let text_color2 = text_color.clone();
     let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
-        let app = ctx.app();
-        let mut reactor = app.ui_reactor();
-
-        reactor.set_state(&text_color2, |prev| {
+        text_color2.update_with(move |prev| {
             let mut new = prev.clone();
             new.retarget(TransitionTarget::new(curr_text_color, 0.2));
             new
