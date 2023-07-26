@@ -2,7 +2,7 @@ use crate::event::{WSIEvent, WSIKeyboardInput};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use common::types::HashSet;
-use winit::event::{ElementState, MouseButton, VirtualKeyCode};
+use winit::event::{ElementState, ModifiersState, MouseButton, VirtualKeyCode};
 use winit::window::Window;
 
 pub struct Input {
@@ -12,6 +12,7 @@ pub struct Input {
 
 pub struct Keyboard {
     pub(crate) pressed_keys: HashSet<VirtualKeyCode>,
+    pub(crate) modifiers: ModifiersState,
 }
 
 pub struct Mouse {
@@ -22,10 +23,21 @@ impl Keyboard {
     pub(crate) fn new() -> Self {
         Self {
             pressed_keys: HashSet::with_capacity(16),
+            modifiers: Default::default(),
         }
     }
+
     pub fn is_key_pressed(&self, keycode: VirtualKeyCode) -> bool {
         self.pressed_keys.contains(&keycode)
+    }
+
+    /// Super key is `Command` on macos, `Control` otherwise.
+    pub fn is_super_key_pressed(&self) -> bool {
+        if cfg!(target_os = "macos") {
+            self.modifiers.contains(ModifiersState::LOGO)
+        } else {
+            self.modifiers.contains(ModifiersState::CTRL)
+        }
     }
 }
 
@@ -68,6 +80,10 @@ impl EngineModule for Input {
                     } else {
                         self.keyboard.pressed_keys.remove(keycode);
                     }
+                }
+                if let WSIKeyboardInput::Modifiers(state) = input {
+                    dbg!(state);
+                    self.keyboard.modifiers = *state;
                 }
             }
             WSIEvent::MouseInput { state, button, .. } => {

@@ -1,13 +1,14 @@
 use crate::utils::wsi::vec2::WSizingInfo;
 use crate::utils::wsi::{WSIPosition, WSISize};
 use common::glm::DVec2;
-use winit::event::{DeviceEvent, ElementState, MouseButton, VirtualKeyCode};
+use winit::event::{DeviceEvent, ElementState, ModifiersState, MouseButton, VirtualKeyCode};
 use winit::window::Window;
 
 #[derive(Copy, Clone)]
 pub enum WSIKeyboardInput {
     Virtual(VirtualKeyCode, ElementState),
     Char(char),
+    Modifiers(ModifiersState),
 }
 
 pub enum WSIEvent {
@@ -70,6 +71,9 @@ impl WSIEvent {
                         input: WSIKeyboardInput::Virtual(input.virtual_keycode.unwrap(), input.state),
                     }
                 }
+                WWindowEvent::ModifiersChanged(state) => WSIEvent::KeyboardInput {
+                    input: WSIKeyboardInput::Modifiers(*state),
+                },
                 WWindowEvent::ReceivedCharacter(ch) => WSIEvent::KeyboardInput {
                     input: WSIKeyboardInput::Char(*ch),
                 },

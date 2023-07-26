@@ -67,12 +67,13 @@ impl<I: Iterator> AllSameBy<I> for I {
 }
 
 pub trait StringExt {
-    fn insert_char(&mut self, char_idx: usize, ch: char);
-    fn remove_char(&mut self, char_idx: usize);
+    fn insert_at_char(&mut self, char_idx: usize, ch: char);
+    fn insert_str_at_char(&mut self, char_idx: usize, s: &str);
+    fn remove_at_char(&mut self, char_idx: usize);
 }
 
 impl StringExt for String {
-    fn insert_char(&mut self, char_idx: usize, ch: char) {
+    fn insert_at_char(&mut self, char_idx: usize, ch: char) {
         let byte_idx = self
             .char_indices()
             .skip(char_idx)
@@ -82,7 +83,17 @@ impl StringExt for String {
         self.insert(byte_idx, ch);
     }
 
-    fn remove_char(&mut self, char_idx: usize) {
+    fn insert_str_at_char(&mut self, char_idx: usize, s: &str) {
+        let byte_idx = self
+            .char_indices()
+            .skip(char_idx)
+            .next()
+            .map(|v| v.0)
+            .unwrap_or(self.len());
+        self.insert_str(byte_idx, s);
+    }
+
+    fn remove_at_char(&mut self, char_idx: usize) {
         let (byte_idx, _) = self.char_indices().skip(char_idx).next().unwrap();
         self.remove(byte_idx);
     }

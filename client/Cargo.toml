@@ -21,6 +21,7 @@ bit-vec = "0.6"
 fixedbitset = "0.4"
 lazy_static = "1.4"
 dirs = "5.0"
+clipboard = "0.5"
 
 [build-dependencies]
 common = { path = "../common" }

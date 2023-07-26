@@ -2,12 +2,14 @@ use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::container::{container, ContainerProps};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{container, UICallbacks};
+use clipboard::ClipboardProvider;
 use common::glm::Vec2;
 use common::make_static_id;
 use common::utils::StringExt;
 use engine::ecs::component::simple_text::TextStyle;
 use engine::ecs::component::ui::{Constraint, Position, UILayoutC, UILayoutCacheC, UITransform, Visibility};
 use engine::event::WSIKeyboardInput;
+use engine::module::input::Input;
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
 use engine::module::ui::color::Color;
@@ -190,6 +192,11 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 let mut new_cursor_offset = 0_isize;
                 let mut new_text = text_state.value().clone();
 
+                let super_key_pressed = {
+                    let input_manager = ctx.module::<Input>();
+                    input_manager.keyboard().is_super_key_pressed()
+                };
+
                 match input {
                     WSIKeyboardInput::Virtual(keycode, state) => {
                         if state == ElementState::Pressed {
@@ -199,24 +206,35 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                                 new_cursor_offset = 1;
                             } else if keycode == VirtualKeyCode::Back {
                                 if *cursor_pos_state.value() > 0 {
-                                    new_text.remove_char(*cursor_pos_state.value() - 1);
+                                    new_text.remove_at_char(*cursor_pos_state.value() - 1);
                                     new_cursor_offset = -1;
                                 }
                             } else if keycode == VirtualKeyCode::Delete {
                                 let cursor_pos = *cursor_pos_state.value();
                                 if new_text.chars().count() > cursor_pos {
-                                    new_text.remove_char(cursor_pos);
+                                    new_text.remove_at_char(cursor_pos);
                                 }
+                            }
+
+                            if super_key_pressed && keycode == VirtualKeyCode::V {
+                                let contents = clipboard::ClipboardContext::new()
+                                    .unwrap()
+                                    .get_contents()
+                                    .unwrap_or_default();
+                                new_text.insert_str_at_char(*cursor_pos_state.value(), &contents);
+                                new_cursor_offset = contents.chars().count() as isize;
                             }
                         }
                     }
                     WSIKeyboardInput::Char(ch) => {
-                        if ch.is_control() {
+                        if ch.is_control() || super_key_pressed {
                             return;
                         }
-                        new_text.insert_char(*cursor_pos_state.value(), ch);
+                        println!("{}", super_key_pressed);
+                        new_text.insert_at_char(*cursor_pos_state.value(), ch);
                         new_cursor_offset = 1;
                     }
+                    _ => {}
                 }
 
                 if &new_text != text_state.value() {
