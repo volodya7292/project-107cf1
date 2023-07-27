@@ -250,48 +250,65 @@ impl<'a> TextAccess for EntityAccess<'a, UIText> {
 }
 
 pub mod reactive {
+    use crate::rendering::ui::container::{container, ContainerProps};
     use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
-    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
+    use common::make_static_id;
     use engine::ecs::component::simple_text::{StyledString, TextStyle};
+    use engine::ecs::component::ui::UILayoutC;
     use engine::module::scene::Scene;
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     pub struct UITextProps {
+        pub layout: UILayoutC,
+        pub callbacks: UICallbacks,
         pub text: String,
         pub style: TextStyle,
         pub wrap: bool,
     }
 
     pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, props: UITextProps) {
-        let parent = ctx.scope_id().clone();
-        let parent_entity = *ctx
-            .reactor()
-            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
-            .unwrap()
-            .value();
-
-        ctx.descend(
+        container(
             local_name,
+            ctx,
+            ContainerProps {
+                layout: props.layout,
+                callbacks: props.callbacks.clone(),
+                ..Default::default()
+            },
             move |ctx| {
-                let styled_string = StyledString::new(props.text.clone(), props.style);
+                let parent = ctx.scope_id().clone();
+                let parent_entity = *ctx
+                    .reactor()
+                    .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+                    .unwrap()
+                    .value();
+                let props = props.clone();
 
-                let mut ui_ctx = UIContext::new(*ctx.ctx());
-                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                    *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), props.wrap)
-                });
-                let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
+                ctx.descend(
+                    make_static_id!(),
+                    move |ctx| {
+                        let styled_string = StyledString::new(props.text.clone(), props.style);
 
-                obj.set_text(styled_string.clone());
-                obj.set_wrap(props.wrap);
+                        let mut ui_ctx = UIContext::new(*ctx.ctx());
+                        let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), props.wrap)
+                        });
+                        let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
+
+                        obj.set_text(styled_string.clone());
+                        obj.set_wrap(props.wrap);
+                    },
+                    move |ctx, scope| {
+                        let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
+                        let mut scene = ctx.module_mut::<Scene>();
+                        scene.remove_object(&entity);
+                    },
+                    true,
+                );
             },
-            move |ctx, scope| {
-                let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
-                let mut scene = ctx.module_mut::<Scene>();
-                scene.remove_object(&entity);
-            },
-            true,
-        );
+        )
     }
 }

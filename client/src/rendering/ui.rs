@@ -70,6 +70,7 @@ pub fn register_ui_elements(ctx: &EngineContext) {
     backgrounds::register(ctx);
 }
 
+#[derive(Clone)]
 pub struct UICallbacks {
     pub interaction_enabled: bool,
     pub focusable: bool,
@@ -97,6 +98,11 @@ impl UICallbacks {
         event_handler.on_focus_in = self.on_focus_in.clone();
         event_handler.on_focus_out = self.on_focus_out.clone();
         event_handler.on_size_update = self.on_size_update.clone();
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.interaction_enabled = enabled;
+        self
     }
 
     pub fn with_focusable(mut self, focusable: bool) -> Self {

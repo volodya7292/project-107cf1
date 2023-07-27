@@ -47,6 +47,7 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
                             text: label.clone(),
                             style: label_style,
                             wrap: false,
+                            ..Default::default()
                         },
                     );
                 },

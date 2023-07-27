@@ -735,6 +735,12 @@ impl TextRenderer {
         self.glyph_array_initialized = true;
     }
 
+    pub fn get_min_line_height(&self, style: &TextStyle) -> f32 {
+        let font = self.allocator.fonts[style.font_id() as usize].best_for_style(style.font_style());
+        let v_metrics = font.v_metrics(rusttype::Scale::uniform(1.0));
+        (v_metrics.ascent - v_metrics.descent) * style.font_size()
+    }
+
     pub fn calculate_minimum_text_size(&self, seq: &str, style: &TextStyle, max_width: f32) -> BlockSize {
         let (_, size) = layout_glyphs(
             &self.allocator,

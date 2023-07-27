@@ -6,7 +6,9 @@ use common::glm::Vec2;
 use common::make_static_id;
 use common::utils::StringExt;
 use engine::ecs::component::simple_text::TextStyle;
-use engine::ecs::component::ui::{Constraint, Position, UILayoutC, UILayoutCacheC, UITransform, Visibility};
+use engine::ecs::component::ui::{
+    Constraint, Position, Sizing, UILayoutC, UILayoutCacheC, UITransform, Visibility,
+};
 use engine::event::WSIKeyboardInput;
 use engine::module::input::Input;
 use engine::module::scene::Scene;
@@ -45,7 +47,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             ..Default::default()
         },
         move |ctx| {
-            let char_height = props.style.font_size();
+            let line_height = {
+                let text_renderer = ctx.ctx().module::<TextRenderer>();
+                text_renderer.get_min_line_height(&props.style)
+            };
 
             remember_state!(ctx, cursor_pos, 1);
             remember_state!(ctx, cursor_opacity, AnimatedValue::immediate(1.0));
@@ -244,8 +249,8 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     layout: props
                         .layout
                         .with_content_transform(UITransform::new().with_offset(*text_offset))
+                        .with_min_height(line_height)
                         .with_grow(),
-                    // .with_min_width(800.0),
                     callbacks: UICallbacks::new()
                         .with_focusable(true)
                         .with_on_click(Arc::new(on_click))
@@ -260,6 +265,11 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         make_static_id!(),
                         ctx,
                         UITextProps {
+                            layout: UILayoutC::new()
+                                .with_width_grow()
+                                .with_height(Sizing::FitContent)
+                                .with_min_height(line_height),
+                            callbacks: UICallbacks::new().with_enabled(false),
                             text: text.clone(),
                             style: props.style,
                             wrap: props.multiline,
@@ -275,7 +285,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                                     .with_position(Position::Relative(cursor_offset))
                                     .with_visibility(Visibility::Opacity(*cursor_opacity))
                                     .with_width_constraint(Constraint::exact(1.0))
-                                    .with_height_constraint(Constraint::exact(char_height)),
+                                    .with_height_constraint(Constraint::exact(line_height)),
                                 background: Some(container::background::solid_color(Color::grayscale(0.5))),
                                 ..Default::default()
                             },
