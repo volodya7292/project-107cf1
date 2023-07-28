@@ -223,9 +223,10 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
 pub mod reactive {
     use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
     use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use common::scene::relation::Relation;
     use engine::ecs::component::ui::UILayoutC;
     use engine::module::scene::Scene;
-    use engine::module::ui::reactive::{ScopeId, UIScopeContext};
+    use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
     pub fn ui_image<F: Fn(&mut UIScopeContext) + 'static>(
@@ -242,6 +243,7 @@ pub mod reactive {
             .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
             .unwrap()
             .value();
+        let child_num = ctx.num_children();
 
         ctx.descend(
             local_id,
@@ -251,6 +253,15 @@ pub mod reactive {
                     let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
                         *UIImage::new(&mut ui_ctx, parent_entity, layout, None, fitness)
                     });
+
+                    // Set consecutive order
+                    {
+                        let mut parent = ui_ctx.scene().entry(&parent_entity);
+                        parent
+                            .get_mut::<Relation>()
+                            .set_child_order(entity_state.value(), Some(child_num as u32));
+                    }
+
                     let mut obj = ui_ctx.scene().object::<UIImage>(&entity_state.value().into());
 
                     if let Some(source) = source.clone() {

@@ -29,8 +29,8 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
             let label = props.label.clone();
             let label_style = props
                 .style
-                .with_font_size(props.style.font_size() * 0.9)
-                .with_color(props.style.color().with_brightness(0.7));
+                .with_font_size(props.style.font_size())
+                .with_color(DEFAULT_FANCY_COLOR.with_brightness(1.2));
 
             container(
                 make_static_id!(),

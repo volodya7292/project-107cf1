@@ -1,6 +1,7 @@
 use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
 use common::glm::Vec4;
 use common::memoffset::offset_of;
+use common::scene::relation::Relation;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
@@ -126,6 +127,7 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
     children_fn: F,
 ) {
     let parent = ctx.scope_id().clone();
+    let child_num = ctx.num_children();
     let parent_entity = *ctx
         .reactor()
         .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
@@ -155,6 +157,14 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
                 } else {
                     Default::default()
                 };
+
+                // Set consecutive order
+                {
+                    let mut parent = ui_ctx.scene().entry(&parent_entity);
+                    parent
+                        .get_mut::<Relation>()
+                        .set_child_order(entity_state.value(), Some(child_num as u32));
+                }
 
                 let mut obj = ui_ctx
                     .scene()

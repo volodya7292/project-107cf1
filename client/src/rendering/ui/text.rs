@@ -254,6 +254,7 @@ pub mod reactive {
     use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
     use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
     use common::make_static_id;
+    use common::scene::relation::Relation;
     use engine::ecs::component::simple_text::{StyledString, TextStyle};
     use engine::ecs::component::ui::UILayoutC;
     use engine::module::scene::Scene;
@@ -270,6 +271,8 @@ pub mod reactive {
     }
 
     pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, props: UITextProps) {
+        let child_num = ctx.num_children();
+
         container(
             local_name,
             ctx,
@@ -296,8 +299,16 @@ pub mod reactive {
                         let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
                             *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), props.wrap)
                         });
-                        let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
 
+                        // Set consecutive order
+                        {
+                            let mut parent = ui_ctx.scene().entry(&parent_entity);
+                            parent
+                                .get_mut::<Relation>()
+                                .set_child_order(entity_state.value(), Some(child_num as u32));
+                        }
+
+                        let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
                         obj.set_text(styled_string.clone());
                         obj.set_wrap(props.wrap);
                     },

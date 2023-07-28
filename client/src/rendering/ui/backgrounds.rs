@@ -34,8 +34,8 @@ mod fancy {
         let pixel = renderer
             .device()
             .create_pixel_shader(
-                include_bytes!("../../../res/shaders/fancy_button.frag.spv"),
-                "fancy_button.frag",
+                include_bytes!("../../../res/shaders/fancy_background.frag.spv"),
+                "fancy_background.frag",
             )
             .unwrap();
 
@@ -53,7 +53,7 @@ pub fn register(ctx: &EngineContext) {
     fancy::register(ctx);
 }
 
-pub const DEFAULT_FANCY_COLOR: Color = Color::grayscale(0.2);
+pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.2, 0.3, 0.2);
 
 pub fn fancy(color: Color) -> ContainerBackground {
     ContainerBackground::new_raw(

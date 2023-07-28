@@ -233,6 +233,15 @@ impl SceneChangeManager {
     /// Removes all change-marks from `handle` and returns only new-value changes.
     /// That is, the components that have new value: added or modified.
     #[inline]
+    pub fn take_new_iter(&mut self, handle: ComponentChangesHandle) -> impl Iterator<Item = EntityId> {
+        self.take(handle)
+            .into_iter()
+            .filter_map(|v| v.ty.is_new().then_some(v.entity))
+    }
+
+    /// Removes all change-marks from `handle` and returns only new-value changes.
+    /// That is, the components that have new value: added or modified.
+    #[inline]
     pub fn take_new<R: FromIterator<EntityId>>(&mut self, handle: ComponentChangesHandle) -> R {
         self.take(handle)
             .into_iter()

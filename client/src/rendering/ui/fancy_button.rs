@@ -72,6 +72,7 @@ pub fn fancy_button(
                 ctx,
                 UITextProps {
                     text: text.data().to_string(),
+                    callbacks: UICallbacks::new().with_enabled(false),
                     style: text.style().clone().with_color(*text_color.current()),
                     ..Default::default()
                 },

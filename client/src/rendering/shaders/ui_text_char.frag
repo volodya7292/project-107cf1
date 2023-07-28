@@ -35,8 +35,7 @@ void main() {
     }
 
     vec4 color = vs_in.color;
-    float innerShadow = mix(1.0, sd, innerShadowIntensity);
-
+//    float innerShadow = mix(1.0, sd, innerShadowIntensity);
 //    color.rgb *= 1.0 - localize(sd, 0.100, 10.0);
 
     if (aa_alpha < ALPHA_BIAS) {

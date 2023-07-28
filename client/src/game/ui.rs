@@ -8,21 +8,22 @@ use crate::rendering::ui::image::reactive::ui_image;
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
 use engine::ecs::component::ui::{
-    BasicEventCallback, ClickedCallback, Padding, Sizing, UILayoutC, Visibility,
+    BasicEventCallback, ClickedCallback, CrossAlign, Padding, Sizing, UILayoutC, Visibility,
 };
 use engine::module::ui::color::Color;
 use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
-use std::sync::Arc;
 
-const MENU_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
+const TAB_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
 // const BUTTON_TEXT_COLOR: Color = Color::rgb(3.0, 6.0, 3.0);
 const BUTTON_TEXT_COLOR: Color = Color::rgb(0.8, 2.0, 0.8);
+const TEXT_COLOR: Color = Color::grayscale(0.9);
 
 fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
     fancy_button(
@@ -58,6 +59,24 @@ fn world_control_button(
             TextStyle::new()
                 .with_color(BUTTON_TEXT_COLOR)
                 .with_font_size(24.0),
+        ),
+        on_click,
+    );
+}
+
+fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
+    fancy_button(
+        local_id,
+        ctx,
+        UILayoutC::new()
+            .with_min_height(24.0)
+            .with_padding(Padding::hv(14.0, 10.0))
+            .with_align(CrossAlign::End),
+        StyledString::new(
+            text,
+            TextStyle::new()
+                .with_color(BUTTON_TEXT_COLOR)
+                .with_font_size(26.0),
         ),
         on_click,
     );
@@ -192,6 +211,14 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
 const TAB_WORLD_CREATION: &str = "world_creation";
 const TAB_SETTINGS: &str = "settings";
 
+fn tab_name(tab_id: &str) -> &'static str {
+    match tab_id {
+        TAB_WORLD_CREATION => "New Overworld",
+        TAB_SETTINGS => "Settings",
+        _ => "",
+    }
+}
+
 fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
     container(
         local_id,
@@ -201,17 +228,11 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx| {
-            remember_state!(ctx, text, "---------------------- ---------------------------- asfd asdf dsaf  fads afds fdas asdasf -------------------- ----------------------------XX".to_string());
+            remember_state!(ctx, text, "world".to_string());
+            remember_state!(ctx, seed, rand::random::<u64>().to_string());
 
-            ui_text(
-                make_static_id!(),
-                ctx,
-                UITextProps {
-                    text: "New Overworld".to_string(),
-                    style: TextStyle::new().with_color(MENU_TITLE_COLOR).with_font_size(30.0),
-                    ..Default::default()
-                },
-            );
+            fn on_proceed(entity: &EntityId, ctx: &EngineContext, _: Vec2) {}
+
             fancy_text_input(
                 make_static_id!(),
                 ctx,
@@ -223,6 +244,20 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     style: TextStyle::new().with_font_size(20.0),
                 },
             );
+            height_spacer(make_static_id!(), ctx, 30.0);
+            fancy_text_input(
+                make_static_id!(),
+                ctx,
+                FancyTextInputProps {
+                    label: "Seed".to_string(),
+                    layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
+                    multiline: false,
+                    text_state: seed.state().clone(),
+                    style: TextStyle::new().with_font_size(20.0),
+                },
+            );
+            expander(make_static_id!(), ctx, 1.0);
+            action_button(make_static_id!(), ctx, "> PROCEED", on_proceed);
         },
     );
 }
@@ -241,7 +276,7 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
                 ctx,
                 UITextProps {
                     text: "SETT sdf sdjf djsa".to_string(),
-                    style: TextStyle::new().with_color(MENU_TITLE_COLOR).with_font_size(30.0),
+                    style: TextStyle::new().with_color(TEXT_COLOR).with_font_size(30.0),
                     ..Default::default()
                 },
             )
@@ -261,14 +296,27 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
         UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)),
         Some(ImageSource::Data(image_source)),
         ImageFitness::Cover,
-        move |ctx| match tab_id {
-            TAB_WORLD_CREATION => {
-                world_creation_view(make_static_id!(), ctx);
+        move |ctx| {
+            ui_text(
+                make_static_id!(),
+                ctx,
+                UITextProps {
+                    text: tab_name(tab_id).to_string(),
+                    style: TextStyle::new().with_color(TAB_TITLE_COLOR).with_font_size(30.0),
+                    ..Default::default()
+                },
+            );
+            height_spacer(make_static_id!(), ctx, 30.0);
+            match tab_id {
+                TAB_WORLD_CREATION => {
+                    world_creation_view(make_static_id!(), ctx);
+                }
+                TAB_SETTINGS => {
+                    settings_view(make_static_id!(), ctx);
+                }
+                _ => {}
             }
-            TAB_SETTINGS => {
-                settings_view(make_static_id!(), ctx);
-            }
-            _ => {}
+            height_spacer(make_static_id!(), ctx, 100.0);
         },
     );
 }

@@ -28,6 +28,7 @@ pub struct UIRenderer {
     root_element_size_dirty: bool,
     force_update_transforms: bool,
     ui_layout_changes: ComponentChangesHandle,
+    relation_changes: ComponentChangesHandle,
 }
 
 pub trait UIState: Send + Sync + 'static {
@@ -308,6 +309,7 @@ impl UIRenderer {
     pub fn new(ctx: &EngineContext, root_entity: EntityId) -> Self {
         let mut scene = ctx.module_mut::<Scene>();
         let ui_layout_changes = scene.change_manager_mut().register_component_flow::<UILayoutC>();
+        let relation_changes = scene.change_manager_mut().register_component_flow::<Relation>();
 
         let root_ui_entity = scene
             .add_object(Some(root_entity), UIObject::new_raw(UILayoutC::column(), ()))
@@ -319,6 +321,7 @@ impl UIRenderer {
             root_element_size_dirty: false,
             scale_factor: 1.0,
             ui_layout_changes,
+            relation_changes,
             force_update_transforms: false,
         }
     }
@@ -362,8 +365,8 @@ impl UIRenderer {
             let mut new_min_size = Vec2::from_element(0.0);
 
             // Calculate self min size using children min sizes
-            for child in &relation.children {
-                let child_entry = scene.storage().entry(child).unwrap();
+            for child in relation.ordered_children() {
+                let child_entry = scene.storage().entry(&child).unwrap();
                 let Some(child_layout) = child_entry.get::<UILayoutC>() else {
                     continue;
                 };
@@ -428,19 +431,16 @@ impl UIRenderer {
                 continue;
             };
 
-            let contains_dirty_children = relation
-                .children
-                .iter()
-                .any(|child| dirty_elements.contains(child));
+            let Some(&parent_layout) = entry.get_checked::<UILayoutC>() else {
+                continue;
+            };
+            let children: SmallVec<[EntityId; 128]> = relation.ordered_children().collect();
 
+            let contains_dirty_children = children.iter().any(|child| dirty_elements.contains(child));
             if !dirty_elements.contains(node) && !contains_dirty_children {
                 continue;
             }
 
-            let Some(&parent_layout) = entry.get_checked::<UILayoutC>() else {
-                continue;
-            };
-            let children: SmallVec<[EntityId; 128]> = relation.children.iter().cloned().collect();
             let parent_cache = *entry.get::<UILayoutCacheC>();
             let flow_axis = parent_layout.content_flow.axis();
             let cross_flow_axis = parent_layout.content_flow.cross_axis();
@@ -448,7 +448,7 @@ impl UIRenderer {
             let parent_clip = &parent_cache.clip_rect;
 
             let mut children_flow_sizings: SmallVec<[ChildFlowSizingInfo; 128]> =
-                SmallVec::with_capacity(relation.children.len());
+                SmallVec::with_capacity(relation.num_children());
 
             drop(entry);
 
@@ -642,8 +642,8 @@ impl UIRenderer {
 
                 // if parent transform changed, then all children transforms must be recalculated
                 let relation = entry.get_mut::<Relation>();
-                for child in &relation.children {
-                    dirty_elements.insert(*child);
+                for child in relation.unordered_children() {
+                    dirty_elements.insert(child);
                 }
             }
         }
@@ -751,7 +751,18 @@ impl EngineModule for UIRenderer {
             self.root_element_size_dirty = false;
         }
 
-        let mut dirty_elements: HashSet<_> = scene.change_manager_mut().take_new(self.ui_layout_changes);
+        let mut dirty_elements: HashSet<_> = scene
+            .change_manager_mut()
+            .take_new_iter(self.ui_layout_changes)
+            .collect();
+
+        // Relation changes are also important because children order can change
+        let dirty_relations: Vec<_> = scene.change_manager_mut().take_new(self.relation_changes);
+        dirty_elements.extend(
+            dirty_relations
+                .iter()
+                .filter(|entity| scene.entry(entity).get_checked::<UILayoutC>().is_some()),
+        );
 
         if !self.force_update_transforms && dirty_elements.is_empty() {
             return;

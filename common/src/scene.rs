@@ -22,7 +22,12 @@ pub fn walk_relation_tree<PI: Clone, F: FnMut(&EntityId, PI) -> PI>(
         if let Some(relation) = relation_comps.get(&entity) {
             // Because we're popping from the stack, insert in reverse order
             // to preserve the order of visiting children so the first is popped first.
-            to_visit.extend(relation.children.iter().rev().map(|e| (*e, parent_info.clone())));
+            to_visit.extend(
+                relation
+                    .ordered_children()
+                    .rev()
+                    .map(|e| (e, parent_info.clone())),
+            );
         }
     }
 }
@@ -40,7 +45,7 @@ pub fn collect_relation_tree_out(access: &SystemAccess, root: &EntityId, out_nod
         if let Some(relation) = relation_comps.get(&entity) {
             // Because we're popping from the stack, insert in reverse order
             // to preserve the order of visiting children so the first is popped first.
-            to_visit.extend(relation.children.iter().rev());
+            to_visit.extend(relation.ordered_children().rev());
         }
     }
 }

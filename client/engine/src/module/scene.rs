@@ -172,7 +172,7 @@ impl Scene {
                 let parent = relation.parent;
 
                 if let Some(parent) = self.storage.get_mut::<Relation>(&parent) {
-                    parent.children.remove(&entity);
+                    parent.remove_child(&entity);
                 }
             }
 
@@ -211,7 +211,7 @@ impl Scene {
             .get_mut::<Relation>(&parent)
             .expect("parent must have Relation component");
 
-        parent_relation.children.extend(children);
+        parent_relation.add_children(children.iter().cloned());
     }
 
     pub fn clear_children(&mut self, parent: &EntityId) {
@@ -219,7 +219,9 @@ impl Scene {
             .storage
             .get_mut::<Relation>(parent)
             .expect("parent must have Relation component");
-        let children: Vec<_> = parent_relation.children.drain(..).collect();
+
+        let children: Vec<_> = parent_relation.unordered_children().collect();
+        parent_relation.clear_children();
 
         for child in &children {
             self.remove_object(child);

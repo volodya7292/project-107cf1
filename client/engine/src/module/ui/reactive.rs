@@ -332,6 +332,10 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         &self.scope_id
     }
 
+    pub fn num_children(&self) -> usize {
+        self.used_children.len()
+    }
+
     /// Returns the state identified by `name`. If the state doesn't exist,
     /// creates a new one with the return value from `init` closure.
     pub fn request_state<T: Send + Sync + 'static, F: FnOnce() -> T>(
