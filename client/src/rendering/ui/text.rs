@@ -8,7 +8,7 @@ use engine::ecs::component::ui::{
 };
 use engine::ecs::component::{SimpleTextC, TransformC, UniformDataC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
+use engine::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
 use engine::module::text_renderer::{RawTextObject, TextRenderer};
 use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
@@ -192,12 +192,9 @@ pub trait UITextImpl {
                 .with_height(Sizing::ParentBased(wrapper_height_calc))
                 .with_shader_inverted_y(true),
             WrapperState { text, wrap },
-        );
+        )
+        .disable_pointer_events();
         let wrapper_entity = ui_ctx.scene.add_object(Some(*main_entity), wrapper_obj).unwrap();
-        {
-            let mut wrapper = ui_ctx.scene().object(&wrapper_entity);
-            wrapper.get_mut::<UIEventHandlerC>().enabled = false;
-        }
 
         let raw_text_entity = ui_ctx
             .scene
@@ -216,41 +213,23 @@ pub trait UITextImpl {
 
         main_entity
     }
+
+    fn modify<F: FnOnce(&mut TextState)>(entity: &ObjectEntityId<UIText>, ctx: &EngineContext, f: F) {
+        let mut scene = ctx.module_mut::<Scene>();
+        let mut obj = scene.object(entity);
+        f(obj.state_mut());
+        drop(obj);
+        drop(scene);
+        UIText::on_update(entity, ctx, 0.0);
+    }
 }
 
 impl UITextImpl for UIText {}
 
-pub trait TextAccess {
-    fn get_text(&self) -> &StyledString;
-    fn set_text(&mut self, text: StyledString);
-    fn get_wrap(&self) -> bool;
-    fn set_wrap(&mut self, wrap: bool);
-}
-
-impl<'a> TextAccess for EntityAccess<'a, UIText> {
-    fn get_text(&self) -> &StyledString {
-        &self.state().text
-    }
-
-    fn set_text(&mut self, text: StyledString) {
-        self.state_mut().text = text;
-        self.request_update();
-    }
-
-    fn get_wrap(&self) -> bool {
-        self.state().wrap
-    }
-
-    fn set_wrap(&mut self, wrap: bool) {
-        self.state_mut().wrap = wrap;
-        self.request_update();
-    }
-}
-
 pub mod reactive {
     use super::UniformData;
     use crate::rendering::ui::container::{container, ContainerProps};
-    use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
+    use crate::rendering::ui::text::{on_size_update, UIText, UITextImpl};
     use crate::rendering::ui::{UICallbacks, UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
     use common::make_static_id;
     use common::memoffset::offset_of;
@@ -314,11 +293,15 @@ pub mod reactive {
                         let opacity = *parent_opacity;
                         ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
+                        drop(ui_ctx);
+                        UIText::modify(&entity_state.value().into(), ctx.ctx(), |state| {
+                            state.text = styled_string;
+                            state.wrap = props.wrap;
+                        });
+                        let mut ui_ctx = UIContext::new(*ctx.ctx());
+
                         let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
                         let raw_text_entity = obj.state().raw_text_entity;
-
-                        obj.set_text(styled_string.clone());
-                        obj.set_wrap(props.wrap);
                         drop(obj);
 
                         {
@@ -330,6 +313,9 @@ pub mod reactive {
                                 opacity,
                             );
                         }
+
+                        drop(ui_ctx);
+                        on_size_update(entity_state.value(), ctx.ctx());
                     },
                     move |ctx, scope| {
                         let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

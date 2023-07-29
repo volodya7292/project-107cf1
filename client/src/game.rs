@@ -7,7 +7,7 @@ use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
 use crate::rendering::ui::image::{ImageAccess, ImageImpl};
 use crate::rendering::ui::register_ui_elements;
-use crate::rendering::ui::text::{TextAccess, UITextImpl};
+use crate::rendering::ui::text::UITextImpl;
 use approx::AbsDiffEq;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
