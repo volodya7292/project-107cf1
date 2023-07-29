@@ -19,6 +19,7 @@ use engine::EngineContext;
 use std::sync::Arc;
 
 pub const STATE_ENTITY_ID: &'static str = "__entity_id";
+pub const LOCAL_VAR_OPACITY: &'static str = "__opacity";
 
 pub struct UIContext<'a> {
     scene: OwnedRefMut<dyn EngineModule, Scene>,
@@ -88,18 +89,6 @@ impl UICallbacks {
         Self::default()
     }
 
-    pub fn apply_to_event_handler(&self, event_handler: &mut UIEventHandlerC) {
-        event_handler.enabled = self.interaction_enabled;
-        event_handler.focusable = self.focusable;
-        event_handler.on_click = self.on_click.clone();
-        event_handler.on_cursor_enter = self.on_cursor_enter.clone();
-        event_handler.on_cursor_leave = self.on_cursor_leave.clone();
-        event_handler.on_key_press = self.on_key_press.clone();
-        event_handler.on_focus_in = self.on_focus_in.clone();
-        event_handler.on_focus_out = self.on_focus_out.clone();
-        event_handler.on_size_update = self.on_size_update.clone();
-    }
-
     pub fn with_enabled(mut self, enabled: bool) -> Self {
         self.interaction_enabled = enabled;
         self
@@ -158,6 +147,24 @@ impl Default for UICallbacks {
             on_focus_out: None,
             on_key_press: None,
             on_size_update: None,
+        }
+    }
+}
+
+impl From<UICallbacks> for UIEventHandlerC {
+    fn from(value: UICallbacks) -> Self {
+        Self {
+            enabled: value.interaction_enabled,
+            focusable: value.focusable,
+            on_click: value.on_click,
+            on_cursor_enter: value.on_cursor_enter,
+            on_cursor_leave: value.on_cursor_leave,
+            on_mouse_press: None,
+            on_mouse_release: None,
+            on_key_press: value.on_key_press,
+            on_focus_in: value.on_focus_in,
+            on_focus_out: value.on_focus_out,
+            on_size_update: value.on_size_update,
         }
     }
 }

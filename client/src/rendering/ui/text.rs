@@ -79,7 +79,6 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
 
     let cache = entry.get::<UILayoutCacheC>();
     let rect_data = *cache.normalized_clip_rect();
-    let final_opacity = cache.final_opacity();
     let final_size = *cache.final_size();
 
     let text_block_size = {
@@ -107,7 +106,6 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
 
     let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
-    uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
 
     drop(raw_text_entry);
 }
@@ -250,15 +248,19 @@ impl<'a> TextAccess for EntityAccess<'a, UIText> {
 }
 
 pub mod reactive {
+    use super::UniformData;
     use crate::rendering::ui::container::{container, ContainerProps};
     use crate::rendering::ui::text::{TextAccess, UIText, UITextImpl};
-    use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
+    use crate::rendering::ui::{UICallbacks, UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
     use common::make_static_id;
+    use common::memoffset::offset_of;
     use common::scene::relation::Relation;
     use engine::ecs::component::simple_text::{StyledString, TextStyle};
     use engine::ecs::component::ui::UILayoutC;
+    use engine::ecs::component::UniformDataC;
     use engine::module::scene::Scene;
     use engine::module::ui::reactive::UIScopeContext;
+    use engine::module::ui::UIObjectEntityImpl;
     use entity_data::EntityId;
 
     #[derive(Default, Clone)]
@@ -285,9 +287,10 @@ pub mod reactive {
                 let parent = ctx.scope_id().clone();
                 let parent_entity = *ctx
                     .reactor()
-                    .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+                    .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
                     .unwrap()
                     .value();
+                let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
                 let props = props.clone();
 
                 ctx.descend(
@@ -308,9 +311,25 @@ pub mod reactive {
                                 .set_child_order(entity_state.value(), Some(child_num as u32));
                         }
 
+                        let opacity = *parent_opacity;
+                        ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+
                         let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
+                        let raw_text_entity = obj.state().raw_text_entity;
+
                         obj.set_text(styled_string.clone());
                         obj.set_wrap(props.wrap);
+                        drop(obj);
+
+                        {
+                            let mut raw_text = ui_ctx.scene.entry(&*raw_text_entity);
+                            let raw_uniform_data = raw_text.get_mut::<UniformDataC>();
+                            UniformDataC::copy_from_with_offset(
+                                raw_uniform_data,
+                                offset_of!(UniformData, opacity),
+                                opacity,
+                            );
+                        }
                     },
                     move |ctx, scope| {
                         let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

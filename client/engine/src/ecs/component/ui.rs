@@ -410,7 +410,6 @@ pub struct UILayoutCacheC {
     pub(crate) global_position: Vec2,
     pub(crate) clip_rect: ClipRect,
     pub(crate) calculated_clip_rect: RectUniformData,
-    pub(crate) final_opacity: f32,
 }
 
 impl UILayoutCacheC {
@@ -430,10 +429,6 @@ impl UILayoutCacheC {
 
     pub fn final_size(&self) -> &Vec2 {
         &self.final_size
-    }
-
-    pub fn final_opacity(&self) -> f32 {
-        self.final_opacity
     }
 }
 
@@ -491,5 +486,9 @@ impl UIEventHandlerC {
             enabled: false,
             ..Default::default()
         }
+    }
+
+    pub fn add_on_size_update(&mut self, handler: Arc<dyn BasicEventCallback<Output = ()>>) {
+        self.on_size_update = Some(self.on_size_update.take().map_or_else(|| handler, |v| v));
     }
 }

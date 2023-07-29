@@ -2,8 +2,8 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::{RenderLayer, Resource};
-use engine::ecs::component::ui::{RectUniformData, UILayoutC, UILayoutCacheC};
-use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
+use engine::ecs::component::ui::{RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC};
+use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::UIState;
@@ -14,6 +14,7 @@ use engine::vkw::{Format, ImageUsageFlags, PrimitiveTopology};
 use engine::EngineContext;
 use entity_data::EntityId;
 use smallvec::smallvec;
+use std::sync::Arc;
 
 struct ImageImplContext {
     mat_pipe_id: MaterialPipelineId,
@@ -138,12 +139,14 @@ pub trait ImageImpl {
                 .with_render_layer(RenderLayer::Overlay)
                 .with_shader_resources(smallvec![initial_image]),
         )
-        .with_mesh(VertexMeshC::without_data(4, 1))
-        .with_scene_event_handler(
-            SceneEventHandler::new().with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-        );
+        .with_mesh(VertexMeshC::without_data(4, 1));
 
         let entity = ui_ctx.scene().add_object(Some(parent), ui_image).unwrap();
+
+        {
+            let mut obj = ui_ctx.scene().entry(&entity);
+            obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(on_size_update));
+        }
 
         entity
     }
@@ -171,20 +174,19 @@ impl ImageAccess for EntityAccess<'_, UIImage> {
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
-struct ObjectUniformData {
+struct UniformData {
     clip_rect: RectUniformData,
     img_offset: Vec2,
     img_scale: Vec2,
     opacity: f32,
 }
 
-fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
+fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut obj = scene.object::<UIImage>(&entity.into());
     let cache = obj.get::<UILayoutCacheC>();
     let rect_data = *cache.normalized_clip_rect();
     let final_size = *cache.final_size();
-    let final_opacity = cache.final_opacity();
     let ui_element_aspect_ratio = final_size.x / final_size.y;
 
     let state = obj.state();
@@ -214,17 +216,19 @@ fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
     };
 
     let uniform_data = obj.get_mut::<UniformDataC>();
-    uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, clip_rect), rect_data);
-    uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_offset), img_offset);
-    uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, img_scale), img_scale);
-    uniform_data.copy_from_with_offset(offset_of!(ObjectUniformData, opacity), final_opacity);
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, img_offset), img_offset);
+    uniform_data.copy_from_with_offset(offset_of!(UniformData, img_scale), img_scale);
 }
 
 pub mod reactive {
+    use super::UniformData;
     use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
-    use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+    use crate::rendering::ui::{UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
+    use common::memoffset::offset_of;
     use common::scene::relation::Relation;
     use engine::ecs::component::ui::UILayoutC;
+    use engine::ecs::component::UniformDataC;
     use engine::module::scene::Scene;
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
@@ -240,9 +244,10 @@ pub mod reactive {
         let parent = ctx.scope_id().clone();
         let parent_entity = *ctx
             .reactor()
-            .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+            .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
             .unwrap()
             .value();
+        let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
         let child_num = ctx.num_children();
 
         ctx.descend(
@@ -263,6 +268,16 @@ pub mod reactive {
                     }
 
                     let mut obj = ui_ctx.scene().object::<UIImage>(&entity_state.value().into());
+
+                    let opacity = *parent_opacity;
+                    ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+
+                    let raw_uniform_data = obj.get_mut::<UniformDataC>();
+                    UniformDataC::copy_from_with_offset(
+                        raw_uniform_data,
+                        offset_of!(UniformData, opacity),
+                        opacity,
+                    );
 
                     if let Some(source) = source.clone() {
                         obj.set_image(source);

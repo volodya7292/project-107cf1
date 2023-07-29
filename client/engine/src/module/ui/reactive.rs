@@ -3,7 +3,6 @@ use crate::EngineContext;
 use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::any::Any;
-use std::collections::hash_map;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -18,6 +17,7 @@ pub struct UIScope {
     on_remove_func: Option<Box<dyn FnOnce(&EngineContext, &UIScope)>>,
     children: Vec<ScopeId>,
     states: HashMap<StateId, Arc<dyn Any + Send + Sync>>,
+    local_vars: HashMap<String, Arc<dyn Any + Send + Sync>>,
     subscribed_to: HashSet<StateUID>,
 }
 
@@ -73,6 +73,7 @@ impl UIReactor {
                 on_remove_func: Some(Box::new(|_, _| {})),
                 children: vec![],
                 states: Default::default(),
+                local_vars: Default::default(),
                 subscribed_to: Default::default(),
             },
         );
@@ -106,6 +107,30 @@ impl UIReactor {
         for scope_id in dirty_scopes {
             self.rebuild(scope_id, ctx, delta_time);
         }
+    }
+
+    pub fn local_var<T: Sync + Send + 'static>(
+        &mut self,
+        scope_id: &ScopeId,
+        name: impl Into<String>,
+        default_value: T,
+    ) -> Arc<T> {
+        let scope = self.scopes.get_mut(scope_id).unwrap();
+        let val = scope
+            .local_vars
+            .entry(name.into())
+            .or_insert_with(|| Arc::new(default_value));
+        val.clone().downcast::<T>().unwrap()
+    }
+
+    pub fn set_local_var<T: Sync + Send + 'static>(
+        &mut self,
+        scope_id: &ScopeId,
+        name: impl Into<String>,
+        value: T,
+    ) {
+        let scope = self.scopes.get_mut(scope_id).unwrap();
+        scope.local_vars.insert(name.into(), Arc::new(value));
     }
 
     pub fn contains_state<T: Send + Sync + 'static>(&self, state: &ReactiveState<T>) -> bool {
@@ -336,6 +361,10 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         self.used_children.len()
     }
 
+    pub fn set_local_var<T: Sync + Send + 'static>(&mut self, name: impl Into<String>, value: T) {
+        self.reactor.set_local_var(&self.scope_id, name, value);
+    }
+
     /// Returns the state identified by `name`. If the state doesn't exist,
     /// creates a new one with the return value from `init` closure.
     pub fn request_state<T: Send + Sync + 'static, F: FnOnce() -> T>(
@@ -413,25 +442,29 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         R: FnOnce(&EngineContext, &UIScope) + 'static,
     {
         let scope_id = self.descendant_scope_id(scope_name);
-
         self.used_children.push(scope_id.clone());
 
-        match self.reactor.scopes.entry(scope_id.clone()) {
-            hash_map::Entry::Vacant(e) => {
-                e.insert(UIScope {
+        if !self.reactor.scopes.contains_key(&scope_id) {
+            let parent_scope = self.reactor.scopes.get(&self.scope_id).unwrap();
+            let parent_local_vars = parent_scope.local_vars.clone();
+
+            self.reactor.scopes.insert(
+                scope_id.clone(),
+                UIScope {
                     children_func: Rc::new(children_fn),
                     on_remove_func: Some(Box::new(on_remove_fn)),
                     children: vec![],
                     states: Default::default(),
+                    local_vars: parent_local_vars,
                     subscribed_to: Default::default(),
-                });
-            }
-            hash_map::Entry::Occupied(mut e) => {
-                e.get_mut().children_func = Rc::new(children_fn);
+                },
+            );
+        } else {
+            let e = self.reactor.scopes.get_mut(&scope_id).unwrap();
+            e.children_func = Rc::new(children_fn);
 
-                if !force_rebuild {
-                    return;
-                }
+            if !force_rebuild {
+                return;
             }
         }
 

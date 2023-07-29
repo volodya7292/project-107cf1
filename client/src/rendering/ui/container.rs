@@ -1,10 +1,10 @@
-use crate::rendering::ui::{UICallbacks, UIContext, STATE_ENTITY_ID};
+use crate::rendering::ui::{UICallbacks, UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use common::scene::relation::Relation;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC, UILayoutCacheC};
-use engine::ecs::component::{MeshRenderConfigC, SceneEventHandler, UniformDataC, VertexMeshC};
+use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC};
+use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::MaterialPipelineId;
 use engine::module::scene::Scene;
 use engine::module::ui::reactive::UIScopeContext;
@@ -16,6 +16,7 @@ use engine::EngineContext;
 use entity_data::EntityId;
 use smallvec::{smallvec, SmallVec};
 use std::mem;
+use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -49,11 +50,22 @@ struct UniformData {
     // ...custom properties
 }
 
-#[derive(Default)]
 pub struct ContainerProps {
     pub layout: UILayoutC,
     pub callbacks: UICallbacks,
     pub background: Option<ContainerBackground>,
+    pub opacity: f32,
+}
+
+impl Default for ContainerProps {
+    fn default() -> Self {
+        Self {
+            layout: Default::default(),
+            callbacks: Default::default(),
+            background: None,
+            opacity: 1.0,
+        }
+    }
 }
 
 pub mod background {
@@ -107,17 +119,15 @@ pub mod background {
     }
 }
 
-fn on_layout_cache_update(entity: &EntityId, ctx: &EngineContext) {
+fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<UIObject<()>>(&entity.into());
 
     let cache = entry.layout_cache();
     let clip_rect = *cache.normalized_clip_rect();
-    let final_opacity = cache.final_opacity();
 
     let uniform_data = entry.get_mut::<UniformDataC>();
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
-    uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), final_opacity);
 }
 
 pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
@@ -130,9 +140,10 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
     let child_num = ctx.num_children();
     let parent_entity = *ctx
         .reactor()
-        .get_state::<EntityId>(parent, STATE_ENTITY_ID.to_string())
+        .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
         .unwrap()
         .value();
+    let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
 
     ctx.descend(
         local_name,
@@ -140,12 +151,7 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
             {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                    let obj = UIObject::new_raw(props.layout, ())
-                        .with_mesh(VertexMeshC::without_data(4, 1))
-                        .with_scene_event_handler(
-                            SceneEventHandler::new()
-                                .with_on_component_update::<UILayoutCacheC>(on_layout_cache_update),
-                        );
+                    let obj = UIObject::new_raw(props.layout, ()).with_mesh(VertexMeshC::without_data(4, 1));
                     *ui_ctx.scene().add_object(Some(parent_entity), obj).unwrap()
                 });
 
@@ -166,19 +172,27 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
                         .set_child_order(entity_state.value(), Some(child_num as u32));
                 }
 
+                let opacity = *parent_opacity * props.layout.visibility.opacity();
+                ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+
                 let mut obj = ui_ctx
                     .scene()
                     .object::<UIObject<()>>(&entity_state.value().into());
                 *obj.get_mut::<MeshRenderConfigC>() = new_render_config;
                 *obj.layout_mut() = props.layout;
 
+                let raw_uniform_data = obj.get_mut::<UniformDataC>();
+                raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), opacity);
                 if let Some(background) = &props.background {
-                    let raw_uniform_data = obj.get_mut::<UniformDataC>();
                     raw_uniform_data.copy_from_slice(mem::size_of::<UniformData>(), &background.uniform_data);
                 }
 
                 let event_handler = obj.event_handler_mut();
-                props.callbacks.apply_to_event_handler(event_handler);
+                *event_handler = props.callbacks.clone().into();
+                event_handler.add_on_size_update(Arc::new(on_size_update));
+
+                drop(obj);
+                drop(ui_ctx);
             }
             children_fn(ctx);
         },
