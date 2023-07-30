@@ -409,7 +409,6 @@ fn layout_glyphs(
                 }
                 TextHAlign::Right => {
                     curr_diff = max_width_norm - line_widths[curr_line];
-                    dbg!(max_width_norm, final_size, curr_line, curr_diff);
                 }
             }
 

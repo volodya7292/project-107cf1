@@ -262,19 +262,14 @@ pub mod reactive {
         props: UIImageProps<P>,
         children: F,
     ) {
-        let parent = ctx.scope_id().clone();
-        let parent_entity = *ctx
-            .reactor()
-            .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
-            .unwrap()
-            .value();
-        let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
+        let parent_entity = *ctx.state(STATE_ENTITY_ID).value();
+        let parent_opacity = ctx.local_var::<f32>(LOCAL_VAR_OPACITY, 1.0);
         let child_num = ctx.num_children();
 
         ctx.descend(
             local_id,
-            props,
-            move |ctx, props| {
+            (props, parent_opacity),
+            move |ctx, (props, parent_opacity)| {
                 {
                     let mut ui_ctx = UIContext::new(*ctx.ctx());
                     let entity_state = ctx.request_state(STATE_ENTITY_ID, || {

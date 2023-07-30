@@ -138,19 +138,14 @@ where
     P: Clone + PartialEq + 'static,
     F: Fn(&mut UIScopeContext, P) + 'static,
 {
-    let parent = ctx.scope_id().clone();
     let child_num = ctx.num_children();
-    let parent_entity = *ctx
-        .reactor()
-        .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
-        .unwrap()
-        .value();
-    let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
+    let parent_entity = *ctx.state::<EntityId>(STATE_ENTITY_ID).value();
+    let parent_opacity = *ctx.local_var::<f32>(LOCAL_VAR_OPACITY, 1.0);
 
     ctx.descend(
         local_name,
-        props,
-        move |ctx, props| {
+        (props, parent_opacity),
+        move |ctx, (props, parent_opacity)| {
             {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
@@ -175,8 +170,8 @@ where
                         .set_child_order(entity_state.value(), Some(child_num as u32));
                 }
 
-                let opacity = *parent_opacity * props.layout.visibility.opacity();
-                ctx.set_local_var(LOCAL_VAR_OPACITY, 1.0_f32); //opacity);
+                let opacity = parent_opacity * props.layout.visibility.opacity();
+                ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
                 let mut obj = ui_ctx
                     .scene()

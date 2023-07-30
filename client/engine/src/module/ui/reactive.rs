@@ -384,6 +384,12 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         self.reactor.set_local_var(&self.scope_id, name, value);
     }
 
+    pub fn state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> ReactiveState<T> {
+        self.reactor
+            .get_state(self.scope_id.clone(), name.into())
+            .unwrap()
+    }
+
     /// Returns the state identified by `name`. If the state doesn't exist,
     /// creates a new one with the return value from `init` closure.
     pub fn request_state<T: Send + Sync + 'static, F: FnOnce() -> T>(
