@@ -269,18 +269,13 @@ pub mod reactive {
                 ..Default::default()
             },
             move |ctx, props| {
-                let parent = ctx.scope_id().clone();
-                let parent_entity = *ctx
-                    .reactor()
-                    .get_state::<EntityId>(parent.clone(), STATE_ENTITY_ID.to_string())
-                    .unwrap()
-                    .value();
-                let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
+                let parent_entity = *ctx.state(STATE_ENTITY_ID).value();
+                let parent_opacity = *ctx.local_var::<f32>(LOCAL_VAR_OPACITY, 1.0);
 
                 ctx.descend(
                     make_static_id!(),
-                    props.clone(),
-                    move |ctx, (text, style, wrap, align)| {
+                    (props, parent_opacity),
+                    move |ctx, ((text, style, wrap, align), parent_opacity)| {
                         let styled_string = StyledString::new(text.clone(), style);
 
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
@@ -296,7 +291,7 @@ pub mod reactive {
                                 .set_child_order(entity_state.value(), Some(child_num as u32));
                         }
 
-                        let opacity = *parent_opacity;
+                        let opacity = parent_opacity;
                         ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
                         drop(ui_ctx);

@@ -230,42 +230,41 @@ impl MainApp {
 
     pub fn is_main_menu_visible(&self, _: &EngineContext) -> bool {
         let mut ui_reactor = self.ui_reactor.borrow_mut();
-        let visible_state = ui_reactor
-            .get_state::<bool>(
-                UIReactor::ROOT_SCOPE_ID.to_string(),
-                ui_root_states::MENU_VISIBLE.to_string(),
-            )
-            .map_or(false, |v| *v.value());
-
-        visible_state
+        ui_reactor
+            .root_state::<bool>(ui_root_states::MENU_VISIBLE.to_string())
+            .map_or(false, |v| *v.value())
     }
 
     pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
         let mut ui_reactor = self.ui_reactor.borrow_mut();
-        let visible_state = ui_reactor
-            .get_state::<bool>(
+        ui_reactor
+            .state::<bool>(
                 UIReactor::ROOT_SCOPE_ID.to_string(),
                 ui_root_states::MENU_VISIBLE.to_string(),
             )
-            .unwrap();
-        visible_state.update(visible);
+            .unwrap()
+            .update(visible);
         drop(ui_reactor);
 
         self.grab_cursor(&ctx.window(), !visible, ctx);
     }
 
-    pub fn create_overworld(&mut self, overworld_name: &str) {
-        let world_path = Self::worlds_dir().join(overworld_name);
-        LocalOverworldInterface::create_overworld(
-            world_path,
-            OverworldParams {
-                seed: 0,
-                tick_count: 0,
-            },
-        );
+    pub fn make_world_path(overworld_name: &str) -> PathBuf {
+        Self::worlds_dir().join(overworld_name)
     }
 
-    pub fn start_game_process(&mut self, ctx: &EngineContext, world_path: impl Into<PathBuf>) {
+    pub fn create_overworld(&mut self, overworld_name: &str, seed_str: &str) {
+        let world_path = Self::make_world_path(overworld_name);
+
+        let seed_digest = common::ring::digest::digest(&common::ring::digest::SHA256, seed_str.as_bytes());
+        let seed = u64::from_le_bytes((seed_digest.as_ref()[..8]).try_into().unwrap());
+
+        LocalOverworldInterface::create_overworld(world_path, OverworldParams { seed, tick_count: 0 });
+    }
+
+    pub fn start_game_process(&mut self, ctx: &EngineContext, overworld_name: &str) {
+        let world_path = Self::make_world_path(overworld_name);
+
         let interface = LocalOverworldInterface::new(world_path, &self.main_registry);
         let overworld = Overworld::new(&self.main_registry, Arc::new(interface));
 

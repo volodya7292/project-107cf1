@@ -131,12 +131,14 @@ fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
     let ui_handler = entry.get::<UIEventHandlerC>();
     let last_focus_entity = interaction_manager.curr_focused_entity;
     let focusable = ui_handler.focusable;
+    drop(interaction_manager);
 
     if let Some(on_click) = &ui_handler.on_click {
         on_click(entity, ctx, pos);
     }
 
     if *entity != last_focus_entity {
+        let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
         interaction_manager.curr_focused_entity = *entity;
         drop(interaction_manager);
 

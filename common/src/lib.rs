@@ -25,6 +25,7 @@ pub use nalgebra_glm as glm;
 pub use parking_lot;
 pub use rayon;
 pub use resource_encoder::encode_resources;
+pub use ring;
 pub use shader_compiler::compile_shaders;
 use std::sync::atomic;
 pub use tokio;

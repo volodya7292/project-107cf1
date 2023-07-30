@@ -1,4 +1,4 @@
-use crate::game::EngineCtxGameExt;
+use crate::game::{EngineCtxGameExt, MainApp};
 use crate::rendering::ui::container::{
     background, container, expander, height_spacer, width_spacer, ContainerProps,
 };
@@ -10,7 +10,7 @@ use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
-use engine::ecs::component::simple_text::{StyledString, TextStyle};
+use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{ClickedCallback, CrossAlign, Padding, Sizing, UILayoutC, Visibility};
 use engine::module::ui::color::Color;
 use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
@@ -22,6 +22,11 @@ const TAB_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
 // const BUTTON_TEXT_COLOR: Color = Color::rgb(3.0, 6.0, 3.0);
 const BUTTON_TEXT_COLOR: Color = Color::rgb(0.8, 2.0, 0.8);
 const TEXT_COLOR: Color = Color::grayscale(0.9);
+
+pub mod ui_root_states {
+    pub const MENU_VISIBLE: &'static str = "menu_visible";
+    pub const IN_GAME_PROCESS: &'static str = "in_game_process";
+}
 
 fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
     fancy_button(
@@ -80,6 +85,21 @@ fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click:
     );
 }
 
+fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
+    let mut app = ctx.app();
+    app.start_game_process(ctx, overworld_name);
+
+    let reactor = app.ui_reactor();
+    reactor
+        .root_state(ui_root_states::MENU_VISIBLE)
+        .unwrap()
+        .update(false);
+    reactor
+        .root_state(ui_root_states::IN_GAME_PROCESS)
+        .unwrap()
+        .update(true);
+}
+
 fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
     container(
         local_id,
@@ -92,6 +112,7 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
             ..Default::default()
         },
         move |ctx, ()| {
+            let name = name.clone();
             ui_text(
                 make_static_id!(),
                 ctx,
@@ -102,7 +123,6 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
                 },
             );
             height_spacer(make_static_id!(), ctx, 4.0);
-
             container(
                 make_static_id!(),
                 ctx,
@@ -110,8 +130,13 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
                     layout: UILayoutC::row().with_width(Sizing::Grow(1.0)),
                     ..Default::default()
                 },
-                |ctx, ()| {
-                    world_control_button(make_static_id!(), ctx, "Continue", |entity, ctx, _| {});
+                move |ctx, ()| {
+                    let name = name.clone();
+                    let on_continue = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                        load_overworld(ctx, &name);
+                    };
+
+                    world_control_button(make_static_id!(), ctx, "Continue", on_continue);
                     width_spacer(make_static_id!(), ctx, 20.0);
                     world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx, _| {});
                 },
@@ -169,22 +194,29 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
             ..Default::default()
         },
         move |ctx, ()| {
+            let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+            dbg!(*is_in_game);
+
             expander(make_static_id!(), ctx, 1.0);
 
-            world_selection_list(make_static_id!(), ctx);
+            if !*is_in_game {
+                world_selection_list(make_static_id!(), ctx);
+            }
 
             height_spacer(make_static_id!(), ctx, 30.0);
 
-            let curr_tab_state2 = curr_tab_state.clone();
-            menu_button(
-                make_static_id!(),
-                ctx,
-                "START",
-                move |_: &EntityId, ctx: &EngineContext, _| {
-                    curr_tab_state2.update(TAB_WORLD_CREATION);
-                },
-            );
-            height_spacer(make_static_id!(), ctx, 30.0);
+            if !*is_in_game {
+                let curr_tab_state2 = curr_tab_state.clone();
+                menu_button(
+                    make_static_id!(),
+                    ctx,
+                    "START",
+                    move |_: &EntityId, ctx: &EngineContext, _| {
+                        curr_tab_state2.update(TAB_WORLD_CREATION);
+                    },
+                );
+                height_spacer(make_static_id!(), ctx, 30.0);
+            }
 
             let curr_tab_state2 = curr_tab_state.clone();
             menu_button(
@@ -231,10 +263,24 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
         |ctx, ()| {
             remember_state!(ctx, name, "world".to_string());
             remember_state!(ctx, seed, rand::random::<u64>().to_string());
+            remember_state!(ctx, error, "".to_string());
 
             let name_state = name.state();
-            let on_proceed = |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
-                // let name = name_state;
+            let seed_state = seed.state();
+            let error_state = error.state();
+            let on_proceed = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                let mut app = ctx.app();
+                let overworld_name = name_state.value();
+
+                if MainApp::make_world_path(overworld_name).exists() {
+                    error_state.update(format!(
+                        "Overworld with name \"{}\" already exists!",
+                        overworld_name
+                    ));
+                } else {
+                    app.create_overworld(overworld_name, seed_state.value());
+                    load_overworld(ctx, overworld_name);
+                }
             };
 
             fancy_text_input(
@@ -261,6 +307,19 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 },
             );
             expander(make_static_id!(), ctx, 1.0);
+            ui_text(
+                make_static_id!(),
+                ctx,
+                UITextProps {
+                    layout: UILayoutC::new().with_width_grow().with_align(CrossAlign::End),
+                    text: error.clone(),
+                    align: TextHAlign::Right,
+                    style: TextStyle::new().with_color(Color::DARK_RED).with_font_size(20.0),
+                    wrap: true,
+                    ..Default::default()
+                },
+            );
+            height_spacer(make_static_id!(), ctx, 10.0);
             action_button(make_static_id!(), ctx, "> PROCEED", on_proceed);
         },
     );
@@ -329,17 +388,15 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     );
 }
 
-pub mod ui_root_states {
-    pub const MENU_VISIBLE: &'static str = "menu_visible";
-}
-
 pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(STATE_ENTITY_ID, || root_entity);
+    ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
 
     let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
     let menu_visible = ctx.subscribe(&menu_visible);
 
     remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
+
     ctx.descend(
         make_static_id!(),
         (*menu_visible, menu_opacity.state()),

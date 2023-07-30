@@ -142,7 +142,7 @@ impl UIReactor {
             .is_some_and(|scope| scope.states.contains_key(&state.name))
     }
 
-    pub fn get_state<T: Send + Sync + 'static>(
+    pub fn state<T: Send + Sync + 'static>(
         &self,
         scope_id: ScopeId,
         state_id: StateId,
@@ -158,6 +158,10 @@ impl UIReactor {
             value,
             _ty: Default::default(),
         })
+    }
+
+    pub fn root_state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> Option<ReactiveState<T>> {
+        self.state(UIReactor::ROOT_SCOPE_ID.to_string(), name.into())
     }
 
     /// Performs rebuilding of the specified scope of `parent`.
@@ -384,10 +388,14 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         self.reactor.set_local_var(&self.scope_id, name, value);
     }
 
-    pub fn state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> ReactiveState<T> {
+    pub fn root_state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> ReactiveState<T> {
         self.reactor
-            .get_state(self.scope_id.clone(), name.into())
+            .state(UIReactor::ROOT_SCOPE_ID.to_string(), name.into())
             .unwrap()
+    }
+
+    pub fn state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> ReactiveState<T> {
+        self.reactor.state(self.scope_id.clone(), name.into()).unwrap()
     }
 
     /// Returns the state identified by `name`. If the state doesn't exist,
