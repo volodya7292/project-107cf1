@@ -123,12 +123,18 @@ pub enum TextOverflow {
     Wrap,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TextHAlign {
-    LEFT,
-    CENTER,
-    RIGHT,
+    Left,
+    Center,
+    Right,
+}
+
+impl Default for TextHAlign {
+    fn default() -> Self {
+        Self::Left
+    }
 }
 
 #[derive(Clone)]
@@ -146,7 +152,7 @@ impl SimpleTextC {
     pub fn new(mat_pipeline_id: MaterialPipelineId) -> Self {
         Self {
             text: Default::default(),
-            h_align: TextHAlign::LEFT,
+            h_align: Default::default(),
             long_word_breaking: false,
             max_width: f32::INFINITY,
             max_height: f32::INFINITY,

@@ -2,7 +2,7 @@ use crate::rendering::ui::UIContext;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
-use engine::ecs::component::simple_text::StyledString;
+use engine::ecs::component::simple_text::{StyledString, TextHAlign};
 use engine::ecs::component::ui::{
     Position, RectUniformData, Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
@@ -35,6 +35,7 @@ pub struct TextState {
     raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
     wrap: bool,
+    h_align: TextHAlign,
     inner_shadow_intensity: f32,
 }
 
@@ -62,6 +63,7 @@ impl UIState for TextState {
         let mut raw_text_entry = scene.entry(&state.raw_text_entity);
         let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
         simple_text.text = state.text;
+        simple_text.h_align = state.h_align;
 
         let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
         uniform_data.copy_from_with_offset(
@@ -158,6 +160,7 @@ pub trait UITextImpl {
         parent: EntityId,
         text: StyledString,
         wrap: bool,
+        h_align: TextHAlign,
     ) -> ObjectEntityId<UIText> {
         let impl_ctx = *ui_ctx.scene.resource::<TextImplContext>();
 
@@ -170,6 +173,7 @@ pub trait UITextImpl {
                 raw_text_entity: Default::default(),
                 text: text.clone(),
                 wrap,
+                h_align,
                 inner_shadow_intensity: 0.0,
             },
         )
@@ -234,7 +238,7 @@ pub mod reactive {
     use common::make_static_id;
     use common::memoffset::offset_of;
     use common::scene::relation::Relation;
-    use engine::ecs::component::simple_text::{StyledString, TextStyle};
+    use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
     use engine::ecs::component::ui::UILayoutC;
     use engine::ecs::component::UniformDataC;
     use engine::module::scene::Scene;
@@ -247,6 +251,7 @@ pub mod reactive {
         pub layout: UILayoutC,
         pub callbacks: UICallbacks,
         pub text: String,
+        pub align: TextHAlign,
         pub style: TextStyle,
         pub wrap: bool,
     }
@@ -260,7 +265,7 @@ pub mod reactive {
             ContainerProps {
                 layout: props.layout,
                 callbacks: props.callbacks.clone(),
-                children_props: (props.text, props.style, props.wrap),
+                children_props: (props.text, props.style, props.wrap, props.align),
                 ..Default::default()
             },
             move |ctx, props| {
@@ -275,12 +280,12 @@ pub mod reactive {
                 ctx.descend(
                     make_static_id!(),
                     props.clone(),
-                    move |ctx, (text, style, wrap)| {
+                    move |ctx, (text, style, wrap, align)| {
                         let styled_string = StyledString::new(text.clone(), style);
 
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
                         let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), wrap)
+                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), wrap, align)
                         });
 
                         // Set consecutive order
@@ -298,6 +303,7 @@ pub mod reactive {
                         UIText::modify(&entity_state.value().into(), ctx.ctx(), |state| {
                             state.text = styled_string;
                             state.wrap = wrap;
+                            state.h_align = align;
                         });
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
 

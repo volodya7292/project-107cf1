@@ -295,6 +295,7 @@ fn layout_glyphs(
 
     // The origin (0,0) is at top-left corner
     let mut curr_offset = Vec2::new(0.0, v_metrics.ascent);
+    let mut curr_non_space_offset = curr_offset;
     let mut prev_glyph = None::<GlyphUID>;
 
     let mut curr_word = Vec::<PositioningInfo>::with_capacity(32);
@@ -330,7 +331,7 @@ fn layout_glyphs(
 
             curr_word.push(PositioningInfo {
                 uid: *g,
-                offset: curr_offset,
+                offset: Default::default(),
                 scale: Vec2::from_element(1.0),
                 size: Vec2::new(glyph_width, glyph_height),
             });
@@ -344,17 +345,15 @@ fn layout_glyphs(
             continue;
         }
 
-        let word_start_x = curr_word[0].offset.x;
-
         // Put the word inside the global layout
         // --------------------------------------------------------------------
 
-        if (word_start_x + curr_word_width >= max_width_norm)
+        if (curr_offset.x + curr_word_width >= max_width_norm)
             && curr_word_offset_x > 0.0
             && segment[0].glyph_id() != space_id
         {
             // Put the word onto a new line
-            line_widths.push(curr_offset.x - curr_word_width);
+            line_widths.push(curr_non_space_offset.x);
             curr_offset.x = 0.0;
             curr_offset.y += line_height;
         }
@@ -382,6 +381,10 @@ fn layout_glyphs(
             glyph_positions.push(pos_info);
 
             curr_offset.x += glyph_width;
+
+            if pos_info.uid.glyph_id() != space_id {
+                curr_non_space_offset = curr_offset;
+            }
         }
     }
 
@@ -400,12 +403,13 @@ fn layout_glyphs(
     for inst in &mut glyph_positions {
         if curr_y != inst.offset.y {
             match h_align {
-                TextHAlign::LEFT => { /* The text is already in this state */ }
-                TextHAlign::CENTER => {
+                TextHAlign::Left => { /* The text is already in this state */ }
+                TextHAlign::Center => {
                     curr_diff = (max_width_norm - line_widths[curr_line]) / 2.0;
                 }
-                TextHAlign::RIGHT => {
+                TextHAlign::Right => {
                     curr_diff = max_width_norm - line_widths[curr_line];
+                    dbg!(max_width_norm, final_size, curr_line, curr_diff);
                 }
             }
 
@@ -746,7 +750,7 @@ impl TextRenderer {
             &self.allocator,
             seq,
             style,
-            TextHAlign::LEFT,
+            TextHAlign::Left,
             false,
             max_width,
             0.0,
@@ -767,7 +771,7 @@ impl TextRenderer {
             &self.allocator,
             seq,
             style,
-            TextHAlign::LEFT,
+            TextHAlign::Left,
             false,
             max_width,
             0.0,
@@ -796,7 +800,7 @@ impl TextRenderer {
             &self.allocator,
             seq,
             style,
-            TextHAlign::LEFT,
+            TextHAlign::Left,
             false,
             max_width,
             0.0,
