@@ -25,7 +25,7 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
             background: Some(backgrounds::fancy(DEFAULT_FANCY_COLOR)),
             ..Default::default()
         },
-        move |ctx| {
+        move |ctx, ()| {
             let label = props.label.clone();
             let label_style = props
                 .style
@@ -39,7 +39,7 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
                     layout: UILayoutC::new().with_padding(Padding::hv(10.0, 0.0)),
                     ..Default::default()
                 },
-                move |ctx| {
+                move |ctx, ()| {
                     ui_text(
                         make_static_id!(),
                         ctx,

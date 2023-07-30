@@ -20,7 +20,7 @@ impl Default for Position {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Sizing {
     /// Minimum size that fits tightly interior contents.
     FitContent,
@@ -38,7 +38,7 @@ impl Default for Sizing {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Constraint {
     pub min: f32,
     pub max: f32,
@@ -67,7 +67,7 @@ impl Default for Constraint {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, PartialEq)]
 pub struct Padding {
     pub left: f32,
     pub right: f32,
@@ -76,7 +76,9 @@ pub struct Padding {
 }
 
 impl Padding {
-    pub fn equal(value: f32) -> Self {
+    pub const ZERO: Self = Padding::equal(0.0);
+
+    pub const fn equal(value: f32) -> Self {
         Self {
             left: value,
             right: value,
@@ -85,7 +87,7 @@ impl Padding {
         }
     }
 
-    pub fn hv(horizontal: f32, vertical: f32) -> Self {
+    pub const fn hv(horizontal: f32, vertical: f32) -> Self {
         Self {
             left: horizontal,
             right: horizontal,
@@ -140,7 +142,7 @@ impl Default for FlowAlign {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CrossAlign {
     Start,
     Center,
@@ -213,7 +215,7 @@ impl Default for Visibility {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct UITransform {
     pub offset: Vec2,
 }
@@ -237,7 +239,7 @@ impl Default for UITransform {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, PartialEq)]
 pub struct UILayoutC {
     pub position: Position,
     pub sizing: [Sizing; 2],
@@ -269,6 +271,11 @@ impl UILayoutC {
             content_flow: ContentFlow::Vertical,
             ..Default::default()
         }
+    }
+
+    pub fn with_sizing(mut self, sizing: [Sizing; 2]) -> Self {
+        self.sizing = sizing;
+        self
     }
 
     pub fn with_position(mut self, position: Position) -> Self {

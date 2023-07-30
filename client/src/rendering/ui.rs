@@ -151,6 +151,12 @@ impl Default for UICallbacks {
     }
 }
 
+impl PartialEq for UICallbacks {
+    fn eq(&self, other: &Self) -> bool {
+        self.interaction_enabled == other.interaction_enabled && self.focusable == other.focusable
+    }
+}
+
 impl From<UICallbacks> for UIEventHandlerC {
     fn from(value: UICallbacks) -> Self {
         Self {

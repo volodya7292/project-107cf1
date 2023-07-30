@@ -19,7 +19,7 @@ impl FontStyle {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct TextStyle {
     /// Font registered in Renderer
     font_id: u16,
@@ -86,7 +86,7 @@ impl Default for TextStyle {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct StyledString {
     data: String,
     text_style: TextStyle,

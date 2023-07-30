@@ -242,7 +242,7 @@ pub mod reactive {
     use engine::module::ui::UIObjectEntityImpl;
     use entity_data::EntityId;
 
-    #[derive(Default, Clone)]
+    #[derive(Default, Clone, PartialEq)]
     pub struct UITextProps {
         pub layout: UILayoutC,
         pub callbacks: UICallbacks,
@@ -260,9 +260,10 @@ pub mod reactive {
             ContainerProps {
                 layout: props.layout,
                 callbacks: props.callbacks.clone(),
+                children_props: (props.text, props.style, props.wrap),
                 ..Default::default()
             },
-            move |ctx| {
+            move |ctx, props| {
                 let parent = ctx.scope_id().clone();
                 let parent_entity = *ctx
                     .reactor()
@@ -270,16 +271,16 @@ pub mod reactive {
                     .unwrap()
                     .value();
                 let parent_opacity = ctx.reactor().local_var::<f32>(&parent, LOCAL_VAR_OPACITY, 1.0);
-                let props = props.clone();
 
                 ctx.descend(
                     make_static_id!(),
-                    move |ctx| {
-                        let styled_string = StyledString::new(props.text.clone(), props.style);
+                    props.clone(),
+                    move |ctx, (text, style, wrap)| {
+                        let styled_string = StyledString::new(text.clone(), *style);
 
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
                         let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), props.wrap)
+                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), *wrap)
                         });
 
                         // Set consecutive order
@@ -296,7 +297,7 @@ pub mod reactive {
                         drop(ui_ctx);
                         UIText::modify(&entity_state.value().into(), ctx.ctx(), |state| {
                             state.text = styled_string;
-                            state.wrap = props.wrap;
+                            state.wrap = *wrap;
                         });
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
 
@@ -322,7 +323,6 @@ pub mod reactive {
                         let mut scene = ctx.module_mut::<Scene>();
                         scene.remove_object(&entity);
                     },
-                    true,
                 );
             },
         )

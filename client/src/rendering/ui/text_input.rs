@@ -46,7 +46,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             layout: UILayoutC::new().with_width_grow(),
             ..Default::default()
         },
-        move |ctx| {
+        move |ctx, ()| {
             let line_height = {
                 let text_renderer = ctx.ctx().module::<TextRenderer>();
                 text_renderer.get_min_line_height(&props.style)
@@ -260,7 +260,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         .with_on_size_update(Arc::new(on_text_size_update)),
                     ..Default::default()
                 },
-                move |ctx| {
+                move |ctx, ()| {
                     ui_text(
                         make_static_id!(),
                         ctx,
@@ -289,7 +289,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                                 background: Some(container::background::solid_color(Color::grayscale(0.5))),
                                 ..Default::default()
                             },
-                            |_| {},
+                            |_, ()| {},
                         );
                     }
                 },

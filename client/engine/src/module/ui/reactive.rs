@@ -13,15 +13,22 @@ pub type ScopeId = String;
 pub type StateId = String;
 
 pub struct UIScope {
-    children_func: Rc<dyn Fn(&mut UIScopeContext)>,
-    on_remove_func: Option<Box<dyn FnOnce(&EngineContext, &UIScope)>>,
+    props: Rc<dyn Any>,
+    children_func: Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>,
+    on_remove_func: fn(&EngineContext, &UIScope),
     children: Vec<ScopeId>,
     states: HashMap<StateId, Arc<dyn Any + Send + Sync>>,
-    local_vars: HashMap<String, Arc<dyn Any + Send + Sync>>,
+    local_vars: HashMap<String, Rc<dyn Any>>,
     subscribed_to: HashSet<StateUID>,
 }
 
 impl UIScope {
+    pub fn local_var<T: Send + Sync + 'static>(&self, name: &str) -> Option<Rc<T>> {
+        self.local_vars
+            .get(name)
+            .map(|v| v.clone().downcast::<T>().unwrap())
+    }
+
     pub fn state<T: Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
         self.states.get(name).map(|v| v.clone().downcast::<T>().unwrap())
     }
@@ -69,8 +76,9 @@ impl UIReactor {
         this.scopes.insert(
             root_id.clone(),
             UIScope {
-                children_func: Rc::new(root_scope_fn),
-                on_remove_func: Some(Box::new(|_, _| {})),
+                props: Rc::new(()),
+                children_func: Rc::new(move |ctx, _| root_scope_fn(ctx)),
+                on_remove_func: |_, _| {},
                 children: vec![],
                 states: Default::default(),
                 local_vars: Default::default(),
@@ -109,28 +117,23 @@ impl UIReactor {
         }
     }
 
-    pub fn local_var<T: Sync + Send + 'static>(
+    pub fn local_var<T: 'static>(
         &mut self,
         scope_id: &ScopeId,
         name: impl Into<String>,
         default_value: T,
-    ) -> Arc<T> {
+    ) -> Rc<T> {
         let scope = self.scopes.get_mut(scope_id).unwrap();
         let val = scope
             .local_vars
             .entry(name.into())
-            .or_insert_with(|| Arc::new(default_value));
+            .or_insert_with(|| Rc::new(default_value));
         val.clone().downcast::<T>().unwrap()
     }
 
-    pub fn set_local_var<T: Sync + Send + 'static>(
-        &mut self,
-        scope_id: &ScopeId,
-        name: impl Into<String>,
-        value: T,
-    ) {
+    pub fn set_local_var<T: 'static>(&mut self, scope_id: &ScopeId, name: impl Into<String>, value: T) {
         let scope = self.scopes.get_mut(scope_id).unwrap();
-        scope.local_vars.insert(name.into(), Arc::new(value));
+        scope.local_vars.insert(name.into(), Rc::new(value));
     }
 
     pub fn contains_state<T: Send + Sync + 'static>(&self, state: &ReactiveState<T>) -> bool {
@@ -166,6 +169,7 @@ impl UIReactor {
 
         scope.subscribed_to.clear();
 
+        let props = Rc::clone(&scope.props);
         let mut child_ctx = UIScopeContext {
             ctx,
             delta_time: dt,
@@ -174,7 +178,8 @@ impl UIReactor {
             used_children: vec![],
             used_states: Default::default(),
         };
-        func(&mut child_ctx);
+
+        func(&mut child_ctx, &*props);
 
         Self::remove_unused_children(&mut child_ctx);
         Self::remove_unused_states(&mut child_ctx);
@@ -193,7 +198,7 @@ impl UIReactor {
 
         for scope_id in queue.into_iter().rev() {
             let mut scope = self.scopes.remove(&scope_id).unwrap();
-            let on_remove = scope.on_remove_func.take().unwrap();
+            let on_remove = scope.on_remove_func;
             on_remove(ctx, &scope);
 
             self.dirty_scopes.remove(&scope_id);
@@ -361,7 +366,15 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         self.used_children.len()
     }
 
-    pub fn set_local_var<T: Sync + Send + 'static>(&mut self, name: impl Into<String>, value: T) {
+    pub fn local_var<T: Sync + Send + 'static>(
+        &mut self,
+        name: impl Into<String>,
+        default_value: T,
+    ) -> Rc<T> {
+        self.reactor.local_var(&self.scope_id, name, default_value)
+    }
+
+    pub fn set_local_var<T: 'static>(&mut self, name: impl Into<String>, value: T) {
         self.reactor.set_local_var(&self.scope_id, name, value);
     }
 
@@ -436,10 +449,15 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     }
 
     /// Performs descent of `scope` if the `parent` hasn't been descended earlier.
-    pub fn descend<F, R>(&mut self, scope_name: &str, children_fn: F, on_remove_fn: R, force_rebuild: bool)
-    where
-        F: Fn(&mut UIScopeContext) + 'static,
-        R: FnOnce(&EngineContext, &UIScope) + 'static,
+    pub fn descend<F, P: PartialEq + 'static>(
+        &mut self,
+        scope_name: &str,
+        props: P,
+        children_fn: F,
+        on_remove_fn: fn(&EngineContext, &UIScope),
+    ) where
+        F: Fn(&mut UIScopeContext, &P) + 'static,
+        //     R: FnOnce(&EngineContext, &UIScope) + 'static,
     {
         let scope_id = self.descendant_scope_id(scope_name);
         self.used_children.push(scope_id.clone());
@@ -451,8 +469,11 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
             self.reactor.scopes.insert(
                 scope_id.clone(),
                 UIScope {
-                    children_func: Rc::new(children_fn),
-                    on_remove_func: Some(Box::new(on_remove_fn)),
+                    props: Rc::new(props),
+                    children_func: Rc::new(move |ctx, props| {
+                        children_fn(ctx, props.downcast_ref::<P>().unwrap())
+                    }),
+                    on_remove_func: on_remove_fn,
                     children: vec![],
                     states: Default::default(),
                     local_vars: parent_local_vars,
@@ -460,12 +481,17 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
                 },
             );
         } else {
-            let e = self.reactor.scopes.get_mut(&scope_id).unwrap();
-            e.children_func = Rc::new(children_fn);
+            let scope = self.reactor.scopes.get_mut(&scope_id).unwrap();
+            scope.children_func =
+                Rc::new(move |ctx, props| children_fn(ctx, props.downcast_ref::<P>().unwrap()));
 
-            if !force_rebuild {
+            let prev_props = scope.props.downcast_ref::<P>().unwrap();
+            if prev_props == &props {
+                // Do not rebuild
                 return;
             }
+
+            scope.props = Rc::new(props);
         }
 
         self.reactor.rebuild(scope_id, self.ctx, self.delta_time);

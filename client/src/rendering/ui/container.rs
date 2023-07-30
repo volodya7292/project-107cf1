@@ -24,7 +24,7 @@ pub struct SolidColorUniformData {
     color: Vec4,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub struct ContainerBackground {
     mat_pipe_res_name: &'static str,
     uniform_data: SmallVec<[u8; 128]>,
@@ -50,20 +50,23 @@ struct UniformData {
     // ...custom properties
 }
 
-pub struct ContainerProps {
+#[derive(PartialEq)]
+pub struct ContainerProps<P> {
     pub layout: UILayoutC,
     pub callbacks: UICallbacks,
     pub background: Option<ContainerBackground>,
     pub opacity: f32,
+    pub children_props: P,
 }
 
-impl Default for ContainerProps {
+impl<P: Default> Default for ContainerProps<P> {
     fn default() -> Self {
         Self {
             layout: Default::default(),
             callbacks: Default::default(),
             background: None,
             opacity: 1.0,
+            children_props: Default::default(),
         }
     }
 }
@@ -130,12 +133,11 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
 }
 
-pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
-    local_name: &str,
-    ctx: &mut UIScopeContext,
-    props: ContainerProps,
-    children_fn: F,
-) {
+pub fn container<P, F>(local_name: &str, ctx: &mut UIScopeContext, props: ContainerProps<P>, children_fn: F)
+where
+    P: PartialEq + 'static,
+    F: Fn(&mut UIScopeContext, &P) + 'static,
+{
     let parent = ctx.scope_id().clone();
     let child_num = ctx.num_children();
     let parent_entity = *ctx
@@ -147,7 +149,8 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
 
     ctx.descend(
         local_name,
-        move |ctx| {
+        props,
+        move |ctx, props| {
             {
                 let mut ui_ctx = UIContext::new(*ctx.ctx());
                 let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
@@ -173,7 +176,7 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
                 }
 
                 let opacity = *parent_opacity * props.layout.visibility.opacity();
-                ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+                ctx.set_local_var(LOCAL_VAR_OPACITY, 1.0_f32); //opacity);
 
                 let mut obj = ui_ctx
                     .scene()
@@ -194,14 +197,13 @@ pub fn container<F: Fn(&mut UIScopeContext) + 'static>(
                 drop(obj);
                 drop(ui_ctx);
             }
-            children_fn(ctx);
+            children_fn(ctx, &props.children_props);
         },
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
             let mut scene = ctx.module_mut::<Scene>();
             scene.remove_object(&*entity);
         },
-        true,
     );
 }
 
@@ -215,7 +217,7 @@ pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {
                 .with_height(Sizing::Grow(fraction)),
             ..Default::default()
         },
-        |_| {},
+        |_, ()| {},
     );
 }
 
@@ -227,7 +229,7 @@ pub fn width_spacer(local_id: &str, ctx: &mut UIScopeContext, width: f32) {
             layout: UILayoutC::new().with_min_width(width),
             ..Default::default()
         },
-        |_| {},
+        |_, ()| {},
     );
 }
 
@@ -239,6 +241,6 @@ pub fn height_spacer(local_id: &str, ctx: &mut UIScopeContext, height: f32) {
             layout: UILayoutC::new().with_min_height(height),
             ..Default::default()
         },
-        |_| {},
+        |_, ()| {},
     );
 }

@@ -4,16 +4,14 @@ use crate::rendering::ui::container::{
 };
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
-use crate::rendering::ui::image::reactive::ui_image;
+use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextStyle};
-use engine::ecs::component::ui::{
-    BasicEventCallback, ClickedCallback, CrossAlign, Padding, Sizing, UILayoutC, Visibility,
-};
+use engine::ecs::component::ui::{ClickedCallback, CrossAlign, Padding, Sizing, UILayoutC, Visibility};
 use engine::module::ui::color::Color;
 use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
@@ -93,7 +91,7 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
             background: Some(background::solid_color(Color::WHITE.with_alpha(0.02))),
             ..Default::default()
         },
-        move |ctx| {
+        move |ctx, ()| {
             ui_text(
                 make_static_id!(),
                 ctx,
@@ -112,7 +110,7 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
                     layout: UILayoutC::row().with_width(Sizing::Grow(1.0)),
                     ..Default::default()
                 },
-                |ctx| {
+                |ctx, ()| {
                     world_control_button(make_static_id!(), ctx, "Continue", |entity, ctx, _| {});
                     width_spacer(make_static_id!(), ctx, 20.0);
                     world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx, _| {});
@@ -122,9 +120,9 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
     );
 }
 
-fn world_selection_list(ctx: &mut UIScopeContext) {
+fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
     container(
-        make_static_id!(),
+        local_id,
         ctx,
         ContainerProps {
             layout: UILayoutC::column()
@@ -132,7 +130,7 @@ fn world_selection_list(ctx: &mut UIScopeContext) {
                 .with_height(Sizing::FitContent),
             ..Default::default()
         },
-        |ctx| {
+        |ctx, ()| {
             let mut ui_ctx = UIContext::new(*ctx.ctx());
             let world_names = ui_ctx.app().get_world_name_list();
             drop(ui_ctx);
@@ -161,16 +159,19 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
     ui_image(
         local_id,
         ctx,
-        UILayoutC::column()
-            .with_width(Sizing::Preferred(400.0))
-            .with_height(Sizing::Grow(1.0))
-            .with_padding(Padding::equal(30.0)),
-        Some(ImageSource::Data(image_source)),
-        ImageFitness::Cover,
-        move |ctx| {
+        UIImageProps {
+            layout: UILayoutC::column()
+                .with_width(Sizing::Preferred(400.0))
+                .with_height(Sizing::Grow(1.0))
+                .with_padding(Padding::equal(30.0)),
+            source: Some(ImageSource::Data(image_source)),
+            fitness: ImageFitness::Cover,
+            ..Default::default()
+        },
+        move |ctx, ()| {
             expander(make_static_id!(), ctx, 1.0);
 
-            world_selection_list(ctx);
+            world_selection_list(make_static_id!(), ctx);
 
             height_spacer(make_static_id!(), ctx, 30.0);
 
@@ -227,7 +228,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             layout: UILayoutC::column().with_grow(),
             ..Default::default()
         },
-        |ctx| {
+        |ctx, ()| {
             remember_state!(ctx, text, "world".to_string());
             remember_state!(ctx, seed, rand::random::<u64>().to_string());
 
@@ -270,7 +271,7 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
             layout: UILayoutC::column(),
             ..Default::default()
         },
-        |ctx| {
+        |ctx, ()| {
             ui_text(
                 make_static_id!(),
                 ctx,
@@ -293,10 +294,14 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     ui_image(
         local_id,
         ctx,
-        UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)),
-        Some(ImageSource::Data(image_source)),
-        ImageFitness::Cover,
-        move |ctx| {
+        UIImageProps {
+            layout: UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)),
+            source: Some(ImageSource::Data(image_source)),
+            fitness: ImageFitness::Cover,
+            children_props: (tab_id,),
+            ..Default::default()
+        },
+        move |ctx, &(tab_id,)| {
             ui_text(
                 make_static_id!(),
                 ctx,
@@ -336,7 +341,8 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     let menu_opacity2 = menu_opacity.state().clone();
     ctx.descend(
         make_static_id!(),
-        move |ctx| {
+        (),
+        move |ctx, &()| {
             let menu_visible = ctx.subscribe(menu_visible.state()).state().clone();
             menu_opacity2.update_with(move |prev| {
                 let mut d = *prev;
@@ -346,7 +352,6 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             });
         },
         |_, _| {},
-        false,
     );
 
     ctx.drive_transition(&menu_opacity);
@@ -360,7 +365,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
                 .with_visibility(Visibility::Opacity(*menu_opacity)),
             ..Default::default()
         },
-        move |ctx| {
+        move |ctx, ()| {
             remember_state!(ctx, curr_nav_view, "");
 
             expander(make_static_id!(), ctx, 0.2);
@@ -375,10 +380,11 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
                     layout: UILayoutC::new()
                         .with_width(Sizing::Grow(1.5))
                         .with_height(Sizing::Grow(1.0)),
+                    children_props: (*curr_nav_view,),
                     ..Default::default()
                 },
-                move |ctx| {
-                    navigation_view(make_static_id!(), ctx, *curr_nav_view);
+                move |ctx, &(tab_id,)| {
+                    navigation_view(make_static_id!(), ctx, tab_id);
                 },
             );
 

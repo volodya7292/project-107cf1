@@ -25,6 +25,15 @@ pub enum ImageSource {
     Data(image::RgbaImage),
 }
 
+impl PartialEq for ImageSource {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ImageSource::Data(a), ImageSource::Data(b)) => a.as_ptr() == b.as_ptr(),
+            _ => false,
+        }
+    }
+}
+
 impl ImageSource {
     pub fn size(&self) -> (u32, u32) {
         match self {
@@ -39,10 +48,16 @@ impl ImageSource {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum ImageFitness {
     Contain,
     Cover,
+}
+
+impl Default for ImageFitness {
+    fn default() -> Self {
+        Self::Contain
+    }
 }
 
 pub struct ImageState {
@@ -233,12 +248,18 @@ pub mod reactive {
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
-    pub fn ui_image<F: Fn(&mut UIScopeContext) + 'static>(
+    #[derive(Default, PartialEq)]
+    pub struct UIImageProps<P> {
+        pub layout: UILayoutC,
+        pub source: Option<ImageSource>,
+        pub fitness: ImageFitness,
+        pub children_props: P,
+    }
+
+    pub fn ui_image<P: PartialEq + 'static, F: Fn(&mut UIScopeContext, &P) + 'static>(
         local_id: &str,
         ctx: &mut UIScopeContext,
-        layout: UILayoutC,
-        source: Option<ImageSource>,
-        fitness: ImageFitness,
+        props: UIImageProps<P>,
         children: F,
     ) {
         let parent = ctx.scope_id().clone();
@@ -252,11 +273,12 @@ pub mod reactive {
 
         ctx.descend(
             local_id,
-            move |ctx| {
+            props,
+            move |ctx, props| {
                 {
                     let mut ui_ctx = UIContext::new(*ctx.ctx());
                     let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                        *UIImage::new(&mut ui_ctx, parent_entity, layout, None, fitness)
+                        *UIImage::new(&mut ui_ctx, parent_entity, props.layout, None, props.fitness)
                     });
 
                     // Set consecutive order
@@ -279,18 +301,17 @@ pub mod reactive {
                         opacity,
                     );
 
-                    if let Some(source) = source.clone() {
+                    if let Some(source) = props.source.clone() {
                         obj.set_image(source);
                     }
                 }
-                children(ctx);
+                children(ctx, &props.children_props);
             },
             move |ctx, scope| {
                 let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
                 let mut scene = ctx.module_mut::<Scene>();
                 scene.remove_object(&*entity);
             },
-            true,
         );
     }
 }
