@@ -229,10 +229,13 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx, ()| {
-            remember_state!(ctx, text, "world".to_string());
+            remember_state!(ctx, name, "world".to_string());
             remember_state!(ctx, seed, rand::random::<u64>().to_string());
 
-            fn on_proceed(entity: &EntityId, ctx: &EngineContext, _: Vec2) {}
+            let name_state = name.state();
+            let on_proceed = |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                // let name = name_state;
+            };
 
             fancy_text_input(
                 make_static_id!(),
@@ -241,7 +244,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     label: "Name".to_string(),
                     layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
                     multiline: false,
-                    text_state: text.state().clone(),
+                    text_state: name.state(),
                     style: TextStyle::new().with_font_size(20.0),
                 },
             );
@@ -253,7 +256,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     label: "Seed".to_string(),
                     layout: UILayoutC::new().with_width_grow().with_max_width(300.0),
                     multiline: false,
-                    text_state: seed.state().clone(),
+                    text_state: seed.state(),
                     style: TextStyle::new().with_font_size(20.0),
                 },
             );
@@ -331,29 +334,25 @@ pub mod ui_root_states {
 }
 
 pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
+    ctx.request_state(STATE_ENTITY_ID, || root_entity);
+
     let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
     let menu_visible = ctx.subscribe(&menu_visible);
 
-    ctx.request_state(STATE_ENTITY_ID, || root_entity);
-
     remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
-
-    let menu_opacity2 = menu_opacity.state().clone();
     ctx.descend(
         make_static_id!(),
-        (),
-        move |ctx, &()| {
-            let menu_visible = ctx.subscribe(menu_visible.state()).state().clone();
-            menu_opacity2.update_with(move |prev| {
+        (*menu_visible, menu_opacity.state()),
+        move |ctx, (menu_visible, menu_opacity)| {
+            menu_opacity.update_with(move |prev| {
                 let mut d = *prev;
-                let opacity = if *menu_visible.value() { 1.0 } else { 0.0 };
+                let opacity = if menu_visible { 1.0 } else { 0.0 };
                 d.retarget(TransitionTarget::new(opacity, 0.07));
                 d
             });
         },
         |_, _| {},
     );
-
     ctx.drive_transition(&menu_opacity);
 
     container(
@@ -370,7 +369,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
 
             expander(make_static_id!(), ctx, 0.2);
 
-            main_menu_controls(make_static_id!(), ctx, curr_nav_view.state().clone());
+            main_menu_controls(make_static_id!(), ctx, curr_nav_view.state());
             width_spacer(make_static_id!(), ctx, 50.0);
 
             container(
@@ -383,7 +382,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
                     children_props: (*curr_nav_view,),
                     ..Default::default()
                 },
-                move |ctx, &(tab_id,)| {
+                move |ctx, (tab_id,)| {
                     navigation_view(make_static_id!(), ctx, tab_id);
                 },
             );

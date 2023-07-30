@@ -24,7 +24,7 @@ pub struct SolidColorUniformData {
     color: Vec4,
 }
 
-#[derive(Default, PartialEq)]
+#[derive(Default, PartialEq, Clone)]
 pub struct ContainerBackground {
     mat_pipe_res_name: &'static str,
     uniform_data: SmallVec<[u8; 128]>,
@@ -50,7 +50,7 @@ struct UniformData {
     // ...custom properties
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct ContainerProps<P> {
     pub layout: UILayoutC,
     pub callbacks: UICallbacks,
@@ -135,8 +135,8 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
 
 pub fn container<P, F>(local_name: &str, ctx: &mut UIScopeContext, props: ContainerProps<P>, children_fn: F)
 where
-    P: PartialEq + 'static,
-    F: Fn(&mut UIScopeContext, &P) + 'static,
+    P: Clone + PartialEq + 'static,
+    F: Fn(&mut UIScopeContext, P) + 'static,
 {
     let parent = ctx.scope_id().clone();
     let child_num = ctx.num_children();
@@ -197,7 +197,7 @@ where
                 drop(obj);
                 drop(ui_ctx);
             }
-            children_fn(ctx, &props.children_props);
+            children_fn(ctx, props.children_props);
         },
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

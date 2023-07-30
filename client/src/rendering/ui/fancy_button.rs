@@ -33,7 +33,7 @@ pub fn fancy_button(
             remember_state!(ctx, text_color, AnimatedValue::immediate(*text.style().color()));
             let curr_text_color = *text.style().color();
 
-            let text_color2 = text_color.state().clone();
+            let text_color2 = text_color.state();
             let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
                 const MUL_FACTOR: f32 = 3.0;
                 let mut active_color = curr_text_color.into_raw();
@@ -48,7 +48,7 @@ pub fn fancy_button(
                 });
             });
 
-            let text_color2 = text_color.state().clone();
+            let text_color2 = text_color.state();
             let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
                 text_color2.update_with(move |prev| {
                     let mut new = prev.clone();

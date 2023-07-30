@@ -248,7 +248,7 @@ pub mod reactive {
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
-    #[derive(Default, PartialEq)]
+    #[derive(Default, Clone, PartialEq)]
     pub struct UIImageProps<P> {
         pub layout: UILayoutC,
         pub source: Option<ImageSource>,
@@ -256,7 +256,7 @@ pub mod reactive {
         pub children_props: P,
     }
 
-    pub fn ui_image<P: PartialEq + 'static, F: Fn(&mut UIScopeContext, &P) + 'static>(
+    pub fn ui_image<P: Clone + PartialEq + 'static, F: Fn(&mut UIScopeContext, &P) + 'static>(
         local_id: &str,
         ctx: &mut UIScopeContext,
         props: UIImageProps<P>,

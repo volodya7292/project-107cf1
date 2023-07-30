@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 define_callback!(TextChangeCallback(&EngineContext, String));
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct TextInputProps {
     pub layout: UILayoutC,
     pub multiline: bool,
@@ -44,9 +44,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
         ctx,
         ContainerProps {
             layout: UILayoutC::new().with_width_grow(),
+            children_props: props,
             ..Default::default()
         },
-        move |ctx, ()| {
+        move |ctx, props| {
             let line_height = {
                 let text_renderer = ctx.ctx().module::<TextRenderer>();
                 text_renderer.get_min_line_height(&props.style)
@@ -60,13 +61,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             remember_state!(ctx, container_size, None::<Vec2>);
             remember_state!(ctx, focused, false);
 
-            let container_size_state = container_size.state().clone();
-            let text_size_state = text_size.state().clone();
-            let text_global_pos_state = text_global_pos.state().clone();
-            let cursor_opacity_state = cursor_opacity.state().clone();
-
             let text = ctx.subscribe(&props.text_state);
             let n_chars = text.chars().count();
+
+            let cursor_opacity_state = cursor_opacity.state();
 
             if cursor_opacity.is_finished() {
                 cursor_opacity_state.update_with(|prev| {
@@ -128,6 +126,9 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 }
             }
 
+            let container_size_state = container_size.state();
+            let text_size_state = text_size.state();
+            let text_global_pos_state = text_global_pos.state();
             let on_text_size_update = move |entity: &EntityId, ctx: &EngineContext| {
                 let mut scene = ctx.module_mut::<Scene>();
                 let entry = scene.entry(entity);
@@ -143,9 +144,9 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 container_size_state.update(Some(clip_rect.size() - layout_padding.size()));
             };
 
-            let container_size_state = container_size.state().clone();
-            let text_global_pos_state = text_global_pos.state().clone();
-            let cursor_pos_state = cursor_pos.state().clone();
+            let container_size_state = container_size.state();
+            let text_global_pos_state = text_global_pos.state();
+            let cursor_pos_state = cursor_pos.state();
             let text2 = text.clone();
             let props2 = props.clone();
             let on_click = move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
@@ -167,19 +168,19 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 }
             };
 
-            let focused_state = focused.state().clone();
+            let focused_state = focused.state();
             let on_focus_in = move |entity: &EntityId, ctx: &EngineContext| {
                 focused_state.update(true);
             };
 
-            let focused_state = focused.state().clone();
+            let focused_state = focused.state();
             let on_focus_out = move |entity: &EntityId, ctx: &EngineContext| {
                 focused_state.update(false);
             };
 
-            let cursor_pos_state = cursor_pos.state().clone();
-            let cursor_opacity_state = cursor_opacity.state().clone();
-            let text_state = text.state().clone();
+            let cursor_pos_state = cursor_pos.state();
+            let cursor_opacity_state = cursor_opacity.state();
+            let text_state = text.state();
             let on_key_press = move |entity: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput| {
                 let super_key_pressed = {
                     let input_manager = ctx.module::<Input>();
@@ -229,8 +230,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         new_cursor_offset = 1;
                     }
 
-                    cursor_pos_state
-                        .update_with(move |prev| (*prev as isize + new_cursor_offset).max(0) as usize);
+                    let new_n_chars = new_text.chars().count();
+                    cursor_pos_state.update_with(move |prev| {
+                        (*prev as isize + new_cursor_offset).clamp(0, new_n_chars as isize) as usize
+                    });
 
                     new_text
                 });
@@ -258,9 +261,16 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         .with_on_focus_out(Arc::new(on_focus_out))
                         .with_on_key_press(Arc::new(on_key_press))
                         .with_on_size_update(Arc::new(on_text_size_update)),
+                    children_props: (
+                        props.style,
+                        props.multiline,
+                        cursor_offset,
+                        *cursor_opacity,
+                        line_height,
+                    ),
                     ..Default::default()
                 },
-                move |ctx, ()| {
+                move |ctx, (style, multiline, cursor_offset, cursor_opacity, line_height)| {
                     ui_text(
                         make_static_id!(),
                         ctx,
@@ -283,7 +293,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                             ContainerProps {
                                 layout: UILayoutC::new()
                                     .with_position(Position::Relative(cursor_offset))
-                                    .with_visibility(Visibility::Opacity(*cursor_opacity))
+                                    .with_visibility(Visibility::Opacity(cursor_opacity))
                                     .with_width_constraint(Constraint::exact(1.0))
                                     .with_height_constraint(Constraint::exact(line_height)),
                                 background: Some(container::background::solid_color(Color::grayscale(0.5))),

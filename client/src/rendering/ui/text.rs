@@ -276,11 +276,11 @@ pub mod reactive {
                     make_static_id!(),
                     props.clone(),
                     move |ctx, (text, style, wrap)| {
-                        let styled_string = StyledString::new(text.clone(), *style);
+                        let styled_string = StyledString::new(text.clone(), style);
 
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
                         let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), *wrap)
+                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), wrap)
                         });
 
                         // Set consecutive order
@@ -297,7 +297,7 @@ pub mod reactive {
                         drop(ui_ctx);
                         UIText::modify(&entity_state.value().into(), ctx.ctx(), |state| {
                             state.text = styled_string;
-                            state.wrap = *wrap;
+                            state.wrap = wrap;
                         });
                         let mut ui_ctx = UIContext::new(*ctx.ctx());
 

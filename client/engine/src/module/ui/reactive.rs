@@ -308,6 +308,12 @@ impl<T> Clone for ReactiveState<T> {
     }
 }
 
+impl<T> PartialEq for ReactiveState<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::as_ptr(&self.value) == Arc::as_ptr(&other.value)
+    }
+}
+
 impl<T: Default> Default for ReactiveState<T> {
     fn default() -> Self {
         Self {
@@ -327,8 +333,8 @@ pub struct StateReceiver<T> {
 }
 
 impl<T> StateReceiver<T> {
-    pub fn state(&self) -> &ReactiveState<T> {
-        &self.state
+    pub fn state(&self) -> ReactiveState<T> {
+        self.state.clone()
     }
 }
 
@@ -449,15 +455,14 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     }
 
     /// Performs descent of `scope` if the `parent` hasn't been descended earlier.
-    pub fn descend<F, P: PartialEq + 'static>(
+    pub fn descend<F, P: Clone + PartialEq + 'static>(
         &mut self,
         scope_name: &str,
         props: P,
         children_fn: F,
         on_remove_fn: fn(&EngineContext, &UIScope),
     ) where
-        F: Fn(&mut UIScopeContext, &P) + 'static,
-        //     R: FnOnce(&EngineContext, &UIScope) + 'static,
+        F: Fn(&mut UIScopeContext, P) + 'static,
     {
         let scope_id = self.descendant_scope_id(scope_name);
         self.used_children.push(scope_id.clone());
@@ -471,7 +476,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
                 UIScope {
                     props: Rc::new(props),
                     children_func: Rc::new(move |ctx, props| {
-                        children_fn(ctx, props.downcast_ref::<P>().unwrap())
+                        children_fn(ctx, props.downcast_ref::<P>().unwrap().clone())
                     }),
                     on_remove_func: on_remove_fn,
                     children: vec![],
@@ -483,7 +488,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         } else {
             let scope = self.reactor.scopes.get_mut(&scope_id).unwrap();
             scope.children_func =
-                Rc::new(move |ctx, props| children_fn(ctx, props.downcast_ref::<P>().unwrap()));
+                Rc::new(move |ctx, props| children_fn(ctx, props.downcast_ref::<P>().unwrap().clone()));
 
             let prev_props = scope.props.downcast_ref::<P>().unwrap();
             if prev_props == &props {
