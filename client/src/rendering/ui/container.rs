@@ -47,6 +47,7 @@ impl ContainerBackground {
 struct UniformData {
     clip_rect: RectUniformData,
     opacity: f32,
+    corner_radius: f32,
     // ...custom properties
 }
 
@@ -56,7 +57,30 @@ pub struct ContainerProps<P> {
     pub callbacks: UICallbacks,
     pub background: Option<ContainerBackground>,
     pub opacity: f32,
+    pub corner_radius: f32,
     pub children_props: P,
+}
+
+impl<P> ContainerProps<P> {
+    pub fn layout(mut self, layout: UILayoutC) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    pub fn background(mut self, background: Option<ContainerBackground>) -> Self {
+        self.background = background;
+        self
+    }
+
+    pub fn corner_radius(mut self, radius: f32) -> Self {
+        self.corner_radius = radius;
+        self
+    }
+
+    pub fn children_props(mut self, props: P) -> Self {
+        self.children_props = props;
+        self
+    }
 }
 
 impl<P: Default> Default for ContainerProps<P> {
@@ -66,9 +90,14 @@ impl<P: Default> Default for ContainerProps<P> {
             callbacks: Default::default(),
             background: None,
             opacity: 1.0,
+            corner_radius: 0.0,
             children_props: Default::default(),
         }
     }
+}
+
+pub fn container_props<P: Default>() -> ContainerProps<P> {
+    Default::default()
 }
 
 pub mod background {
@@ -98,8 +127,8 @@ pub mod background {
         let pixel = renderer
             .device()
             .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_container.frag.spv"),
-                "ui_container.frag",
+                include_bytes!("../../../res/shaders/solid_background.frag.spv"),
+                "solid_background.frag",
             )
             .unwrap();
 
@@ -181,6 +210,8 @@ where
 
                 let raw_uniform_data = obj.get_mut::<UniformDataC>();
                 raw_uniform_data.copy_from_with_offset(offset_of!(UniformData, opacity), opacity);
+                raw_uniform_data
+                    .copy_from_with_offset(offset_of!(UniformData, corner_radius), props.corner_radius);
                 if let Some(background) = &props.background {
                     raw_uniform_data.copy_from_slice(mem::size_of::<UniformData>(), &background.uniform_data);
                 }
@@ -210,6 +241,7 @@ pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {
             layout: UILayoutC::new()
                 .with_width(Sizing::Grow(fraction))
                 .with_height(Sizing::Grow(fraction)),
+            callbacks: UICallbacks::new().with_interaction(false),
             ..Default::default()
         },
         |_, ()| {},
@@ -222,6 +254,7 @@ pub fn width_spacer(local_id: &str, ctx: &mut UIScopeContext, width: f32) {
         ctx,
         ContainerProps {
             layout: UILayoutC::new().with_min_width(width),
+            callbacks: UICallbacks::new().with_interaction(false),
             ..Default::default()
         },
         |_, ()| {},
@@ -234,6 +267,7 @@ pub fn height_spacer(local_id: &str, ctx: &mut UIScopeContext, height: f32) {
         ctx,
         ContainerProps {
             layout: UILayoutC::new().with_min_height(height),
+            callbacks: UICallbacks::new().with_interaction(false),
             ..Default::default()
         },
         |_, ()| {},
