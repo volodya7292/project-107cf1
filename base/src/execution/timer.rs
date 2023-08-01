@@ -2,10 +2,12 @@ use crate::execution::virtual_processor::VirtualProcessor;
 use crate::execution::{spawn_coroutine, Task};
 use common::tokio;
 use common::tokio::time::MissedTickBehavior;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A fair timer that tries to execute each tick on a thread pool as precisely as possible.
 pub struct IntervalTimer {
+    processor: Arc<VirtualProcessor>,
     waiter: Task<()>,
 }
 
@@ -14,20 +16,26 @@ impl IntervalTimer {
     where
         F: Fn() + Send + Sync + Clone + 'static,
     {
-        let waiter = spawn_coroutine(async move {
-            let mut interval = tokio::time::interval(period);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            loop {
-                interval.tick().await;
-                processor.spawn(on_tick.clone()).future().await;
-            }
-        });
+        let processor = Arc::new(processor);
 
-        Self { waiter }
+        let waiter = {
+            let processor = Arc::clone(&processor);
+            spawn_coroutine(async move {
+                let mut interval = tokio::time::interval(period);
+                interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                loop {
+                    interval.tick().await;
+                    processor.spawn(on_tick.clone()).future().await;
+                }
+            })
+        };
+
+        Self { processor, waiter }
     }
 
-    pub fn cancel_and_wait(self) {
+    /// May cause deadlock if executed in another virtual processor or thread pool.
+    pub fn stop_and_join(&self) {
         self.waiter.cancel();
-        self.waiter.wait();
+        self.processor.stop_and_join();
     }
 }

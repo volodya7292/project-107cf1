@@ -1,6 +1,7 @@
 use crate::execution::{spawn_coroutine, Task};
 use common::parking_lot::Mutex;
 use common::threading::SafeThreadPool;
+use common::tokio::sync::mpsc::error::TryRecvError;
 use common::tokio::sync::{mpsc, Notify};
 use common::MO_RELAXED;
 use std::sync::atomic::AtomicBool;
@@ -15,20 +16,23 @@ struct ScheduledTask {
 /// Many such processors allow executing their tasks concurrently
 /// instead of waiting for FIFO queue in case of threadpool.
 pub struct VirtualProcessor {
-    worker: Task<()>,
-    sender: mpsc::UnboundedSender<ScheduledTask>,
+    worker: Mutex<Option<Task<()>>>,
+    sender: Mutex<Option<mpsc::UnboundedSender<ScheduledTask>>>,
 }
 
 impl VirtualProcessor {
     pub fn new(pool: &Arc<SafeThreadPool>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let worker = spawn_coroutine(VirtualProcessor::worker_fn(Arc::clone(&pool), receiver));
-        Self { worker, sender }
+        Self {
+            worker: Mutex::new(Some(worker)),
+            sender: Mutex::new(Some(sender)),
+        }
     }
 
     /// Detaches the virtual processor so the tasks can continue executing in background.
     pub fn detach(self) {
-        self.worker.detach()
+        self.worker.lock().take().unwrap().detach()
     }
 
     async fn worker_fn(pool: Arc<SafeThreadPool>, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
@@ -44,10 +48,15 @@ impl VirtualProcessor {
                     };
                     task
                 } else {
-                    let Ok(task) = receiver.try_recv() else {
-                        break;
-                    };
-                    task
+                    match receiver.try_recv() {
+                        Ok(task) => task,
+                        Err(TryRecvError::Empty) => {
+                            break;
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            break 'outer;
+                        }
+                    }
                 };
                 notifiers.push(task.complete_notify);
                 tasks.push(task.func);
@@ -98,8 +107,23 @@ impl VirtualProcessor {
             cancelled,
         };
 
-        self.sender.send(scheduled_task).ok().unwrap();
+        if let Some(sender) = &*self.sender.lock() {
+            sender.send(scheduled_task).ok().unwrap();
+        }
         virtual_task
+    }
+
+    /// After joining the virtual processor won't execute any tasks.
+    /// May cause a deadlock if executed in another virtual processor or thread pool.
+    pub fn stop_and_join(&self) {
+        // Cancel the remaining tasks by disconnecting the channel
+        drop(self.sender.lock().take());
+
+        if let Some(worker) = self.worker.lock().take() {
+            worker.wait();
+        } else {
+            panic!("virtual processor has already been joined");
+        }
     }
 }
 
