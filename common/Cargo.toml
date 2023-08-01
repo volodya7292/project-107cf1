@@ -25,6 +25,7 @@ bumpalo = "3.13"
 memoffset = "0.9"
 index-pool = "1.0"
 ring = "0.16"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos = { path = "../common/macos" }

@@ -4,6 +4,7 @@ pub mod function_storage;
 pub mod instant_meter;
 pub mod lrc;
 pub mod nd_range;
+pub mod resource_cache;
 pub mod resource_encoder;
 pub mod resource_file;
 pub mod scene;
@@ -15,6 +16,7 @@ pub mod unsafe_slice;
 pub mod utils;
 
 pub use futures_lite;
+pub use image;
 pub use log;
 #[cfg(target_os = "macos")]
 pub use macos;

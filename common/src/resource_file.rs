@@ -1,4 +1,5 @@
-use crate::types::{ConcurrentCache, ConcurrentCacheExt, HashMap};
+use crate::resource_cache::{CachedResource, ResourceCache};
+use crate::types::HashMap;
 use byteorder::{LittleEndian, ReadBytesExt};
 use io::{Seek, SeekFrom};
 use parking_lot::Mutex;
@@ -179,20 +180,14 @@ impl ResourceRef {
 
 pub struct BufferedResourceReader {
     resources: Arc<ResourceFile>,
-    cache: ConcurrentCache<String, Arc<[u8]>>,
+    cache: ResourceCache,
 }
 
 impl BufferedResourceReader {
-    const CAPACITY: usize = 100_000_000;
-
-    fn cache_entry_weigher(_: &String, value: &Arc<[u8]>) -> u32 {
-        value.len().min(u32::MAX as usize) as u32
-    }
-
     pub fn new(resources: Arc<ResourceFile>) -> Arc<Self> {
         Arc::new(Self {
             resources,
-            cache: ConcurrentCache::with_weigher(Self::CAPACITY, Self::cache_entry_weigher),
+            cache: Default::default(),
         })
     }
 
@@ -200,16 +195,18 @@ impl BufferedResourceReader {
         &self.resources
     }
 
-    pub fn get(&self, path: &str) -> Result<Arc<[u8]>, Error> {
-        let entry = self
-            .cache
-            .entry_by_ref(path)
-            .or_try_insert_with(|| {
-                let res = self.resources.get(path)?;
-                res.read().map(|v| v.into())
-            })
-            .map_err(|e| Arc::into_inner(e).unwrap())?;
+    pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
+        self.cache.get(path, || {
+            let res = self.resources.get(path)?;
+            res.read().map(|v| Arc::from(v))
+        })
+    }
 
-        Ok(entry.into_value())
+    pub fn get_map<T: CachedResource, F: FnOnce(Arc<Vec<u8>>) -> Arc<T>>(
+        &self,
+        path: &str,
+        init: F,
+    ) -> Result<Arc<T>, Error> {
+        self.cache.get(path, || self.get(path).map(init))
     }
 }

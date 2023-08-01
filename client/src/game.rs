@@ -25,18 +25,18 @@ use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
 use base::overworld::{Overworld, OverworldOrchestrator, OverworldParams};
 use base::physics::aabb::AABB;
 use base::physics::MOTION_EPSILON;
-use common::glm;
 use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
 use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::resource_file::{BufferedResourceReader, ResourceFile};
 use common::threading::SafeThreadPool;
+use common::{glm, image};
 use engine::event::{WSIEvent, WSIKeyboardInput};
 use engine::module::input::Input;
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
-use engine::module::scene::{ObjectEntityId, Scene};
-use engine::module::text_renderer::{FontSet, TextRenderer};
+use engine::module::scene::Scene;
+use engine::module::text_renderer::TextRenderer;
 use engine::module::ui::reactive::UIReactor;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
@@ -59,9 +59,23 @@ const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
 const PLAYER_CAMERA_OFFSET: DVec3 = DVec3::new(0.0, 0.625, 0.0);
 
+pub trait SceneGameExt {
+    fn resources(&self) -> Arc<BufferedResourceReader>;
+}
+
+impl SceneGameExt for Scene {
+    fn resources(&self) -> Arc<BufferedResourceReader> {
+        Arc::clone(&self.resource::<Arc<BufferedResourceReader>>())
+    }
+}
+
 pub trait EngineCtxGameExt {
     fn app(&self) -> OwnedRefMut<dyn EngineModule, MainApp>;
-    fn resources(&self) -> Arc<BufferedResourceReader>;
+    fn scene(&self) -> OwnedRefMut<dyn EngineModule, Scene>;
+    fn resource_image(
+        scene: &Scene,
+        filename: &str,
+    ) -> Result<Arc<image::RgbaImage>, common::resource_file::Error>;
 }
 
 impl EngineCtxGameExt for EngineContext<'_> {
@@ -69,9 +83,19 @@ impl EngineCtxGameExt for EngineContext<'_> {
         self.module_mut::<MainApp>()
     }
 
-    fn resources(&self) -> Arc<BufferedResourceReader> {
-        let scene = self.module::<Scene>();
-        Arc::clone(&scene.resource::<Arc<BufferedResourceReader>>())
+    fn scene(&self) -> OwnedRefMut<dyn EngineModule, Scene> {
+        self.module_mut::<Scene>()
+    }
+
+    fn resource_image(
+        scene: &Scene,
+        filename: &str,
+    ) -> Result<Arc<image::RgbaImage>, common::resource_file::Error> {
+        let resources = scene.resources();
+        resources.get_map(filename, |data| {
+            let dyn_img = image::load_from_memory(&data).unwrap();
+            Arc::new(dyn_img.into_rgba8())
+        })
     }
 }
 

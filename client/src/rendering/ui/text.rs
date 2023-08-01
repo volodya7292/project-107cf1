@@ -1,4 +1,4 @@
-use crate::rendering::ui::UIContext;
+use crate::game::EngineCtxGameExt;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
 use engine::ecs::component::render_config::RenderLayer;
@@ -156,13 +156,13 @@ pub trait UITextImpl {
     }
 
     fn new(
-        ui_ctx: &mut UIContext,
+        ctx: &EngineContext,
         parent: EntityId,
         text: StyledString,
         wrap: bool,
         h_align: TextHAlign,
     ) -> ObjectEntityId<UIText> {
-        let impl_ctx = *ui_ctx.scene.resource::<TextImplContext>();
+        let impl_ctx = ctx.scene().resource::<TextImplContext>();
 
         let main_obj = UIText::new_raw(
             UILayoutC::new()
@@ -187,7 +187,7 @@ pub trait UITextImpl {
                 .with_render_type(RenderLayer::Overlay),
         );
 
-        let main_entity = ui_ctx.scene.add_object(Some(parent), main_obj).unwrap();
+        let main_entity = ctx.scene().add_object(Some(parent), main_obj).unwrap();
         let wrapper_obj = UIObject::new_raw(
             UILayoutC::new()
                 .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
@@ -198,20 +198,21 @@ pub trait UITextImpl {
             WrapperState { text, wrap },
         )
         .disable_pointer_events();
-        let wrapper_entity = ui_ctx.scene.add_object(Some(*main_entity), wrapper_obj).unwrap();
+        let wrapper_entity = ctx.scene().add_object(Some(*main_entity), wrapper_obj).unwrap();
 
-        let raw_text_entity = ui_ctx
-            .scene
+        let raw_text_entity = ctx
+            .scene()
             .add_object(Some(*wrapper_entity), raw_text_obj)
             .unwrap();
 
-        let mut main_obj = ui_ctx.scene.object::<UIText>(&main_entity);
+        let mut scene = ctx.scene();
+        let mut main_obj = scene.object::<UIText>(&main_entity);
         main_obj.get_mut::<TextState>().wrapper_entity = wrapper_entity;
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
         main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(on_size_update));
         drop(main_obj);
 
-        ui_ctx.ctx.dispatch_callback(move |ctx, _| {
+        ctx.dispatch_callback(move |ctx, _| {
             on_size_update(&main_entity, ctx);
         });
 
@@ -232,9 +233,10 @@ impl UITextImpl for UIText {}
 
 pub mod reactive {
     use super::UniformData;
+    use crate::game::EngineCtxGameExt;
     use crate::rendering::ui::container::{container, ContainerProps};
     use crate::rendering::ui::text::{on_size_update, UIText, UITextImpl};
-    use crate::rendering::ui::{UICallbacks, UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
+    use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
     use common::make_static_id;
     use common::memoffset::offset_of;
     use common::scene::relation::Relation;
@@ -289,39 +291,40 @@ pub mod reactive {
                 ctx.descend(
                     make_static_id!(),
                     (props, parent_opacity),
-                    move |ctx, ((text, style, wrap, align), parent_opacity)| {
+                    move |scope_ctx, ((text, style, wrap, align), parent_opacity)| {
                         let styled_string = StyledString::new(text.clone(), style);
 
-                        let mut ui_ctx = UIContext::new(*ctx.ctx());
-                        let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
-                            *UIText::new(&mut ui_ctx, parent_entity, styled_string.clone(), wrap, align)
+                        let ctx = *scope_ctx.ctx();
+                        let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
+                            *UIText::new(&ctx, parent_entity, styled_string.clone(), wrap, align)
                         });
 
                         // Set consecutive order
                         {
-                            let mut parent = ui_ctx.scene().entry(&parent_entity);
+                            let mut scene = ctx.scene();
+                            let mut parent = scene.entry(&parent_entity);
                             parent
                                 .get_mut::<Relation>()
                                 .set_child_order(entity_state.value(), Some(child_num as u32));
                         }
 
                         let opacity = parent_opacity;
-                        ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+                        scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
-                        drop(ui_ctx);
-                        UIText::modify(&entity_state.value().into(), ctx.ctx(), |state| {
+                        UIText::modify(&entity_state.value().into(), scope_ctx.ctx(), |state| {
                             state.text = styled_string;
                             state.wrap = wrap;
                             state.h_align = align;
                         });
-                        let mut ui_ctx = UIContext::new(*ctx.ctx());
-
-                        let mut obj = ui_ctx.scene().object::<UIText>(&entity_state.value().into());
-                        let raw_text_entity = obj.state().raw_text_entity;
-                        drop(obj);
 
                         {
-                            let mut raw_text = ui_ctx.scene.entry(&*raw_text_entity);
+                            let mut scene = ctx.scene();
+
+                            let mut obj = scene.object::<UIText>(&entity_state.value().into());
+                            let raw_text_entity = obj.state().raw_text_entity;
+                            drop(obj);
+
+                            let mut raw_text = scene.entry(&*raw_text_entity);
                             let raw_uniform_data = raw_text.get_mut::<UniformDataC>();
                             UniformDataC::copy_from_with_offset(
                                 raw_uniform_data,
@@ -330,8 +333,7 @@ pub mod reactive {
                             );
                         }
 
-                        drop(ui_ctx);
-                        on_size_update(entity_state.value(), ctx.ctx());
+                        on_size_update(entity_state.value(), scope_ctx.ctx());
                     },
                     move |ctx, scope| {
                         let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

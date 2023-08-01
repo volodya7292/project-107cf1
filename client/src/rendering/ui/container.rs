@@ -1,4 +1,5 @@
-use crate::rendering::ui::{UICallbacks, UIContext, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
+use crate::game::EngineCtxGameExt;
+use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
 use common::glm::Vec4;
 use common::memoffset::offset_of;
 use common::scene::relation::Relation;
@@ -174,16 +175,16 @@ where
     ctx.descend(
         local_name,
         (props, parent_opacity),
-        move |ctx, (props, parent_opacity)| {
+        move |scope_ctx, (props, parent_opacity)| {
             {
-                let mut ui_ctx = UIContext::new(*ctx.ctx());
-                let entity_state = ctx.request_state(STATE_ENTITY_ID, || {
+                let ctx = *scope_ctx.ctx();
+                let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
                     let obj = UIObject::new_raw(props.layout, ()).with_mesh(VertexMeshC::without_data(4, 1));
-                    *ui_ctx.scene().add_object(Some(parent_entity), obj).unwrap()
+                    *ctx.scene().add_object(Some(parent_entity), obj).unwrap()
                 });
 
                 let new_render_config = if let Some(background) = &props.background {
-                    let mat_pipe_id = ui_ctx
+                    let mat_pipe_id = ctx
                         .scene()
                         .named_resource::<MaterialPipelineId>(background.mat_pipe_res_name);
                     MeshRenderConfigC::new(*mat_pipe_id, true).with_render_layer(RenderLayer::Overlay)
@@ -193,18 +194,18 @@ where
 
                 // Set consecutive order
                 {
-                    let mut parent = ui_ctx.scene().entry(&parent_entity);
+                    let mut scene = ctx.scene();
+                    let mut parent = scene.entry(&parent_entity);
                     parent
                         .get_mut::<Relation>()
                         .set_child_order(entity_state.value(), Some(child_num as u32));
                 }
 
                 let opacity = parent_opacity * props.layout.visibility.opacity();
-                ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
+                scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
-                let mut obj = ui_ctx
-                    .scene()
-                    .object::<UIObject<()>>(&entity_state.value().into());
+                let mut scene = ctx.scene();
+                let mut obj = scene.object::<UIObject<()>>(&entity_state.value().into());
                 *obj.get_mut::<MeshRenderConfigC>() = new_render_config;
                 *obj.layout_mut() = props.layout;
 
@@ -221,9 +222,8 @@ where
                 event_handler.add_on_size_update(Arc::new(on_size_update));
 
                 drop(obj);
-                drop(ui_ctx);
             }
-            children_fn(ctx, props.children_props);
+            children_fn(scope_ctx, props.children_props);
         },
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

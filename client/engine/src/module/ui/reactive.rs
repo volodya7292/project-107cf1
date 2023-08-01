@@ -515,6 +515,14 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
 
         self.reactor.rebuild(scope_id, self.ctx, self.delta_time);
     }
+
+    /// Executes the specified action once on the first rebuild.
+    pub fn once<F>(&mut self, scope_name: &str, children_fn: F)
+    where
+        F: Fn(&mut UIScopeContext) + 'static,
+    {
+        self.descend(scope_name, (), move |ctx, ()| children_fn(ctx), |_, _| {});
+    }
 }
 
 /// Requests a state and subscribes to it creating a variable with respective name.

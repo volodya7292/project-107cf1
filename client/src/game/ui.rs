@@ -7,7 +7,7 @@ use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputPro
 use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
-use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
+use crate::rendering::ui::STATE_ENTITY_ID;
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
@@ -288,11 +288,8 @@ fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
 }
 
 fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: ReactiveState<&'static str>) {
-    let resources = ctx.ctx().resources();
-
-    let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
-        .unwrap()
-        .unwrap();
+    let image_source =
+        EngineContext::resource_image(&ctx.ctx().scene(), "/textures/main_menu_background.jpg").unwrap();
 
     fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
 
@@ -468,10 +465,8 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
 }
 
 fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static str) {
-    let resources = ctx.ctx().resources();
-    let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
-        .unwrap()
-        .unwrap();
+    let image_source =
+        EngineContext::resource_image(&ctx.ctx().scene(), "/textures/main_menu_background.jpg").unwrap();
 
     if TABS.into_iter().find(|v| *v == tab_id).is_none() {
         return;
@@ -521,20 +516,22 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
     ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
 
-    ctx.ctx().dispatch_callback(|ctx, _| {
-        update_overworlds_list(ctx);
+    ctx.once(make_static_id!(), |ctx| {
+        ctx.ctx().dispatch_callback(|ctx, _| {
+            update_overworlds_list(ctx);
+        });
     });
 
     let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
     let menu_visible = ctx.subscribe(&menu_visible);
-
     remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
 
+    let menu_opacity_state = menu_opacity.state();
     ctx.descend(
         make_static_id!(),
-        (*menu_visible, menu_opacity.state()),
-        move |ctx, (menu_visible, menu_opacity)| {
-            menu_opacity.update_with(move |prev| {
+        *menu_visible,
+        move |ctx, menu_visible| {
+            menu_opacity_state.update_with(move |prev| {
                 let mut d = *prev;
                 let opacity = if menu_visible { 1.0 } else { 0.0 };
                 d.retarget(TransitionTarget::new(opacity, 0.07));

@@ -6,63 +6,16 @@ pub mod image;
 pub mod text;
 pub mod text_input;
 
-use crate::game::{EngineCtxGameExt, MainApp};
+use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
-use ::image::ImageResult;
-use common::lrc::OwnedRefMut;
-use common::resource_file::BufferedResourceReader;
 use engine::ecs::component::ui::{BasicEventCallback, ClickedCallback, KeyPressedCallback, UIEventHandlerC};
-use engine::module::scene::Scene;
 use engine::module::EngineModule;
 use engine::EngineContext;
 use std::sync::Arc;
 
 pub const STATE_ENTITY_ID: &'static str = "__entity_id";
 pub const LOCAL_VAR_OPACITY: &'static str = "__opacity";
-
-pub struct UIContext<'a> {
-    scene: OwnedRefMut<dyn EngineModule, Scene>,
-    ctx: EngineContext<'a>,
-    resources: Arc<BufferedResourceReader>,
-}
-
-impl<'a> UIContext<'a> {
-    pub fn new(ctx: EngineContext<'a>) -> Self {
-        let scene = ctx.module_mut::<Scene>();
-        let resources = Arc::clone(&scene.resource::<Arc<BufferedResourceReader>>());
-        Self {
-            scene,
-            ctx,
-            resources,
-        }
-    }
-
-    pub fn ctx(&self) -> &EngineContext {
-        &self.ctx
-    }
-
-    pub fn app(&mut self) -> OwnedRefMut<dyn EngineModule, MainApp> {
-        self.ctx.module_mut::<MainApp>()
-    }
-
-    pub fn scene(&mut self) -> &mut Scene {
-        &mut *self.scene
-    }
-
-    pub fn resource(&mut self, filename: &str) -> Result<Arc<[u8]>, common::resource_file::Error> {
-        self.resources.get(filename)
-    }
-
-    pub fn resource_image(
-        resources: &Arc<BufferedResourceReader>,
-        filename: &str,
-    ) -> Result<ImageResult<::image::RgbaImage>, common::resource_file::Error> {
-        let res = resources.get(filename)?;
-        let dyn_img = ::image::load_from_memory(&res);
-        Ok(dyn_img.map(|img| img.into_rgba8()))
-    }
-}
 
 pub fn register_ui_elements(ctx: &EngineContext) {
     container::background::register_backgrounds(ctx);
