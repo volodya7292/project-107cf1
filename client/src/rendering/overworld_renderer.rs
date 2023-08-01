@@ -331,4 +331,11 @@ impl OverworldRenderer {
             }
         }
     }
+
+    pub fn cleanup_everything(&mut self, scene: &mut Scene) {
+        for (_, entities) in &self.entities {
+            scene.remove_object(&entities.solid);
+            scene.remove_object(&entities.translucent);
+        }
+    }
 }

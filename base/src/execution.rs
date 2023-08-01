@@ -27,7 +27,7 @@ impl<T> Task<T> {
         self.0 = None;
     }
 
-    pub fn cancel(self) {
+    pub fn cancel(&self) {
         self.0.as_ref().unwrap().abort();
     }
 

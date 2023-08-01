@@ -291,7 +291,7 @@ impl MainApp {
         let _ = fs::remove_dir_all(world_path);
     }
 
-    pub fn start_game_process(&mut self, ctx: &EngineContext, overworld_name: &str) {
+    pub fn enter_overworld(&mut self, ctx: &EngineContext, overworld_name: &str) {
         let world_path = Self::make_world_path(overworld_name);
 
         let interface = LocalOverworldInterface::new(world_path, &self.main_registry);
@@ -360,6 +360,18 @@ impl MainApp {
 
         self.show_main_menu(ctx, false);
         self.grab_cursor(&*ctx.window(), true, ctx);
+    }
+
+    pub fn exit_overworld(&mut self, ctx: &EngineContext) {
+        self.tick_timer.take().unwrap().cancel_and_wait();
+        {
+            let game_state = self.game_state.as_ref().unwrap().lock();
+            game_state
+                .overworld_renderer
+                .lock()
+                .cleanup_everything(&mut ctx.scene());
+        }
+        self.game_state = None;
     }
 
     pub fn data_dir() -> PathBuf {

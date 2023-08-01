@@ -132,7 +132,7 @@ fn update_overworlds_list(ctx: &EngineContext) {
 
 fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
     let mut app = ctx.app();
-    app.start_game_process(ctx, overworld_name);
+    app.enter_overworld(ctx, overworld_name);
 
     let reactor = app.ui_reactor();
     reactor
@@ -147,6 +147,17 @@ fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
         .root_state(ui_root_states::IN_GAME_PROCESS)
         .unwrap()
         .update(true);
+}
+
+fn close_overworld(ctx: &EngineContext) {
+    let mut app = ctx.app();
+    app.exit_overworld(ctx);
+
+    let reactor = app.ui_reactor();
+    reactor
+        .root_state(ui_root_states::IN_GAME_PROCESS)
+        .unwrap()
+        .update(false);
 }
 
 fn confirm_overworld_delete_modal(
@@ -344,14 +355,25 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
             );
             height_spacer(make_static_id!(), ctx, 30.0);
 
-            menu_button(
-                make_static_id!(),
-                ctx,
-                "EXIT",
-                Arc::new(move |_: &EntityId, ctx: &EngineContext, _| ctx.request_stop()),
-            );
+            if *is_in_game {
+                menu_button(
+                    make_static_id!(),
+                    ctx,
+                    "EXIT TO MAIN MENU",
+                    Arc::new(|_: &EntityId, ctx: &EngineContext, _| {
+                        close_overworld(ctx);
+                    }),
+                );
+            } else {
+                menu_button(
+                    make_static_id!(),
+                    ctx,
+                    "EXIT",
+                    Arc::new(|_: &EntityId, ctx: &EngineContext, _| ctx.request_stop()),
+                );
+            }
 
-            expander(make_static_id!(), ctx, 0.5);
+            height_spacer(make_static_id!(), ctx, 100.0);
         },
     );
 }

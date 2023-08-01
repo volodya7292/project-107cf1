@@ -273,8 +273,6 @@ pub mod reactive {
     }
 
     pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, props: UITextProps) {
-        let child_num = ctx.num_children();
-
         container(
             local_name,
             ctx,
@@ -298,15 +296,6 @@ pub mod reactive {
                         let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
                             *UIText::new(&ctx, parent_entity, styled_string.clone(), wrap, align)
                         });
-
-                        // Set consecutive order
-                        {
-                            let mut scene = ctx.scene();
-                            let mut parent = scene.entry(&parent_entity);
-                            parent
-                                .get_mut::<Relation>()
-                                .set_child_order(entity_state.value(), Some(child_num as u32));
-                        }
 
                         let opacity = parent_opacity;
                         scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);

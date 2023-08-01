@@ -125,15 +125,24 @@ fn global_on_mouse_release(ctx: &EngineContext) {
 }
 
 fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
-    let mut scene = ctx.module_mut::<Scene>();
     let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
-    let entry = scene.entry(entity);
-    let ui_handler = entry.get::<UIEventHandlerC>();
     let last_focus_entity = interaction_manager.curr_focused_entity;
-    let focusable = ui_handler.focusable;
     drop(interaction_manager);
 
-    if let Some(on_click) = &ui_handler.on_click {
+    let mut scene = ctx.module_mut::<Scene>();
+    let entry = scene.entry(entity);
+    let (on_click, on_focus_in, focusable) = {
+        let ui_handler = entry.get::<UIEventHandlerC>();
+        (
+            ui_handler.on_click.clone(),
+            ui_handler.on_focus_in.clone(),
+            ui_handler.focusable,
+        )
+    };
+    drop(entry);
+    drop(scene);
+
+    if let Some(on_click) = &on_click {
         on_click(entity, ctx, pos);
     }
 
@@ -141,10 +150,6 @@ fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
         let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
         interaction_manager.curr_focused_entity = *entity;
         drop(interaction_manager);
-
-        let on_focus_in = ui_handler.on_focus_in.clone();
-        drop(entry);
-        drop(scene);
 
         if focusable {
             if let Some(on_focus_in) = on_focus_in {

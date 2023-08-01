@@ -272,8 +272,8 @@ pub mod reactive {
 
         ctx.descend(
             local_id,
-            (props, parent_opacity),
-            move |scope_ctx, (props, parent_opacity)| {
+            (props, parent_opacity, child_num),
+            move |scope_ctx, (props, parent_opacity, child_num)| {
                 {
                     let ctx = *scope_ctx.ctx();
                     let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {

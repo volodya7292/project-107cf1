@@ -6,7 +6,7 @@ use std::time::Duration;
 
 /// A fair timer that tries to execute each tick on a thread pool as precisely as possible.
 pub struct IntervalTimer {
-    _waiter: Task<()>,
+    waiter: Task<()>,
 }
 
 impl IntervalTimer {
@@ -23,6 +23,11 @@ impl IntervalTimer {
             }
         });
 
-        Self { _waiter: waiter }
+        Self { waiter }
+    }
+
+    pub fn cancel_and_wait(self) {
+        self.waiter.cancel();
+        self.waiter.wait();
     }
 }
