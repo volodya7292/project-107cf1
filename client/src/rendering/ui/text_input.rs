@@ -279,7 +279,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                                 .with_width_grow()
                                 .with_height(Sizing::FitContent)
                                 .with_min_height(line_height),
-                            callbacks: UICallbacks::new().with_enabled(false),
+                            callbacks: UICallbacks::new().with_interaction(false),
                             text: text.clone(),
                             style: props.style,
                             wrap: props.multiline,

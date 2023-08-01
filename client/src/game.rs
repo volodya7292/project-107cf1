@@ -262,6 +262,11 @@ impl MainApp {
         LocalOverworldInterface::create_overworld(world_path, OverworldParams { seed, tick_count: 0 });
     }
 
+    pub fn delete_overworld(&mut self, overworld_name: &str) {
+        let world_path = Self::make_world_path(overworld_name);
+        let _ = fs::remove_dir_all(world_path);
+    }
+
     pub fn start_game_process(&mut self, ctx: &EngineContext, overworld_name: &str) {
         let world_path = Self::make_world_path(overworld_name);
 

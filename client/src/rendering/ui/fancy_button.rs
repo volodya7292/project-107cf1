@@ -17,10 +17,8 @@ pub fn fancy_button(
     ctx: &mut UIScopeContext,
     layout: UILayoutC,
     text: StyledString,
-    on_click: impl ClickedCallback,
+    on_click: ClickedCallback,
 ) {
-    let on_click = Arc::new(on_click);
-
     container(
         local_id,
         ctx,
@@ -78,7 +76,7 @@ pub fn fancy_button(
                         ctx,
                         UITextProps {
                             text: text.data().to_string(),
-                            callbacks: UICallbacks::new().with_enabled(false),
+                            callbacks: UICallbacks::new().with_interaction(false),
                             style: text.style().clone().with_color(*text_color.current()),
                             ..Default::default()
                         },

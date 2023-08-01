@@ -340,6 +340,16 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_preferred_width(mut self, width: f32) -> Self {
+        self.sizing[0] = Sizing::Preferred(width);
+        self
+    }
+
+    pub fn with_preferred_height(mut self, height: f32) -> Self {
+        self.sizing[1] = Sizing::Preferred(height);
+        self
+    }
+
     pub fn with_min_width(mut self, min_width: f32) -> Self {
         self.constraints[0].min = min_width;
         self
@@ -447,8 +457,9 @@ macro_rules! define_callback {
     };
 }
 
+pub type ClickedCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
+
 define_callback!(BasicEventCallback(&EntityId, &EngineContext));
-define_callback!(ClickedCallback(&EntityId, &EngineContext, Vec2));
 define_callback!(KeyPressedCallback(&EntityId, &EngineContext, WSIKeyboardInput));
 
 pub struct UIEventHandlerC {
@@ -459,7 +470,7 @@ pub struct UIEventHandlerC {
     pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_click: Option<Arc<dyn ClickedCallback<Output = ()>>>,
+    pub on_click: Option<ClickedCallback>,
     pub on_size_update: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub focusable: bool,
     pub enabled: bool,

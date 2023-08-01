@@ -75,7 +75,7 @@ pub fn register_ui_elements(ctx: &EngineContext) {
 pub struct UICallbacks {
     pub interaction_enabled: bool,
     pub focusable: bool,
-    pub on_click: Option<Arc<dyn ClickedCallback<Output = ()>>>,
+    pub on_click: Option<ClickedCallback>,
     pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
@@ -89,7 +89,7 @@ impl UICallbacks {
         Self::default()
     }
 
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
+    pub fn with_interaction(mut self, enabled: bool) -> Self {
         self.interaction_enabled = enabled;
         self
     }
@@ -99,7 +99,7 @@ impl UICallbacks {
         self
     }
 
-    pub fn with_on_click(mut self, on_click: Arc<dyn ClickedCallback<Output = ()>>) -> Self {
+    pub fn with_on_click(mut self, on_click: ClickedCallback) -> Self {
         self.on_click = Some(on_click);
         self
     }

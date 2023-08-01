@@ -256,6 +256,20 @@ pub mod reactive {
         pub wrap: bool,
     }
 
+    impl UITextProps {
+        pub fn with_style(mut self, style: TextStyle) -> Self {
+            self.style = style;
+            self
+        }
+    }
+
+    pub fn ui_text_props(text: impl Into<String>) -> UITextProps {
+        UITextProps {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
+
     pub fn ui_text(local_name: &str, ctx: &mut UIScopeContext, props: UITextProps) {
         let child_num = ctx.num_children();
 

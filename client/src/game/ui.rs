@@ -1,22 +1,25 @@
 use crate::game::{EngineCtxGameExt, MainApp};
 use crate::rendering::ui::container::{
-    background, container, expander, height_spacer, width_spacer, ContainerProps,
+    background, container, container_props, expander, height_spacer, width_spacer, ContainerProps,
 };
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
 use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
-use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
+use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
 use crate::rendering::ui::{UIContext, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{ClickedCallback, CrossAlign, Padding, Sizing, UILayoutC, Visibility};
+use engine::ecs::component::ui::{
+    ClickedCallback, CrossAlign, Padding, Position, Sizing, UILayoutC, Visibility,
+};
 use engine::module::ui::color::Color;
-use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
+use engine::module::ui::reactive::{ReactiveState, UIReactor, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
+use std::sync::Arc;
 
 const TAB_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
 // const BUTTON_TEXT_COLOR: Color = Color::rgb(3.0, 6.0, 3.0);
@@ -25,10 +28,46 @@ const TEXT_COLOR: Color = Color::grayscale(0.9);
 
 pub mod ui_root_states {
     pub const MENU_VISIBLE: &'static str = "menu_visible";
+    pub const ACTIVE_MODAL_VIEWS: &'static str = "curr_modal_view";
+
+    pub const CURR_MENU_TAB: &'static str = "curr_menu_tab";
     pub const IN_GAME_PROCESS: &'static str = "in_game_process";
+    pub const WORLD_NAME_LIST: &'static str = "world_name_list";
 }
 
-fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
+type ModalFn = Arc<dyn Fn(&mut UIScopeContext) + Send + Sync + 'static>;
+
+fn push_modal_view<F>(ctx: &mut UIReactor, view_fn: F)
+where
+    F: Fn(&mut UIScopeContext) + Send + Sync + 'static,
+{
+    let views_state = ctx
+        .root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS)
+        .unwrap();
+    views_state.update_with(move |prev| {
+        let mut new = prev.clone();
+        new.push(Arc::new(view_fn));
+        new
+    });
+}
+
+fn pop_modal_view(ctx: &mut UIReactor) {
+    let views_state = ctx
+        .root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS)
+        .unwrap();
+    views_state.update_with(move |prev| {
+        let mut new = prev.clone();
+        new.pop().unwrap();
+        // let idx = new
+        //     .iter()
+        //     .position(|v| *v as *const ModalFn == view_fn as *const ModalFn)
+        //     .unwrap();
+        // new.remove(idx);
+        new
+    });
+}
+
+fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: ClickedCallback) {
     fancy_button(
         local_id,
         ctx,
@@ -45,12 +84,7 @@ fn menu_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: i
     );
 }
 
-fn world_control_button(
-    local_id: &str,
-    ctx: &mut UIScopeContext,
-    text: &str,
-    on_click: impl ClickedCallback,
-) {
+fn world_control_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: ClickedCallback) {
     fancy_button(
         local_id,
         ctx,
@@ -67,7 +101,7 @@ fn world_control_button(
     );
 }
 
-fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: impl ClickedCallback) {
+fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: ClickedCallback) {
     fancy_button(
         local_id,
         ctx,
@@ -85,6 +119,17 @@ fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click:
     );
 }
 
+fn update_overworlds_list(ctx: &EngineContext) {
+    let app = ctx.app();
+    let reactor = app.ui_reactor();
+    let world_names = app.get_world_name_list();
+
+    let names_state = reactor
+        .root_state::<Vec<String>>(ui_root_states::WORLD_NAME_LIST)
+        .unwrap();
+    names_state.update(world_names);
+}
+
 fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
     let mut app = ctx.app();
     app.start_game_process(ctx, overworld_name);
@@ -95,12 +140,70 @@ fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
         .unwrap()
         .update(false);
     reactor
+        .root_state(ui_root_states::CURR_MENU_TAB)
+        .unwrap()
+        .update("");
+    reactor
         .root_state(ui_root_states::IN_GAME_PROCESS)
         .unwrap()
         .update(true);
 }
 
-fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
+fn confirm_overworld_delete_modal(
+    ctx: &mut UIScopeContext,
+    overworld_name: String,
+    on_dispose: ClickedCallback,
+) {
+    container(
+        make_static_id!(),
+        ctx,
+        container_props()
+            .layout(
+                UILayoutC::column()
+                    .with_preferred_width(300.0)
+                    .with_preferred_height(200.0)
+                    .with_padding(Padding::equal(20.0)),
+            )
+            .background(Some(background::solid_color(Color::BLACK)))
+            .corner_radius(10.0)
+            .children_props(overworld_name),
+        move |ctx, overworld_name| {
+            let on_dispose2 = on_dispose.clone();
+            let name = overworld_name.clone();
+            let on_confirm = Arc::new(move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
+                let mut app = ctx.app();
+                app.delete_overworld(&name);
+                drop(app);
+                update_overworlds_list(ctx);
+                on_dispose2(entity, ctx, pos);
+            });
+
+            let on_dispose2 = on_dispose.clone();
+            ui_text(
+                make_static_id!(),
+                ctx,
+                ui_text_props(format!(
+                    "Do you want to irreversibly delete '{}'?",
+                    overworld_name
+                ))
+                .with_style(TextStyle::new().with_font_size(24.0)),
+            );
+            height_spacer(make_static_id!(), ctx, 20.0);
+            container(
+                make_static_id!(),
+                ctx,
+                container_props().layout(UILayoutC::row().with_width_grow()),
+                move |ctx, ()| {
+                    world_control_button(make_static_id!(), ctx, "DELETE", on_confirm.clone());
+                    expander(make_static_id!(), ctx, 1.0);
+                    world_control_button(make_static_id!(), ctx, "CANCEL", on_dispose2.clone());
+                },
+            );
+        },
+    );
+}
+
+fn world_item(local_id: &str, ctx: &mut UIScopeContext, overworld_name: String) {
     container(
         local_id,
         ctx,
@@ -112,12 +215,12 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
             ..Default::default()
         },
         move |ctx, ()| {
-            let name = name.clone();
+            let overworld_name = overworld_name.clone();
             ui_text(
                 make_static_id!(),
                 ctx,
                 UITextProps {
-                    text: name.clone(),
+                    text: overworld_name.clone(),
                     style: TextStyle::new().with_font_size(24.0),
                     ..Default::default()
                 },
@@ -131,14 +234,32 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, name: String) {
                     ..Default::default()
                 },
                 move |ctx, ()| {
-                    let name = name.clone();
+                    let name = overworld_name.clone();
                     let on_continue = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
                         load_overworld(ctx, &name);
                     };
+                    let name = overworld_name.clone();
+                    let on_delete = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                        let app = ctx.app();
+                        let mut reactor = app.ui_reactor();
+                        let name = name.clone();
 
-                    world_control_button(make_static_id!(), ctx, "Continue", on_continue);
+                        push_modal_view(&mut reactor, move |ctx| {
+                            confirm_overworld_delete_modal(
+                                ctx,
+                                name.clone(),
+                                Arc::new(|_, ctx, _| {
+                                    let app = ctx.app();
+                                    let mut reactor = app.ui_reactor();
+                                    pop_modal_view(&mut reactor);
+                                }),
+                            )
+                        });
+                    };
+
+                    world_control_button(make_static_id!(), ctx, "Continue", Arc::new(on_continue));
                     width_spacer(make_static_id!(), ctx, 20.0);
-                    world_control_button(make_static_id!(), ctx, "Delete", |entity, ctx, _| {});
+                    world_control_button(make_static_id!(), ctx, "Delete", Arc::new(on_delete));
                 },
             )
         },
@@ -156,9 +277,7 @@ fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx, ()| {
-            let mut ui_ctx = UIContext::new(*ctx.ctx());
-            let world_names = ui_ctx.app().get_world_name_list();
-            drop(ui_ctx);
+            let world_names = ctx.subscribe(&ctx.root_state::<Vec<String>>(ui_root_states::WORLD_NAME_LIST));
 
             for (i, name) in world_names.iter().enumerate() {
                 world_item(&make_static_id!(i), ctx, name.clone());
@@ -195,7 +314,6 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
         },
         move |ctx, ()| {
             let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
-            dbg!(*is_in_game);
 
             expander(make_static_id!(), ctx, 1.0);
 
@@ -211,9 +329,9 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                     make_static_id!(),
                     ctx,
                     "START",
-                    move |_: &EntityId, ctx: &EngineContext, _| {
+                    Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
                         curr_tab_state2.update(TAB_WORLD_CREATION);
-                    },
+                    }),
                 );
                 height_spacer(make_static_id!(), ctx, 30.0);
             }
@@ -223,9 +341,9 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "SETTINGS",
-                move |_: &EntityId, ctx: &EngineContext, _| {
+                Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
                     curr_tab_state2.update(TAB_SETTINGS);
-                },
+                }),
             );
             height_spacer(make_static_id!(), ctx, 30.0);
 
@@ -233,7 +351,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "EXIT",
-                move |_: &EntityId, ctx: &EngineContext, _| ctx.request_stop(),
+                Arc::new(move |_: &EntityId, ctx: &EngineContext, _| ctx.request_stop()),
             );
 
             expander(make_static_id!(), ctx, 0.5);
@@ -243,6 +361,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
 
 const TAB_WORLD_CREATION: &str = "world_creation";
 const TAB_SETTINGS: &str = "settings";
+const TABS: [&'static str; 2] = [TAB_WORLD_CREATION, TAB_SETTINGS];
 
 fn tab_name(tab_id: &str) -> &'static str {
     match tab_id {
@@ -279,6 +398,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                     ));
                 } else {
                     app.create_overworld(overworld_name, seed_state.value());
+                    drop(app);
                     load_overworld(ctx, overworld_name);
                 }
             };
@@ -320,7 +440,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 },
             );
             height_spacer(make_static_id!(), ctx, 10.0);
-            action_button(make_static_id!(), ctx, "> PROCEED", on_proceed);
+            action_button(make_static_id!(), ctx, "> PROCEED", Arc::new(on_proceed));
         },
     );
 }
@@ -352,6 +472,10 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     let image_source = UIContext::resource_image(&resources, "/textures/main_menu_background.jpg")
         .unwrap()
         .unwrap();
+
+    if TABS.into_iter().find(|v| *v == tab_id).is_none() {
+        return;
+    }
 
     ui_image(
         local_id,
@@ -390,7 +514,16 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
 
 pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(STATE_ENTITY_ID, || root_entity);
+
+    ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
     ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
+    let active_modal_views_state =
+        ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
+    ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
+
+    ctx.ctx().dispatch_callback(|ctx, _| {
+        update_overworlds_list(ctx);
+    });
 
     let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
     let menu_visible = ctx.subscribe(&menu_visible);
@@ -422,7 +555,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             ..Default::default()
         },
         move |ctx, ()| {
-            remember_state!(ctx, curr_nav_view, "");
+            let curr_nav_view = ctx.subscribe(&ctx.root_state::<&str>(ui_root_states::CURR_MENU_TAB));
 
             expander(make_static_id!(), ctx, 0.2);
 
@@ -447,4 +580,39 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             expander(make_static_id!(), ctx, 1.0);
         },
     );
+
+    let active_modal_views = ctx.subscribe(&active_modal_views_state);
+
+    for modal_fn in active_modal_views.iter().cloned() {
+        container(
+            "modal_wrapper",
+            ctx,
+            ContainerProps {
+                layout: UILayoutC::column()
+                    .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
+                    .with_grow(),
+                background: Some(background::solid_color(Color::BLACK.with_alpha(0.4))),
+                ..Default::default()
+            },
+            move |ctx, ()| {
+                let modal_fn = modal_fn.clone();
+                expander(make_static_id!(), ctx, 1.0);
+                container(
+                    make_static_id!(),
+                    ctx,
+                    ContainerProps {
+                        layout: UILayoutC::new()
+                            .with_width(Sizing::FitContent)
+                            .with_height(Sizing::FitContent)
+                            .with_align(CrossAlign::Center),
+                        ..Default::default()
+                    },
+                    move |ctx, ()| {
+                        modal_fn(ctx);
+                    },
+                );
+                expander(make_static_id!(), ctx, 1.0);
+            },
+        );
+    }
 }
