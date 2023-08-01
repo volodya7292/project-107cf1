@@ -211,10 +211,9 @@ pub trait UITextImpl {
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
         main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(on_size_update));
         drop(main_obj);
+        drop(scene);
 
-        ctx.dispatch_callback(move |ctx, _| {
-            on_size_update(&main_entity, ctx);
-        });
+        on_size_update(&main_entity, ctx);
 
         main_entity
     }
