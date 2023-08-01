@@ -184,6 +184,7 @@ fn confirm_overworld_delete_modal(
             let on_confirm = Arc::new(move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
                 let mut app = ctx.app();
                 app.delete_overworld(&name);
+                println!("Deleted overworld '{}'.", &name);
                 drop(app);
                 update_overworlds_list(ctx);
                 on_dispose2(entity, ctx, pos);
@@ -291,7 +292,7 @@ fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
             let world_names = ctx.subscribe(&ctx.root_state::<Vec<String>>(ui_root_states::WORLD_NAME_LIST));
 
             for (i, name) in world_names.iter().enumerate() {
-                world_item(&make_static_id!(i), ctx, name.clone());
+                world_item(&make_static_id!(format!("{}_{}", i, name)), ctx, name.clone());
                 height_spacer(&make_static_id!(i), ctx, 10.0);
             }
         },
@@ -336,7 +337,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 menu_button(
                     make_static_id!(),
                     ctx,
-                    "START",
+                    "NEW OVERWORLD",
                     Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
                         curr_tab_state2.update(TAB_WORLD_CREATION);
                     }),
@@ -359,7 +360,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 menu_button(
                     make_static_id!(),
                     ctx,
-                    "EXIT TO MAIN MENU",
+                    "EXIT OVERWORLD",
                     Arc::new(|_: &EntityId, ctx: &EngineContext, _| {
                         close_overworld(ctx);
                     }),
@@ -418,6 +419,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 } else {
                     app.create_overworld(overworld_name, seed_state.value());
                     drop(app);
+                    update_overworlds_list(ctx);
                     load_overworld(ctx, overworld_name);
                 }
             };
@@ -473,15 +475,15 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx, ()| {
-            ui_text(
-                make_static_id!(),
-                ctx,
-                UITextProps {
-                    text: "SETT sdf sdjf djsa".to_string(),
-                    style: TextStyle::new().with_color(TEXT_COLOR).with_font_size(30.0),
-                    ..Default::default()
-                },
-            )
+            // ui_text(
+            //     make_static_id!(),
+            //     ctx,
+            //     UITextProps {
+            //         text: "SETT sdf sdjf djsa".to_string(),
+            //         style: TextStyle::new().with_color(TEXT_COLOR).with_font_size(30.0),
+            //         ..Default::default()
+            //     },
+            // );
         },
     );
 }
@@ -564,6 +566,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     );
     ctx.drive_transition(&menu_opacity);
 
+    // TODO: add background
     container(
         make_static_id!(),
         ctx,

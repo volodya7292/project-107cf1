@@ -13,6 +13,7 @@ use common::moka;
 use common::parking_lot::{Mutex, RwLock};
 use common::types::{ConcurrentCache, HashMap};
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,12 +74,13 @@ fn on_commit(
 }
 
 pub struct LocalOverworldInterface {
+    folder: PathBuf,
     registry: Arc<Registry>,
     generator: Arc<OverworldGenerator>,
     sectors_cache: Arc<SectorsCache>,
     to_save: Arc<Mutex<HashMap<ClusterPos, Arc<RwLock<ClusterState>>>>>,
     params: OverworldParams,
-    _save_worker: IntervalTimer,
+    save_worker: IntervalTimer,
 }
 
 pub struct SectorsCache {
@@ -155,13 +157,19 @@ impl LocalOverworldInterface {
         };
 
         Self {
+            folder,
             registry: Arc::clone(&generator.main_registry().registry()),
             generator,
             sectors_cache,
             to_save,
             params,
-            _save_worker: save_worker,
+            save_worker,
         }
+    }
+
+    pub fn stop_and_commit_changes(&self) {
+        self.save_worker.stop_and_join();
+        on_commit(&self.folder, &self.registry, &self.sectors_cache, &self.to_save);
     }
 }
 
@@ -189,6 +197,10 @@ impl OverworldInterface for LocalOverworldInterface {
 
     fn generator(&self) -> &Arc<OverworldGenerator> {
         &self.generator
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

@@ -167,36 +167,3 @@ impl<T: Interpolatable> From<T> for AnimatedValue<T> {
         Self::immediate(value)
     }
 }
-
-pub fn start_transition<T: SceneObject, I: Interpolatable + 'static>(
-    entity: ObjectEntityId<T>,
-    ctx: &EngineContext,
-    key_fn: for<'a> fn(&'a mut EntityAccess<T>) -> &'a mut AnimatedValue<I>,
-    new_target: TransitionTarget<I>,
-) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.object(&entity);
-    let key = key_fn(&mut entry);
-    key.retarget(new_target);
-
-    drop(entry);
-    drop(scene);
-    drive_transition(entity, ctx, 0.0, key_fn);
-}
-
-pub fn drive_transition<T: SceneObject, I: Interpolatable + 'static>(
-    entity: ObjectEntityId<T>,
-    ctx: &EngineContext,
-    dt: f64,
-    key_fn: for<'a> fn(&'a mut EntityAccess<T>) -> &'a mut AnimatedValue<I>,
-) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let mut entry = scene.object(&entity);
-    let key = key_fn(&mut entry);
-
-    if !key.advance(dt) {
-        ctx.dispatch_callback(move |ctx, dt| {
-            drive_transition(entity, ctx, dt, key_fn);
-        });
-    }
-}

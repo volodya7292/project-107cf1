@@ -327,8 +327,8 @@ impl MainApp {
             last_tick_start: Instant::now(),
             tick_count: 0,
             overworld,
-            overworld_orchestrator,
-            overworld_renderer: Arc::clone(&overworld_renderer),
+            overworld_orchestrator: Some(overworld_orchestrator),
+            overworld_renderer: Some(Arc::clone(&overworld_renderer)),
             res_map: Arc::clone(&self.res_map),
             player_pos,
             player_orientation: Default::default(),
@@ -342,7 +342,7 @@ impl MainApp {
             curr_block: self.main_registry.block_test.into_any(),
             set_water: false,
             change_stream_pos: true,
-            player_collision_enabled: false,
+            player_collision_enabled: true,
             do_remove_block: false,
         }));
 
@@ -363,15 +363,34 @@ impl MainApp {
     }
 
     pub fn exit_overworld(&mut self, ctx: &EngineContext) {
-        self.tick_timer.take().unwrap().cancel_and_wait();
+        self.tick_timer.take().unwrap().stop_and_join();
+        println!("World timer stopped.");
+
+        let mut game_state = self.game_state.take().unwrap();
         {
-            let game_state = self.game_state.as_ref().unwrap().lock();
-            game_state
-                .overworld_renderer
-                .lock()
-                .cleanup_everything(&mut ctx.scene());
+            let mut game_state = game_state.lock();
+
+            let overworld_orchestrator = game_state.overworld_orchestrator.take().unwrap();
+            overworld_orchestrator.lock().stop_and_join();
+            drop(overworld_orchestrator);
+
+            let overworld_renderer = game_state.overworld_renderer.take().unwrap();
+            overworld_renderer.lock().cleanup_everything(&mut ctx.scene());
+            drop(overworld_renderer);
+
+            println!("Overworld engine stopped. Saving changes...");
+
+            let local_interface = game_state
+                .overworld
+                .interface()
+                .as_any()
+                .downcast_ref::<LocalOverworldInterface>()
+                .unwrap();
+            local_interface.stop_and_commit_changes();
         }
-        self.game_state = None;
+
+        println!("Cleaning up...");
+        drop(game_state);
     }
 
     pub fn data_dir() -> PathBuf {
@@ -623,7 +642,7 @@ impl EngineModule for MainApp {
         curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
         curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
 
-        let overworld_renderer = Arc::clone(&curr_state.overworld_renderer);
+        let overworld_renderer = Arc::clone(curr_state.overworld_renderer.as_ref().unwrap());
 
         drop(curr_state);
         drop(renderer);
@@ -677,8 +696,8 @@ struct GameProcessState {
     last_tick_start: Instant,
     tick_count: u64,
     overworld: Arc<Overworld>,
-    overworld_orchestrator: Arc<Mutex<OverworldOrchestrator>>,
-    overworld_renderer: Arc<Mutex<OverworldRenderer>>,
+    overworld_orchestrator: Option<Arc<Mutex<OverworldOrchestrator>>>,
+    overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
     res_map: Arc<DefaultResourceMapping>,
 
     player_pos: DVec3,
@@ -711,7 +730,7 @@ fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mut
     let update_res = base::on_tick(
         curr_tick,
         &curr_state.overworld.main_registry().registry(),
-        &mut curr_state.overworld_orchestrator.lock(),
+        &mut curr_state.overworld_orchestrator.as_ref().unwrap().lock(),
         &new_actions,
     );
 
@@ -768,6 +787,8 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
     if curr_state.change_stream_pos {
         curr_state
             .overworld_orchestrator
+            .as_ref()
+            .unwrap()
             .lock()
             .set_stream_pos(curr_state.player_pos);
     }

@@ -401,4 +401,9 @@ impl OverworldOrchestrator {
             removed_clusters: clusters_diff.to_remove,
         }
     }
+
+    pub fn stop_and_join(&mut self) {
+        self.cluster_load_processor.stop_and_join();
+        self.cluster_compression_processor.stop_and_join();
+    }
 }

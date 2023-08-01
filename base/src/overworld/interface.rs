@@ -7,6 +7,7 @@ use crate::overworld::raw_cluster::RawCluster;
 use crate::overworld::ClusterState;
 use common::parking_lot::RwLock;
 use lazy_static::lazy_static;
+use std::any::Any;
 use std::sync::Arc;
 
 lazy_static! {
@@ -25,4 +26,5 @@ pub trait OverworldInterface: Send + Sync {
     /// Queues the cluster for saving into the underlying storage.
     fn persist_cluster(&self, pos: &ClusterPos, cluster: Arc<RwLock<ClusterState>>);
     fn generator(&self) -> &Arc<OverworldGenerator>;
+    fn as_any(&self) -> &dyn Any;
 }
