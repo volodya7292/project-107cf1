@@ -10,6 +10,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::thread;
 use std::time::Duration;
 
 static DEFAULT_THREAD_POOL: RwLock<Option<Arc<SafeThreadPool>>> = RwLock::new(None);
@@ -66,7 +67,9 @@ impl Drop for RuntimeGuard {
         // Stop thread pool
         {
             let pool = DEFAULT_THREAD_POOL.write().take().unwrap();
-            while Arc::strong_count(&pool) > 1 {}
+            while Arc::strong_count(&pool) > 1 {
+                thread::sleep(Duration::from_millis(10));
+            }
             // Dropping must join the spawned tasks
             drop(pool);
         }
@@ -78,7 +81,9 @@ impl Drop for RuntimeGuard {
             stop_notify.as_ref().unwrap().notify_one();
 
             let executor = COROUTINE_EXECUTOR.write().take().unwrap();
-            while Arc::strong_count(&executor) > 1 {}
+            while Arc::strong_count(&executor) > 1 {
+                thread::sleep(Duration::from_millis(10));
+            }
 
             // Wait for completion of remaining tasks
             let executor = Arc::into_inner(executor).unwrap();

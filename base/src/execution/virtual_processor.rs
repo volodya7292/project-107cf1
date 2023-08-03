@@ -32,19 +32,21 @@ impl VirtualProcessor {
 
     /// Detaches the virtual processor so the tasks can continue executing in background.
     pub fn detach(self) {
-        self.worker.lock().take().unwrap().detach()
+        self.worker.lock().take().unwrap().detach();
     }
 
     async fn worker_fn(pool: Arc<SafeThreadPool>, mut receiver: mpsc::UnboundedReceiver<ScheduledTask>) {
-        'outer: loop {
+        loop {
             let n_parallel_tasks = pool.current_num_threads();
             let mut notifiers = Vec::with_capacity(n_parallel_tasks);
             let mut tasks = Vec::with_capacity(n_parallel_tasks);
+            let mut do_stop = false;
 
             for i in 0..n_parallel_tasks {
                 let task = if i == 0 {
                     let Some(task) = receiver.recv().await else {
-                        break 'outer;
+                        do_stop = true;
+                        break;
                     };
                     task
                 } else {
@@ -54,7 +56,8 @@ impl VirtualProcessor {
                             break;
                         }
                         Err(TryRecvError::Disconnected) => {
-                            break 'outer;
+                            do_stop = true;
+                            break;
                         }
                     }
                 };
@@ -70,6 +73,10 @@ impl VirtualProcessor {
 
             for listener in listeners {
                 listener.await;
+            }
+
+            if do_stop {
+                break;
             }
         }
     }
@@ -113,17 +120,27 @@ impl VirtualProcessor {
         virtual_task
     }
 
+    fn disconnect_channel(&self) {
+        *self.sender.lock() = None;
+    }
+
     /// After joining the virtual processor won't execute any tasks.
     /// May cause a deadlock if executed in another virtual processor or thread pool.
     pub fn stop_and_join(&self) {
         // Cancel the remaining tasks by disconnecting the channel
-        drop(self.sender.lock().take());
+        self.disconnect_channel();
 
         if let Some(worker) = self.worker.lock().take() {
             worker.wait();
         } else {
             panic!("virtual processor has already been joined");
         }
+    }
+}
+
+impl Drop for VirtualProcessor {
+    fn drop(&mut self) {
+        self.disconnect_channel();
     }
 }
 
