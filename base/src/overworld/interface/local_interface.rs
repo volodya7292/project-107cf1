@@ -3,7 +3,7 @@ use crate::execution::timer::IntervalTimer;
 use crate::execution::virtual_processor::VirtualProcessor;
 use crate::main_registry::MainRegistry;
 use crate::overworld::generator::OverworldGenerator;
-use crate::overworld::interface::{LoadedType, OverworldInterface, BINCODE_OPTIONS};
+use crate::overworld::interface::{LoadedType, OverworldInterface};
 use crate::overworld::position::ClusterPos;
 use crate::overworld::raw_cluster::{deserialize_cluster, serialize_cluster, RawCluster};
 use crate::overworld::{ClusterState, OverworldParams};
@@ -12,9 +12,10 @@ use common::glm::{I64Vec3, TVec3};
 use common::moka;
 use common::parking_lot::{Mutex, RwLock};
 use common::types::{ConcurrentCache, HashMap};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, io};
@@ -24,9 +25,18 @@ const SECTOR_SIZE_CELLS_1D: usize = SECTOR_SIZE_1D * RawCluster::SIZE;
 const SECTORS_DIR_NAME: &'static str = "matter";
 const OVERWORLD_PARAMS_FILE_NAME: &'static str = "params.json";
 
+lazy_static! {
+    pub static ref BINCODE_OPTIONS: bincode::DefaultOptions = bincode::options();
+}
+
 fn make_sector_file_name(pos: &SectorPos) -> String {
     let raw_pos = pos.get();
     format!("{}_{}_{}", raw_pos.x, raw_pos.y, raw_pos.z)
+}
+
+fn save_params(params: &OverworldParams, overworld_folder: &Path) {
+    let params_path = overworld_folder.join(OVERWORLD_PARAMS_FILE_NAME);
+    fs::write(params_path, serde_json::to_string(params).unwrap()).unwrap();
 }
 
 fn on_commit(
@@ -34,6 +44,7 @@ fn on_commit(
     registry: &Arc<Registry>,
     sectors_cache: &SectorsCache,
     to_save: &Arc<Mutex<HashMap<ClusterPos, Arc<RwLock<ClusterState>>>>>,
+    params: &Arc<Mutex<OverworldParams>>,
 ) {
     let clusters: Vec<_> = to_save.lock().drain().collect();
     let mut by_sectors = HashMap::<SectorPos, Arc<RwLock<SectorData>>>::new();
@@ -71,6 +82,8 @@ fn on_commit(
         let file_name = make_sector_file_name(&sector_pos);
         fs::write(folder.join(SECTORS_DIR_NAME).join(file_name), sector_bytes).unwrap();
     }
+
+    save_params(&params.lock().clone(), folder);
 }
 
 pub struct LocalOverworldInterface {
@@ -79,7 +92,7 @@ pub struct LocalOverworldInterface {
     generator: Arc<OverworldGenerator>,
     sectors_cache: Arc<SectorsCache>,
     to_save: Arc<Mutex<HashMap<ClusterPos, Arc<RwLock<ClusterState>>>>>,
-    params: OverworldParams,
+    params: Arc<Mutex<OverworldParams>>,
     save_worker: IntervalTimer,
 }
 
@@ -144,15 +157,17 @@ impl LocalOverworldInterface {
         let params: OverworldParams = serde_json::from_slice(&fs::read(params_path).unwrap()).unwrap();
         let generator = Arc::new(OverworldGenerator::new(params.seed, main_registry));
 
+        let params = Arc::new(Mutex::new(params));
         let save_worker = {
             let folder = folder.clone();
             let sectors_cache = Arc::clone(&sectors_cache);
             let to_save = Arc::clone(&to_save);
             let registry = Arc::clone(generator.main_registry().registry());
+            let params = Arc::clone(&params);
             IntervalTimer::start(
                 Duration::from_secs(15),
                 VirtualProcessor::new(&default_queue().unwrap()),
-                move || on_commit(&folder, &registry, &sectors_cache, &to_save),
+                move || on_commit(&folder, &registry, &sectors_cache, &to_save, &params),
             )
         };
 
@@ -169,11 +184,21 @@ impl LocalOverworldInterface {
 
     pub fn stop_and_commit_changes(&self) {
         self.save_worker.stop_and_join();
-        on_commit(&self.folder, &self.registry, &self.sectors_cache, &self.to_save);
+        on_commit(
+            &self.folder,
+            &self.registry,
+            &self.sectors_cache,
+            &self.to_save,
+            &self.params,
+        );
     }
 }
 
 impl OverworldInterface for LocalOverworldInterface {
+    fn generator(&self) -> &Arc<OverworldGenerator> {
+        &self.generator
+    }
+
     fn load_cluster(&self, pos: &ClusterPos) -> (RawCluster, LoadedType) {
         let sector_pos = SectorPos::from_cluster_pos(pos);
         let file_data = self.sectors_cache.get(&sector_pos);
@@ -195,8 +220,12 @@ impl OverworldInterface for LocalOverworldInterface {
         self.to_save.lock().insert(*pos, cluster);
     }
 
-    fn generator(&self) -> &Arc<OverworldGenerator> {
-        &self.generator
+    fn persisted_params(&self) -> OverworldParams {
+        *self.params.lock()
+    }
+
+    fn persist_params(&self, params: OverworldParams) {
+        *self.params.lock() = params;
     }
 
     fn as_any(&self) -> &dyn Any {

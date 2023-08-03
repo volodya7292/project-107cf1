@@ -283,7 +283,14 @@ impl MainApp {
         let seed_digest = common::ring::digest::digest(&common::ring::digest::SHA256, seed_str.as_bytes());
         let seed = u64::from_le_bytes((seed_digest.as_ref()[..8]).try_into().unwrap());
 
-        LocalOverworldInterface::create_overworld(world_path, OverworldParams { seed, tick_count: 0 });
+        LocalOverworldInterface::create_overworld(
+            world_path,
+            OverworldParams {
+                seed,
+                tick_count: 0,
+                player_position: None,
+            },
+        );
     }
 
     pub fn delete_overworld(&mut self, overworld_name: &str) {
@@ -297,11 +304,14 @@ impl MainApp {
         let interface = LocalOverworldInterface::new(world_path, &self.main_registry);
         let overworld = Overworld::new(&self.main_registry, Arc::new(interface));
 
-        let spawn_point = overworld.interface().generator().gen_spawn_point();
-        // dbg!(spawn_point);
         // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
-        let player_pos = glm::convert(spawn_point.0);
+
+        let params = overworld.interface().persisted_params();
+
+        let player_pos = params
+            .player_position()
+            .unwrap_or_else(|| glm::convert(overworld.interface().generator().gen_spawn_point().0));
         // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
@@ -325,7 +335,7 @@ impl MainApp {
 
         let new_game_state = Arc::new(Mutex::new(GameProcessState {
             last_tick_start: Instant::now(),
-            tick_count: 0,
+            tick_count: params.tick_count,
             overworld,
             overworld_orchestrator: Some(overworld_orchestrator),
             overworld_renderer: Some(Arc::clone(&overworld_renderer)),
@@ -528,6 +538,9 @@ impl EngineModule for MainApp {
             });
         }
 
+        if self.is_main_menu_visible(ctx) {
+            return;
+        }
         let Some(main_state) = self.game_state.as_ref() else {
             return;
         };
@@ -738,6 +751,14 @@ fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mut
     overworld_renderer.update(curr_state.player_pos, &update_res);
 
     main_state.lock().tick_count += 1;
+
+    // Update persisted params
+    {
+        let mut params = curr_state.overworld.interface().persisted_params();
+        params.tick_count = main_state.lock().tick_count;
+        params.set_player_position(curr_state.player_pos);
+        curr_state.overworld.interface().persist_params(params);
+    }
 }
 
 fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut OverworldActionsStorage) {

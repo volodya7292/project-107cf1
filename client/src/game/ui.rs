@@ -323,6 +323,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
         },
         move |ctx, ()| {
             let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+            let menu_visible_state = ctx.root_state::<bool>(ui_root_states::MENU_VISIBLE);
 
             expander(make_static_id!(), ctx, 1.0);
 
@@ -332,7 +333,16 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
 
             height_spacer(make_static_id!(), ctx, 30.0);
 
-            if !*is_in_game {
+            if *is_in_game {
+                menu_button(
+                    make_static_id!(),
+                    ctx,
+                    "CONTINUE",
+                    Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
+                        menu_visible_state.update(false);
+                    }),
+                );
+            } else {
                 let curr_tab_state2 = curr_tab_state.clone();
                 menu_button(
                     make_static_id!(),
@@ -342,8 +352,8 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                         curr_tab_state2.update(TAB_WORLD_CREATION);
                     }),
                 );
-                height_spacer(make_static_id!(), ctx, 30.0);
             }
+            height_spacer(make_static_id!(), ctx, 30.0);
 
             let curr_tab_state2 = curr_tab_state.clone();
             menu_button(

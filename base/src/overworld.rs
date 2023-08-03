@@ -32,6 +32,7 @@ use crate::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, CompressedCluster, RawCluster};
 use crate::registry::Registry;
 use accessor::OverworldAccessor;
+use common::glm::DVec3;
 use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
 use common::parking_lot::{Mutex, RawRwLock, RwLock};
 use common::types::HashMap;
@@ -282,10 +283,21 @@ pub struct Overworld {
     interface: Arc<dyn OverworldInterface>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct OverworldParams {
     pub seed: u64,
     pub tick_count: u64,
+    pub player_position: Option<[f64; 3]>,
+}
+
+impl OverworldParams {
+    pub fn player_position(&self) -> Option<DVec3> {
+        self.player_position.map(|v| v.into())
+    }
+
+    pub fn set_player_position(&mut self, player_pos: DVec3) {
+        self.player_position = Some(player_pos.into());
+    }
 }
 
 impl Overworld {
