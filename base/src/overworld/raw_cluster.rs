@@ -99,15 +99,19 @@ pub trait BlockDataImpl {
     fn light_source_type(&self) -> LightType;
 
     fn regular_light_source(&self) -> LightLevel {
-        (self.light_source_type() == LightType::Regular)
-            .then_some(self.raw_light_source())
-            .unwrap_or(LightLevel::ZERO)
+        if self.light_source_type() == LightType::Regular {
+            self.raw_light_source()
+        } else {
+            LightLevel::ZERO
+        }
     }
 
     fn sky_light_source(&self) -> LightLevel {
-        (self.light_source_type() == LightType::Sky)
-            .then_some(self.raw_light_source())
-            .unwrap_or(LightLevel::ZERO)
+        if self.light_source_type() == LightType::Sky {
+            self.raw_light_source()
+        } else {
+            LightLevel::ZERO
+        }
     }
 
     fn light_state(&self) -> LightLevel;

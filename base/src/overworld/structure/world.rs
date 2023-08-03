@@ -488,7 +488,8 @@ pub fn gen_fn(
                 let pos = ClusterBlockPos::new(x, y, z);
                 let mut data = cluster.get_mut(&pos);
 
-                if global_y.div_euclid(1024) == 0 {
+                if global_y == 1024 {
+                    //.mod_euclid(1024) == 0 {
                     *data.light_source_type_mut() = LightType::Sky;
                     *data.raw_light_source_mut() = LightLevel::MAX;
                 }

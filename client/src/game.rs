@@ -767,6 +767,8 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                             LightType::Regular,
                         );
                     } else {
+                        new_actions.set_regular_light_state(set_pos, LightLevel::ZERO);
+                        new_actions.set_sky_light_state(set_pos, LightLevel::ZERO);
                     }
                 }
 

@@ -18,6 +18,7 @@ use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, LightType};
 use crate::overworld::{ClusterState, LoadedClusters};
 use crate::registry::Registry;
+use common::glm::U8Vec3;
 use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::types::HashMap;
@@ -143,11 +144,12 @@ fn on_light_tick(
     mut result: OverworldActionsBuilder,
 ) -> bool {
     let prev_light = block_data.light_state().components();
-    let mut new_light = block_data.regular_light_source().components();
     let block = registry.get_block(block_data.block_id()).unwrap();
 
     // Collect neighbouring light (vanishing)
-    if block.can_pass_light() {
+    let new_light = if block.can_pass_light() {
+        let mut new_light = block_data.regular_light_source().components();
+
         for dir in Facing::DIRECTIONS {
             let rel_pos = pos.offset_i32(&dir);
             let Some(data) = access.get_block(&rel_pos) else {
@@ -165,7 +167,11 @@ fn on_light_tick(
 
             new_light = new_light.sup(&rel_curr_light);
         }
-    }
+
+        new_light
+    } else {
+        U8Vec3::zeros()
+    };
 
     // Spread current light to neighbours
     if new_light != prev_light {
@@ -190,11 +196,12 @@ fn on_sky_light_tick(
     mut result: OverworldActionsBuilder,
 ) -> bool {
     let prev_light = block_data.sky_light_state().components();
-    let mut new_light = block_data.sky_light_source().components();
     let block = registry.get_block(block_data.block_id()).unwrap();
 
     // Collect neighbouring light (vanishing)
-    if block.can_pass_light() {
+    let new_light = if block.can_pass_light() {
+        let mut new_light = block_data.sky_light_source().components();
+
         for dir in Facing::DIRECTIONS {
             let rel_pos = pos.offset_i32(&dir);
             let Some(data) = access.get_block(&rel_pos) else {
@@ -216,7 +223,11 @@ fn on_sky_light_tick(
 
             new_light = new_light.sup(&rel_curr_light);
         }
-    }
+
+        new_light
+    } else {
+        U8Vec3::zeros()
+    };
 
     // Spread current light to neighbours
     if new_light != prev_light {
