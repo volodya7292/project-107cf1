@@ -756,7 +756,7 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                 let set_pos = pos.offset(&dir);
 
                 if curr_state.set_water {
-                    new_actions.set_liquid(set_pos, LiquidState::source(curr_state.res_map.material_water()));
+                    new_actions.set_liquid(set_pos, LiquidState::source(registry.liquid_water));
                 } else {
                     new_actions.set_block(set_pos, curr_state.curr_block.clone());
 

@@ -403,10 +403,12 @@ fn gen_block_vertices(
     let model = res_map.textured_model_for_block(state.block_id());
 
     let contains_liquid = state.liquid_state().level() > 0;
+    let mut liquid_material_id = u16::MAX;
     let mut liquid_heights = [0_f32; 4];
 
     // Calculate liquid heights if it is present
     if contains_liquid {
+        liquid_material_id = res_map.material_for_liquid(state.liquid_state().liquid_id());
         for x in 0..2 {
             for z in 0..2 {
                 let rel = pos.offset(&glm::vec3(x, 0, z));
@@ -415,11 +417,12 @@ fn gen_block_vertices(
             }
         }
     } else if block.is_model_invisible() {
+        // Nothing to render
         return;
     }
 
     // Generate inner faces
-    if !model.get_inner_quads().is_empty() {
+    if !block.is_model_invisible() && !model.get_inner_quads().is_empty() {
         // TODO: REMOVE: For inner quads use the light level of the current block
         // let aligned_pos = pos.add_scalar(1);
         // let index = aligned_block_index(&glm::convert_unchecked(aligned_pos));
@@ -465,9 +468,9 @@ fn gen_block_vertices(
         let rel_pos = pos.offset(facing.direction());
         let rel_cell = accessor.get_block(&rel_pos);
 
+        // Render liquid if present
         if let Some(rel_cell) = rel_cell {
             let rel_block = registry.get_block(rel_cell.block_id()).unwrap();
-
             let rel_occludes = rel_block.occluder().occludes_side(facing.mirror());
 
             // Render liquid quad if liquid is present
@@ -479,7 +482,7 @@ fn gen_block_vertices(
                 // Add respective liquid quad
                 construct_liquid_quad(
                     &posf,
-                    state.liquid_state().liquid_id(),
+                    liquid_material_id,
                     &liquid_heights,
                     facing,
                     state.light_state(),
@@ -515,6 +518,11 @@ fn gen_block_vertices(
                     }
                 }
             }
+        }
+
+        if block.is_model_invisible() {
+            // do not render side faces
+            continue;
         }
 
         // Render model side faces

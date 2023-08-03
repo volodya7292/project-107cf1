@@ -4,11 +4,11 @@ use crate::overworld;
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::overworld::light_state::LightLevel;
+use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::Structure;
-use crate::overworld::Overworld;
 use crate::registry::Registry;
 use crate::utils::noise::{HybridNoise, ParamNoise};
 use crate::utils::voronoi_noise::VoronoiNoise2D;
@@ -120,9 +120,10 @@ struct ClusterXZCache {
     biomes: Arc<[[u32; RawCluster::SIZE]; RawCluster::SIZE]>,
 }
 
-// Max 8192 2D clusters in cache
+// Max 2D cluster XZ->biome mappings in cache
 const MAX_CLUSTER_BIOME_MAPS: usize = 2048;
 const MAX_GEN_HEIGHT: f32 = 500.0;
+const WATER_LEVEL: f32 = 250.0;
 
 const FLATNESS_FREQ: f64 = 1.0 / 50.0;
 const HILLS_FREQ: f64 = 1.0 / 100.0;
@@ -487,16 +488,21 @@ pub fn gen_fn(
                 let pos = ClusterBlockPos::new(x, y, z);
                 let mut data = cluster.get_mut(&pos);
 
+                if global_y.div_euclid(1024) == 0 {
+                    *data.light_source_type_mut() = LightType::Sky;
+                    *data.raw_light_source_mut() = LightLevel::MAX;
+                }
+
                 if global_y <= height as i64 {
                     data.set(registry.block_test);
                 } else {
                     data.set(registry.block_empty);
                     *data.sky_light_state_mut() = LightLevel::MAX;
-                }
 
-                if global_y.div_euclid(1024) == 0 {
-                    *data.light_source_type_mut() = LightType::Sky;
-                    *data.raw_light_source_mut() = LightLevel::MAX;
+                    if global_y <= WATER_LEVEL as i64 {
+                        *data.liquid_state_mut() = LiquidState::source(registry.liquid_water);
+                    } else {
+                    }
                 }
             }
         }

@@ -9,6 +9,7 @@ use engine::module::main_renderer::TextureAtlasType;
 use std::sync::Arc;
 
 const MAX_BLOCKS: usize = 16384;
+const MAX_LIQUIDS: usize = 1024;
 
 macro_rules! add_getters {
     ($t: ty, $($name: ident)*) => ($(
@@ -32,6 +33,7 @@ impl DefaultResourceMapping {
             reg.get_block_model(main_reg.model_cube()).unwrap(),
             null_tex_res,
             MAX_BLOCKS,
+            MAX_LIQUIDS,
         );
 
         // Textures
@@ -77,6 +79,8 @@ impl DefaultResourceMapping {
                 &map,
             ),
         );
+
+        map.set_liquid_material(main_reg.liquid_water, material_water);
 
         Arc::new(Self {
             mapping: Arc::new(map),

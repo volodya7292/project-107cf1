@@ -21,7 +21,7 @@ lazy_static = "1.4"
 rstar = "0.11"
 bumpalo = "3.13"
 rand_xoshiro = "0.6"
-lz4_flex = { version = "0.10", default-features = false, features = ["std"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 erased-serde = "0.3"

@@ -1,13 +1,11 @@
 use crate::overworld::block::{Block, BlockBuilder, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::interface::block_states::{StateDeserializeFn, StateSerializeInfo};
-use crate::overworld::occluder::Occluder;
-use crate::overworld::raw_cluster::{BlockData, CellInfo, LightType};
-use crate::overworld::structure::world::{biome, Biome};
+use crate::overworld::raw_cluster::{CellInfo, LightType};
+use crate::overworld::structure::world::Biome;
 use crate::overworld::structure::Structure;
-use common::resource_file::ResourceRef;
 use common::types::HashMap;
-use entity_data::{Archetype, EntityId, EntityStorage};
+use entity_data::Archetype;
 use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 use std::convert::TryInto;
@@ -21,11 +19,14 @@ impl BlockStateArchetype for StatelessBlock {
     }
 }
 
+pub struct LiquidType {}
+
 pub struct Registry {
     structures: Vec<Structure>,
     biomes: Vec<Biome>,
     // structures_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
+    liquids: Vec<LiquidType>,
     // textures: Vec<(TextureAtlasType, ResourceRef)>,
     // materials: Vec<Material>,
     material_count: u16,
@@ -40,6 +41,7 @@ pub struct Registry {
 impl Registry {
     pub const MODEL_ID_NULL: u16 = u16::MAX;
     pub const MAX_BLOCKS: u16 = u16::MAX - 1;
+    pub const MAX_LIQUIDS: u16 = u16::MAX - 1;
     pub const MAX_MODELS: u16 = u16::MAX - 1;
 
     pub fn new() -> Self {
@@ -50,6 +52,7 @@ impl Registry {
             models: vec![],
             // textures: vec![],
             // materials: vec![],
+            liquids: vec![],
             material_count: 0,
             // textured_models: vec![],
             blocks: vec![],
@@ -145,6 +148,14 @@ impl Registry {
 
         self.blocks.push(block);
         (self.blocks.len() - 1) as u16
+    }
+
+    pub fn register_liquid(&mut self) -> u16 {
+        if self.liquids.len() == Self::MAX_LIQUIDS as usize {
+            panic!("Maximum number of liquids is reached!");
+        }
+        self.liquids.push(LiquidType {});
+        (self.liquids.len() - 1) as u16
     }
 
     pub fn register_biome(&mut self, biome: Biome) -> u32 {

@@ -10,13 +10,20 @@ pub struct ResourceMapping {
     materials: Vec<TextureMaterial>,
     textured_block_models: Vec<Option<TexturedBlockModel>>,
     null_textured_block_model: Option<TexturedBlockModel>,
+    null_material: u16,
+    liquid_materials: Vec<Option<u16>>,
 }
 
 impl ResourceMapping {
     pub const MAX_TEXTURES: u16 = 2048;
     pub const MAX_MATERIALS: u16 = u16::MAX - 1;
 
-    pub fn new(null_model: &BlockModel, null_texture_res: ResourceRef, max_textured_models: usize) -> Self {
+    pub fn new(
+        null_model: &BlockModel,
+        null_texture_res: ResourceRef,
+        max_textured_models: usize,
+        max_textured_liquid: usize,
+    ) -> Self {
         assert!(max_textured_models < (u16::MAX - 1) as usize);
 
         let mut this = Self {
@@ -24,6 +31,8 @@ impl ResourceMapping {
             materials: vec![],
             textured_block_models: (0..max_textured_models).map(|_| None).collect(),
             null_textured_block_model: None,
+            null_material: u16::MAX,
+            liquid_materials: (0..max_textured_liquid).map(|_| None).collect(),
         };
 
         let null_texture = this.register_texture(TextureAtlasType::ALBEDO, null_texture_res);
@@ -31,6 +40,7 @@ impl ResourceMapping {
         let null_tex_model =
             TexturedBlockModel::new(null_model, &[QuadMaterial::new(null_material); 6], &this);
 
+        this.null_material = null_material;
         this.null_textured_block_model = Some(null_tex_model);
 
         this
@@ -56,6 +66,10 @@ impl ResourceMapping {
         self.textured_block_models[block_id as usize] = Some(textured_model);
     }
 
+    pub fn set_liquid_material(&mut self, liquid_id: u16, material_id: u16) {
+        self.liquid_materials[liquid_id as usize] = Some(material_id);
+    }
+
     pub fn get_material(&self, id: u16) -> Option<&TextureMaterial> {
         self.materials.get(id as usize)
     }
@@ -66,6 +80,14 @@ impl ResourceMapping {
             .map(|v| v.as_ref())
             .flatten()
             .unwrap_or(self.null_textured_block_model.as_ref().unwrap())
+    }
+
+    pub fn material_for_liquid(&self, liquid_id: u16) -> u16 {
+        self.liquid_materials
+            .get(liquid_id as usize)
+            .cloned()
+            .flatten()
+            .unwrap_or(self.null_material)
     }
 
     pub fn textures(&self) -> &[(TextureAtlasType, ResourceRef)] {

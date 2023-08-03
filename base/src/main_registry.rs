@@ -32,7 +32,7 @@ pub struct MainRegistry {
     pub block_test: BlockState<StatelessBlock>,
     pub block_glow: BlockState<StatelessBlock>,
     pub block_test_stateful: BlockState<TestStatefulBlock>,
-    // pub block_water: BlockState<StatelessBlock>,
+    pub liquid_water: u16,
 }
 
 macro_rules! add_getters {
@@ -85,6 +85,10 @@ impl MainRegistry {
             let id = reg.register_block::<TestStatefulBlock>(BlockBuilder::new(model_cube));
             BlockState::new(id, TestStatefulBlock { go: 0, go2: 0 })
         };
+
+        // Liquids
+        // ----------------------------------------------------------------------------------------------------
+        let liquid_water = reg.register_liquid();
 
         // Biomes
         // ----------------------------------------------------------------------------------------------------
@@ -171,6 +175,7 @@ impl MainRegistry {
             block_test_stateful,
             // block_water,
             // water_states,
+            liquid_water,
         })
     }
 
