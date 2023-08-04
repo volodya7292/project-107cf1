@@ -176,15 +176,16 @@ fn calc_quad_lighting(
         .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
 
     let lights = [
-        blend_lighting(base, [side0, side1, corner01]),
-        blend_lighting(base, [side1, side2, corner12]),
         blend_lighting(base, [side3, side0, corner30]),
         blend_lighting(base, [side2, side3, corner23]),
+        blend_lighting(base, [side0, side1, corner01]),
+        blend_lighting(base, [side1, side2, corner12]),
     ];
 
+    const ADJACENT_COORD_IDS: [[usize; 2]; 3] = [[1, 2], [0, 2], [0, 1]];
+
     let facing_comp = dir.iamax();
-    let vi = (facing_comp + 1) % 3;
-    let vj = (facing_comp + 2) % 3;
+    let [vi, vj] = ADJACENT_COORD_IDS[facing_comp];
 
     let mut result = [0_u16; 4];
 
@@ -194,7 +195,7 @@ fn calc_quad_lighting(
         let weights = [inv_v.x * inv_v.y, ij.x * inv_v.y, inv_v.x * ij.y, ij.x * ij.y];
 
         let lighting =
-            lights[0] * weights[0] + lights[1] * weights[1] + lights[2] * weights[2] + lights[3] * weights[3];
+            weights[0] * lights[2] + weights[1] * lights[3] + weights[2] * lights[0] + weights[3] * lights[1];
 
         result[v_idx] = LightLevel::from_color(lighting).raw();
     }
