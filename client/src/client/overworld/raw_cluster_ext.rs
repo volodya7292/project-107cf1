@@ -175,6 +175,7 @@ fn calc_quad_lighting(
         .get_block(&rel_pos.offset(&sides[3]).offset(&sides[0]))
         .map_or(LightLevel::ZERO, |v| v.light_state_by(light_type));
 
+    // The order of values implies quad in Z curve (viewing from +Y, with origin at X=0,Z=1)
     let lights = [
         blend_lighting(base, [side3, side0, corner30]),
         blend_lighting(base, [side2, side3, corner23]),
