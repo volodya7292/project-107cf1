@@ -16,12 +16,11 @@ use crate::utils::white_noise::WhiteNoise;
 pub use biome::Biome;
 use bit_vec::BitVec;
 use common::glm;
-use common::glm::{DVec2, DVec3, I64Vec2, I64Vec3, U32Vec3};
+use common::glm::{DVec2, I64Vec2, I64Vec3};
 use common::types::ConcurrentCache;
 use common::types::ConcurrentCacheExt;
 use noise;
 use noise::{NoiseFn, Seedable};
-use overworld::raw_cluster;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
 use rstar::{Envelope, Point, RTree};
@@ -122,8 +121,11 @@ struct ClusterXZCache {
 
 // Max 2D cluster XZ->biome mappings in cache
 const MAX_CLUSTER_BIOME_MAPS: usize = 2048;
-const MAX_GEN_HEIGHT: f32 = 500.0;
-const WATER_LEVEL: f32 = 250.0;
+const MAX_OCEAN_DEPTH: f32 = 256.0;
+const MAX_SURFACE_HEIGHT: f32 = 256.0;
+// Do not change, this depends on min/max values
+const WATER_LEVEL_ALTITUDE: f32 = 0.0;
+const GEN_ALTITUDE_RANGE: f32 = MAX_OCEAN_DEPTH + MAX_SURFACE_HEIGHT;
 
 const FLATNESS_FREQ: f64 = 1.0 / 50.0;
 const HILLS_FREQ: f64 = 1.0 / 100.0;
@@ -134,10 +136,9 @@ const MOUNTAINS_RIDGES_FREQ: f64 = 1.0 / 700.0;
 const OCEANS_FREQ: f64 = 1.0 / 1400.0;
 const OCEANS_LOC_FREQ: f64 = 1.0 / 700.0;
 
-const FLATNESS_MAX_HEIGHT: f32 = 8.0;
-const HILLS_MAX_HEIGHT: f32 = 60.0;
-const MOUNTAINS_MAX_HEIGHT: f32 = 400.0;
-const MAX_ALTITUDE: f32 = FLATNESS_MAX_HEIGHT + HILLS_MAX_HEIGHT + MOUNTAINS_MAX_HEIGHT;
+const FLATNESS_MAX_HEIGHT: f32 = 0.03 * MAX_SURFACE_HEIGHT; //8.0;
+const HILLS_MAX_HEIGHT: f32 = 0.17 * MAX_SURFACE_HEIGHT; //60.0;
+const MOUNTAINS_MAX_HEIGHT: f32 = 0.8 * MAX_SURFACE_HEIGHT; //400.0;
 
 pub struct WorldState {
     registry: Arc<Registry>,
@@ -246,7 +247,7 @@ impl WorldState {
         value as f32 * 0.5 + 0.5
     }
 
-    fn calc_height_at(&self, pos: I64Vec2) -> f32 {
+    fn calc_altitude_at(&self, pos: I64Vec2) -> f32 {
         let pos_d: DVec2 = glm::convert(pos);
 
         let mut flat_height = self.flat_noise.sample(pos_d * FLATNESS_FREQ) as f32;
@@ -279,7 +280,7 @@ impl WorldState {
         let mut mountains_pow = self
             .mountains_power_noise
             .sample(pos_d * MOUNTAINS_RIDGES_FREQ, 0.5) as f32;
-        mountains_pow = (mountains_pow * 0.5 + 0.5);
+        mountains_pow = mountains_pow * 0.5 + 0.5;
 
         mountains_height = localize(mountains_height, mountains_mp, mountains_mask * 200.0);
         mountains_height *= glm::mix_scalar(1., mountains_ridges, mountains_pow);
@@ -291,19 +292,25 @@ impl WorldState {
         let mut oceans = self.oceans_noise.sample(pos_d * OCEANS_FREQ, 0.5) as f32;
         oceans = oceans * 0.5 + 0.5;
         oceans = localize(oceans, 0.5, 2.0_f32.powf(oceans_loc * 10.0));
-        oceans = -1.0 + oceans;
-        oceans *= MAX_ALTITUDE;
 
-        let mut oceans_mask = self.oceans_mask_noise.sample(pos_d * OCEANS_LOC_FREQ, 0.5) as f32;
-        oceans_mask = oceans_mask * 0.5 + 0.5;
-        oceans_mask = localize(oceans_mask, 0.5, 4.);
+        // let mut oceans_mask = self.oceans_mask_noise.sample(pos_d * OCEANS_LOC_FREQ, 0.5) as f32;
+        // oceans_mask = oceans_mask * 0.5 + 0.5;
+        // oceans_mask = localize(oceans_mask, 0.5, 4.);
 
-        let final_height = flat_height
-            + hills_height * hills_mask
-            + mountains_height * mountains_mask
-            + oceans * oceans_mask;
+        // Transform water level so that the MIN_GEN_ALTITUDE is at 0
+        const WATER_LEVEL_ZO: f32 = 0.5 * GEN_ALTITUDE_RANGE + WATER_LEVEL_ALTITUDE;
 
-        final_height.clamp(-MAX_ALTITUDE, MAX_ALTITUDE)
+        // Range [water level height; max altitude]
+        let mut surface_height =
+            WATER_LEVEL_ZO + flat_height + hills_height * hills_mask + mountains_height * mountains_mask;
+
+        // Range [0; MAX_HEIGHT]
+        // `oceans_mask` makes sure that when there's an ocean,
+        // the height is at 0 when surface_height is at WATER_LEVEL_ZO;
+        // similarly, when surface_height is max, the final_height is always < WATER_LEVEL_ZO.
+        let final_height = surface_height * oceans;
+
+        (final_height - 0.5 * GEN_ALTITUDE_RANGE).clamp(-MAX_OCEAN_DEPTH, MAX_SURFACE_HEIGHT)
     }
 
     pub fn select_biome_idx(&self, pos: I64Vec2, max: usize) -> usize {
@@ -325,10 +332,10 @@ impl WorldState {
             .gen_range(0..max)
     }
 
-    fn calc_biome_at(&self, pos: I64Vec2, height: f32) -> u32 {
+    fn calc_biome_at(&self, pos: I64Vec2, altitude: f32) -> u32 {
         let mut raw_temp = self.sample_raw_temperature(pos);
         let mut raw_humidity = self.sample_raw_humidity(pos);
-        let raw_altitude = height / MAX_ALTITUDE;
+        let raw_altitude = ((altitude + MAX_OCEAN_DEPTH) / GEN_ALTITUDE_RANGE) * 2.0 - 1.0;
 
         if raw_humidity > raw_temp {
             // When the temperature is low the humidity must also be low,
@@ -364,10 +371,10 @@ impl WorldState {
         for x in 0..RawCluster::SIZE {
             for z in 0..RawCluster::SIZE {
                 let pos = cluster_pos + I64Vec2::new(x as i64, z as i64);
-                let height = self.calc_height_at(pos);
+                let altitude = self.calc_altitude_at(pos);
 
-                height_map_mut[x][z] = height;
-                biome_map_mut[x][z] = self.calc_biome_at(pos, height);
+                height_map_mut[x][z] = altitude;
+                biome_map_mut[x][z] = self.calc_biome_at(pos, altitude);
             }
         }
 
@@ -405,9 +412,10 @@ impl WorldState {
             traversed_nodes.set(0, true);
 
             let block_pos = (closest_to_aligned * RawCluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
-            let height = self.calc_height_at(block_pos);
+            let height = self.calc_altitude_at(block_pos);
 
             if height >= 1.0 {
+                println!("FOUND {}", height);
                 return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
             }
         }
@@ -434,15 +442,16 @@ impl WorldState {
                 traversed_nodes.set(idx_1d, true);
 
                 let block_pos = (next_pos * RawCluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
-                let height = self.calc_height_at(block_pos);
+                let height = self.calc_altitude_at(block_pos);
 
                 if height >= 1.0 {
+                    println!("FOUND {}", height);
                     return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
                 }
             }
         }
 
-        let height = self.calc_height_at(closest_to);
+        let height = self.calc_altitude_at(closest_to);
         BlockPos::new(closest_to.x, height as i64 + 1, closest_to.y)
     }
 }
@@ -488,11 +497,10 @@ pub fn gen_fn(
                 let pos = ClusterBlockPos::new(x, y, z);
                 let mut data = cluster.get_mut(&pos);
 
-                if global_y == 1024 {
-                    //.mod_euclid(1024) == 0 {
-                    *data.light_source_type_mut() = LightType::Sky;
-                    *data.raw_light_source_mut() = LightLevel::MAX;
-                }
+                // if global_y.rem_euclid(1024) == 0 {
+                //     *data.light_source_type_mut() = LightType::Sky;
+                //     *data.raw_light_source_mut() = LightLevel::MAX;
+                // }
 
                 if global_y <= height as i64 {
                     data.set(registry.block_test);
@@ -500,7 +508,7 @@ pub fn gen_fn(
                     data.set(registry.block_empty);
                     *data.sky_light_state_mut() = LightLevel::MAX;
 
-                    if global_y <= WATER_LEVEL as i64 {
+                    if global_y <= WATER_LEVEL_ALTITUDE as i64 {
                         *data.liquid_state_mut() = LiquidState::source(registry.liquid_water);
                     } else {
                     }

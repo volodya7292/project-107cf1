@@ -498,8 +498,6 @@ impl MainApp {
     }
 }
 
-// TODO: Make Application this a module
-
 impl EngineModule for MainApp {
     fn on_start(&mut self, ctx: &EngineContext) {
         // let mut ui_ctx = UIContext::new(ctx, &self.resources);
