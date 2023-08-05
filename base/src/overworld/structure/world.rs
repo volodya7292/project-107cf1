@@ -404,23 +404,22 @@ impl WorldState {
         const SEARCH_DIAM: i64 = 32;
         const CLUSTER_CENTER: i64 = RawCluster::SIZE as i64 / 2;
 
-        let closest_to_aligned = closest_to.map(|v| v.div_euclid(RawCluster::SIZE as i64));
+        let cluster_closest_to = closest_to.map(|v| v.div_euclid(RawCluster::SIZE as i64));
         let mut queue = VecDeque::with_capacity((SEARCH_DIAM * SEARCH_DIAM) as usize);
         let mut traversed_nodes = BitVec::from_elem(queue.capacity(), false);
 
         {
             traversed_nodes.set(0, true);
 
-            let block_pos = (closest_to_aligned * RawCluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
-            let height = self.calc_altitude_at(block_pos);
+            let block_pos = (cluster_closest_to * RawCluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
+            let altitude = self.calc_altitude_at(block_pos);
 
-            if height >= 1.0 {
-                println!("FOUND {}", height);
-                return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
+            if altitude >= 1.0 {
+                return BlockPos::new(block_pos.x, altitude as i64 + 1, block_pos.y);
             }
         }
 
-        queue.push_back(closest_to_aligned);
+        queue.push_back(cluster_closest_to);
 
         // Breadth-first search
         while let Some(curr_pos) = queue.pop_front() {
@@ -428,7 +427,7 @@ impl WorldState {
                 let dir: I64Vec2 = glm::convert(dir.xz());
                 let next_pos = curr_pos + dir;
 
-                let rel_pos = (next_pos - closest_to_aligned).add_scalar(SEARCH_DIAM / 2);
+                let rel_pos = (next_pos - cluster_closest_to).add_scalar(SEARCH_DIAM / 2);
                 if rel_pos.x < 0 || rel_pos.y < 0 || rel_pos.x >= SEARCH_DIAM || rel_pos.y >= SEARCH_DIAM {
                     continue;
                 }
@@ -442,11 +441,10 @@ impl WorldState {
                 traversed_nodes.set(idx_1d, true);
 
                 let block_pos = (next_pos * RawCluster::SIZE as i64).add_scalar(CLUSTER_CENTER);
-                let height = self.calc_altitude_at(block_pos);
+                let altitude = self.calc_altitude_at(block_pos);
 
-                if height >= 1.0 {
-                    println!("FOUND {}", height);
-                    return BlockPos::new(block_pos.x, height as i64 + 1, block_pos.y);
+                if altitude >= 1.0 {
+                    return BlockPos::new(block_pos.x, altitude as i64 + 1, block_pos.y);
                 }
             }
         }
@@ -471,7 +469,7 @@ pub fn gen_fn(
     _structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    cluster_pos: ClusterPos,
+    cluster_origin: BlockPos,
     cluster: &mut RawCluster,
     state: Arc<OnceLock<Box<dyn StructureCache>>>,
 ) {
@@ -487,22 +485,23 @@ pub fn gen_fn(
         .unwrap();
 
     let registry = generator.main_registry();
-    let xz_cache = state.cluster_xz_cache_at(cluster_pos.get().xz());
+    let xz_cache = state.cluster_xz_cache_at(cluster_origin.cluster_pos().get().xz());
 
     for x in 0..RawCluster::SIZE {
         for y in 0..RawCluster::SIZE {
             for z in 0..RawCluster::SIZE {
-                let global_y = cluster_pos.get().y + y as i64;
-                let height = xz_cache.heights[x][z];
+                let global_y = cluster_origin.0.y + y as i64;
+                let altitude = xz_cache.heights[x][z];
                 let pos = ClusterBlockPos::new(x, y, z);
                 let mut data = cluster.get_mut(&pos);
 
+                // May be not necessary
                 // if global_y.rem_euclid(1024) == 0 {
                 //     *data.light_source_type_mut() = LightType::Sky;
                 //     *data.raw_light_source_mut() = LightLevel::MAX;
                 // }
 
-                if global_y <= height as i64 {
+                if global_y <= altitude as i64 {
                     data.set(registry.block_test);
                 } else {
                     data.set(registry.block_empty);

@@ -4,7 +4,6 @@ use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::{raw_cluster, Overworld};
 use bit_vec::BitVec;
 use common::glm;
 use common::glm::{I64Vec3, U64Vec3};
@@ -16,12 +15,13 @@ use std::sync::{Arc, OnceLock};
 pub type GenPosCheckFn =
     fn(structure: &Structure, generator: &OverworldGenerator, center_pos: BlockPos) -> bool;
 
-/// Fills the specified cluster with structure's blocks
+/// Fills the specified cluster with structure's blocks.
+/// `cluster_origin` specifies the relative (to the structure) position of the (0,0,0) block of the cluster.
 pub type GenFn = fn(
     structure: &Structure,
     generator: &OverworldGenerator,
     structure_seed: u64,
-    cluster_pos: ClusterPos,
+    cluster_origin: BlockPos,
     cluster: &mut RawCluster,
     structure_state: Arc<OnceLock<Box<dyn StructureCache>>>,
 );
@@ -98,7 +98,7 @@ impl Structure {
         &self,
         generator: &OverworldGenerator,
         structure_seed: u64,
-        cluster_pos: ClusterPos,
+        cluster_origin: BlockPos,
         cluster: &mut RawCluster,
         structure_cache: Arc<OnceLock<Box<dyn StructureCache>>>,
     ) {
@@ -106,7 +106,7 @@ impl Structure {
             self,
             generator,
             structure_seed,
-            cluster_pos,
+            cluster_origin,
             cluster,
             structure_cache,
         );

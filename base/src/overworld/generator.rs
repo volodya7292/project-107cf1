@@ -1,7 +1,7 @@
 use crate::main_registry::MainRegistry;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::structure::{Structure, StructuresIter};
+use crate::overworld::structure::{world, Structure, StructuresIter};
 use crate::utils::white_noise::WhiteNoise;
 use bit_vec::BitVec;
 use common::glm::I64Vec3;
@@ -162,8 +162,13 @@ impl OverworldGenerator {
                 Arc::new(OnceLock::new())
             });
 
-        let rel_spawn_point = world_st.gen_spawn_point(self, world_seed, cache).unwrap();
-        world_pos.center_pos.offset(&rel_spawn_point.0)
+        // Use aligned center pos because cluster generation process aligns the center position
+        let aligned_world_center = world_pos.center_pos.cluster_pos().to_block_pos();
+
+        let rel_spawn_point = world_st.gen_spawn_point(self, world_seed, cache.clone()).unwrap();
+        let spawn_point = aligned_world_center.offset(&rel_spawn_point.0);
+
+        spawn_point
     }
 
     pub fn generate_cluster(&self, cluster: &mut RawCluster, pos: ClusterPos) {
@@ -182,11 +187,15 @@ impl OverworldGenerator {
                 Arc::new(OnceLock::new())
             });
 
-        let rel_cluster_pos = pos
-            .to_block_pos()
-            .offset(&(-world_pos.center_pos.0))
-            .cluster_pos();
+        let world_center_cluster = world_pos.center_pos.cluster_pos();
+        let rel_cluster_origin = ClusterPos::new(pos.get() - world_center_cluster.get());
 
-        world_st.gen_cluster(self, world_seed, rel_cluster_pos, cluster, cache);
+        world_st.gen_cluster(
+            self,
+            world_seed,
+            rel_cluster_origin.to_block_pos(),
+            cluster,
+            cache,
+        );
     }
 }
