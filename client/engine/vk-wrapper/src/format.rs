@@ -57,6 +57,10 @@ lazy_static! {
         | FormatFeatureFlags::BLIT_DST
         | FormatFeatureFlags::TRANSFER_SRC
         | FormatFeatureFlags::TRANSFER_DST;
+    pub static ref SAMPLE_IMAGE_FEATURES: FormatFeatureFlags =
+        FormatFeatureFlags::SAMPLED_IMAGE| FormatFeatureFlags::TRANSFER_SRC
+            | FormatFeatureFlags::TRANSFER_DST;
+
     pub static ref BUFFER_FORMATS: HashMap<Format, FormatFeatureFlags> = [
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::R32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),
@@ -76,7 +80,7 @@ lazy_static! {
         (Format::RG16_FLOAT, *DEFAULT_IMAGE_FEATURES),
         (Format::RG32_UINT, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA8_UNORM, *DEFAULT_IMAGE_FEATURES),
-        (Format::RGBA8_SRGB, *DEFAULT_IMAGE_FEATURES),
+        (Format::RGBA8_SRGB, *SAMPLE_IMAGE_FEATURES),
         (Format::RGBA16_FLOAT, *DEFAULT_IMAGE_FEATURES),
         (Format::RGBA32_FLOAT, *DEFAULT_IMAGE_FEATURES),
     ]
