@@ -1,13 +1,12 @@
 use crate::main_registry::MainRegistry;
 use crate::overworld::position::{BlockPos, ClusterPos};
 use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::structure::{world, Structure, StructuresIter};
+use crate::overworld::structure::{Structure, StructuresIter};
 use crate::utils::white_noise::WhiteNoise;
 use bit_vec::BitVec;
 use common::glm::I64Vec3;
 use common::types::ConcurrentCache;
 use common::types::ConcurrentCacheExt;
-use common::types::UInt;
 use rand::Rng;
 use rand_distr::num_traits::Zero;
 use std::any::Any;
@@ -64,13 +63,13 @@ impl OverworldGenerator {
             .0
     }
 
-    /// Returns position of the structure center (within gen-octant corresponding to the block position)
+    /// Returns position of the structure center (within gen-octant corresponding to the `nearby_pos`)
     /// and a `bool` indicating whether the structure is actually present there.  
     /// Gen-octant size = `structure.avg_spacing * cluster_size` blocks.
-    pub fn gen_structure_pos(&self, structure: &Structure, pos: BlockPos) -> StructurePos {
-        let structure_fit_size = UInt::next_multiple_of(structure.max_size().max(), RawCluster::SIZE as u64);
-        let octant_size = structure.avg_spacing() * RawCluster::SIZE as u64;
-        let octant = pos.0.map(|v| v.div_euclid(octant_size as i64));
+    pub fn gen_structure_pos(&self, structure: &Structure, nearby_pos: BlockPos) -> StructurePos {
+        let structure_max_axis_size = structure.max_size().max();
+        let octant_size = structure.octant_size();
+        let octant = nearby_pos.0.map(|v| v.div_euclid(octant_size as i64));
         let octant_u64 = octant.map(|v| u64::from_ne_bytes(v.to_ne_bytes()));
 
         let mut rng = self
@@ -83,12 +82,11 @@ impl OverworldGenerator {
             .rng();
         let mut present = rng.gen::<bool>();
 
-        let low_margin = (structure_fit_size / 2).max(structure.min_spacing() / 2);
-        let range = low_margin..(octant_size - low_margin);
+        let gen_range = structure.calc_gen_range();
+        let dx = rng.gen_range(gen_range.clone()) as i64;
+        let dy = rng.gen_range(gen_range.clone()) as i64;
+        let dz = rng.gen_range(gen_range.clone()) as i64;
 
-        let dx = rng.gen_range(range.clone()) as i64;
-        let dy = rng.gen_range(range.clone()) as i64;
-        let dz = rng.gen_range(range.clone()) as i64;
         let center_pos = octant * (octant_size as i64) + I64Vec3::new(dx, dy, dz);
         let center_pos = BlockPos(center_pos);
 
@@ -113,15 +111,15 @@ impl OverworldGenerator {
     pub fn find_nearest_structures<'a>(
         &'a self,
         structure: &'a Structure,
-        start_cluster_pos: I64Vec3,
+        start_pos: BlockPos,
         max_search_radius: u32,
     ) -> StructuresIter<'a> {
         assert!(max_search_radius >= 1);
 
         let diam = max_search_radius as i64 * 2 - 1;
         let volume = diam.pow(3) as usize;
-        let clusters_per_octant = structure.avg_spacing() as i64;
-        let start_octant = start_cluster_pos.map(|v| v.div_euclid(clusters_per_octant));
+        let octant_size = structure.octant_size() as i64;
+        let start_octant = start_pos.0.map(|v| v.div_euclid(octant_size));
 
         let mut queue = VecDeque::with_capacity(volume);
         let traversed_nodes = BitVec::from_elem(volume, false);

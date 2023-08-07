@@ -157,9 +157,8 @@ impl MainRegistry {
         // ----------------------------------------------------------------------------------------------------
         let structure_world = reg.register_structure(Structure::new(
             0,
-            U64Vec3::from_element(world::MAX_RADIUS as u64 * 2),
-            9000,
-            16000,
+            U64Vec3::from_element(world::MAX_RADIUS * 2),
+            2000..100_000,
             |_, _, _| true,
             world::gen_fn,
             Some(world::spawn_point_fn),

@@ -2,13 +2,14 @@ pub mod world;
 
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
-use crate::overworld::position::{BlockPos, ClusterPos};
+use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::RawCluster;
 use bit_vec::BitVec;
 use common::glm;
 use common::glm::{I64Vec3, U64Vec3};
 use common::types::UInt;
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 /// Returns whether the structure can be generated at specified center position.
@@ -38,10 +39,11 @@ pub struct Structure {
     uid: u32,
     /// Maximum size in blocks
     max_size: U64Vec3,
-    /// Minimum spacing in clusters between structures of this type
-    min_spacing: u64,
-    /// Average spacing in clusters between structures of this type
-    avg_spacing: u64,
+    /// Min-max spacing range in blocks between structures of this type.
+    /// Octants are tightly packed based on this range and the structure size.
+    /// This also introduces randomness to generated center positions of structures.
+    /// A very specific range (450..450) has no randomness because the spacing.
+    spacing_range: Range<u64>,
     gen_pos_check_fn: GenPosCheckFn,
     gen_fn: GenFn,
     gen_spawn_point_fn: Option<GenSpawnPointFn>,
@@ -52,22 +54,15 @@ impl Structure {
     pub fn new(
         uid: u32,
         max_size: U64Vec3,
-        min_spacing: u64,
-        avg_spacing: u64,
+        spacing_range: Range<u64>,
         gen_pos_check_fn: GenPosCheckFn,
         gen_fn: GenFn,
         gen_spawn_point_fn: Option<GenSpawnPointFn>,
     ) -> Structure {
-        assert!(avg_spacing >= min_spacing);
-
-        let size_in_clusters = UInt::div_ceil(max_size.max(), RawCluster::SIZE as u64);
-        assert!(min_spacing >= size_in_clusters);
-
         Structure {
             uid,
             max_size,
-            min_spacing,
-            avg_spacing,
+            spacing_range,
             gen_pos_check_fn,
             gen_fn,
             gen_spawn_point_fn,
@@ -82,12 +77,24 @@ impl Structure {
         self.max_size
     }
 
+    /// The structures of this type are spaced at least this far apart.
     pub fn min_spacing(&self) -> u64 {
-        self.min_spacing
+        self.spacing_range.start
     }
 
-    pub fn avg_spacing(&self) -> u64 {
-        self.avg_spacing
+    /// The structures of this type are spaced at most this far apart.
+    pub fn max_spacing(&self) -> u64 {
+        self.spacing_range.end
+    }
+
+    /// Octant size is the side-length of the area of generation of a single structure.
+    pub fn octant_size(&self) -> u64 {
+        self.max_size.max() + self.max_spacing() / 2
+    }
+
+    pub fn calc_gen_range(&self) -> Range<u64> {
+        let gen_padding = (self.max_size.max() / 2).max(self.min_spacing() / 2);
+        gen_padding..(self.octant_size() - gen_padding)
     }
 
     pub fn check_gen_pos(&self, generator: &OverworldGenerator, center_pos: BlockPos) -> bool {
@@ -137,8 +144,7 @@ impl Iterator for StructuresIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let diam = self.max_search_radius as i64 * 2 - 1;
-        let clusters_per_octant = self.structure.avg_spacing() as i64;
-        let blocks_per_octant = clusters_per_octant * RawCluster::SIZE as i64;
+        let octant_size = self.structure.octant_size() as i64;
 
         let front_octant = self.queue.front().unwrap();
         {
@@ -148,10 +154,9 @@ impl Iterator for StructuresIter<'_> {
             if !self.traversed_nodes.get(idx_1d).unwrap() {
                 self.traversed_nodes.set(idx_1d, true);
 
-                let cluster_pos = ClusterPos::new(front_octant * blocks_per_octant);
                 let st_pos = self
                     .generator
-                    .gen_structure_pos(self.structure, cluster_pos.to_block_pos());
+                    .gen_structure_pos(self.structure, BlockPos(front_octant * octant_size));
 
                 if st_pos.present {
                     return Some(st_pos.center_pos);
@@ -184,10 +189,9 @@ impl Iterator for StructuresIter<'_> {
                 self.queue.push_back(next_pos);
                 self.traversed_nodes.set(idx_1d, true);
 
-                let cluster_pos = ClusterPos::new(next_pos * blocks_per_octant);
                 let st_pos = self
                     .generator
-                    .gen_structure_pos(self.structure, cluster_pos.to_block_pos());
+                    .gen_structure_pos(self.structure, BlockPos(next_pos * octant_size));
 
                 if st_pos.present {
                     return Some(st_pos.center_pos);
