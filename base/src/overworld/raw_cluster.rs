@@ -64,7 +64,7 @@ pub struct CellInfo {
     pub block_id: u16,
     pub light_source: LightLevel,
     pub light_source_type: LightType,
-    pub light_state: LightLevel,
+    pub regular_light_state: LightLevel,
     pub sky_light_state: LightLevel,
     pub liquid_state: LiquidState,
     pub active: bool,
@@ -77,7 +77,7 @@ impl Default for CellInfo {
             block_id: u16::MAX,
             light_source: Default::default(),
             light_source_type: LightType::Regular,
-            light_state: Default::default(),
+            regular_light_state: Default::default(),
             sky_light_state: Default::default(),
             liquid_state: LiquidState::NONE,
             active: false,
@@ -114,12 +114,12 @@ pub trait BlockDataImpl {
         }
     }
 
-    fn light_state(&self) -> LightLevel;
+    fn regular_light_state(&self) -> LightLevel;
     fn sky_light_state(&self) -> LightLevel;
 
     fn light_state_by(&self, ty: LightType) -> LightLevel {
         match ty {
-            LightType::Regular => self.light_state(),
+            LightType::Regular => self.regular_light_state(),
             LightType::Sky => self.sky_light_state(),
         }
     }
@@ -145,8 +145,8 @@ impl BlockDataImpl for BlockData<'_> {
         self.info.light_source_type
     }
 
-    fn light_state(&self) -> LightLevel {
-        self.info.light_state
+    fn regular_light_state(&self) -> LightLevel {
+        self.info.regular_light_state
     }
 
     fn sky_light_state(&self) -> LightLevel {
@@ -184,8 +184,8 @@ impl BlockDataImpl for BlockDataMut<'_> {
         self.info.light_source_type
     }
 
-    fn light_state(&self) -> LightLevel {
-        self.info.light_state
+    fn regular_light_state(&self) -> LightLevel {
+        self.info.regular_light_state
     }
 
     fn sky_light_state(&self) -> LightLevel {
@@ -227,8 +227,8 @@ impl BlockDataMut<'_> {
         &mut self.info.light_source_type
     }
 
-    pub fn light_state_mut(&mut self) -> &mut LightLevel {
-        &mut self.info.light_state
+    pub fn regular_light_state_mut(&mut self) -> &mut LightLevel {
+        &mut self.info.regular_light_state
     }
 
     pub fn sky_light_state_mut(&mut self) -> &mut LightLevel {

@@ -70,7 +70,7 @@ impl Registry {
             block_id: block_empty,
             light_source: Default::default(),
             light_source_type: LightType::Regular,
-            light_state: Default::default(),
+            regular_light_state: Default::default(),
             sky_light_state: Default::default(),
             liquid_state: Default::default(),
             active: false,

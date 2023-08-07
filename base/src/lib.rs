@@ -136,14 +136,14 @@ pub fn on_liquid_tick(
     false
 }
 
-fn on_light_tick(
+pub fn on_light_tick(
     pos: &BlockPos,
     block_data: BlockData,
     registry: &Registry,
     access: &mut ReadOnlyOverworldAccessor,
     mut result: OverworldActionsBuilder,
 ) -> bool {
-    let prev_light = block_data.light_state().components();
+    let prev_light = block_data.regular_light_state().components();
     let block = registry.get_block(block_data.block_id()).unwrap();
 
     // Collect neighbouring light (vanishing)
@@ -152,18 +152,21 @@ fn on_light_tick(
 
         for dir in Facing::DIRECTIONS {
             let rel_pos = pos.offset_i32(&dir);
-            let Some(data) = access.get_block(&rel_pos) else {
+            let Some(rel_data) = access.get_block(&rel_pos) else {
                 return true;
             };
-            let rel_block = registry.get_block(data.block_id()).unwrap();
+            let rel_block = registry.get_block(rel_data.block_id()).unwrap();
 
             let rel_light = if rel_block.can_pass_light() {
-                data.light_state()
+                rel_data
+                    .regular_light_state()
+                    .components()
+                    .sup(&rel_data.regular_light_source().components())
             } else {
-                data.regular_light_source()
+                rel_data.regular_light_source().components()
             };
 
-            let rel_curr_light = rel_light.components().map(|v| v.saturating_sub(1));
+            let rel_curr_light = rel_light.map(|v| v.saturating_sub(1));
 
             new_light = new_light.sup(&rel_curr_light);
         }
@@ -188,7 +191,7 @@ fn on_light_tick(
     false
 }
 
-fn on_sky_light_tick(
+pub fn on_sky_light_tick(
     pos: &BlockPos,
     block_data: BlockData,
     registry: &Registry,
@@ -204,21 +207,24 @@ fn on_sky_light_tick(
 
         for dir in Facing::DIRECTIONS {
             let rel_pos = pos.offset_i32(&dir);
-            let Some(data) = access.get_block(&rel_pos) else {
+            let Some(rel_data) = access.get_block(&rel_pos) else {
                 return true;
             };
-            let rel_block = registry.get_block(data.block_id()).unwrap();
+            let rel_block = registry.get_block(rel_data.block_id()).unwrap();
 
             let rel_light = if rel_block.can_pass_light() {
-                data.sky_light_state()
+                rel_data
+                    .sky_light_state()
+                    .components()
+                    .sup(&rel_data.sky_light_source().components())
             } else {
-                data.sky_light_source()
+                rel_data.sky_light_source().components()
             };
 
             let rel_curr_light = if &dir == Facing::PositiveY.direction() {
-                rel_light.components()
+                rel_light
             } else {
-                rel_light.components().map(|v| v.saturating_sub(1))
+                rel_light.map(|v| v.saturating_sub(1))
             };
 
             new_light = new_light.sup(&rel_curr_light);
@@ -320,13 +326,14 @@ pub fn process_active_blocks(
 }
 
 /// Used to propagate lighting and liquids from neighbours when the block at `block_pos` is removed.
-fn check_block(registry: &Registry, access: &mut OverworldAccessor, pos: &BlockPos) {
+pub fn check_block(registry: &Registry, access: &mut OverworldAccessor, pos: &BlockPos) {
     let curr_data = access.get_block(pos).unwrap();
     let curr_block = registry.get_block(curr_data.block_id()).unwrap();
 
     if !curr_block.can_pass_light() {
         access.update_block(pos, |data| {
-            *data.light_state_mut() = LightLevel::ZERO;
+            *data.regular_light_state_mut() = LightLevel::ZERO;
+            *data.sky_light_state_mut() = LightLevel::ZERO;
         });
     }
     if !curr_block.can_pass_liquid() {
@@ -343,7 +350,7 @@ fn check_block(registry: &Registry, access: &mut OverworldAccessor, pos: &BlockP
     }
 }
 
-fn apply_overworld_actions(
+pub fn apply_overworld_actions(
     registry: &Arc<Registry>,
     loaded_clusters: &LoadedClusters,
     actions: &[&OverworldActionsStorage],

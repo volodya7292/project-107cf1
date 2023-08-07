@@ -345,7 +345,7 @@ impl OverworldAccessor {
 
             match ty {
                 LightType::Regular => {
-                    *data.light_state_mut() = light_level;
+                    *data.regular_light_state_mut() = light_level;
                 }
                 LightType::Sky => {
                     *data.sky_light_state_mut() = light_level;

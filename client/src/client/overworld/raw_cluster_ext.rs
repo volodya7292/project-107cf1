@@ -487,7 +487,7 @@ fn gen_block_vertices(
                     liquid_material_id,
                     &liquid_heights,
                     facing,
-                    state.light_state(),
+                    state.regular_light_state(),
                     state.sky_light_state(),
                     vertices_translucent,
                 );

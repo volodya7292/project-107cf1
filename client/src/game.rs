@@ -9,6 +9,7 @@ use crate::rendering::ui::image::{ImageAccess, ImageImpl};
 use crate::rendering::ui::register_ui_elements;
 use crate::rendering::ui::text::UITextImpl;
 use approx::AbsDiffEq;
+use base::check_block;
 use base::execution::default_queue;
 use base::execution::timer::IntervalTimer;
 use base::execution::virtual_processor::VirtualProcessor;
@@ -766,6 +767,7 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
     let delta_time = (start_t - curr_state.last_tick_start).as_secs_f64();
 
     let mut new_block_set_cooldown = curr_state.block_set_cooldown;
+    let overworld = Arc::clone(&main_state.lock().overworld);
 
     // Set block on mouse button click
     if curr_state.block_set_cooldown == 0.0 {
@@ -775,28 +777,51 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                 let set_pos = pos.offset(&dir);
 
                 if curr_state.set_water {
-                    new_actions.set_liquid(set_pos, LiquidState::source(registry.liquid_water));
+                    overworld
+                        .access()
+                        .set_liquid_state(&set_pos, LiquidState::source(registry.liquid_water));
                 } else {
-                    new_actions.set_block(set_pos, curr_state.curr_block.clone());
+                    overworld.access().update_block(&set_pos, |data| {
+                        data.set(curr_state.curr_block.clone());
 
-                    if curr_state.curr_block.block_id == registry.block_glow.block_id {
-                        new_actions.set_light_source(
-                            set_pos,
-                            LightLevel::from_intensity(10),
-                            LightType::Regular,
-                        );
-                    } else {
-                        new_actions.set_regular_light_state(set_pos, LightLevel::ZERO);
-                        new_actions.set_sky_light_state(set_pos, LightLevel::ZERO);
-                    }
+                        if curr_state.curr_block.block_id == registry.block_glow.block_id {
+                            *data.light_source_type_mut() = LightType::Regular;
+                            *data.raw_light_source_mut() = LightLevel::from_intensity(10);
+                        } else {
+                            *data.raw_light_source_mut() = LightLevel::ZERO;
+                        }
+                    });
                 }
+
+                check_block(registry.registry(), &mut overworld.access(), &set_pos);
 
                 new_block_set_cooldown = 0.15;
             }
         } else if curr_state.do_remove_block {
             if let Some(inter) = curr_state.look_at_block {
-                new_actions.set_block(inter.0, registry.block_empty);
-                new_actions.set_light_source(inter.0, LightLevel::ZERO, LightType::Regular);
+                overworld.access().update_block(&inter.0, |data| {
+                    data.set(registry.block_empty);
+                    *data.raw_light_source_mut() = LightLevel::ZERO;
+                });
+                check_block(registry.registry(), &mut overworld.access(), &inter.0);
+
+                let mut access = main_state.lock().overworld.access().into_read_only();
+                let data = access.get_block(&inter.0).unwrap();
+
+                base::on_light_tick(
+                    &inter.0,
+                    data,
+                    registry.registry(),
+                    &mut main_state.lock().overworld.access().into_read_only(),
+                    new_actions.builder(),
+                );
+                base::on_sky_light_tick(
+                    &inter.0,
+                    data,
+                    registry.registry(),
+                    &mut main_state.lock().overworld.access().into_read_only(),
+                    new_actions.builder(),
+                );
 
                 new_block_set_cooldown = 0.15;
             }
