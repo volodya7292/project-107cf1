@@ -62,9 +62,12 @@ impl Registry {
             inner_block_state_empty: None,
         };
 
-        let block_empty = registry.register_block::<StatelessBlock>(BlockBuilder::new(Self::MODEL_ID_NULL));
+        let block_empty = registry.register_block::<StatelessBlock>(
+            BlockBuilder::new(Self::MODEL_ID_NULL)
+                .with_can_pass_light(true)
+                .with_can_pass_liquid(true),
+        );
         registry.block_empty = block_empty;
-
         registry.inner_block_state_empty = Some(CellInfo {
             entity_id: Default::default(),
             block_id: block_empty,
@@ -85,6 +88,10 @@ impl Registry {
         }
         self.models.push(block_model);
         (self.models.len() - 1).try_into().unwrap()
+    }
+
+    pub fn block_empty(&self) -> u16 {
+        self.block_empty
     }
 
     // pub fn register_texture(&mut self, ty: TextureAtlasType, res_ref: ResourceRef) -> u16 {

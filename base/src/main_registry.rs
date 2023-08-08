@@ -56,14 +56,7 @@ impl MainRegistry {
 
         // Blocks
         // ----------------------------------------------------------------------------------------------------
-        let block_empty = {
-            let id = reg.register_block::<StatelessBlock>(
-                BlockBuilder::new(Registry::MODEL_ID_NULL)
-                    .with_can_pass_liquid(true)
-                    .with_can_pass_light(true),
-            );
-            BlockState::new(id, StatelessBlock)
-        };
+        let block_empty = BlockState::new(reg.block_empty(), StatelessBlock);
         let block_default = {
             let id = reg.register_block::<StatelessBlock>(BlockBuilder::new(model_cube));
             BlockState::new(id, StatelessBlock)

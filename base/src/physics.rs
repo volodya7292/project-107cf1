@@ -1,4 +1,5 @@
 use aabb::AABB;
+use approx::AbsDiffEq;
 use common::glm;
 use common::glm::{DVec3, I64Vec3};
 
@@ -12,27 +13,34 @@ pub mod aabb;
 pub const MOTION_EPSILON: f64 = 1e-10;
 pub const G_ACCEL: f64 = 14.0;
 
-fn combine_collision_deltas(a: DVec3, b: DVec3) -> DVec3 {
-    a.zip_map(&b, |a, b| {
-        if a >= 0.0 && b >= 0.0 {
-            a.max(b)
-        } else if a <= 0.0 && b <= 0.0 {
-            a.min(b)
-        } else {
-            0.0
-        }
-    })
-}
-
 pub fn collision_delta_many2one(aabbs: &[AABB], other: &AABB, resolve_direction: &DVec3) -> DVec3 {
-    aabbs.iter().fold(DVec3::default(), |acc, aabb| {
-        combine_collision_deltas(acc, aabb.collision_delta(other, resolve_direction))
-    })
+    if aabbs.is_empty() {
+        return DVec3::zeros();
+    }
+
+    let deltas: Vec<_> = aabbs
+        .iter()
+        .map(|aabb| aabb.collision_delta(other, resolve_direction))
+        .collect();
+
+    let positive_delta = deltas
+        .iter()
+        .map(|v| v.sup(&DVec3::zeros()))
+        .fold(DVec3::zeros(), |total_delta, delta| total_delta.sup(&delta));
+
+    let negative_delta = deltas
+        .iter()
+        .map(|v| v.inf(&DVec3::zeros()))
+        .fold(DVec3::zeros(), |total_delta, delta| total_delta.inf(&delta));
+
+    positive_delta + negative_delta
 }
 
 impl Overworld {
-    /// Returns new object position
-    pub fn resolve_collisions(
+    /// If collisions can't be resolved, applies resolutions for each collider
+    /// effectively averaging all resolutions. Returns new object position.
+    /// This resolution may be unstable (the object at new position may collide with other objects).
+    pub fn resolve_collisions_fairly(
         &self,
         curr_object_pos: DVec3,
         motion_delta: DVec3,
@@ -95,22 +103,24 @@ impl Overworld {
         new_object_pos
     }
 
-    pub fn resolve_collisions2(
+    /// If collisions can't be resolved, return the initial position
+    /// without applying the motion delta. Returns new object position.
+    /// Ensures that the object can't move in unresolvable situations.
+    pub fn try_resolve_collisions(
         &self,
         curr_object_pos: DVec3,
         motion_delta: DVec3,
         object_aabb: &AABB,
     ) -> DVec3 {
-        // when motion delta is large, move by minimum intervals (in multiple steps)
+        let new_pos = self.resolve_collisions_fairly(curr_object_pos, motion_delta, object_aabb);
+        // Use another fair collision resolution to check the first resolution stability.
+        let new_pos2 = self.resolve_collisions_fairly(new_pos, DVec3::zeros(), object_aabb);
 
-        // delta_step = motion_delta.min(MAX_DELTA_STEP)
-
-        // for i in range(ceil(motion_delta / MAX_DELTA_STEP)):
-        //  1. delta_step = motion_delta.min(MAX_DELTA_STEP)
-        //  2. new_pos = prev_pos + delta_step
-        //  3. passively resolve collisions (ie. without motion delta)
-        //  4. motion_delta -= delta_step
-
-        todo!()
+        if new_pos.abs_diff_eq(&new_pos2, MOTION_EPSILON) {
+            new_pos
+        } else {
+            // The collision can't be resolved
+            curr_object_pos
+        }
     }
 }

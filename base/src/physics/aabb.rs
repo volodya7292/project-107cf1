@@ -78,7 +78,7 @@ impl AABB {
         let mut delta = DVec3::from_element(0.0);
 
         if !self.collides_with(other) {
-            return DVec3::default();
+            return delta;
         }
 
         for i in 0..3 {

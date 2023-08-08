@@ -604,9 +604,10 @@ impl EngineModule for MainApp {
             }
             drop(blocks);
 
-            let new_pos = curr_state
-                .overworld
-                .move_entity(prev_pos, motion_delta, &curr_state.player_aabb);
+            let new_pos =
+                curr_state
+                    .overworld
+                    .try_resolve_collisions(prev_pos, motion_delta, &curr_state.player_aabb);
 
             if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
                 // Note: the ground is reached
