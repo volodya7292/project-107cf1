@@ -8,6 +8,7 @@ use base::overworld::occluder::Occluder;
 use base::overworld::position::RelativeBlockPos;
 use base::overworld::raw_cluster::RawCluster;
 use base::overworld::raw_cluster::{BlockDataImpl, LightType};
+use base::registry::Registry;
 use common::glm;
 use common::glm::{I32Vec3, Vec2, Vec3};
 use common::types::Bool;
@@ -208,62 +209,67 @@ fn calc_quad_lighting(
 type LiquidHeightsCache =
     Box<[[[Option<f32>; RawCluster::SIZE + 1]; RawCluster::SIZE]; RawCluster::SIZE + 1]>;
 
-/// Calculates liquid height at vertex in XZ-range 0..25
+/// Calculates liquid height in range \[0..25]\[0..24]\[0..25]
+/// where XZ coords are quad vertices and Y coord is a particular block.
 fn calc_liquid_height(
+    pos: &RelativeBlockPos,
+    accessor: &ClusterNeighbourhoodAccessor,
+    registry: &Registry,
+) -> f32 {
+    let mut height_sum = 0_u32;
+    let mut count = 0_u32;
+    let mut level_bias_allowed = false;
+
+    'outer: for i in -1..=0_i32 {
+        for j in -1..=0_i32 {
+            let rel_pos = pos.offset(&glm::vec3(i, 0, j));
+            let Some(rel_data) = accessor.get_block(&rel_pos) else {
+                continue;
+            };
+
+            let rel_liquid = rel_data.liquid_state();
+            let rel_block = registry.get_block(rel_data.block_id()).unwrap();
+
+            if !rel_block.can_pass_liquid() {
+                continue;
+            }
+
+            let top_liquid_exists = {
+                let top_rel_pos = rel_pos.offset(Facing::PositiveY.direction());
+                let top_level = accessor
+                    .get_block(&top_rel_pos)
+                    .map_or(0, |v| v.liquid_state().level());
+                top_level > 0
+            };
+
+            if rel_liquid.is_max() && top_liquid_exists {
+                height_sum = LiquidState::MAX_LEVEL as u32;
+                count = 1;
+                level_bias_allowed = false;
+                break 'outer;
+            }
+
+            height_sum += rel_liquid.level() as u32;
+            count += 1;
+        }
+    }
+
+    // if there is no liquid above all four corners, lower current level slightly
+    let top_factor = 1.0 - level_bias_allowed.into_f32() * 0.1;
+    let factor = height_sum as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
+
+    top_factor * factor
+}
+
+fn calc_liquid_height_cached(
     accessor: &ClusterNeighbourhoodAccessor,
     cache: &mut LiquidHeightsCache,
     pos: &RelativeBlockPos,
 ) -> f32 {
     let registry = accessor.registry();
     let entry = &mut cache[pos.0.x as usize][pos.0.y as usize][pos.0.z as usize];
-
     // Use a cache to reduce the number of calculations by a factor of ~4
-    *entry.get_or_insert_with(|| {
-        let mut height_sum = 0_u32;
-        let mut count = 0_u32;
-        let mut level_bias_allowed = false;
-
-        'outer: for i in -1..=0_i32 {
-            for j in -1..=0_i32 {
-                let rel_pos = pos.offset(&glm::vec3(i, 0, j));
-                // let rel_padded_idx = aligned_block_index(&glm::convert_unchecked(rel_padded));
-                let Some(rel_data) = accessor.get_block(&rel_pos) else {
-                    continue;
-                };
-
-                let rel_liquid = rel_data.liquid_state();
-                let rel_block = registry.get_block(rel_data.block_id()).unwrap();
-
-                if !rel_block.can_pass_liquid() {
-                    continue;
-                }
-
-                let top_liquid_exists = {
-                    let top_rel_pos = rel_pos.offset(Facing::PositiveY.direction());
-                    let top_level = accessor
-                        .get_block(&top_rel_pos)
-                        .map_or(0, |v| v.liquid_state().level());
-                    top_level > 0
-                };
-                if rel_liquid.is_max() {
-                    // All four liquid levels must be highest to ensure correct vertex joints
-                    height_sum = LiquidState::MAX_LEVEL as u32;
-                    count = 1;
-                    level_bias_allowed = !top_liquid_exists;
-                    break 'outer;
-                }
-
-                height_sum += rel_liquid.level() as u32;
-                count += 1;
-            }
-        }
-
-        // if there is no liquid above all four corners, lower current level slightly
-        let top_factor = 1.0 - level_bias_allowed.into_f32() * 0.1;
-        let factor = height_sum as f32 / (count * LiquidState::MAX_LEVEL as u32) as f32;
-
-        top_factor * factor
-    })
+    *entry.get_or_insert_with(|| calc_liquid_height(pos, accessor, registry))
 }
 
 fn construct_liquid_quad(
@@ -279,47 +285,19 @@ fn construct_liquid_quad(
     const P001: Vec3 = Vec3::new(0.0, 0.0, 1.0);
     const P100: Vec3 = Vec3::new(1.0, 0.0, 0.0);
     const P101: Vec3 = Vec3::new(1.0, 0.0, 1.0);
-
-    // let liq_p010 = Vec3::new(0.0, liquid_heights[0], 0.0);
-    // let liq_p011 = Vec3::new(0.0, liquid_heights[1], 1.0);
-    // let liq_p110 = Vec3::new(1.0, liquid_heights[2], 0.0);
-    // let liq_p111 = Vec3::new(1.0, liquid_heights[3], 1.0);
-
-    /*
-
-
-    [
-        // Z
-        Quad::new([p110, p100, p010, p000]),
-        Quad::new([p011, p001, p111, p101]),
-        // Y
-        Quad::new([p000, p100, p001, p101]),
-        Quad::new([p011, p111, p010, p110]),
-        // X
-        Quad::new([p010, p000, p011, p001]),
-        Quad::new([p111, p101, p110, p100]),
-    ]
-
-        // UV
-        // Vec2::new(0.0, 0.0),
-        // Vec2::new(0.0, 1.0),
-        // Vec2::new(1.0, 0.0),
-        // Vec2::new(1.0, 1.0),
-
-     */
-
-    let material_id = material_id as u32;
-    let lighting = light_level.raw();
-    let sky_lighting = sky_light_level.raw();
-    let quad_vertices;
-    let mut normal: Vec3 = glm::convert(*facing.direction());
-
-    let quad_uv = [
+    const QUAD_UV_2D: [Vec2; 4] = [
         Vec2::new(0.0, 0.0),
         Vec2::new(0.0, 1.0),
         Vec2::new(1.0, 0.0),
         Vec2::new(1.0, 1.0),
     ];
+
+    let material_id = material_id as u32;
+    let lighting = light_level.raw();
+    let sky_lighting = sky_light_level.raw();
+
+    let quad_vertices;
+    let mut normal: Vec3 = glm::convert(*facing.direction());
 
     match facing {
         Facing::NegativeY => {
@@ -369,23 +347,18 @@ fn construct_liquid_quad(
         }
     };
 
-    vertices.extend(
-        quad_vertices
-            .into_iter()
-            .zip(quad_uv.into_iter())
-            .map(|(pos, uv)| {
-                Vertex {
-                    position: posf + pos,
-                    normal,
-                    tex_uv: uv,
-                    ao: u8::MAX,
-                    lighting,
-                    sky_lighting,
-                    material_id,
-                }
-                .pack()
-            }),
-    );
+    vertices.extend(quad_vertices.into_iter().zip(QUAD_UV_2D).map(|(pos, uv)| {
+        Vertex {
+            position: posf + pos,
+            normal,
+            tex_uv: uv,
+            ao: u8::MAX,
+            lighting,
+            sky_lighting,
+            material_id,
+        }
+        .pack()
+    }));
 }
 
 fn gen_block_vertices(
@@ -414,7 +387,7 @@ fn gen_block_vertices(
         for x in 0..2 {
             for z in 0..2 {
                 let rel = pos.offset(&glm::vec3(x, 0, z));
-                let height = calc_liquid_height(accessor, liquid_cache, &rel);
+                let height = calc_liquid_height_cached(accessor, liquid_cache, &rel);
                 liquid_heights[(x * 2 + z) as usize] = height;
             }
         }

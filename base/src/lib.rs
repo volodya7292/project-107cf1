@@ -41,11 +41,13 @@ pub fn on_liquid_tick(
     const SPREAD_DENSITY: u8 = 2;
 
     let curr_liquid = *block_data.liquid_state();
+
     let mut new_liquid = if curr_liquid.is_source() {
         curr_liquid
     } else {
         LiquidState::new(curr_liquid.liquid_id(), 0)
     };
+
     let block = registry.get_block(block_data.block_id()).unwrap();
 
     if !block.can_pass_liquid() {
