@@ -1,17 +1,21 @@
-use aabb::AABB;
-use approx::AbsDiffEq;
-use common::glm;
-use common::glm::{DVec3, I64Vec3};
+pub mod aabb;
+pub mod physical_object;
 
 use crate::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
 use crate::overworld::Overworld;
-
-pub mod aabb;
+use aabb::AABB;
+use approx::AbsDiffEq;
+use common::glm;
+use common::glm::{DVec3, I64Vec3, Vec3};
 
 pub const MOTION_EPSILON: f64 = 1e-10;
 pub const G_ACCEL: f64 = 14.0;
+
+pub fn calc_force(mass: f32, accel: Vec3) -> Vec3 {
+    accel * mass
+}
 
 pub fn collision_delta_many2one(aabbs: &[AABB], other: &AABB, resolve_direction: &DVec3) -> DVec3 {
     if aabbs.is_empty() {

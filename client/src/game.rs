@@ -25,7 +25,8 @@ use base::overworld::position::BlockPos;
 use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
 use base::overworld::{Overworld, OverworldOrchestrator, OverworldParams};
 use base::physics::aabb::AABB;
-use base::physics::MOTION_EPSILON;
+use base::physics::physical_object::ObjectMotion;
+use base::physics::{calc_force, G_ACCEL, MOTION_EPSILON};
 use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
 use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
@@ -34,7 +35,7 @@ use common::resource_file::{BufferedResourceReader, ResourceFile};
 use common::threading::SafeThreadPool;
 use common::{glm, image};
 use engine::event::{WSIEvent, WSIKeyboardInput};
-use engine::module::input::Input;
+use engine::module::input::{Input, Keyboard};
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
@@ -51,6 +52,7 @@ use entity_data::EntityId;
 use std::any::Any;
 use std::cell::RefMut;
 use std::f32::consts::FRAC_PI_2;
+use std::f64::consts::PI;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,6 +117,25 @@ pub struct MainApp {
     cursor_grab: bool,
     root_entity: EntityId,
     ui_reactor: Lrc<UIReactor>,
+}
+
+const WALK_VELOCITY: f64 = 4.0;
+
+fn calc_bobbing_displacement(walk_time: f64, walk_speed: f64, camera_orientation: Vec3) -> DVec3 {
+    const BOBBING_MAX_HEIGHT: f64 = 0.07;
+    const BOBBING_WIDTH: f64 = 0.04;
+
+    let bobbing_freq: f64 = 0.7 * walk_speed;
+
+    let wave = (walk_time * 2.0 * PI * bobbing_freq * 0.5).sin();
+
+    let disp_y_norm = 1.0 - (1.0 - wave.powi(2)).sqrt();
+
+    let mut displacement = DVec3::zeros();
+    displacement += camera::move_xz(camera_orientation, 0.0, wave * BOBBING_WIDTH * 0.5);
+    displacement.y += disp_y_norm * BOBBING_MAX_HEIGHT;
+
+    displacement
 }
 
 impl MainApp {
@@ -346,12 +367,14 @@ impl MainApp {
             player_direction: Default::default(),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
+            walk_time: 0.0,
             curr_jump_force: 0.0,
             look_at_block: None,
             block_set_cooldown: 0.0,
             do_set_block: false,
             curr_block: self.main_registry.block_test.into_any(),
             set_water: false,
+            player_motion: ObjectMotion::new(72.0),
             change_stream_pos: true,
             player_collision_enabled: true,
             do_remove_block: false,
@@ -497,6 +520,142 @@ impl MainApp {
             _ => {}
         }
     }
+
+    fn calc_player_velocity(kb: &Keyboard, state: &GameProcessState, orientation: Vec3) -> Vec3 {
+        let mut vel_front_back = 0;
+        let mut vel_left_right = 0;
+        let mut vel_up_down = 0;
+
+        if kb.is_key_pressed(VirtualKeyCode::W) {
+            vel_front_back += 1;
+        }
+        if kb.is_key_pressed(VirtualKeyCode::S) {
+            vel_front_back -= 1;
+        }
+        if kb.is_key_pressed(VirtualKeyCode::A) {
+            vel_left_right -= 1;
+        }
+        if kb.is_key_pressed(VirtualKeyCode::D) {
+            vel_left_right += 1;
+        }
+        if kb.is_key_pressed(VirtualKeyCode::Space) {
+            if !state.player_collision_enabled {
+                vel_up_down += 1;
+            }
+        }
+        if kb.is_key_pressed(VirtualKeyCode::LShift) {
+            vel_up_down -= 1;
+        }
+
+        let horizontal_move_vec: Vec3 = glm::convert(
+            camera::move_xz(orientation, vel_front_back as f64, vel_left_right as f64) * WALK_VELOCITY,
+        );
+        let vertical_move_vel = Vec3::new(0.0, vel_up_down as f32, 0.0) * (WALK_VELOCITY as f32);
+
+        horizontal_move_vec + vertical_move_vel
+    }
+
+    fn on_update_game_input(&mut self, delta_time: f64, ctx: &EngineContext) {
+        let Some(main_state) = self.game_state.as_ref() else {
+            return;
+        };
+
+        let input = ctx.module::<Input>();
+
+        let kb = input.keyboard();
+        let mut curr_state = main_state.lock();
+
+        if kb.is_key_pressed(VirtualKeyCode::Space) && curr_state.fall_time == 0.0 {
+            curr_state.curr_jump_force = (450.0 / delta_time) as f32;
+        }
+
+        let move_vel = Self::calc_player_velocity(kb, &curr_state, curr_state.player_orientation);
+
+        if move_vel.xz().amax() > 1e-6 {
+            curr_state.walk_time += delta_time;
+        }
+
+        let motion_delta = {
+            let player_mass = curr_state.player_motion.mass();
+            let g_force = calc_force(player_mass, Vec3::new(0.0, -G_ACCEL as f32, 0.0));
+
+            let mut total_force = Vec3::zeros();
+
+            if curr_state.player_collision_enabled {
+                let mut blocks = curr_state.overworld.access();
+                if blocks
+                    .get_block(&BlockPos::from_f64(&curr_state.player_pos))
+                    .is_some()
+                {
+                    let jump_force = Vec3::new(0.0, curr_state.curr_jump_force, 0.0);
+                    total_force += g_force + jump_force;
+                }
+            }
+
+            curr_state.player_motion.update(total_force, delta_time as f32);
+
+            glm::convert::<_, DVec3>(curr_state.player_motion.velocity + move_vel) * delta_time
+        };
+
+        curr_state.curr_jump_force = 0.0;
+        let mut new_jump_force = curr_state.curr_jump_force;
+
+        if curr_state.player_collision_enabled {
+            let prev_pos = curr_state.player_pos;
+
+            let new_pos =
+                curr_state
+                    .overworld
+                    .try_resolve_collisions(prev_pos, motion_delta, &curr_state.player_aabb);
+
+            if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
+                // Note: the ground is reached
+                new_jump_force = 0.0;
+                curr_state.player_motion.velocity = Vec3::zeros();
+                curr_state.fall_time = 0.0;
+            } else {
+                curr_state.fall_time += delta_time;
+            }
+
+            curr_state.player_pos = new_pos;
+        } else {
+            curr_state.player_pos += motion_delta;
+        }
+        curr_state.curr_jump_force = new_jump_force;
+
+        {
+            let mut renderer = ctx.module_mut::<MainRenderer>();
+            let camera = renderer.active_camera_mut();
+
+            // Handle rotation
+            let cursor_offset = self.cursor_rel * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
+
+            let mut rotation = *camera.rotation();
+            rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
+            rotation.y += cursor_offset.x;
+            // rotation.y += delta_time as f32;
+
+            let bobbing_offset = calc_bobbing_displacement(curr_state.walk_time, WALK_VELOCITY, rotation);
+
+            camera.set_rotation(rotation);
+            camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET + bobbing_offset);
+            self.cursor_rel = Vec2::new(0.0, 0.0);
+
+            curr_state.player_orientation = rotation;
+            curr_state.player_direction = camera.direction();
+        }
+
+        // Handle Look-at
+        {
+            let cam_pos = curr_state.player_pos + PLAYER_CAMERA_OFFSET;
+            let cam_dir = curr_state.player_direction;
+            let mut access = curr_state.overworld.access();
+            curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
+        }
+
+        curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
+        curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
+    }
 }
 
 impl EngineModule for MainApp {
@@ -540,127 +699,14 @@ impl EngineModule for MainApp {
         if self.is_main_menu_visible(ctx) {
             return;
         }
+
+        self.on_update_game_input(delta_time, ctx);
+
         let Some(main_state) = self.game_state.as_ref() else {
             return;
         };
 
-        let mut renderer = ctx.module_mut::<MainRenderer>();
-        let input = ctx.module::<Input>();
-
-        let kb = input.keyboard();
-        let mut curr_state = main_state.lock();
-        let mut vel_front_back = 0;
-        let mut vel_left_right = 0;
-        let mut vel_up_down = 0;
-
-        if kb.is_key_pressed(VirtualKeyCode::W) {
-            vel_front_back += 1;
-        }
-        if kb.is_key_pressed(VirtualKeyCode::S) {
-            vel_front_back -= 1;
-        }
-        if kb.is_key_pressed(VirtualKeyCode::A) {
-            vel_left_right -= 1;
-        }
-        if kb.is_key_pressed(VirtualKeyCode::D) {
-            vel_left_right += 1;
-        }
-        if kb.is_key_pressed(VirtualKeyCode::Space) {
-            if !curr_state.player_collision_enabled {
-                vel_up_down += 1;
-            }
-            curr_state.curr_jump_force = 8.0;
-        }
-        if kb.is_key_pressed(VirtualKeyCode::LShift) {
-            vel_up_down -= 1;
-        }
-
-        let prev_pos = curr_state.player_pos;
-        let ms = MOVEMENT_SPEED * delta_time;
-        let mut motion_delta = DVec3::default();
-
-        // Handle translation
-        motion_delta.y += vel_up_down as f64 * ms;
-        motion_delta += camera::move_xz(
-            curr_state.player_orientation,
-            vel_front_back as f64 * ms,
-            vel_left_right as f64 * ms,
-        );
-
-        let mut new_jump_force = curr_state.curr_jump_force;
-        let mut new_fall_time = curr_state.fall_time;
-
-        if curr_state.player_collision_enabled {
-            let mut blocks = curr_state.overworld.access();
-            if blocks
-                .get_block(&BlockPos::from_f64(&curr_state.player_pos))
-                .is_some()
-            {
-                // Free fall
-                motion_delta.y -= (base::physics::G_ACCEL * curr_state.fall_time) * delta_time;
-
-                // Jump force
-                motion_delta.y += new_jump_force * delta_time;
-            }
-            drop(blocks);
-
-            let new_pos =
-                curr_state
-                    .overworld
-                    .try_resolve_collisions(prev_pos, motion_delta, &curr_state.player_aabb);
-
-            if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
-                // Note: the ground is reached
-                new_jump_force = 0.0;
-                // println!("GROUND HIT");
-                new_fall_time = delta_time;
-            } else {
-                new_fall_time += delta_time;
-            }
-
-            curr_state.player_pos = new_pos;
-        } else {
-            curr_state.player_pos += motion_delta;
-        }
-        curr_state.fall_time = new_fall_time;
-        curr_state.curr_jump_force = new_jump_force;
-
-        {
-            let camera = renderer.active_camera_mut();
-
-            // Handle rotation
-            let cursor_offset = self.cursor_rel * (Self::MOUSE_SENSITIVITY * delta_time) as f32;
-
-            let mut rotation = *camera.rotation();
-            rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
-            rotation.y += cursor_offset.x;
-            // rotation.y += delta_time as f32;
-
-            camera.set_rotation(rotation);
-            camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET);
-            self.cursor_rel = Vec2::new(0.0, 0.0);
-
-            curr_state.player_orientation = rotation;
-            curr_state.player_direction = camera.direction();
-        }
-
-        // Handle Look-at
-        {
-            let cam_pos = curr_state.player_pos + PLAYER_CAMERA_OFFSET;
-            let cam_dir = curr_state.player_direction;
-            let mut access = curr_state.overworld.access();
-            curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
-        }
-
-        curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
-        curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
-
-        let overworld_renderer = Arc::clone(curr_state.overworld_renderer.as_ref().unwrap());
-
-        drop(curr_state);
-        drop(renderer);
-        drop(input);
-
+        let overworld_renderer = Arc::clone(main_state.lock().overworld_renderer.as_ref().unwrap());
         overworld_renderer
             .lock()
             .update_scene(&mut ctx.module_mut::<Scene>());
@@ -718,10 +764,13 @@ struct GameProcessState {
     player_direction: Vec3,
     player_aabb: AABB,
     fall_time: f64,
-    curr_jump_force: f64,
+    walk_time: f64,
+    curr_jump_force: f32,
     look_at_block: Option<(BlockPos, Facing)>,
     curr_block: AnyBlockState,
     set_water: bool,
+
+    player_motion: ObjectMotion,
 
     change_stream_pos: bool,
     player_collision_enabled: bool,
@@ -729,8 +778,6 @@ struct GameProcessState {
     do_set_block: bool,
     do_remove_block: bool,
 }
-
-const MOVEMENT_SPEED: f64 = 16.0;
 
 fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mutex<OverworldRenderer>>) {
     let curr_state = main_state.lock().clone();
