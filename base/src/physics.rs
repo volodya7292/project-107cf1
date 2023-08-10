@@ -11,7 +11,7 @@ use common::glm;
 use common::glm::{DVec3, I64Vec3, Vec3};
 
 pub const MOTION_EPSILON: f64 = 1e-10;
-pub const G_ACCEL: f64 = 14.0;
+pub const G_ACCEL: f64 = 12.0;
 
 pub fn calc_force(mass: f32, accel: Vec3) -> Vec3 {
     accel * mass

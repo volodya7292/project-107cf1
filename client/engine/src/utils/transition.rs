@@ -1,6 +1,4 @@
-use crate::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
 use crate::module::ui::color::Color;
-use crate::EngineContext;
 use std::ops::{Add, Mul, Sub};
 
 /// Maps linear time to function-specific time. In and out are in range [0; 1].

@@ -43,6 +43,7 @@ use engine::module::ui::reactive::UIReactor;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
+use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::utils::wsi::find_best_video_mode;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::EventLoop;
@@ -119,13 +120,13 @@ pub struct MainApp {
     ui_reactor: Lrc<UIReactor>,
 }
 
-const WALK_VELOCITY: f64 = 4.0;
+const WALK_VELOCITY: f64 = 3.0;
 
-fn calc_bobbing_displacement(walk_time: f64, walk_speed: f64, camera_orientation: Vec3) -> DVec3 {
+fn calc_bobbing_displacement(walk_time: f64, walk_vel: f64, camera_orientation: Vec3) -> DVec3 {
     const BOBBING_MAX_HEIGHT: f64 = 0.07;
     const BOBBING_WIDTH: f64 = 0.04;
 
-    let bobbing_freq: f64 = 0.7 * walk_speed;
+    let bobbing_freq: f64 = 0.7 * walk_vel;
 
     let wave = (walk_time * 2.0 * PI * bobbing_freq * 0.5).sin();
 
@@ -364,10 +365,11 @@ impl MainApp {
             res_map: Arc::clone(&self.res_map),
             player_pos,
             player_orientation: Default::default(),
-            player_direction: Default::default(),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
             walk_time: 0.0,
+            walk_velocity: Default::default(),
+            bobbing_offset: Default::default(),
             curr_jump_force: 0.0,
             look_at_block: None,
             block_set_cooldown: 0.0,
@@ -547,12 +549,14 @@ impl MainApp {
             vel_up_down -= 1;
         }
 
-        let horizontal_move_vec: Vec3 = glm::convert(
-            camera::move_xz(orientation, vel_front_back as f64, vel_left_right as f64) * WALK_VELOCITY,
-        );
-        let vertical_move_vel = Vec3::new(0.0, vel_up_down as f32, 0.0) * (WALK_VELOCITY as f32);
+        let horizontal_move: Vec3 = glm::convert(camera::move_xz(
+            orientation,
+            vel_front_back as f64,
+            vel_left_right as f64,
+        ));
+        let vertical_move = Vec3::new(0.0, vel_up_down as f32, 0.0);
 
-        horizontal_move_vec + vertical_move_vel
+        (horizontal_move + vertical_move) * (WALK_VELOCITY as f32)
     }
 
     fn on_update_game_input(&mut self, delta_time: f64, ctx: &EngineContext) {
@@ -566,14 +570,41 @@ impl MainApp {
         let mut curr_state = main_state.lock();
 
         if kb.is_key_pressed(VirtualKeyCode::Space) && curr_state.fall_time == 0.0 {
-            curr_state.curr_jump_force = (450.0 / delta_time) as f32;
+            curr_state.curr_jump_force = (380.0 / delta_time) as f32;
         }
 
-        let move_vel = Self::calc_player_velocity(kb, &curr_state, curr_state.player_orientation);
+        {
+            let move_vel = Self::calc_player_velocity(kb, &curr_state, curr_state.player_orientation);
+            curr_state
+                .walk_velocity
+                .retarget(TransitionTarget::new(move_vel, 0.07));
+            curr_state.walk_velocity.advance(delta_time);
+        }
+        let walk_vel = *curr_state.walk_velocity.current();
 
-        if move_vel.xz().amax() > 1e-6 {
+        if walk_vel.xz().magnitude() as f64 >= 0.5 {
+            // velocity is greater than 0.5 m/s => walking
+            let mut renderer = ctx.module_mut::<MainRenderer>();
+            let camera = renderer.active_camera_mut();
+
+            let bobbing_offset =
+                calc_bobbing_displacement(curr_state.walk_time, WALK_VELOCITY, *camera.rotation());
+
+            const SMOOTHING_TIME: f64 = 0.2;
+            let bobbing_offset_smoothed = glm::convert::<_, Vec3>(bobbing_offset)
+                * (curr_state.walk_time.min(SMOOTHING_TIME) / SMOOTHING_TIME) as f32;
+
+            curr_state.bobbing_offset.retarget(bobbing_offset_smoothed.into());
             curr_state.walk_time += delta_time;
+        } else {
+            if curr_state.walk_time != 0.0 {
+                curr_state.walk_time = 0.0;
+                curr_state
+                    .bobbing_offset
+                    .retarget(TransitionTarget::new(Vec3::zeros(), 0.2));
+            }
         }
+        curr_state.bobbing_offset.advance(delta_time);
 
         let motion_delta = {
             let player_mass = curr_state.player_motion.mass();
@@ -594,7 +625,7 @@ impl MainApp {
 
             curr_state.player_motion.update(total_force, delta_time as f32);
 
-            glm::convert::<_, DVec3>(curr_state.player_motion.velocity + move_vel) * delta_time
+            glm::convert::<_, DVec3>(curr_state.player_motion.velocity + walk_vel) * delta_time
         };
 
         curr_state.curr_jump_force = 0.0;
@@ -635,20 +666,23 @@ impl MainApp {
             rotation.y += cursor_offset.x;
             // rotation.y += delta_time as f32;
 
-            let bobbing_offset = calc_bobbing_displacement(curr_state.walk_time, WALK_VELOCITY, rotation);
+            let bobbing_offset: DVec3 = glm::convert(*curr_state.bobbing_offset.current());
 
             camera.set_rotation(rotation);
             camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET + bobbing_offset);
             self.cursor_rel = Vec2::new(0.0, 0.0);
 
             curr_state.player_orientation = rotation;
-            curr_state.player_direction = camera.direction();
         }
 
         // Handle Look-at
         {
-            let cam_pos = curr_state.player_pos + PLAYER_CAMERA_OFFSET;
-            let cam_dir = curr_state.player_direction;
+            let mut renderer = ctx.module_mut::<MainRenderer>();
+            let camera = renderer.active_camera_mut();
+
+            let cam_pos = camera.position();
+            let cam_dir = camera.direction();
+
             let mut access = curr_state.overworld.access();
             curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
         }
@@ -761,10 +795,11 @@ struct GameProcessState {
 
     player_pos: DVec3,
     player_orientation: Vec3,
-    player_direction: Vec3,
     player_aabb: AABB,
     fall_time: f64,
     walk_time: f64,
+    walk_velocity: AnimatedValue<Vec3>,
+    bobbing_offset: AnimatedValue<Vec3>,
     curr_jump_force: f32,
     look_at_block: Option<(BlockPos, Facing)>,
     curr_block: AnyBlockState,
