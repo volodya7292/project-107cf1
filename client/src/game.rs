@@ -39,6 +39,7 @@ use engine::module::input::{Input, Keyboard};
 use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
+use engine::module::ui::color::Color;
 use engine::module::ui::reactive::UIReactor;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
@@ -199,7 +200,7 @@ impl MainApp {
             *ui_renderer.root_ui_entity()
         };
 
-        let ui_reactor = { UIReactor::new(move |ctx| ui::ui_root(ctx, ui_root_element)) };
+        let ui_reactor = { UIReactor::new(move |ctx| ui::overlay_root(ctx, ui_root_element)) };
 
         let game = MainApp {
             resources: Arc::clone(&resources),
@@ -650,6 +651,7 @@ impl MainApp {
 
             curr_state.player_pos = new_pos;
         } else {
+            curr_state.player_motion.velocity = Vec3::zeros();
             curr_state.player_pos += motion_delta;
         }
         curr_state.curr_jump_force = new_jump_force;
@@ -685,6 +687,25 @@ impl MainApp {
 
             let mut access = curr_state.overworld.access();
             curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
+        }
+
+        // Check whether the head is in liquid and set appropriate color filter
+        {
+            let reactor = self.ui_reactor();
+            let filter_state = reactor.root_state(ui_root_states::GAME_COLOR_FILTER).unwrap();
+            let mut access = curr_state.overworld.access();
+
+            let block_pos = BlockPos::from_f64(&(curr_state.player_pos + PLAYER_CAMERA_OFFSET));
+
+            if let Some(data) = access.get_block(&block_pos) {
+                let liquid_present = !data.liquid_state().is_empty();
+
+                if liquid_present {
+                    filter_state.update(Color::new(0.0, 0.0, 1.0, 0.4));
+                } else {
+                    filter_state.update(Color::TRANSPARENT);
+                }
+            }
         }
 
         curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);

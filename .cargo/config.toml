@@ -4,7 +4,7 @@ build.incremental = true
 rustflags = "-C target-cpu=x86-64 -C target-feature=sse2,+sse3,+avx2"
 
 [profile.dev]
-opt-level = 2
+opt-level = 1
 
 [profile.release]
 opt-level = 3

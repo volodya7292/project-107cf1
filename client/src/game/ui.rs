@@ -1,4 +1,5 @@
 use crate::game::{EngineCtxGameExt, MainApp};
+use crate::rendering::ui::backgrounds::game_effects;
 use crate::rendering::ui::container::{
     background, container, container_props, expander, height_spacer, width_spacer, ContainerProps,
 };
@@ -32,6 +33,7 @@ pub mod ui_root_states {
 
     pub const CURR_MENU_TAB: &'static str = "curr_menu_tab";
     pub const IN_GAME_PROCESS: &'static str = "in_game_process";
+    pub const GAME_COLOR_FILTER: &'static str = "game_color_filter";
     pub const WORLD_NAME_LIST: &'static str = "world_name_list";
 }
 
@@ -541,14 +543,8 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     );
 }
 
-pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
-    ctx.request_state(STATE_ENTITY_ID, || root_entity);
-
-    ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
-    ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
-    let active_modal_views_state =
-        ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
-    ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
+fn ui_root(ctx: &mut UIScopeContext) {
+    let active_modal_views_state = ctx.root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS);
 
     ctx.once(make_static_id!(), |ctx| {
         ctx.ctx().dispatch_callback(|ctx, _| {
@@ -556,7 +552,7 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         });
     });
 
-    let menu_visible = ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
+    let menu_visible = ctx.root_state(ui_root_states::MENU_VISIBLE);
     let menu_visible = ctx.subscribe(&menu_visible);
     remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
 
@@ -580,12 +576,11 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     container(
         make_static_id!(),
         ctx,
-        ContainerProps {
-            layout: UILayoutC::row()
+        container_props().layout(
+            UILayoutC::row()
                 .with_grow()
                 .with_visibility(Visibility::Opacity(*menu_opacity)),
-            ..Default::default()
-        },
+        ),
         move |ctx, ()| {
             let curr_nav_view = ctx.subscribe(&ctx.root_state::<&str>(ui_root_states::CURR_MENU_TAB));
 
@@ -647,4 +642,26 @@ pub fn ui_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             },
         );
     }
+}
+
+pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
+    ctx.request_state(STATE_ENTITY_ID, || root_entity);
+
+    ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
+    ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
+    ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
+    ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
+    ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
+
+    let game_color_filter_state = ctx.request_state(ui_root_states::GAME_COLOR_FILTER, || Color::TRANSPARENT);
+    let game_color_filter = ctx.subscribe(&game_color_filter_state);
+
+    container(
+        make_static_id!(),
+        ctx,
+        container_props()
+            .layout(UILayoutC::row().with_grow())
+            .background(Some(game_effects(*game_color_filter, 0.1))),
+        move |ctx, ()| ui_root(ctx),
+    );
 }

@@ -49,11 +49,49 @@ mod fancy {
     }
 }
 
-pub fn register(ctx: &EngineContext) {
-    fancy::register(ctx);
-}
+mod game_effects {
+    use super::*;
+    use common::glm::Vec4;
 
-pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.2, 0.3, 0.2);
+    pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
+
+    #[derive(Default, Copy, Clone)]
+    #[repr(C)]
+    pub struct UniformData {
+        pub filter: Vec4,
+        // [0;1]
+        pub pain_factor: f32,
+    }
+
+    pub fn register(ctx: &EngineContext) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+        let scene = ctx.module_mut::<Scene>();
+
+        let vertex = renderer
+            .device()
+            .create_vertex_shader(
+                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+                &[],
+                "ui_rect.vert",
+            )
+            .unwrap();
+        let pixel = renderer
+            .device()
+            .create_pixel_shader(
+                include_bytes!("../../../res/shaders/game_effects_background.frag.spv"),
+                "game_effects_background.frag",
+            )
+            .unwrap();
+
+        let mat_pipe_id = renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        );
+
+        scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
+    }
+}
 
 pub fn fancy(color: Color) -> ContainerBackground {
     ContainerBackground::new_raw(
@@ -63,3 +101,20 @@ pub fn fancy(color: Color) -> ContainerBackground {
         },
     )
 }
+
+pub fn game_effects(filter: Color, pain_factor: f32) -> ContainerBackground {
+    ContainerBackground::new_raw(
+        game_effects::MATERIAL_PIPE_RES_NAME,
+        game_effects::UniformData {
+            filter: filter.into_raw(),
+            pain_factor,
+        },
+    )
+}
+
+pub fn register(ctx: &EngineContext) {
+    fancy::register(ctx);
+    game_effects::register(ctx);
+}
+
+pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.2, 0.3, 0.2);
