@@ -13,7 +13,7 @@ rand_distr = "0.4"
 approx = "0.5"
 entity_data = "1.11"
 #entity_data = { path = "../../entity_data" }
-smallvec = "1.10"
+smallvec = "1.11"
 bit-vec = "0.6"
 fixedbitset = "0.4"
 replace_with = "0.1"

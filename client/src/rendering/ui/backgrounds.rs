@@ -97,7 +97,7 @@ pub fn fancy(color: Color) -> ContainerBackground {
     ContainerBackground::new_raw(
         fancy::MATERIAL_PIPE_RES_NAME,
         fancy::UniformData {
-            background_color: color.into_raw(),
+            background_color: color.into_raw_linear(),
         },
     )
 }
@@ -106,7 +106,7 @@ pub fn game_effects(filter: Color, pain_factor: f32) -> ContainerBackground {
     ContainerBackground::new_raw(
         game_effects::MATERIAL_PIPE_RES_NAME,
         game_effects::UniformData {
-            filter: filter.into_raw(),
+            filter: filter.into_raw_linear(),
             pain_factor,
         },
     )
@@ -117,4 +117,4 @@ pub fn register(ctx: &EngineContext) {
     game_effects::register(ctx);
 }
 
-pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.2, 0.3, 0.2);
+pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.4, 0.5, 0.4);

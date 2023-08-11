@@ -17,7 +17,11 @@ impl<T: Copy + Add<Output = Self> + Sub + Mul<f32, Output = Self>> Interpolatabl
 
 impl Interpolatable for Color {
     fn interpolate(a: Self, b: Self, f: f32) -> Self {
-        Color::from(Interpolatable::interpolate(a.into_raw(), b.into_raw(), f))
+        Color::from(Interpolatable::interpolate(
+            a.into_raw_linear(),
+            b.into_raw_linear(),
+            f,
+        ))
     }
 }
 

@@ -891,7 +891,7 @@ impl TextRenderer {
                     Some(GlyphInstance {
                         glyph_index: glyph_loc.index,
                         glyph_size,
-                        color: seq.style.color().into_raw(),
+                        color: seq.style.color().into_raw_linear(),
                         offset: info.offset,
                         scale: info.scale,
                     })

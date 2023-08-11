@@ -34,7 +34,7 @@ pub fn fancy_button(
             let text_color2 = text_color.state();
             let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
                 const MUL_FACTOR: f32 = 3.0;
-                let mut active_color = curr_text_color.into_raw();
+                let mut active_color = curr_text_color.into_raw_linear();
                 active_color.x *= MUL_FACTOR;
                 active_color.y *= MUL_FACTOR;
                 active_color.z *= MUL_FACTOR;

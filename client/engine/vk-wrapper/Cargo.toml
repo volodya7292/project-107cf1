@@ -7,14 +7,14 @@ edition = "2021"
 [dependencies]
 common = { path = "../../../common" }
 lazy_static = "1.4"
-smallvec = { version = "1.10", features = ["const_generics"] }
+smallvec = { version = "1.11", features = ["const_generics"] }
 ash = "0.37"
 raw-window-handle = "0.5"
 spirv_cross = { version = "0.23", features = ["glsl"] }
 vma = { path = "vma" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.22"
+core-graphics = "0.23"
 core-foundation = "0.9"
-cocoa = "0.24"
+cocoa = "0.25"
 objc = "0.2"

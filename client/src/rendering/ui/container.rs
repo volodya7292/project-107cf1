@@ -146,7 +146,7 @@ pub mod background {
         ContainerBackground::new_raw(
             SOLID_COLOR_MATERIAL_PIPE_RES_NAME,
             SolidColorUniformData {
-                color: color.into_raw(),
+                color: color.into_raw_linear(),
             },
         )
     }

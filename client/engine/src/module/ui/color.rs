@@ -1,5 +1,6 @@
-use common::glm::Vec4;
+use common::glm::{Vec3, Vec4};
 
+/// An sRGB-color.
 /// `r`,`g`,`b` are in range [0; inf]; `a` is in range [0; 1].
 #[derive(Debug, Copy, Clone, Default, PartialEq)]
 pub struct Color(Vec4);
@@ -16,6 +17,12 @@ impl Color {
 
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self::new(r, g, b, 1.0)
+    }
+
+    pub fn from_srgb(r: f32, g: f32, b: f32) -> Self {
+        let rgb = Vec3::new(r, g, b).map(|v| if v < 1.0 { v.powf(2.2) } else { v });
+        let rgba = rgb.push(1.0);
+        Self(rgba)
     }
 
     pub fn from_hex(hex: u32) -> Self {
@@ -43,8 +50,13 @@ impl Color {
         self
     }
 
-    pub fn into_raw(self) -> Vec4 {
-        self.0
+    pub fn alpha(&self) -> f32 {
+        self.0.w
+    }
+
+    pub fn into_raw_linear(self) -> Vec4 {
+        let rgb = self.0.xyz().map(|v| if v < 1.0 { v.powf(2.2) } else { v });
+        rgb.push(self.alpha())
     }
 }
 

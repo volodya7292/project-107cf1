@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 const TAB_TITLE_COLOR: Color = Color::rgb(0.5, 1.8, 0.5);
 // const BUTTON_TEXT_COLOR: Color = Color::rgb(3.0, 6.0, 3.0);
-const BUTTON_TEXT_COLOR: Color = Color::rgb(0.8, 2.0, 0.8);
+const BUTTON_TEXT_COLOR: Color = Color::rgb(0.9, 2.0, 0.9);
 const TEXT_COLOR: Color = Color::grayscale(0.9);
 
 pub mod ui_root_states {
@@ -135,12 +135,9 @@ fn update_overworlds_list(ctx: &EngineContext) {
 fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
     let mut app = ctx.app();
     app.enter_overworld(ctx, overworld_name);
+    app.show_main_menu(ctx, false);
 
     let reactor = app.ui_reactor();
-    reactor
-        .root_state(ui_root_states::MENU_VISIBLE)
-        .unwrap()
-        .update(false);
     reactor
         .root_state(ui_root_states::CURR_MENU_TAB)
         .unwrap()
@@ -325,7 +322,6 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
         },
         move |ctx, ()| {
             let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
-            let menu_visible_state = ctx.root_state::<bool>(ui_root_states::MENU_VISIBLE);
 
             expander(make_static_id!(), ctx, 1.0);
 
@@ -341,7 +337,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                     ctx,
                     "CONTINUE",
                     Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
-                        menu_visible_state.update(false);
+                        ctx.app().show_main_menu(ctx, false);
                     }),
                 );
             } else {
