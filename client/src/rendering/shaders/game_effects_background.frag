@@ -19,6 +19,8 @@ layout(location = 0) in Input {
     vec2 texCoord;
 } vs_in;
 
+const vec3 PAIN_COLOR = SRGB2LIN(vec3(0.65, 0.12, 0.12));
+
 void main() {
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
     if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size * info.scale_factor)) {
@@ -36,7 +38,7 @@ void main() {
     vec4 finalColor = filter_color;
     finalColor.a *= opacity;
 
-    finalColor = mix(finalColor, vec4(0.4, 0.01, 0.01, 1.0), pxPainFactor * pain_factor);
+    finalColor = mix(finalColor, vec4(PAIN_COLOR, 1.0), pxPainFactor * pain_factor);
 
     writeOutput(finalColor);
 }

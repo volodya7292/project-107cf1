@@ -279,3 +279,7 @@ void calc_trilinear_unit_coeffs(vec3 p, out float v[8]) {
 float linearize_depth(float d, float z_near) {
     return z_near / (1.0 - d);
 }
+
+// Converts srgb color (usually used by devs) to linear (for correct calculations/interpolations)
+#define SRGB2LIN(rgb) pow(rgb, vec3(2.2))
+
