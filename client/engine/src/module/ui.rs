@@ -663,7 +663,7 @@ impl UIRenderer {
     }
 
     /// Outputs objects that contain the specified point to the specified closure.
-    /// If the closure returns `true` the traversal is stopped.
+    /// If the closure returns `true` the traversal is stopped. Iterates children first.
     pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
         &self,
         point: &Vec2,

@@ -17,7 +17,7 @@ pub struct UIScope {
     children_func: Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>,
     on_remove_func: fn(&EngineContext, &UIScope),
     children: Vec<ScopeId>,
-    states: HashMap<StateId, Arc<dyn Any + Send + Sync>>,
+    states: HashMap<StateId, Arc<Mutex<Arc<dyn Any + Send + Sync>>>>,
     local_vars: HashMap<String, Rc<dyn Any>>,
     subscribed_to: HashSet<StateUID>,
 }
@@ -30,7 +30,9 @@ impl UIScope {
     }
 
     pub fn state<T: Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
-        self.states.get(name).map(|v| v.clone().downcast::<T>().unwrap())
+        self.states
+            .get(name)
+            .map(|v| v.lock().clone().downcast::<T>().unwrap())
     }
 }
 
@@ -98,13 +100,13 @@ impl UIReactor {
         for (uid, modifiers) in modified_states {
             let Some(scope) = self
                 .scopes
-                .get_mut(uid.scope_id()) else {
+                .get(uid.scope_id()) else {
                 continue;
             };
-            let state_value = scope.states.get_mut(uid.state_id()).unwrap();
+            let mut state_value = scope.states.get(uid.state_id()).unwrap().lock();
 
             for modifier in modifiers {
-                *state_value = modifier(state_value);
+                *state_value = modifier(&state_value);
             }
 
             if let Some(subs) = self.state_subscribers.get(&uid) {
@@ -149,7 +151,7 @@ impl UIReactor {
     ) -> Option<ReactiveState<T>> {
         let scope = self.scopes.get(&scope_id)?;
         let state = scope.states.get(&state_id)?;
-        let value = state.clone().downcast::<T>().unwrap();
+        let value = state.clone(); //.lock().downcast::<T>().unwrap();
 
         Some(ReactiveState {
             owner: scope_id,
@@ -268,7 +270,7 @@ pub struct ReactiveState<T> {
     owner: ScopeId,
     name: String,
     modified_states: sync::Weak<Mutex<ModifiedStates>>,
-    value: Arc<T>,
+    value: Arc<Mutex<Arc<dyn Any + Send + Sync>>>,
     _ty: PhantomData<T>,
 }
 
@@ -295,8 +297,8 @@ impl<T: Send + Sync + 'static> ReactiveState<T> {
         self.update_with(move |_| new_value);
     }
 
-    pub fn value(&self) -> &T {
-        &self.value
+    pub fn value(&self) -> Arc<T> {
+        self.value.lock().clone().downcast::<T>().unwrap()
     }
 }
 
@@ -318,13 +320,13 @@ impl<T> PartialEq for ReactiveState<T> {
     }
 }
 
-impl<T: Default> Default for ReactiveState<T> {
+impl<T: Default + Send + Sync + 'static> Default for ReactiveState<T> {
     fn default() -> Self {
         Self {
             owner: "".to_string(),
             name: "".to_string(),
             modified_states: Default::default(),
-            value: Default::default(),
+            value: Arc::new(Mutex::new(Arc::new(T::default()))),
             _ty: Default::default(),
         }
     }
@@ -332,6 +334,7 @@ impl<T: Default> Default for ReactiveState<T> {
 
 pub struct StateReceiver<T> {
     state: ReactiveState<T>,
+    curr_value: Arc<T>,
     _ty: PhantomData<T>,
     _not_sync_not_send: PhantomData<*const u8>,
 }
@@ -346,7 +349,7 @@ impl<T: 'static> Deref for StateReceiver<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.state.value
+        &self.curr_value
     }
 }
 
@@ -418,13 +421,13 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         let state_value = scope
             .states
             .entry(name.clone())
-            .or_insert_with(|| Arc::new(init()));
+            .or_insert_with(|| Arc::new(Mutex::new(Arc::new(init()))));
 
         ReactiveState {
             owner: self.scope_id.clone(),
             name,
             modified_states: Arc::downgrade(&self.reactor.modified_states),
-            value: state_value.clone().downcast::<T>().unwrap(),
+            value: state_value.clone(),
             _ty: Default::default(),
         }
     }
@@ -441,12 +444,11 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
             .insert(self.scope_id.clone());
 
         let latest_value = &self.reactor.scopes[&state.owner].states[&state.name];
-
-        let mut state = state.clone();
-        state.value = latest_value.clone().downcast::<T>().unwrap();
+        let state = state.clone();
 
         StateReceiver {
             state,
+            curr_value: latest_value.lock().clone().downcast::<T>().unwrap(),
             _ty: Default::default(),
             _not_sync_not_send: Default::default(),
         }

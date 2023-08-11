@@ -68,6 +68,11 @@ impl<P> ContainerProps<P> {
         self
     }
 
+    pub fn callbacks(mut self, callbacks: UICallbacks) -> Self {
+        self.callbacks = callbacks;
+        self
+    }
+
     pub fn background(mut self, background: Option<ContainerBackground>) -> Self {
         self.background = background;
         self
@@ -99,6 +104,17 @@ impl<P: Default> Default for ContainerProps<P> {
 
 pub fn container_props<P: Default>() -> ContainerProps<P> {
     Default::default()
+}
+
+pub fn container_props_init<P>(children_props: P) -> ContainerProps<P> {
+    ContainerProps {
+        layout: Default::default(),
+        callbacks: Default::default(),
+        background: None,
+        opacity: 0.0,
+        corner_radius: 0.0,
+        children_props,
+    }
 }
 
 pub mod background {
@@ -198,14 +214,14 @@ where
                     let mut parent = scene.entry(&parent_entity);
                     parent
                         .get_mut::<Relation>()
-                        .set_child_order(entity_state.value(), Some(child_num as u32));
+                        .set_child_order(&entity_state.value(), Some(child_num as u32));
                 }
 
                 let opacity = parent_opacity * props.layout.visibility.opacity();
                 scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
                 let mut scene = ctx.scene();
-                let mut obj = scene.object::<UIObject<()>>(&entity_state.value().into());
+                let mut obj = scene.object::<UIObject<()>>(&(*entity_state.value()).into());
                 *obj.get_mut::<MeshRenderConfigC>() = new_render_config;
                 *obj.layout_mut() = props.layout;
 

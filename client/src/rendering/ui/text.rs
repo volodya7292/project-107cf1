@@ -299,7 +299,7 @@ pub mod reactive {
                         let opacity = parent_opacity;
                         scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
-                        UIText::modify(&entity_state.value().into(), scope_ctx.ctx(), |state| {
+                        UIText::modify(&(*entity_state.value()).into(), scope_ctx.ctx(), |state| {
                             state.text = styled_string;
                             state.wrap = wrap;
                             state.h_align = align;
@@ -308,7 +308,7 @@ pub mod reactive {
                         {
                             let mut scene = ctx.scene();
 
-                            let mut obj = scene.object::<UIText>(&entity_state.value().into());
+                            let mut obj = scene.object::<UIText>(&(*entity_state.value()).into());
                             let raw_text_entity = obj.state().raw_text_entity;
                             drop(obj);
 
@@ -321,7 +321,7 @@ pub mod reactive {
                             );
                         }
 
-                        on_size_update(entity_state.value(), scope_ctx.ctx());
+                        on_size_update(&entity_state.value(), scope_ctx.ctx());
                     },
                     move |ctx, scope| {
                         let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

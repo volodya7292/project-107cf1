@@ -3,13 +3,16 @@ pub mod container;
 pub mod fancy_button;
 pub mod fancy_text_input;
 pub mod image;
+pub mod scrollable_container;
 pub mod text;
 pub mod text_input;
 
 use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
-use engine::ecs::component::ui::{BasicEventCallback, ClickedCallback, KeyPressedCallback, UIEventHandlerC};
+use engine::ecs::component::ui::{
+    BasicEventCallback, ClickedCallback, KeyPressedCallback, ScrollCallback, UIEventHandlerC,
+};
 use engine::module::EngineModule;
 use engine::EngineContext;
 use std::sync::Arc;
@@ -31,6 +34,7 @@ pub struct UICallbacks {
     pub on_click: Option<ClickedCallback>,
     pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_scroll: Option<ScrollCallback>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
@@ -67,6 +71,11 @@ impl UICallbacks {
         self
     }
 
+    pub fn with_on_scroll(mut self, on_scroll: ScrollCallback) -> Self {
+        self.on_scroll = Some(on_scroll);
+        self
+    }
+
     pub fn with_on_focus_in(mut self, on_focus_in: Arc<dyn BasicEventCallback<Output = ()>>) -> Self {
         self.on_focus_in = Some(on_focus_in);
         self
@@ -96,6 +105,7 @@ impl Default for UICallbacks {
             on_click: None,
             on_cursor_enter: None,
             on_cursor_leave: None,
+            on_scroll: None,
             on_focus_in: None,
             on_focus_out: None,
             on_key_press: None,
@@ -120,6 +130,7 @@ impl From<UICallbacks> for UIEventHandlerC {
             on_cursor_leave: value.on_cursor_leave,
             on_mouse_press: None,
             on_mouse_release: None,
+            on_scroll: value.on_scroll,
             on_key_press: value.on_key_press,
             on_focus_in: value.on_focus_in,
             on_focus_out: value.on_focus_out,

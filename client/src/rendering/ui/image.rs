@@ -286,11 +286,11 @@ pub mod reactive {
                         let mut parent = scene.entry(&parent_entity);
                         parent
                             .get_mut::<Relation>()
-                            .set_child_order(entity_state.value(), Some(child_num as u32));
+                            .set_child_order(&entity_state.value(), Some(child_num as u32));
                     }
 
                     let mut scene = ctx.scene();
-                    let mut obj = scene.object::<UIImage>(&entity_state.value().into());
+                    let mut obj = scene.object::<UIImage>(&(*entity_state.value()).into());
 
                     let opacity = *parent_opacity;
                     scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);

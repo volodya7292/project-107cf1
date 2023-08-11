@@ -273,6 +273,11 @@ impl UILayoutC {
         }
     }
 
+    pub fn with_content_flow(mut self, flow: ContentFlow) -> Self {
+        self.content_flow = flow;
+        self
+    }
+
     pub fn with_sizing(mut self, sizing: [Sizing; 2]) -> Self {
         self.sizing = sizing;
         self
@@ -458,6 +463,7 @@ macro_rules! define_callback {
 }
 
 pub type ClickedCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
+pub type ScrollCallback = Arc<dyn Fn(&EntityId, &EngineContext, f64) + Send + Sync>;
 
 define_callback!(BasicEventCallback(&EntityId, &EngineContext));
 define_callback!(KeyPressedCallback(&EntityId, &EngineContext, WSIKeyboardInput));
@@ -467,6 +473,7 @@ pub struct UIEventHandlerC {
     pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_mouse_press: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_mouse_release: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_scroll: Option<ScrollCallback>,
     pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
@@ -483,6 +490,7 @@ impl Default for UIEventHandlerC {
             on_cursor_leave: None,
             on_mouse_press: None,
             on_mouse_release: None,
+            on_scroll: None,
             on_key_press: None,
             on_focus_in: None,
             on_focus_out: None,

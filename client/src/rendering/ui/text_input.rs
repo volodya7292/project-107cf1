@@ -160,7 +160,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     } else {
                         f32::INFINITY
                     },
-                    pos - text_global_pos_state.value(),
+                    pos - *text_global_pos_state.value(),
                 );
 
                 if let Some(char_idx) = char_idx {

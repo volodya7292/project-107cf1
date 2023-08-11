@@ -7,6 +7,7 @@ use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
 use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
+use crate::rendering::ui::scrollable_container::scrollable_container;
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
 use crate::rendering::ui::STATE_ENTITY_ID;
 use common::glm::Vec2;
@@ -278,13 +279,13 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, overworld_name: String) 
 }
 
 fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
-    container(
+    scrollable_container(
         local_id,
         ctx,
         ContainerProps {
             layout: UILayoutC::column()
                 .with_width(Sizing::Grow(1.0))
-                .with_height(Sizing::FitContent),
+                .with_height(Sizing::Grow(2.0)),
             ..Default::default()
         },
         |ctx, ()| {
@@ -419,16 +420,16 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 let mut app = ctx.app();
                 let overworld_name = name_state.value();
 
-                if MainApp::make_world_path(overworld_name).exists() {
+                if MainApp::make_world_path(&overworld_name).exists() {
                     error_state.update(format!(
                         "Overworld with name \"{}\" already exists!",
                         overworld_name
                     ));
                 } else {
-                    app.create_overworld(overworld_name, seed_state.value());
+                    app.create_overworld(&overworld_name, &seed_state.value());
                     drop(app);
                     update_overworlds_list(ctx);
-                    load_overworld(ctx, overworld_name);
+                    load_overworld(ctx, &overworld_name);
                 }
             };
 

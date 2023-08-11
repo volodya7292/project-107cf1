@@ -171,6 +171,44 @@ fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
     }
 }
 
+fn global_on_scroll(ctx: &EngineContext, delta: f64) {
+    let curr_mouse_pos = {
+        let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
+        interaction_manager.curr_mouse_position
+    };
+
+    let scroll_entity = {
+        let mut scene = ctx.module_mut::<Scene>();
+        let ui_renderer = ctx.module_mut::<UIRenderer>();
+        let mut scroll_entity = EntityId::NULL;
+        ui_renderer.traverse_at_point(&curr_mouse_pos, &mut scene, |entry| {
+            let Some(handler) = entry.get_checked::<UIEventHandlerC>() else {
+                return false;
+            };
+            let found = handler.enabled && handler.on_scroll.is_some();
+            if found {
+                scroll_entity = *entry.entity();
+            }
+            found
+        });
+        scroll_entity
+    };
+
+    if scroll_entity == EntityId::NULL {
+        return;
+    }
+
+    let mut scene = ctx.module_mut::<Scene>();
+    let entry = scene.entry(&scroll_entity);
+    let ui_handler = entry.get::<UIEventHandlerC>();
+
+    if let Some(handler) = ui_handler.on_scroll.clone() {
+        drop(entry);
+        drop(scene);
+        handler(&scroll_entity, ctx, delta);
+    }
+}
+
 fn global_on_keyboard_input(ctx: &EngineContext, input: WSIKeyboardInput) {
     let mut scene = ctx.module_mut::<Scene>();
     let interaction_manager = ctx.module::<UIInteractionManager>();
@@ -252,6 +290,11 @@ impl EngineModule for UIInteractionManager {
                         global_on_mouse_release(ctx);
                     });
                 }
+            }
+            WSIEvent::MouseWheel { delta } => {
+                ctx.dispatch_callback(move |ctx, _| {
+                    global_on_scroll(ctx, delta);
+                });
             }
             WSIEvent::KeyboardInput { input } => {
                 ctx.dispatch_callback(move |ctx, _| {

@@ -1,7 +1,9 @@
 use crate::utils::wsi::vec2::WSizingInfo;
 use crate::utils::wsi::{WSIPosition, WSISize};
-use common::glm::DVec2;
-use winit::event::{DeviceEvent, ElementState, ModifiersState, MouseButton, VirtualKeyCode};
+use common::glm::{DVec2, DVec3};
+use winit::event::{
+    DeviceEvent, ElementState, ModifiersState, MouseButton, MouseScrollDelta, VirtualKeyCode,
+};
 use winit::window::Window;
 
 #[derive(Copy, Clone)]
@@ -22,6 +24,9 @@ pub enum WSIEvent {
     },
     MouseMotion {
         delta: DVec2,
+    },
+    MouseWheel {
+        delta: f64,
     },
     KeyboardInput {
         input: WSIKeyboardInput,
@@ -76,6 +81,18 @@ impl WSIEvent {
                 },
                 WWindowEvent::ReceivedCharacter(ch) => WSIEvent::KeyboardInput {
                     input: WSIKeyboardInput::Char(*ch),
+                },
+                WWindowEvent::MouseWheel { delta, .. } => WSIEvent::MouseWheel {
+                    delta: {
+                        match delta {
+                            MouseScrollDelta::LineDelta(_, y) => *y as f64,
+                            MouseScrollDelta::PixelDelta(delta) => {
+                                WSIPosition::<f32>::from_raw((delta.x as f32, delta.y as f32), sizing_info)
+                                    .logical()
+                                    .y as f64
+                            }
+                        }
+                    },
                 },
                 _ => return None,
             };
