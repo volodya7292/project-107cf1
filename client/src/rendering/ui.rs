@@ -11,7 +11,8 @@ use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
 use engine::ecs::component::ui::{
-    BasicEventCallback, ClickedCallback, KeyPressedCallback, ScrollCallback, UIEventHandlerC,
+    BasicEventCallback, ClickedCallback, KeyPressedCallback, ScrollCallback, SizeUpdateCallback,
+    UIEventHandlerC,
 };
 use engine::module::EngineModule;
 use engine::EngineContext;
@@ -38,7 +39,7 @@ pub struct UICallbacks {
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
-    pub on_size_update: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_size_update: Option<SizeUpdateCallback>,
 }
 
 impl UICallbacks {
@@ -91,7 +92,7 @@ impl UICallbacks {
         self
     }
 
-    pub fn with_on_size_update(mut self, on_size_update: Arc<dyn BasicEventCallback<Output = ()>>) -> Self {
+    pub fn with_on_size_update(mut self, on_size_update: SizeUpdateCallback) -> Self {
         self.on_size_update = Some(on_size_update);
         self
     }

@@ -213,7 +213,7 @@ impl ReadOnlyOverworldAccessorImpl for OverworldAccessor {
 
                     for aabb in model.aabbs() {
                         if let Some(inter) = aabb
-                            .translate(curr_block_pos)
+                            .translate(&curr_block_pos)
                             .ray_intersection(ray_origin, ray_dir)
                         {
                             let len = (inter.point() - ray_origin).magnitude();

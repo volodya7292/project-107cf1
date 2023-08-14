@@ -1,6 +1,6 @@
 use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
-use common::glm::Vec4;
+use common::glm::{Vec2, Vec4};
 use common::memoffset::offset_of;
 use common::scene::relation::Relation;
 use engine::ecs::component::render_config::RenderLayer;
@@ -168,7 +168,7 @@ pub mod background {
     }
 }
 
-fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
+fn on_size_update(entity: &EntityId, ctx: &EngineContext, _new_size: Vec2) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.object::<UIObject<()>>(&entity.into());
 

@@ -52,6 +52,7 @@ mod fancy {
 mod game_effects {
     use super::*;
     use common::glm::Vec4;
+    use engine::vkw::utils::GLSLBool;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -61,6 +62,7 @@ mod game_effects {
         pub filter: Vec4,
         // [0;1]
         pub pain_factor: f32,
+        pub vision_obstructed: GLSLBool,
     }
 
     pub fn register(ctx: &EngineContext) {
@@ -102,12 +104,13 @@ pub fn fancy(color: Color) -> ContainerBackground {
     )
 }
 
-pub fn game_effects(filter: Color, pain_factor: f32) -> ContainerBackground {
+pub fn game_effects(filter: Color, pain_factor: f32, vision_obstructed: bool) -> ContainerBackground {
     ContainerBackground::new_raw(
         game_effects::MATERIAL_PIPE_RES_NAME,
         game_effects::UniformData {
             filter: filter.into_raw_linear(),
             pain_factor,
+            vision_obstructed: vision_obstructed as u32,
         },
     )
 }

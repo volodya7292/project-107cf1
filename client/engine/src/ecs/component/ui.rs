@@ -464,6 +464,7 @@ macro_rules! define_callback {
 
 pub type ClickedCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
 pub type ScrollCallback = Arc<dyn Fn(&EntityId, &EngineContext, f64) + Send + Sync>;
+pub type SizeUpdateCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
 
 define_callback!(BasicEventCallback(&EntityId, &EngineContext));
 define_callback!(KeyPressedCallback(&EntityId, &EngineContext, WSIKeyboardInput));
@@ -478,7 +479,7 @@ pub struct UIEventHandlerC {
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_click: Option<ClickedCallback>,
-    pub on_size_update: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_size_update: Option<SizeUpdateCallback>,
     pub focusable: bool,
     pub enabled: bool,
 }
@@ -514,7 +515,7 @@ impl UIEventHandlerC {
         }
     }
 
-    pub fn add_on_size_update(&mut self, handler: Arc<dyn BasicEventCallback<Output = ()>>) {
+    pub fn add_on_size_update(&mut self, handler: SizeUpdateCallback) {
         self.on_size_update = Some(self.on_size_update.take().map_or_else(|| handler, |v| v));
     }
 }

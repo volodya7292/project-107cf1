@@ -74,21 +74,21 @@ impl UIState for TextState {
     }
 }
 
-fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
+fn on_size_update(entity: &EntityId, ctx: &EngineContext, new_size: Option<Vec2>) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.entry(entity);
     let state = entry.get_mut::<TextState>().clone();
 
     let cache = entry.get::<UILayoutCacheC>();
     let rect_data = *cache.normalized_clip_rect();
-    let final_size = *cache.final_size();
+    let new_size = new_size.unwrap_or(Vec2::new(f32::INFINITY, 0.0));
 
     let text_block_size = {
         let text_renderer = ctx.module_mut::<TextRenderer>();
         text_renderer.calculate_minimum_text_size(
             state.text.data(),
             state.text.style(),
-            if state.wrap { final_size.x } else { f32::INFINITY },
+            if state.wrap { new_size.x } else { f32::INFINITY },
         )
     };
 
@@ -104,7 +104,7 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
     let mut raw_text_entry = scene.entry(&state.raw_text_entity);
     let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
 
-    simple_text.max_width = if state.wrap { final_size.x } else { f32::INFINITY };
+    simple_text.max_width = if state.wrap { new_size.x } else { f32::INFINITY };
 
     let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
@@ -191,7 +191,6 @@ pub trait UITextImpl {
         let wrapper_obj = UIObject::new_raw(
             UILayoutC::new()
                 .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
-                .with_grow()
                 .with_width(Sizing::ParentBased(wrapper_width_calc))
                 .with_height(Sizing::ParentBased(wrapper_height_calc))
                 .with_shader_inverted_y(true),
@@ -209,11 +208,13 @@ pub trait UITextImpl {
         let mut main_obj = scene.object::<UIText>(&main_entity);
         main_obj.get_mut::<TextState>().wrapper_entity = wrapper_entity;
         main_obj.get_mut::<TextState>().raw_text_entity = raw_text_entity;
-        main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(on_size_update));
+        main_obj.get_mut::<UIEventHandlerC>().on_size_update = Some(Arc::new(|entity, ctx, new_size| {
+            on_size_update(entity, ctx, Some(new_size))
+        }));
         drop(main_obj);
         drop(scene);
 
-        on_size_update(&main_entity, ctx);
+        on_size_update(&main_entity, ctx, None);
 
         main_entity
     }
@@ -238,7 +239,6 @@ pub mod reactive {
     use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
     use common::make_static_id;
     use common::memoffset::offset_of;
-    use common::scene::relation::Relation;
     use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
     use engine::ecs::component::ui::UILayoutC;
     use engine::ecs::component::UniformDataC;
@@ -258,8 +258,23 @@ pub mod reactive {
     }
 
     impl UITextProps {
-        pub fn with_style(mut self, style: TextStyle) -> Self {
+        pub fn layout(mut self, layout: UILayoutC) -> Self {
+            self.layout = layout;
+            self
+        }
+
+        pub fn style(mut self, style: TextStyle) -> Self {
             self.style = style;
+            self
+        }
+
+        pub fn align(mut self, align: TextHAlign) -> Self {
+            self.align = align;
+            self
+        }
+
+        pub fn wrap(mut self, wrap: bool) -> Self {
+            self.wrap = wrap;
             self
         }
     }
@@ -321,7 +336,7 @@ pub mod reactive {
                             );
                         }
 
-                        on_size_update(&entity_state.value(), scope_ctx.ctx());
+                        on_size_update(&entity_state.value(), scope_ctx.ctx(), None);
                     },
                     move |ctx, scope| {
                         let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();

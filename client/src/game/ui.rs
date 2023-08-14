@@ -35,6 +35,7 @@ pub mod ui_root_states {
     pub const CURR_MENU_TAB: &'static str = "curr_menu_tab";
     pub const IN_GAME_PROCESS: &'static str = "in_game_process";
     pub const GAME_COLOR_FILTER: &'static str = "game_color_filter";
+    pub const VISION_OBSTRUCTED: &'static str = "vision_obstructed";
     pub const WORLD_NAME_LIST: &'static str = "world_name_list";
 }
 
@@ -198,7 +199,7 @@ fn confirm_overworld_delete_modal(
                     "Do you want to irreversibly delete '{}'?",
                     overworld_name
                 ))
-                .with_style(TextStyle::new().with_font_size(24.0)),
+                .style(TextStyle::new().with_font_size(24.0)),
             );
             height_spacer(make_static_id!(), ctx, 20.0);
             container(
@@ -540,7 +541,7 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     );
 }
 
-fn ui_root(ctx: &mut UIScopeContext) {
+fn game_menu(ctx: &mut UIScopeContext) {
     let active_modal_views_state = ctx.root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS);
 
     ctx.once(make_static_id!(), |ctx| {
@@ -575,6 +576,7 @@ fn ui_root(ctx: &mut UIScopeContext) {
         ctx,
         container_props().layout(
             UILayoutC::row()
+                .with_position(Position::Relative(Vec2::zeros()))
                 .with_grow()
                 .with_visibility(Visibility::Opacity(*menu_opacity)),
         ),
@@ -641,14 +643,52 @@ fn ui_root(ctx: &mut UIScopeContext) {
     }
 }
 
+pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstructed: bool) {
+    container(
+        make_static_id!(),
+        ctx,
+        container_props()
+            .layout(
+                UILayoutC::column()
+                    .with_grow()
+                    .with_position(Position::Relative(Vec2::zeros())),
+            )
+            .background(Some(game_effects(color_filter, 0.0, vision_obstructed))),
+        move |ctx, ()| {
+            expander(make_static_id!(), ctx, 1.0);
+
+            if vision_obstructed {
+                ui_text(
+                    make_static_id!(),
+                    ctx,
+                    ui_text_props("Your vision is obstructed!")
+                        .layout(
+                            UILayoutC::new()
+                                .with_width_grow()
+                                .with_padding(Padding::hv(0.0, 30.0)),
+                        )
+                        .style(TextStyle::new().with_font_size(30.0))
+                        .align(TextHAlign::Center)
+                        .wrap(true),
+                );
+            }
+        },
+    );
+}
+
 pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(STATE_ENTITY_ID, || root_entity);
 
     ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
     ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
-    ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
     ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
     ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
+
+    let in_game_process_state = ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
+    let in_game_process = ctx.subscribe(&in_game_process_state);
+
+    let vision_obstructed_state = ctx.request_state(ui_root_states::VISION_OBSTRUCTED, || false);
+    let vision_obstructed = ctx.subscribe(&vision_obstructed_state);
 
     let game_color_filter_state = ctx.request_state(ui_root_states::GAME_COLOR_FILTER, || Color::TRANSPARENT);
     let game_color_filter = ctx.subscribe(&game_color_filter_state);
@@ -657,8 +697,13 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         make_static_id!(),
         ctx,
         container_props()
-            .layout(UILayoutC::row().with_grow())
-            .background(Some(game_effects(*game_color_filter, 0.1))),
-        move |ctx, ()| ui_root(ctx),
+            .layout(UILayoutC::new().with_grow())
+            .children_props((*in_game_process, *game_color_filter, *vision_obstructed)),
+        move |ctx, (in_game, color_filter, vision_obstructed)| {
+            if in_game {
+                game_overlay(ctx, color_filter, vision_obstructed);
+            }
+            game_menu(ctx)
+        },
     );
 }

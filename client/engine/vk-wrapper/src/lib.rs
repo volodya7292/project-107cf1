@@ -1,3 +1,30 @@
+#[macro_use]
+pub mod utils;
+mod fence;
+mod semaphore;
+
+pub mod adapter;
+pub mod buffer;
+pub mod cmd_list;
+pub mod descriptor_pool;
+pub mod device;
+pub mod entry;
+pub mod format;
+pub mod framebuffer;
+pub mod image;
+pub mod image_view;
+pub mod instance;
+pub mod pipeline;
+pub mod pipeline_signature;
+mod platform;
+pub mod query_pool;
+pub mod queue;
+pub mod render_pass;
+pub mod sampler;
+pub mod shader;
+pub mod surface;
+pub mod swapchain;
+
 pub use adapter::Adapter;
 use buffer::Buffer;
 pub use buffer::BufferBarrier;
@@ -65,30 +92,3 @@ pub use surface::Surface;
 pub use swapchain::Swapchain;
 pub use swapchain::SwapchainImage;
 use swapchain::SwapchainWrapper;
-
-#[macro_use]
-mod utils;
-mod fence;
-mod semaphore;
-
-pub mod adapter;
-pub mod buffer;
-pub mod cmd_list;
-pub mod descriptor_pool;
-pub mod device;
-pub mod entry;
-pub mod format;
-pub mod framebuffer;
-pub mod image;
-pub mod image_view;
-pub mod instance;
-pub mod pipeline;
-pub mod pipeline_signature;
-mod platform;
-pub mod query_pool;
-pub mod queue;
-pub mod render_pass;
-pub mod sampler;
-pub mod shader;
-pub mod surface;
-pub mod swapchain;

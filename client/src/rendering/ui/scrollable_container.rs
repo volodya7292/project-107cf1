@@ -52,22 +52,14 @@ pub fn scrollable_container<P, F>(
 
             let on_wrapper_size_update = {
                 let wrapper_height_state = wrapper_height.state();
-                Arc::new(move |entity: &EntityId, ctx: &EngineContext| {
-                    let mut scene = ctx.module_mut::<Scene>();
-                    let entry = scene.entry(entity);
-                    let cache = entry.get::<UILayoutCacheC>();
-                    let size = *cache.final_size();
-                    wrapper_height_state.update(size.y);
+                Arc::new(move |entity: &EntityId, ctx: &EngineContext, new_size: Vec2| {
+                    wrapper_height_state.update(new_size.y);
                 })
             };
             let on_content_size_update = {
                 let content_height_state = content_height.state();
-                Arc::new(move |entity: &EntityId, ctx: &EngineContext| {
-                    let mut scene = ctx.module_mut::<Scene>();
-                    let entry = scene.entry(entity);
-                    let cache = entry.get::<UILayoutCacheC>();
-                    let size = *cache.final_size();
-                    content_height_state.update(size.y);
+                Arc::new(move |entity: &EntityId, ctx: &EngineContext, new_size: Vec2| {
+                    content_height_state.update(new_size.y);
                 })
             };
 

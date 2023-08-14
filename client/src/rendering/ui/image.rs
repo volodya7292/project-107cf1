@@ -199,7 +199,7 @@ struct UniformData {
     opacity: f32,
 }
 
-fn on_size_update(entity: &EntityId, ctx: &EngineContext) {
+fn on_size_update(entity: &EntityId, ctx: &EngineContext, _new_size: Vec2) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut obj = scene.object::<UIImage>(&entity.into());
     let cache = obj.get::<UILayoutCacheC>();

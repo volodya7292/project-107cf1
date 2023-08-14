@@ -689,18 +689,25 @@ impl MainApp {
             curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
         }
 
-        // Check whether the head is in liquid and set appropriate color filter
         {
+            let registry = self.main_registry.registry();
             let reactor = self.ui_reactor();
             let filter_state = reactor.root_state(ui_root_states::GAME_COLOR_FILTER).unwrap();
+            let vision_obstructed_state = reactor
+                .root_state::<bool>(ui_root_states::VISION_OBSTRUCTED)
+                .unwrap();
             let mut access = curr_state.overworld.access();
 
             let block_pos = BlockPos::from_f64(&(curr_state.player_pos + PLAYER_CAMERA_OFFSET));
 
             if let Some(data) = access.get_block(&block_pos) {
-                let liquid_present = !data.liquid_state().is_empty();
+                let block = registry.get_block(data.block_id()).unwrap();
 
-                if liquid_present {
+                vision_obstructed_state
+                    .update(!block.transparent() && registry.get_block_model(block.model_id()).is_some());
+
+                if !data.liquid_state().is_empty() {
+                    // The head is in liquid => set appropriate color filter
                     filter_state.update(Color::new(0.0, 0.0, 1.0, 0.4));
                 } else {
                     filter_state.update(Color::TRANSPARENT);
@@ -880,11 +887,14 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                 let dir: I64Vec3 = glm::convert(*facing.direction());
                 let set_pos = pos.offset(&dir);
 
+                let new_block_global_aabb = AABB::block().translate(&glm::convert(set_pos.0));
+                let player_global_aabb = curr_state.player_aabb.translate(&curr_state.player_pos);
+
                 if curr_state.set_water {
                     overworld
                         .access()
                         .set_liquid_state(&set_pos, LiquidState::source(registry.liquid_water));
-                } else {
+                } else if !player_global_aabb.collides_with(&new_block_global_aabb) {
                     overworld.access().update_block(&set_pos, |data| {
                         data.set(curr_state.curr_block.clone());
 

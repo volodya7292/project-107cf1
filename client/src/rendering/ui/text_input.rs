@@ -129,7 +129,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             let container_size_state = container_size.state();
             let text_size_state = text_size.state();
             let text_global_pos_state = text_global_pos.state();
-            let on_text_size_update = move |entity: &EntityId, ctx: &EngineContext| {
+            let on_text_size_update = move |entity: &EntityId, ctx: &EngineContext, _new_size: Vec2| {
                 let mut scene = ctx.module_mut::<Scene>();
                 let entry = scene.entry(entity);
                 let layout = entry.get::<UILayoutC>();

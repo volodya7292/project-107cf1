@@ -38,10 +38,6 @@ pub(crate) fn make_mul_of_u64(number: u64, multiplier: u64) -> u64 {
     ((number + multiplier - 1) / multiplier) * multiplier
 }
 
-pub fn log2(n: u32) -> u32 {
-    u32::BITS - n.leading_zeros() - 1
-}
-
 macro_rules! vk_bitflags_impl {
     ($name: ident, $flag_type: ty) => {
         impl Default for $name {
@@ -136,3 +132,5 @@ macro_rules! vk_bitflags_impl {
         }
     };
 }
+
+pub type GLSLBool = u32;

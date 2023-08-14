@@ -11,8 +11,10 @@ layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform Obje
     Rect clip_rect;
     float opacity;
     float corner_radius;
+    // ------------------
     vec4 filter_color;
     float pain_factor;
+    bool vision_obstructed;
 };
 
 layout(location = 0) in Input {
@@ -36,9 +38,13 @@ void main() {
     pxPainFactor = pow(pxPainFactor, 3);
 
     vec4 finalColor = filter_color;
-    finalColor.a *= opacity;
-
     finalColor = mix(finalColor, vec4(PAIN_COLOR, 1.0), pxPainFactor * pain_factor);
+
+    if (vision_obstructed) {
+        finalColor = vec4(0, 0, 0, 1);
+    }
+
+    finalColor.a *= opacity;
 
     writeOutput(finalColor);
 }

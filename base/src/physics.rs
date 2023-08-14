@@ -50,9 +50,9 @@ impl Overworld {
         motion_delta: DVec3,
         object_aabb: &AABB,
     ) -> DVec3 {
-        let aabb_in_full_motion = object_aabb.combine(&object_aabb.translate(motion_delta));
-        let global_object_aabb = object_aabb.translate(curr_object_pos);
-        let global_motion_aabb = aabb_in_full_motion.translate(curr_object_pos);
+        let aabb_in_full_motion = object_aabb.combine(&object_aabb.translate(&motion_delta));
+        let global_object_aabb = object_aabb.translate(&curr_object_pos);
+        let global_motion_aabb = aabb_in_full_motion.translate(&curr_object_pos);
 
         // Use motion_aabb to account for extreme motion deltas to prevent 'tunneling'
         let start: I64Vec3 = glm::convert_unchecked(glm::floor(&global_motion_aabb.min()));
@@ -76,7 +76,7 @@ impl Overworld {
 
                     if let Some(model) = reg.get_block_model(block.model_id()) {
                         let pos: DVec3 = glm::convert(pos);
-                        blocks_aabbs.extend(model.aabbs().iter().map(|v| v.translate(pos)));
+                        blocks_aabbs.extend(model.aabbs().iter().map(|v| v.translate(&pos)));
                     }
                 }
             }
@@ -93,15 +93,15 @@ impl Overworld {
         // to correctly calculate collision deltas
 
         new_object_pos += x_delta;
-        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(new_object_pos));
+        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(&new_object_pos));
         new_object_pos.x -= collision_delta_many2one(&blocks_aabbs, &in_motion_aabb, &res_dir).x;
 
         new_object_pos += y_delta;
-        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(new_object_pos));
+        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(&new_object_pos));
         new_object_pos.y -= collision_delta_many2one(&blocks_aabbs, &in_motion_aabb, &res_dir).y;
 
         new_object_pos += z_delta;
-        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(new_object_pos));
+        let in_motion_aabb = global_object_aabb.combine(&object_aabb.translate(&new_object_pos));
         new_object_pos.z -= collision_delta_many2one(&blocks_aabbs, &in_motion_aabb, &res_dir).z;
 
         new_object_pos

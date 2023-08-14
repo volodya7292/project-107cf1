@@ -30,6 +30,10 @@ impl AABB {
         Self { min, max }
     }
 
+    pub fn block() -> Self {
+        Self::new(DVec3::zeros(), DVec3::from_element(1.0))
+    }
+
     /// Creates a new AABB centered at origin of specified size.
     pub fn from_size(size: DVec3) -> Self {
         let half = size * 0.5;
@@ -55,7 +59,7 @@ impl AABB {
         self.max - self.min
     }
 
-    pub fn translate(&self, translation: DVec3) -> Self {
+    pub fn translate(&self, translation: &DVec3) -> Self {
         Self {
             min: self.min + translation,
             max: self.max + translation,

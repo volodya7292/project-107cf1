@@ -52,16 +52,12 @@ impl Bool for bool {
     }
 }
 
-/// log2(8) = 3  
-/// log2(5) = 2
 pub trait UInt {
     // TODO: remove when std div_ceil is stable
     fn div_ceil(self, other: Self) -> Self;
     // TODO: remove when std next_multiple_of is stable
     fn next_multiple_of(self, m: Self) -> Self;
 }
-
-pub trait Int {}
 
 macro_rules! uint_impl {
     ($($t: ty)*) => ($(
@@ -76,13 +72,5 @@ macro_rules! uint_impl {
         }
     )*)
 }
-macro_rules! int_impl {
-    ($($t: ty)*) => ($(
-        impl Int for $t {
-
-        }
-    )*)
-}
 
 uint_impl! { u8 u16 u32 u64 }
-int_impl! { i8 i16 i32 i64 }

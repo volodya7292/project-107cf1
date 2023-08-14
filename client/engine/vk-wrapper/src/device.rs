@@ -389,7 +389,7 @@ impl Device {
             )
         };
         let mut mip_levels = if params.preferred_mip_levels == 0 {
-            utils::log2(size.0.max(size.1).max(size.2)) + 1
+            (size.0.max(size.1).max(size.2)).ilog2() + 1
         } else {
             params.preferred_mip_levels
         };

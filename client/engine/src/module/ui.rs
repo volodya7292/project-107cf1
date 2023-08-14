@@ -751,11 +751,15 @@ impl EngineModule for UIRenderer {
                     Some((*entity, handler))
                 })
                 .collect();
-
             drop(scene);
 
             for (entity, on_size_update) in callbacks {
-                on_size_update(&entity, ctx);
+                let new_size = {
+                    let mut scene = ctx.module_mut::<Scene>();
+                    let entry = scene.entry(&entity);
+                    entry.get::<UILayoutCacheC>().final_size
+                };
+                on_size_update(&entity, ctx, new_size);
             }
         });
 
