@@ -158,6 +158,7 @@ pub struct MainRenderer {
     scale_factor: f32,
     settings: Settings,
     last_frame_ts: Instant,
+    frame_count: u32,
     device: Arc<Device>,
 
     staging_buffer: HostBuffer<u8>,
@@ -260,6 +261,7 @@ pub(crate) struct FrameInfo {
     frame_size: UVec2,
     surface_size: UVec2,
     scale_factor: f32,
+    time: u32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -733,7 +735,20 @@ impl MainRenderer {
         let mut stages: Vec<Box<dyn RenderStage>> = vec![
             Box::new(DepthStage::new(&device)),
             Box::new(GBufferStage::new(&device)),
-            Box::new(PostProcessStage::new(&device)),
+            {
+                // TODO: move this out from this crate (engine) to the program crate
+                let mut stage = Box::new(PostProcessStage::new(&device));
+                stage.add_custom_post_process(
+                    "sky",
+                    device
+                        .create_pixel_shader(
+                            include_bytes!("../../shaders/build/post_sky.frag.spv"),
+                            "post_sky.frag",
+                        )
+                        .unwrap(),
+                );
+                stage
+            },
             Box::new(ComposeStage::new(&device)),
         ];
         if graphics_queue != present_queue {
@@ -768,6 +783,7 @@ impl MainRenderer {
             scale_factor: 1.0,
             settings,
             last_frame_ts: Instant::now(),
+            frame_count: 0,
             device,
             staging_buffer,
             transfer_jobs,
@@ -1291,6 +1307,7 @@ impl MainRenderer {
                 frame_size: self.render_size,
                 surface_size: self.surface_size,
                 scale_factor: self.scale_factor,
+                time: self.frame_count,
             };
 
             let frame_ctx = FrameContext {
@@ -1504,6 +1521,7 @@ impl MainRenderer {
 impl EngineModule for MainRenderer {
     fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         self.on_draw(ctx);
+        self.frame_count = self.frame_count.wrapping_add(1);
     }
 
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
