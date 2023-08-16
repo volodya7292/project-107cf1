@@ -36,16 +36,16 @@ use common::threading::SafeThreadPool;
 use common::{glm, image};
 use engine::event::{WSIEvent, WSIKeyboardInput};
 use engine::module::input::{Input, Keyboard};
-use engine::module::main_renderer::{camera, MainRenderer, WrapperObject};
+use engine::module::main_renderer::{camera, MainRenderer, PostProcess, WrapperObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
-use engine::module::ui::color::Color;
 use engine::module::ui::reactive::UIReactor;
 use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::utils::wsi::find_best_video_mode;
+use engine::vkw::utils::GLSLBool;
 use engine::winit::event::{MouseButton, VirtualKeyCode};
 use engine::winit::event_loop::EventLoop;
 use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
@@ -115,6 +115,7 @@ pub struct MainApp {
 
     material_pipelines: MaterialPipelines,
     game_state: Option<Arc<Mutex<GameProcessState>>>,
+    post_liquid_uniforms: Arc<Mutex<PostProcessLiquidUniforms>>,
 
     cursor_grab: bool,
     root_entity: EntityId,
@@ -140,6 +141,12 @@ fn calc_bobbing_displacement(walk_time: f64, walk_vel: f64, camera_orientation: 
     displacement
 }
 
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+struct PostProcessLiquidUniforms {
+    enabled: GLSLBool,
+}
+
 impl MainApp {
     const MOUSE_SENSITIVITY: f64 = 0.2;
 
@@ -151,6 +158,19 @@ impl MainApp {
             .add_object(None, WrapperObject::new())
             .unwrap();
 
+        let post_liquid_uniforms = Arc::new(Mutex::new(PostProcessLiquidUniforms::default()));
+        let renderer_post_processes = vec![
+            PostProcess {
+                name: "sky".to_string(),
+                shader_code: include_bytes!("../res/shaders/post_sky.frag.spv").to_vec(),
+                uniform_data: Arc::new(Mutex::new(())),
+            },
+            PostProcess {
+                name: "liquid_distortions".to_string(),
+                shader_code: include_bytes!("../res/shaders/post_liquid_distortions.frag.spv").to_vec(),
+                uniform_data: post_liquid_uniforms.clone(),
+            },
+        ];
         let renderer = MainRenderer::new(
             "VulkanRenderer",
             &*ctx.window(),
@@ -165,6 +185,7 @@ impl MainApp {
             |adapter| 0,
             root_entity,
             ctx,
+            renderer_post_processes,
         );
         ctx.register_module(renderer);
 
@@ -211,6 +232,7 @@ impl MainApp {
             tick_timer: None,
             material_pipelines: mat_pipelines,
             game_state: None,
+            post_liquid_uniforms,
             cursor_grab: true,
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
@@ -689,10 +711,11 @@ impl MainApp {
             curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
         }
 
+        // Handle inside-block vision filters
         {
             let registry = self.main_registry.registry();
             let reactor = self.ui_reactor();
-            let filter_state = reactor.root_state(ui_root_states::GAME_COLOR_FILTER).unwrap();
+            // let filter_state = reactor.root_state(ui_root_states::GAME_COLOR_FILTER).unwrap();
             let vision_obstructed_state = reactor
                 .root_state::<bool>(ui_root_states::VISION_OBSTRUCTED)
                 .unwrap();
@@ -706,12 +729,17 @@ impl MainApp {
                 vision_obstructed_state
                     .update(!block.transparent() && registry.get_block_model(block.model_id()).is_some());
 
-                if !data.liquid_state().is_empty() {
-                    // The head is in liquid => set appropriate color filter
-                    filter_state.update(Color::new(0.0, 0.0, 1.0, 0.4));
-                } else {
-                    filter_state.update(Color::TRANSPARENT);
+                {
+                    let mut post_liquid = self.post_liquid_uniforms.lock();
+                    post_liquid.enabled = !data.liquid_state().is_empty() as GLSLBool;
                 }
+
+                // if !data.liquid_state().is_empty() {
+                //     // The head is in liquid => set appropriate color filter
+                //     // filter_state.update(Color::new(0.0, 0.0, 1.0, 0.4));
+                // } else {
+                //     // filter_state.update(Color::TRANSPARENT);
+                // }
             }
         }
 

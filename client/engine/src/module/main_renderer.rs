@@ -64,6 +64,7 @@ use common::glm;
 use common::glm::{DVec3, Mat4, U32Vec2, U32Vec4, UVec2, Vec3, Vec4};
 use common::lrc::Lrc;
 use common::lrc::LrcExt;
+use common::parking_lot::Mutex;
 use common::resource_file::ResourceRef;
 use common::scene::relation::Relation;
 use common::types::HashMap;
@@ -158,7 +159,7 @@ pub struct MainRenderer {
     scale_factor: f32,
     settings: Settings,
     last_frame_ts: Instant,
-    frame_count: u32,
+    shader_time: f32,
     device: Arc<Device>,
 
     staging_buffer: HostBuffer<u8>,
@@ -261,7 +262,7 @@ pub(crate) struct FrameInfo {
     frame_size: UVec2,
     surface_size: UVec2,
     scale_factor: f32,
-    time: u32,
+    time: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -524,6 +525,22 @@ impl WrapperObject {
 
 impl SceneObject for WrapperObject {}
 
+pub trait UniformsBlock: Send + Sync + 'static {
+    fn as_raw(&self) -> &[u8];
+}
+
+impl<T: Copy + Send + Sync + 'static> UniformsBlock for T {
+    fn as_raw(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self as *const _ as *const u8, mem::size_of_val(self)) }
+    }
+}
+
+pub struct PostProcess {
+    pub name: String,
+    pub shader_code: Vec<u8>,
+    pub uniform_data: Arc<Mutex<dyn UniformsBlock>>,
+}
+
 impl MainRenderer {
     pub fn new<F: Fn(&[Arc<vkw::Adapter>]) -> usize>(
         name: &str,
@@ -533,6 +550,7 @@ impl MainRenderer {
         adapter_selector: F,
         root_entity: EntityId,
         ctx: &EngineContext,
+        post_processes: Vec<PostProcess>,
     ) -> MainRenderer {
         let vke = vkw::Entry::new().unwrap();
         let instance = vke.create_instance(name, Some(window)).unwrap();
@@ -724,9 +742,9 @@ impl MainRenderer {
             material_buffer,
             uniform_buffer_basic,
             uniform_buffer_offsets: IndexPool::new(),
-            renderables: HashMap::with_capacity(N_MAX_OBJECTS as usize),
+            renderables: HashMap::with_capacity(N_MAX_OBJECTS),
             material_pipelines: vec![],
-            curr_vertex_meshes: HashMap::with_capacity(N_MAX_OBJECTS as usize),
+            curr_vertex_meshes: HashMap::with_capacity(N_MAX_OBJECTS),
         };
 
         let graphics_queue = device.get_queue(QueueType::Graphics);
@@ -736,17 +754,14 @@ impl MainRenderer {
             Box::new(DepthStage::new(&device)),
             Box::new(GBufferStage::new(&device)),
             {
-                // TODO: move this out from this crate (engine) to the program crate
                 let mut stage = Box::new(PostProcessStage::new(&device));
-                stage.add_custom_post_process(
-                    "sky",
-                    device
-                        .create_pixel_shader(
-                            include_bytes!("../../shaders/build/post_sky.frag.spv"),
-                            "post_sky.frag",
-                        )
-                        .unwrap(),
-                );
+                for process in post_processes {
+                    stage.add_custom_post_process(
+                        &process.name,
+                        device.create_pixel_shader(&process.shader_code, name).unwrap(),
+                        process.uniform_data,
+                    );
+                }
                 stage
             },
             Box::new(ComposeStage::new(&device)),
@@ -783,7 +798,7 @@ impl MainRenderer {
             scale_factor: 1.0,
             settings,
             last_frame_ts: Instant::now(),
-            frame_count: 0,
+            shader_time: 0.0,
             device,
             staging_buffer,
             transfer_jobs,
@@ -1307,7 +1322,7 @@ impl MainRenderer {
                 frame_size: self.render_size,
                 surface_size: self.surface_size,
                 scale_factor: self.scale_factor,
-                time: self.frame_count,
+                time: self.shader_time,
             };
 
             let frame_ctx = FrameContext {
@@ -1519,9 +1534,9 @@ impl MainRenderer {
 }
 
 impl EngineModule for MainRenderer {
-    fn on_update(&mut self, _: f64, ctx: &EngineContext) {
+    fn on_update(&mut self, dt: f64, ctx: &EngineContext) {
         self.on_draw(ctx);
-        self.frame_count = self.frame_count.wrapping_add(1);
+        self.shader_time = (self.shader_time + dt as f32) % 65536.0;
     }
 
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {

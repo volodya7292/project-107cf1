@@ -2,8 +2,10 @@ use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
+use crate::module::main_renderer::UniformsBlock;
 use common::glm;
 use common::glm::{Mat4, Vec2, Vec4};
+use common::parking_lot::Mutex;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
 use vk_wrapper::image::ImageParams;
@@ -14,6 +16,8 @@ use vk_wrapper::{
     PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler, SamplerFilter, SamplerMipmap, Shader,
     Subpass, SubpassDependency,
 };
+
+pub type PostProcessUniformData = Arc<Mutex<dyn UniformsBlock>>;
 
 pub struct PostProcessStage {
     device: Arc<Device>,
@@ -32,7 +36,7 @@ pub struct PostProcessStage {
     bloom_upscale_pipeline: Arc<Pipeline>,
     bloom_sampler: Arc<Sampler>,
 
-    post_processes: Vec<(String, Arc<Pipeline>)>,
+    post_processes: Vec<(String, Arc<Pipeline>, PostProcessUniformData)>,
 
     tonemap_render_pass: Arc<RenderPass>,
     tonemap_pipeline: Arc<Pipeline>,
@@ -357,7 +361,12 @@ impl PostProcessStage {
         }
     }
 
-    pub fn add_custom_post_process(&mut self, name: &str, pixel_shader: Arc<Shader>) {
+    pub fn add_custom_post_process(
+        &mut self,
+        name: &str,
+        pixel_shader: Arc<Shader>,
+        uniform_data: Arc<Mutex<dyn UniformsBlock>>,
+    ) {
         let signature = self
             .device
             .create_pipeline_signature(&[Arc::clone(&self.quad_shader), pixel_shader], &[])
@@ -377,7 +386,8 @@ impl PostProcessStage {
             )
             .unwrap();
 
-        self.post_processes.push((name.to_string(), pipeline));
+        self.post_processes
+            .push((name.to_string(), pipeline, uniform_data));
     }
 
     fn g_buffer_merge_stage(
@@ -511,6 +521,148 @@ impl PostProcessStage {
         cl.end_render_pass();
 
         Arc::clone(merge_framebuffer.get_image(0).unwrap())
+    }
+
+    fn custom_post_processing(
+        &self,
+        cl: &mut CmdList,
+        resources: &ResourceManagementScope,
+        ctx: &StageContext,
+        input_position: &Arc<Image>,
+        input_image: Arc<Image>,
+        input_depth: &Arc<Image>,
+    ) -> Arc<Image> {
+        let mut curr_back_image = input_image;
+
+        for (name, pipeline, uniform_data) in &self.post_processes {
+            let fb = resources.request(
+                &format!("post_{name}_fb"),
+                (ctx.render_size,),
+                |(render_size,), _| {
+                    self.custom_process_render_pass
+                        .create_framebuffer(
+                            *render_size,
+                            &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
+                        )
+                        .unwrap()
+                },
+            );
+
+            let custom_ub_present = uniform_data.lock().as_raw().len() > 0;
+            let custom_info_ub = custom_ub_present.then(|| {
+                resources.request_uniform_buffer_raw(
+                    &format!("post_{name}_ub"),
+                    uniform_data.lock().as_raw(),
+                    cl,
+                )
+            });
+
+            let resources_desc =
+                resources.request_descriptors(&format!("post_{name}_desc"), pipeline.signature(), 0, 1);
+
+            unsafe {
+                let mut bindings = vec![
+                    resources_desc.create_binding(
+                        0,
+                        0,
+                        BindingRes::Image(Arc::clone(input_position), None, ImageLayout::SHADER_READ),
+                    ),
+                    resources_desc.create_binding(
+                        1,
+                        0,
+                        BindingRes::Image(Arc::clone(&curr_back_image), None, ImageLayout::SHADER_READ),
+                    ),
+                    resources_desc.create_binding(
+                        2,
+                        0,
+                        BindingRes::Image(Arc::clone(input_depth), None, ImageLayout::DEPTH_STENCIL_READ),
+                    ),
+                    resources_desc.create_binding(3, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
+                ];
+                if let Some(custom_info_ub) = custom_info_ub {
+                    bindings.push(resources_desc.create_binding(
+                        4,
+                        0,
+                        BindingRes::Buffer(custom_info_ub.handle()),
+                    ));
+                }
+                self.device
+                    .update_descriptor_set(resources_desc.get(0), &bindings);
+            }
+
+            cl.bind_pipeline(pipeline);
+            cl.begin_render_pass(&self.custom_process_render_pass, &fb, &[], false);
+
+            cl.bind_graphics_inputs(pipeline.signature(), 0, &[resources_desc.get(0)], &[]);
+            cl.draw(3, 0);
+
+            cl.end_render_pass();
+
+            curr_back_image = Arc::clone(fb.get_image(0).unwrap());
+        }
+
+        curr_back_image
+    }
+
+    fn combine_main_and_overlay_stage(
+        &self,
+        cl: &mut CmdList,
+        resources: &ResourceManagementScope,
+        ctx: &StageContext,
+        main_source_image: &Arc<Image>,
+        g_overlay_albedo: &Arc<Image>,
+    ) -> Arc<Image> {
+        let desc = resources.request_descriptors(
+            "post_combine-main-overlay_desc",
+            self.combine_main_overlay_pipeline.signature(),
+            0,
+            1,
+        );
+
+        unsafe {
+            self.device.update_descriptor_set(
+                desc.get(0),
+                &[
+                    desc.create_binding(
+                        0,
+                        0,
+                        BindingRes::Image(Arc::clone(&main_source_image), None, ImageLayout::SHADER_READ),
+                    ),
+                    desc.create_binding(
+                        1,
+                        0,
+                        BindingRes::Image(Arc::clone(&g_overlay_albedo), None, ImageLayout::SHADER_READ),
+                    ),
+                ],
+            );
+        }
+
+        let framebuffer = resources.request(
+            "post_combine-main-overlay",
+            (ctx.render_size,),
+            |(render_size,), _| {
+                self.combine_main_overlay_render_pass
+                    .create_framebuffer(
+                        *render_size,
+                        &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
+                    )
+                    .unwrap()
+            },
+        );
+
+        // Mix source and bloom
+        cl.bind_pipeline(&self.combine_main_overlay_pipeline);
+        cl.bind_graphics_inputs(
+            self.combine_main_overlay_pipeline.signature(),
+            0,
+            &[desc.get(0)],
+            &[],
+        );
+        cl.begin_render_pass(&self.combine_main_overlay_render_pass, &framebuffer, &[], false);
+        cl.draw(3, 0);
+        cl.end_render_pass();
+
+        Arc::clone(framebuffer.get_image(0).unwrap())
     }
 
     fn bloom_stage(
@@ -686,131 +838,6 @@ impl PostProcessStage {
         Arc::clone(&bloom_image_views[0])
     }
 
-    fn custom_post_processing(
-        &self,
-        cl: &mut CmdList,
-        resources: &ResourceManagementScope,
-        ctx: &StageContext,
-        input_image: Arc<Image>,
-        input_depth: &Arc<Image>,
-    ) -> Arc<Image> {
-        let mut curr_back_image = input_image;
-
-        for (name, pipeline) in &self.post_processes {
-            let fb = resources.request(
-                &format!("post_{name}_fb"),
-                (ctx.render_size,),
-                |(render_size,), _| {
-                    self.custom_process_render_pass
-                        .create_framebuffer(
-                            *render_size,
-                            &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
-                        )
-                        .unwrap()
-                },
-            );
-
-            let resources_desc =
-                resources.request_descriptors(&format!("post_{name}_desc"), pipeline.signature(), 0, 1);
-
-            unsafe {
-                self.device.update_descriptor_set(
-                    resources_desc.get(0),
-                    &[
-                        resources_desc.create_binding(
-                            0,
-                            0,
-                            BindingRes::Image(Arc::clone(&curr_back_image), None, ImageLayout::SHADER_READ),
-                        ),
-                        resources_desc.create_binding(
-                            1,
-                            0,
-                            BindingRes::Image(
-                                Arc::clone(&input_depth),
-                                None,
-                                ImageLayout::DEPTH_STENCIL_READ,
-                            ),
-                        ),
-                        resources_desc.create_binding(2, 0, BindingRes::Buffer(ctx.per_frame_ub.handle())),
-                    ],
-                );
-            }
-
-            cl.bind_pipeline(pipeline);
-            cl.begin_render_pass(&self.custom_process_render_pass, &fb, &[], false);
-
-            cl.bind_graphics_inputs(pipeline.signature(), 0, &[resources_desc.get(0)], &[]);
-            cl.draw(3, 0);
-
-            cl.end_render_pass();
-
-            curr_back_image = Arc::clone(fb.get_image(0).unwrap());
-        }
-
-        curr_back_image
-    }
-
-    fn combine_main_and_overlay_stage(
-        &self,
-        cl: &mut CmdList,
-        resources: &ResourceManagementScope,
-        ctx: &StageContext,
-        main_source_image: &Arc<Image>,
-        g_overlay_albedo: &Arc<Image>,
-    ) -> Arc<Image> {
-        let desc = resources.request_descriptors(
-            "post_combine-main-overlay_desc",
-            self.combine_main_overlay_pipeline.signature(),
-            0,
-            1,
-        );
-
-        unsafe {
-            self.device.update_descriptor_set(
-                desc.get(0),
-                &[
-                    desc.create_binding(
-                        0,
-                        0,
-                        BindingRes::Image(Arc::clone(&main_source_image), None, ImageLayout::SHADER_READ),
-                    ),
-                    desc.create_binding(
-                        1,
-                        0,
-                        BindingRes::Image(Arc::clone(&g_overlay_albedo), None, ImageLayout::SHADER_READ),
-                    ),
-                ],
-            );
-        }
-
-        let framebuffer = resources.request(
-            "post_combine-main-overlay",
-            (ctx.render_size,),
-            |(render_size,), _| {
-                self.combine_main_overlay_render_pass
-                    .create_framebuffer(
-                        *render_size,
-                        &[(0, ImageMod::AdditionalUsage(ImageUsageFlags::SAMPLED))],
-                    )
-                    .unwrap()
-            },
-        );
-
-        // Mix source and bloom
-        cl.bind_pipeline(&self.combine_main_overlay_pipeline);
-        cl.bind_graphics_inputs(
-            self.combine_main_overlay_pipeline.signature(),
-            0,
-            &[desc.get(0)],
-            &[],
-        );
-        cl.begin_render_pass(&self.combine_main_overlay_render_pass, &framebuffer, &[], false);
-        cl.draw(3, 0);
-        cl.end_render_pass();
-
-        Arc::clone(framebuffer.get_image(0).unwrap())
-    }
-
     fn tonemap_stage(
         &self,
         cl: &mut CmdList,
@@ -886,6 +913,9 @@ impl RenderStage for PostProcessStage {
         cl.begin(true).unwrap();
 
         let g_framebuffer: Arc<Framebuffer> = resources.get(GBufferStage::RES_FRAMEBUFFER);
+        let g_position = g_framebuffer
+            .get_image(GBufferStage::POSITION_ATTACHMENT_ID)
+            .unwrap();
         let g_depth = g_framebuffer
             .get_image(GBufferStage::DEPTH_ATTACHMENT_ID)
             .unwrap();
@@ -896,7 +926,8 @@ impl RenderStage for PostProcessStage {
 
         let main_source_image = self.g_buffer_merge_stage(cl, resources, ctx);
 
-        let main_source_image = self.custom_post_processing(cl, resources, ctx, main_source_image, g_depth);
+        let main_source_image =
+            self.custom_post_processing(cl, resources, ctx, g_position, main_source_image, g_depth);
 
         let combined_source_image =
             self.combine_main_and_overlay_stage(cl, resources, ctx, &main_source_image, g_overlay_albedo);

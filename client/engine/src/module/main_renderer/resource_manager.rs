@@ -1,10 +1,10 @@
+use crate::module::main_renderer::UniformsBlock;
 use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::any::Any;
 use std::collections::hash_map;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::{mem, slice};
 use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Binding, BindingRes, BufferUsageFlags, CmdList, DescriptorPool, DescriptorSet, Device,
@@ -197,13 +197,13 @@ impl ResourceManagementScope<'_> {
         })
     }
 
-    pub fn request_uniform_buffer<T: Copy + 'static>(
+    pub fn request_uniform_buffer_raw(
         &self,
         name: &str,
-        data: T,
+        data: &[u8],
         copy_cl: &mut CmdList,
     ) -> Arc<DeviceBuffer> {
-        let len = mem::size_of_val(&data);
+        let len = data.len();
 
         let staging_buffer = self.request_host_buffer(
             &format!("{name}-staging"),
@@ -220,9 +220,7 @@ impl ResourceManagementScope<'_> {
         );
 
         let mut staging_buffer = staging_buffer.lock();
-        staging_buffer.write(0, unsafe {
-            slice::from_raw_parts(&data as *const _ as *const u8, len)
-        });
+        staging_buffer.write(0, data);
 
         copy_cl.copy_buffer(&*staging_buffer, 0, &*device_buffer, 0, len as u64);
         copy_cl.barrier_buffer(
@@ -237,6 +235,15 @@ impl ResourceManagementScope<'_> {
         );
 
         device_buffer
+    }
+
+    pub fn request_uniform_buffer<T: UniformsBlock>(
+        &self,
+        name: &str,
+        data: T,
+        copy_cl: &mut CmdList,
+    ) -> Arc<DeviceBuffer> {
+        self.request_uniform_buffer_raw(name, data.as_raw(), copy_cl)
     }
 
     pub fn request_image(&self, name: &str, params: ImageParams) -> Arc<Image> {

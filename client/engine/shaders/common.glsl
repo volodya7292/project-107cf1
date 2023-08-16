@@ -57,7 +57,7 @@ struct FrameInfo {
     uvec2 frame_size;
     uvec2 surface_size;
     float scale_factor;
-    uint time;
+    float time;
 };
 
 vec2 normalToSphericalAngles(vec3 normal) {

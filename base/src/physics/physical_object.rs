@@ -1,7 +1,5 @@
 use common::glm::Vec3;
 
-type Force3 = Vec3;
-
 #[derive(Copy, Clone)]
 pub struct ObjectMotion {
     mass: f32,
