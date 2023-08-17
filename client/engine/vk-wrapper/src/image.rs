@@ -239,6 +239,10 @@ impl Image {
     pub const TYPE_2D: ImageType = ImageType(vk::ImageType::TYPE_2D);
     pub const TYPE_3D: ImageType = ImageType(vk::ImageType::TYPE_3D);
 
+    pub fn bytesize(&self) -> u64 {
+        self.wrapper.bytesize
+    }
+
     pub fn size_2d(&self) -> (u32, u32) {
         (self.size.0, self.size.1)
     }

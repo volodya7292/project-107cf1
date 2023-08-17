@@ -180,7 +180,7 @@ impl ResourceRef {
 
 pub struct BufferedResourceReader {
     resources: Arc<ResourceFile>,
-    cache: ResourceCache,
+    cache: ResourceCache<String>,
 }
 
 impl BufferedResourceReader {
@@ -196,7 +196,7 @@ impl BufferedResourceReader {
     }
 
     pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
-        self.cache.get(path, || {
+        self.cache.get(path.to_string(), || {
             let res = self.resources.get(path)?;
             res.read().map(|v| Arc::from(v))
         })
@@ -207,6 +207,6 @@ impl BufferedResourceReader {
         path: &str,
         init: F,
     ) -> Result<Arc<T>, Error> {
-        self.cache.get(path, || self.get(path).map(init))
+        self.cache.get(path.to_string(), || self.get(path).map(init))
     }
 }

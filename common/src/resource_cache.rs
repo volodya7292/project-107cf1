@@ -1,6 +1,7 @@
 use crate::types::{ConcurrentCache, ConcurrentCacheExt};
 use image::Rgba;
 use std::any::{Any, TypeId};
+use std::hash::Hash;
 use std::sync::Arc;
 
 pub trait CachedResource: Send + Sync + 'static {
@@ -38,14 +39,17 @@ impl<R: CachedResource> CachedResource for Arc<R> {
     }
 }
 
-pub struct ResourceCache {
-    cache: ConcurrentCache<(String, TypeId), Arc<dyn CachedResource>>,
+pub struct ResourceCache<K> {
+    cache: ConcurrentCache<(K, TypeId), Arc<dyn CachedResource>>,
 }
 
-impl ResourceCache {
+impl<K> ResourceCache<K>
+where
+    K: Eq + Hash + Send + Sync + 'static,
+{
     const CAPACITY: usize = 100_000_000;
 
-    fn cache_entry_weigher(_: &(String, TypeId), value: &Arc<dyn CachedResource>) -> u32 {
+    fn cache_entry_weigher(_: &(K, TypeId), value: &Arc<dyn CachedResource>) -> u32 {
         value.footprint().min(u32::MAX as usize) as u32
     }
 
@@ -55,14 +59,18 @@ impl ResourceCache {
         }
     }
 
+    pub fn evict<T: CachedResource>(&self, key: K) {
+        self.cache.remove(&(key, TypeId::of::<T>()));
+    }
+
     pub fn get<T: CachedResource, E: Sync + Send + 'static, F: FnOnce() -> Result<Arc<T>, E>>(
         &self,
-        path: &str,
+        key: K,
         init: F,
     ) -> Result<Arc<T>, E> {
         let entry = self
             .cache
-            .entry((path.to_string(), TypeId::of::<T>()))
+            .entry((key, TypeId::of::<T>()))
             .or_try_insert_with(|| init().map(|v: Arc<T>| Arc::new(v) as Arc<dyn CachedResource>))
             .map_err(|e| Arc::into_inner(e).unwrap())?;
 
@@ -72,7 +80,10 @@ impl ResourceCache {
     }
 }
 
-impl Default for ResourceCache {
+impl<K> Default for ResourceCache<K>
+where
+    K: Eq + Hash + Send + Sync + 'static,
+{
     fn default() -> Self {
         Self::new()
     }

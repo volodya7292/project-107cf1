@@ -2,7 +2,8 @@ use crate::game::EngineCtxGameExt;
 use common::glm::Vec2;
 use common::image;
 use common::memoffset::offset_of;
-use engine::ecs::component::render_config::{RenderLayer, Resource};
+use common::resource_cache::ResourceCache;
+use engine::ecs::component::render_config::{GPUImageResource, GPUResource, RenderLayer};
 use engine::ecs::component::ui::{RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
@@ -19,6 +20,7 @@ use std::sync::Arc;
 
 struct ImageImplContext {
     mat_pipe_id: MaterialPipelineId,
+    image_cache: ResourceCache<usize>,
 }
 
 #[derive(Clone)]
@@ -30,7 +32,6 @@ impl PartialEq for ImageSource {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ImageSource::Data(a), ImageSource::Data(b)) => a.as_ptr() == b.as_ptr(),
-            _ => false,
         }
     }
 }
@@ -42,9 +43,15 @@ impl ImageSource {
         }
     }
 
-    pub fn into_raw(self) -> Vec<u8> {
+    pub fn uid(&self) -> usize {
         match self {
-            ImageSource::Data(img) => img.as_raw().clone(),
+            ImageSource::Data(img) => Arc::as_ptr(img) as usize,
+        }
+    }
+
+    pub fn to_raw(&self) -> Vec<u8> {
+        match self {
+            ImageSource::Data(img) => img.as_raw().to_vec(),
         }
     }
 }
@@ -64,7 +71,8 @@ impl Default for ImageFitness {
 pub struct ImageState {
     fitness: ImageFitness,
     image_aspect_ratio: f32,
-    source: Option<ImageSource>,
+    curr_source: Option<ImageSource>,
+    new_source: Option<ImageSource>,
 }
 
 impl UIState for ImageState {
@@ -72,25 +80,37 @@ impl UIState for ImageState {
         let mut scene = ctx.module_mut::<Scene>();
         let renderer = ctx.module::<MainRenderer>();
 
+        let impl_ctx = scene.resource::<ImageImplContext>();
+
         let mut obj = scene.object::<UIImage>(&entity.into());
-        let Some(source) = obj.state_mut().source.take() else {
+        let Some(new_source) = obj.state_mut().new_source.take() else {
             return;
         };
-        let size = source.size();
+        let new_source_uid = new_source.uid();
+        let new_source_size = new_source.size();
 
-        let original_aspect_ratio = size.0 as f32 / size.1 as f32;
+        let res = impl_ctx
+            .image_cache
+            .get(new_source_uid, || {
+                GPUImageResource::new(
+                    renderer.device(),
+                    ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, new_source.size())
+                        .with_preferred_mip_levels(1),
+                    new_source.to_raw(),
+                )
+            })
+            .unwrap();
+
+        if let Some(curr_source) = obj.state_mut().curr_source.take() {
+            impl_ctx.image_cache.evict::<GPUImageResource>(curr_source.uid());
+        }
+        obj.state_mut().curr_source = Some(new_source);
+
+        let original_aspect_ratio = new_source_size.0 as f32 / new_source_size.1 as f32;
         obj.state_mut().image_aspect_ratio = original_aspect_ratio;
 
-        let res = Resource::image(
-            renderer.device(),
-            ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, source.size())
-                .with_preferred_mip_levels(1),
-            source.into_raw(),
-        )
-        .unwrap();
-
         let mesh_cfg = obj.get_mut::<MeshRenderConfigC>();
-        mesh_cfg.set_shader_resource(0, res);
+        mesh_cfg.set_shader_resource(0, GPUResource::Image(res));
     }
 }
 
@@ -123,7 +143,10 @@ pub trait ImageImpl {
             CullMode::BACK,
         );
 
-        scene.register_resource(ImageImplContext { mat_pipe_id });
+        scene.register_resource(ImageImplContext {
+            mat_pipe_id,
+            image_cache: Default::default(),
+        });
     }
 
     fn new(
@@ -137,7 +160,7 @@ pub trait ImageImpl {
         let renderer = ctx.module::<MainRenderer>();
 
         let impl_ctx = scene.resource::<ImageImplContext>();
-        let initial_image = Resource::image(
+        let initial_image = GPUResource::image(
             renderer.device(),
             ImageParams::d2(Format::RGBA8_UNORM, ImageUsageFlags::SAMPLED, (1, 1)),
             vec![0_u8; 4],
@@ -149,7 +172,8 @@ pub trait ImageImpl {
             ImageState {
                 fitness,
                 image_aspect_ratio: 1.0,
-                source,
+                curr_source: None,
+                new_source: source,
             },
         )
         .with_renderer(
@@ -174,7 +198,7 @@ pub trait ImageImpl {
 
 impl ImageImpl for UIImage {
     fn with_source(mut self, source: ImageSource) -> Self {
-        self.state.source = Some(source);
+        self.state.new_source = Some(source);
         self
     }
 }
@@ -185,7 +209,7 @@ pub trait ImageAccess {
 
 impl ImageAccess for EntityAccess<'_, UIImage> {
     fn set_image(&mut self, source: ImageSource) {
-        self.state_mut().source = Some(source);
+        self.state_mut().new_source = Some(source);
         self.request_update();
     }
 }

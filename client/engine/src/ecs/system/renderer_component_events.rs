@@ -1,4 +1,4 @@
-use crate::ecs::component::render_config::Resource;
+use crate::ecs::component::render_config::GPUResource;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
@@ -64,7 +64,7 @@ impl RenderConfigComponentEvents<'_> {
 
         for (binding_id, res) in &mut config.resources {
             match res {
-                Resource::Buffer {
+                GPUResource::Buffer {
                     new_source_data,
                     buffer,
                 } => {
@@ -83,25 +83,22 @@ impl RenderConfigComponentEvents<'_> {
                         BindingRes::Buffer(buffer.handle()),
                     ));
                 }
-                Resource::Image {
-                    new_source_data,
-                    image,
-                } => {
-                    let Some(data) = new_source_data.take() else {
+                GPUResource::Image(res) => {
+                    let Some(data) = res.new_source_data.lock().take() else {
                         continue;
                     };
 
                     buffer_updates.push(BufferUpdate::Image(ImageUpdate {
-                        image: Arc::clone(image),
+                        image: Arc::clone(&res.image),
                         data,
                     }));
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
-                        BindingRes::Image(Arc::clone(image), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(&res.image), None, ImageLayout::SHADER_READ),
                     ));
                 }
-                Resource::None => {}
+                GPUResource::None => {}
             }
         }
 
