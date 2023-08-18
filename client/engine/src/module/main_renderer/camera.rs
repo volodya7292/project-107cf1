@@ -80,6 +80,10 @@ impl PerspectiveCamera {
         self.fov_y
     }
 
+    pub fn set_fovy(&mut self, fov_y: f32) {
+        self.fov_y = fov_y;
+    }
+
     pub fn move2(&mut self, front_back: f64, left_right: f64) {
         let d = DVec3::new(
             (-self.rotation.y).sin() as f64,

@@ -104,6 +104,10 @@ impl EngineCtxGameExt for EngineContext<'_> {
     }
 }
 
+struct GameSettings {
+    fov_y: f32,
+}
+
 pub struct MainApp {
     resources: Arc<BufferedResourceReader>,
     main_registry: Arc<MainRegistry>,
@@ -115,6 +119,7 @@ pub struct MainApp {
 
     material_pipelines: MaterialPipelines,
     game_state: Option<Arc<Mutex<GameProcessState>>>,
+    settings: GameSettings,
     post_liquid_uniforms: Arc<Mutex<PostProcessLiquidUniforms>>,
 
     cursor_grab: bool,
@@ -232,6 +237,7 @@ impl MainApp {
             tick_timer: None,
             material_pipelines: mat_pipelines,
             game_state: None,
+            settings: GameSettings { fov_y: FRAC_PI_2 },
             post_liquid_uniforms,
             cursor_grab: true,
             root_entity,
@@ -688,7 +694,6 @@ impl MainApp {
             let mut rotation = *camera.rotation();
             rotation.x = (rotation.x + cursor_offset.y).clamp(-FRAC_PI_2, FRAC_PI_2);
             rotation.y += cursor_offset.x;
-            // rotation.y += delta_time as f32;
 
             let bobbing_offset: DVec3 = glm::convert(*curr_state.bobbing_offset.current());
 
@@ -715,7 +720,6 @@ impl MainApp {
         {
             let registry = self.main_registry.registry();
             let reactor = self.ui_reactor();
-            // let filter_state = reactor.root_state(ui_root_states::GAME_COLOR_FILTER).unwrap();
             let vision_obstructed_state = reactor
                 .root_state::<bool>(ui_root_states::VISION_OBSTRUCTED)
                 .unwrap();
@@ -729,17 +733,21 @@ impl MainApp {
                 vision_obstructed_state
                     .update(!block.transparent() && registry.get_block_model(block.model_id()).is_some());
 
+                let inside_liquid = !data.liquid_state().is_empty();
+
                 {
                     let mut post_liquid = self.post_liquid_uniforms.lock();
-                    post_liquid.enabled = !data.liquid_state().is_empty() as GLSLBool;
-                }
+                    post_liquid.enabled = inside_liquid as GLSLBool;
+                };
 
-                // if !data.liquid_state().is_empty() {
-                //     // The head is in liquid => set appropriate color filter
-                //     // filter_state.update(Color::new(0.0, 0.0, 1.0, 0.4));
-                // } else {
-                //     // filter_state.update(Color::TRANSPARENT);
-                // }
+                let mut renderer = ctx.module_mut::<MainRenderer>();
+                let camera = renderer.active_camera_mut();
+
+                if inside_liquid {
+                    camera.set_fovy(self.settings.fov_y * 0.75);
+                } else {
+                    camera.set_fovy(self.settings.fov_y);
+                }
             }
         }
 
