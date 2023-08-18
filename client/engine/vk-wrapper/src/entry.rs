@@ -31,13 +31,27 @@ pub struct Entry {
     pub(crate) ash_entry: ash::Entry,
 }
 
+fn vk_debug_callback_filter(message_type: vk::DebugUtilsMessageTypeFlagsEXT, msg: &str) -> bool {
+    if message_type == vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+        && msg.contains("CoreValidation-Shader-OutputNotConsumed")
+    {
+        return false;
+    }
+
+    true
+}
+
 unsafe extern "system" fn vk_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _p_user_data: *mut c_void,
 ) -> vk::Bool32 {
-    let msg = CStr::from_ptr((*p_callback_data).p_message);
+    let msg = CStr::from_ptr((*p_callback_data).p_message).to_string_lossy();
+
+    if !vk_debug_callback_filter(message_type, &msg) {
+        return vk::FALSE;
+    }
 
     let msg_type = match message_type {
         vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "VAL",
@@ -54,7 +68,7 @@ unsafe extern "system" fn vk_debug_callback(
         _ => info!(target: "vulkan", "[{}] {:?}", msg_type, msg),
     }
 
-    0
+    vk::FALSE
 }
 
 pub fn enumerate_required_window_extensions(
