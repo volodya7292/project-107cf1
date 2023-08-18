@@ -144,8 +144,8 @@ pub mod background {
         let pixel = renderer
             .device()
             .create_pixel_shader(
-                include_bytes!("../../../res/shaders/solid_background.frag.spv"),
-                "solid_background.frag",
+                include_bytes!("../../../res/shaders/ui_background_solid.frag.spv"),
+                "ui_background_solid.frag",
             )
             .unwrap();
 

@@ -318,6 +318,10 @@ impl UILayoutC {
         self
     }
 
+    pub fn with_fixed_size(mut self, size: f32) -> Self {
+        self.with_fixed_width(size).with_fixed_height(size)
+    }
+
     pub fn with_height(mut self, height: Sizing) -> Self {
         self.sizing[1] = height;
         self

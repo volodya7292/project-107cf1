@@ -9,7 +9,7 @@ use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::scrollable_container::scrollable_container;
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
-use crate::rendering::ui::STATE_ENTITY_ID;
+use crate::rendering::ui::{backgrounds, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
@@ -653,25 +653,53 @@ pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstru
                     .with_grow()
                     .with_position(Position::Relative(Vec2::zeros())),
             )
-            .background(Some(game_effects(color_filter, 0.0, vision_obstructed))),
-        move |ctx, ()| {
+            .background(Some(game_effects(color_filter, 0.0, vision_obstructed)))
+            .children_props(vision_obstructed),
+        move |ctx, vision_obstructed| {
             expander(make_static_id!(), ctx, 1.0);
 
-            if vision_obstructed {
-                ui_text(
-                    make_static_id!(),
-                    ctx,
-                    ui_text_props("Your vision is obstructed!")
-                        .layout(
-                            UILayoutC::new()
-                                .with_width_grow()
-                                .with_padding(Padding::hv(0.0, 30.0)),
-                        )
-                        .style(TextStyle::new().with_font_size(30.0))
-                        .align(TextHAlign::Center)
-                        .wrap(true),
-                );
-            }
+            container(
+                make_static_id!(),
+                ctx,
+                container_props()
+                    .layout(UILayoutC::row().with_width_grow())
+                    .children_props(vision_obstructed),
+                |ctx, vision_obstructed| {
+                    container(
+                        make_static_id!(),
+                        ctx,
+                        container_props().layout(UILayoutC::row().with_width_grow()),
+                        |ctx, ()| {
+                            container(
+                                make_static_id!(),
+                                ctx,
+                                container_props()
+                                    .layout(UILayoutC::new().with_fixed_size(140.0))
+                                    .background(Some(backgrounds::health_indicators(0.3, 0.5))),
+                                |ctx, ()| {},
+                            )
+                        },
+                    );
+
+                    if vision_obstructed {
+                        ui_text(
+                            make_static_id!(),
+                            ctx,
+                            ui_text_props("Your vision is obstructed!")
+                                .layout(
+                                    UILayoutC::new()
+                                        .with_width_grow()
+                                        .with_padding(Padding::hv(0.0, 30.0)),
+                                )
+                                .style(TextStyle::new().with_font_size(30.0))
+                                .align(TextHAlign::Center)
+                                .wrap(true),
+                        );
+                    }
+
+                    expander(make_static_id!(), ctx, 1.0);
+                },
+            );
         },
     );
 }
