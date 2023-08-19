@@ -32,7 +32,7 @@ use crate::overworld::position::{ClusterBlockPos, ClusterPos};
 use crate::overworld::raw_cluster::{BlockData, BlockDataImpl, CompressedCluster, RawCluster};
 use crate::registry::Registry;
 use accessor::OverworldAccessor;
-use common::glm::DVec3;
+use common::glm::{DVec3, Vec3};
 use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
 use common::parking_lot::{Mutex, RawRwLock, RwLock};
 use common::types::HashMap;
@@ -284,19 +284,56 @@ pub struct Overworld {
 }
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
-pub struct OverworldParams {
-    pub seed: u64,
-    pub tick_count: u64,
-    pub player_position: Option<[f64; 3]>,
+pub struct PlayerState {
+    position: Option<[f64; 3]>,
+    orientation: [f64; 3],
+    velocity: [f32; 3],
+    health: f32,
+    satiety: f32,
 }
 
-impl OverworldParams {
-    pub fn player_position(&self) -> Option<DVec3> {
-        self.player_position.map(|v| v.into())
+impl PlayerState {
+    pub fn new() -> Self {
+        Self {
+            position: None,
+            orientation: Default::default(),
+            velocity: Default::default(),
+            health: 1.0,
+            satiety: 1.0,
+        }
     }
 
-    pub fn set_player_position(&mut self, player_pos: DVec3) {
-        self.player_position = Some(player_pos.into());
+    pub fn position(&self) -> Option<DVec3> {
+        self.position.map(|v| v.into())
+    }
+
+    pub fn set_position(&mut self, position: DVec3) {
+        self.position = Some(position.into())
+    }
+
+    pub fn velocity(&self) -> Vec3 {
+        self.velocity.into()
+    }
+
+    pub fn set_velocity(&mut self, velocity: Vec3) {
+        self.velocity = velocity.into();
+    }
+}
+
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub struct OverworldState {
+    pub seed: u64,
+    pub tick_count: u64,
+    pub player_state: PlayerState,
+}
+
+impl OverworldState {
+    pub fn player_state(&self) -> &PlayerState {
+        &self.player_state
+    }
+
+    pub fn update_player_state<F: FnOnce(&mut PlayerState)>(&mut self, f: F) {
+        f(&mut self.player_state);
     }
 }
 

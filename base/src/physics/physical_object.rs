@@ -7,11 +7,8 @@ pub struct ObjectMotion {
 }
 
 impl ObjectMotion {
-    pub fn new(mass: f32) -> Self {
-        Self {
-            mass,
-            velocity: Vec3::zeros(),
-        }
+    pub fn new(mass: f32, velocity: Vec3) -> Self {
+        Self { mass, velocity }
     }
 
     pub fn mass(&self) -> f32 {

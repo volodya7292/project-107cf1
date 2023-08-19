@@ -4,7 +4,7 @@ pub mod local_interface;
 use crate::overworld::generator::OverworldGenerator;
 use crate::overworld::position::ClusterPos;
 use crate::overworld::raw_cluster::RawCluster;
-use crate::overworld::{ClusterState, OverworldParams};
+use crate::overworld::{ClusterState, OverworldState};
 use common::parking_lot::RwLock;
 use std::any::Any;
 use std::sync::Arc;
@@ -23,8 +23,8 @@ pub trait OverworldInterface: Send + Sync {
     /// Queues the cluster for saving into the underlying storage.
     fn persist_cluster(&self, pos: &ClusterPos, cluster: Arc<RwLock<ClusterState>>);
 
-    fn persisted_params(&self) -> OverworldParams;
-    fn persist_params(&self, params: OverworldParams);
+    fn persisted_state(&self) -> OverworldState;
+    fn persist_state(&self, params: OverworldState);
 
     fn as_any(&self) -> &dyn Any;
 }

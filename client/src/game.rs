@@ -23,7 +23,7 @@ use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
 use base::overworld::position::BlockPos;
 use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
-use base::overworld::{Overworld, OverworldOrchestrator, OverworldParams};
+use base::overworld::{Overworld, OverworldOrchestrator, OverworldState, PlayerState};
 use base::physics::aabb::AABB;
 use base::physics::physical_object::ObjectMotion;
 use base::physics::{calc_force, G_ACCEL, MOTION_EPSILON};
@@ -337,10 +337,10 @@ impl MainApp {
 
         LocalOverworldInterface::create_overworld(
             world_path,
-            OverworldParams {
+            OverworldState {
                 seed,
                 tick_count: 0,
-                player_position: None,
+                player_state: PlayerState::new(),
             },
         );
     }
@@ -359,12 +359,14 @@ impl MainApp {
         // crate::proto::make_world_prototype_image(overworld.generator());
         // crate::proto::make_climate_graph_image(main_registry.registry());
 
-        let params = overworld.interface().persisted_params();
+        let params = overworld.interface().persisted_state();
 
-        let player_pos = params
-            .player_position()
-            .unwrap_or_else(|| glm::convert(overworld.interface().generator().gen_spawn_point().0));
-        // self.player_pos = DVec3::new(0.5, 64.0, 0.5);
+        let player_pos = params.player_state().position().unwrap_or_else(|| {
+            let block_spawn_point = overworld.interface().generator().gen_spawn_point().0;
+            let real_spawn_point: DVec3 = glm::convert(block_spawn_point);
+            real_spawn_point + glm::vec3(0.5, 0.5, 0.5)
+        });
+        let player_velocity = params.player_state().velocity();
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
         overworld_orchestrator.set_xz_render_distance(256);
@@ -405,7 +407,7 @@ impl MainApp {
             do_set_block: false,
             curr_block: self.main_registry.block_test.into_any(),
             set_water: false,
-            player_motion: ObjectMotion::new(72.0),
+            player_motion: ObjectMotion::new(72.0, player_velocity),
             change_stream_pos: true,
             player_collision_enabled: true,
             do_remove_block: false,
@@ -900,10 +902,13 @@ fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mut
 
     // Update persisted params
     {
-        let mut params = curr_state.overworld.interface().persisted_params();
+        let mut params = curr_state.overworld.interface().persisted_state();
         params.tick_count = main_state.lock().tick_count;
-        params.set_player_position(curr_state.player_pos);
-        curr_state.overworld.interface().persist_params(params);
+        params.update_player_state(|params| {
+            params.set_position(curr_state.player_pos);
+            params.set_velocity(curr_state.player_motion.velocity);
+        });
+        curr_state.overworld.interface().persist_state(params);
     }
 }
 
