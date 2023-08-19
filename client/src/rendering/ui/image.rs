@@ -94,6 +94,7 @@ impl UIState for ImageState {
             .get(new_source_uid, || {
                 GPUImageResource::new(
                     renderer.device(),
+                    "UIImage",
                     ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, new_source.size())
                         .with_preferred_mip_levels(1),
                     new_source.to_raw(),
@@ -162,6 +163,7 @@ pub trait ImageImpl {
         let impl_ctx = scene.resource::<ImageImplContext>();
         let initial_image = GPUResource::image(
             renderer.device(),
+            "UIImage_initial",
             ImageParams::d2(Format::RGBA8_UNORM, ImageUsageFlags::SAMPLED, (1, 1)),
             vec![0_u8; 4],
         )

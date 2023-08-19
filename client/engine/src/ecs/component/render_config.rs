@@ -17,10 +17,11 @@ pub struct GPUImageResource {
 impl GPUImageResource {
     pub fn new(
         device: &Arc<vkw::Device>,
+        name: &str,
         params: ImageParams,
         source_data: Vec<u8>,
     ) -> Result<Arc<Self>, vkw::DeviceError> {
-        let image = device.create_image(&params.add_usage(vkw::ImageUsageFlags::TRANSFER_DST), "")?;
+        let image = device.create_image(&params.add_usage(vkw::ImageUsageFlags::TRANSFER_DST), name)?;
         let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr(), source_data.len()) };
 
         Ok(Arc::new(GPUImageResource {
@@ -62,11 +63,13 @@ impl Default for GPUResource {
 impl GPUResource {
     pub fn image(
         device: &Arc<vkw::Device>,
+        name: &str,
         params: ImageParams,
         source_data: Vec<u8>,
     ) -> Result<GPUResource, vkw::DeviceError> {
         Ok(GPUResource::Image(GPUImageResource::new(
             device,
+            name,
             params,
             source_data,
         )?))

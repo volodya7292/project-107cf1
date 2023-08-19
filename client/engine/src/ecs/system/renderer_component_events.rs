@@ -68,15 +68,13 @@ impl RenderConfigComponentEvents<'_> {
                     new_source_data,
                     buffer,
                 } => {
-                    let Some(data) = new_source_data.take() else {
-                        continue;
+                    if let Some(data) = new_source_data.take() {
+                        buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
+                            buffer: buffer.handle(),
+                            dst_offset: 0,
+                            data: data.into(),
+                        }));
                     };
-
-                    buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
-                        buffer: buffer.handle(),
-                        dst_offset: 0,
-                        data: data.into(),
-                    }));
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
@@ -84,14 +82,12 @@ impl RenderConfigComponentEvents<'_> {
                     ));
                 }
                 GPUResource::Image(res) => {
-                    let Some(data) = res.new_source_data.lock().take() else {
-                        continue;
+                    if let Some(data) = res.new_source_data.lock().take() {
+                        buffer_updates.push(BufferUpdate::Image(ImageUpdate {
+                            image: Arc::clone(&res.image),
+                            data,
+                        }));
                     };
-
-                    buffer_updates.push(BufferUpdate::Image(ImageUpdate {
-                        image: Arc::clone(&res.image),
-                        data,
-                    }));
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
