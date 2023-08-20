@@ -288,8 +288,8 @@ pub struct PlayerState {
     position: Option<[f64; 3]>,
     orientation: [f64; 3],
     velocity: [f32; 3],
-    health: f32,
-    satiety: f32,
+    health: f64,
+    satiety: f64,
 }
 
 impl PlayerState {
@@ -311,12 +311,36 @@ impl PlayerState {
         self.position = Some(position.into())
     }
 
+    pub fn orientation(&self) -> DVec3 {
+        self.orientation.into()
+    }
+
+    pub fn set_orientation(&mut self, orientation: DVec3) {
+        self.orientation = orientation.into();
+    }
+
     pub fn velocity(&self) -> Vec3 {
         self.velocity.into()
     }
 
     pub fn set_velocity(&mut self, velocity: Vec3) {
         self.velocity = velocity.into();
+    }
+
+    pub fn health(&self) -> f64 {
+        self.health
+    }
+
+    pub fn set_health(&mut self, health: f64) {
+        self.health = health.clamp(0.0, 1.0);
+    }
+
+    pub fn satiety(&self) -> f64 {
+        self.satiety
+    }
+
+    pub fn set_satiety(&mut self, satiety: f64) {
+        self.satiety = satiety.clamp(0.0, 1.0);
     }
 }
 
@@ -328,8 +352,8 @@ pub struct OverworldState {
 }
 
 impl OverworldState {
-    pub fn player_state(&self) -> &PlayerState {
-        &self.player_state
+    pub fn player_state(&self) -> PlayerState {
+        self.player_state
     }
 
     pub fn update_player_state<F: FnOnce(&mut PlayerState)>(&mut self, f: F) {

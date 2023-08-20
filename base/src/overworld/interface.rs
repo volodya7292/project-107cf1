@@ -24,7 +24,7 @@ pub trait OverworldInterface: Send + Sync {
     fn persist_cluster(&self, pos: &ClusterPos, cluster: Arc<RwLock<ClusterState>>);
 
     fn persisted_state(&self) -> OverworldState;
-    fn persist_state(&self, params: OverworldState);
+    fn update_persisted_state(&self, f: &dyn Fn(&mut OverworldState));
 
     fn as_any(&self) -> &dyn Any;
 }

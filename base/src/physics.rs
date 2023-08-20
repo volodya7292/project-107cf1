@@ -1,5 +1,4 @@
 pub mod aabb;
-pub mod physical_object;
 
 use crate::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use crate::overworld::position::BlockPos;
@@ -15,6 +14,10 @@ pub const G_ACCEL: f64 = 12.0;
 
 pub fn calc_force(mass: f32, accel: Vec3) -> Vec3 {
     accel * mass
+}
+
+pub fn calc_acceleration(forces: Vec3, object_mass: f32) -> Vec3 {
+    forces / object_mass
 }
 
 pub fn collision_delta_many2one(aabbs: &[AABB], other: &AABB, resolve_direction: &DVec3) -> DVec3 {

@@ -22,11 +22,10 @@ use base::overworld::interface::local_interface::LocalOverworldInterface;
 use base::overworld::light_state::LightLevel;
 use base::overworld::liquid_state::LiquidState;
 use base::overworld::position::BlockPos;
-use base::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
+use base::overworld::raw_cluster::{BlockDataImpl, LightType};
 use base::overworld::{Overworld, OverworldOrchestrator, OverworldState, PlayerState};
 use base::physics::aabb::AABB;
-use base::physics::physical_object::ObjectMotion;
-use base::physics::{calc_force, G_ACCEL, MOTION_EPSILON};
+use base::physics::{calc_acceleration, calc_force, G_ACCEL, MOTION_EPSILON};
 use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
 use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
@@ -154,6 +153,13 @@ struct PostProcessLiquidUniforms {
 
 impl MainApp {
     const MOUSE_SENSITIVITY: f64 = 0.2;
+    const PLAYER_MASS: f32 = 80.0; // health won't automatically regenerate past this value
+    const DAY_CYCLE_TIME_INTERVAL: f64 = 60.0 * 30.0; // 30 minutes
+    const SATIETY_IDLE_DECREASE_SPEED: f64 = 1.0 / Self::DAY_CYCLE_TIME_INTERVAL;
+    const HEALTH_MAX_REGEN_SPEED: f64 = 1.0 / 200.0;
+    const HEALTH_REGEN_THRESHOLD: f64 = 0.5; // health won't automatically regenerate past this value
+    const MAX_SAFE_PLAYER_VELOCITY: f32 = 12.0;
+    const FATAL_PLAYER_VELOCITY: f32 = 21.0;
 
     pub fn init(ctx: &EngineContext) {
         ctx.register_module(Scene::new());
@@ -394,8 +400,6 @@ impl MainApp {
             overworld_orchestrator: Some(overworld_orchestrator),
             overworld_renderer: Some(Arc::clone(&overworld_renderer)),
             res_map: Arc::clone(&self.res_map),
-            player_pos,
-            player_orientation: Default::default(),
             player_aabb: AABB::from_size(DVec3::new(0.6, 1.75, 0.6)),
             fall_time: 0.0,
             walk_time: 0.0,
@@ -407,7 +411,6 @@ impl MainApp {
             do_set_block: false,
             curr_block: self.main_registry.block_test.into_any(),
             set_water: false,
-            player_motion: ObjectMotion::new(72.0, player_velocity),
             change_stream_pos: true,
             player_collision_enabled: true,
             do_remove_block: false,
@@ -482,6 +485,12 @@ impl MainApp {
         use engine::winit::event::ElementState;
 
         let main_state = self.game_state.as_ref().unwrap();
+        let player_state = main_state
+            .lock()
+            .overworld
+            .interface()
+            .persisted_state()
+            .player_state();
 
         match event {
             WSIEvent::KeyboardInput { input } => {
@@ -503,13 +512,7 @@ impl MainApp {
                         curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
                     }
                     VirtualKeyCode::P => {
-                        println!("{}", curr_state.player_pos);
-                        println!(
-                            "{:?}",
-                            curr_state
-                                .player_pos
-                                .map(|v| v.rem_euclid(RawCluster::SIZE as f64))
-                        );
+                        println!("{:?}", player_state.position());
                     }
                     VirtualKeyCode::T => {
                         self.grab_cursor(main_window, !self.cursor_grab, &ctx);
@@ -599,13 +602,15 @@ impl MainApp {
 
         let kb = input.keyboard();
         let mut curr_state = main_state.lock();
+        let player_state = curr_state.overworld.interface().persisted_state().player_state();
 
         if kb.is_key_pressed(VirtualKeyCode::Space) && curr_state.fall_time == 0.0 {
-            curr_state.curr_jump_force = (380.0 / delta_time) as f32;
+            curr_state.curr_jump_force = (MainApp::PLAYER_MASS * 5.5 / delta_time as f32);
         }
 
         {
-            let move_vel = Self::calc_player_velocity(kb, &curr_state, curr_state.player_orientation);
+            let move_vel =
+                Self::calc_player_velocity(kb, &curr_state, glm::convert(player_state.orientation()));
             curr_state
                 .walk_velocity
                 .retarget(TransitionTarget::new(move_vel, 0.07));
@@ -637,16 +642,15 @@ impl MainApp {
         }
         curr_state.bobbing_offset.advance(delta_time);
 
-        let motion_delta = {
-            let player_mass = curr_state.player_motion.mass();
-            let g_force = calc_force(player_mass, Vec3::new(0.0, -G_ACCEL as f32, 0.0));
+        let (mut new_player_velocity, motion_delta) = {
+            let g_force = calc_force(MainApp::PLAYER_MASS, Vec3::new(0.0, -G_ACCEL as f32, 0.0));
 
             let mut total_force = Vec3::zeros();
 
             if curr_state.player_collision_enabled {
                 let mut blocks = curr_state.overworld.access();
                 if blocks
-                    .get_block(&BlockPos::from_f64(&curr_state.player_pos))
+                    .get_block(&BlockPos::from_f64(&player_state.position().unwrap()))
                     .is_some()
                 {
                     let jump_force = Vec3::new(0.0, curr_state.curr_jump_force, 0.0);
@@ -654,16 +658,20 @@ impl MainApp {
                 }
             }
 
-            curr_state.player_motion.update(total_force, delta_time as f32);
+            let new_player_velocity = player_state.velocity()
+                + calc_acceleration(total_force, MainApp::PLAYER_MASS) * delta_time as f32;
+            let motion_delta = glm::convert::<_, DVec3>(new_player_velocity + walk_vel) * delta_time;
 
-            glm::convert::<_, DVec3>(curr_state.player_motion.velocity + walk_vel) * delta_time
+            (new_player_velocity, motion_delta)
         };
 
         curr_state.curr_jump_force = 0.0;
         let mut new_jump_force = curr_state.curr_jump_force;
+        let mut new_player_pos = player_state.position().unwrap();
+        let mut health_decrease = 0.0;
 
         if curr_state.player_collision_enabled {
-            let prev_pos = curr_state.player_pos;
+            let prev_pos = player_state.position().unwrap();
 
             let new_pos =
                 curr_state
@@ -671,21 +679,28 @@ impl MainApp {
                     .try_resolve_collisions(prev_pos, motion_delta, &curr_state.player_aabb);
 
             if new_pos.y.abs_diff_eq(&prev_pos.y, MOTION_EPSILON) {
+                if new_player_velocity.y < -Self::MAX_SAFE_PLAYER_VELOCITY {
+                    health_decrease = ((new_player_velocity.y.abs() - Self::MAX_SAFE_PLAYER_VELOCITY)
+                        / (Self::FATAL_PLAYER_VELOCITY - Self::MAX_SAFE_PLAYER_VELOCITY))
+                        as f64;
+                }
+
                 // Note: the ground is reached
                 new_jump_force = 0.0;
-                curr_state.player_motion.velocity = Vec3::zeros();
+                new_player_velocity = Vec3::zeros();
                 curr_state.fall_time = 0.0;
             } else {
                 curr_state.fall_time += delta_time;
             }
 
-            curr_state.player_pos = new_pos;
+            new_player_pos = new_pos;
         } else {
-            curr_state.player_motion.velocity = Vec3::zeros();
-            curr_state.player_pos += motion_delta;
+            new_player_velocity = Vec3::zeros();
+            new_player_pos += motion_delta;
         }
         curr_state.curr_jump_force = new_jump_force;
 
+        let mut new_player_orientation = player_state.orientation();
         {
             let mut renderer = ctx.module_mut::<MainRenderer>();
             let camera = renderer.active_camera_mut();
@@ -700,10 +715,10 @@ impl MainApp {
             let bobbing_offset: DVec3 = glm::convert(*curr_state.bobbing_offset.current());
 
             camera.set_rotation(rotation);
-            camera.set_position(curr_state.player_pos + PLAYER_CAMERA_OFFSET + bobbing_offset);
+            camera.set_position(new_player_pos + PLAYER_CAMERA_OFFSET + bobbing_offset);
             self.cursor_rel = Vec2::new(0.0, 0.0);
 
-            curr_state.player_orientation = rotation;
+            new_player_orientation = glm::convert(rotation);
         }
 
         // Handle Look-at
@@ -727,7 +742,7 @@ impl MainApp {
                 .unwrap();
             let mut access = curr_state.overworld.access();
 
-            let block_pos = BlockPos::from_f64(&(curr_state.player_pos + PLAYER_CAMERA_OFFSET));
+            let block_pos = BlockPos::from_f64(&(new_player_pos + PLAYER_CAMERA_OFFSET));
 
             if let Some(data) = access.get_block(&block_pos) {
                 let block = registry.get_block(data.block_id()).unwrap();
@@ -755,6 +770,28 @@ impl MainApp {
 
         curr_state.do_set_block = input.mouse().is_button_pressed(MouseButton::Left);
         curr_state.do_remove_block = input.mouse().is_button_pressed(MouseButton::Right);
+
+        curr_state.overworld.interface().update_persisted_state(&|state| {
+            state.update_player_state(|p_state| {
+                p_state.set_position(new_player_pos);
+                p_state.set_orientation(new_player_orientation);
+                p_state.set_velocity(new_player_velocity);
+
+                p_state.set_health((p_state.health() - health_decrease).max(0.0));
+                // TODO: death screen
+            });
+        });
+
+        // Update HUD
+        {
+            let reactor = self.ui_reactor();
+            let player_health_state = reactor.root_state::<f64>(ui_root_states::PLAYER_HEALTH).unwrap();
+            let player_satiety_state = reactor.root_state::<f64>(ui_root_states::PLAYER_SATIETY).unwrap();
+
+            let player_state = curr_state.overworld.interface().persisted_state().player_state();
+            player_health_state.update(player_state.health());
+            player_satiety_state.update(player_state.satiety());
+        }
     }
 }
 
@@ -859,8 +896,6 @@ struct GameProcessState {
     overworld_renderer: Option<Arc<Mutex<OverworldRenderer>>>,
     res_map: Arc<DefaultResourceMapping>,
 
-    player_pos: DVec3,
-    player_orientation: Vec3,
     player_aabb: AABB,
     fall_time: f64,
     walk_time: f64,
@@ -871,8 +906,6 @@ struct GameProcessState {
     curr_block: AnyBlockState,
     set_water: bool,
 
-    player_motion: ObjectMotion,
-
     change_stream_pos: bool,
     player_collision_enabled: bool,
     block_set_cooldown: f64,
@@ -882,6 +915,7 @@ struct GameProcessState {
 
 fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mutex<OverworldRenderer>>) {
     let curr_state = main_state.lock().clone();
+    let player_state = curr_state.overworld.interface().persisted_state().player_state();
 
     let curr_tick = curr_state.tick_count;
     let mut new_actions = OverworldActionsStorage::new();
@@ -896,25 +930,26 @@ fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mut
     );
 
     let mut overworld_renderer = overworld_renderer.lock();
-    overworld_renderer.update(curr_state.player_pos, &update_res);
+    if let Some(player_pos) = player_state.position() {
+        overworld_renderer.update(player_pos, &update_res);
+    }
 
     main_state.lock().tick_count += 1;
 
     // Update persisted params
     {
-        let mut params = curr_state.overworld.interface().persisted_state();
-        params.tick_count = main_state.lock().tick_count;
-        params.update_player_state(|params| {
-            params.set_position(curr_state.player_pos);
-            params.set_velocity(curr_state.player_motion.velocity);
+        let tick_count = main_state.lock().tick_count;
+        curr_state.overworld.interface().update_persisted_state(&|state| {
+            state.tick_count = tick_count;
         });
-        curr_state.overworld.interface().persist_state(params);
     }
 }
 
 fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut OverworldActionsStorage) {
     let start_t = Instant::now();
     let curr_state = main_state.lock().clone();
+    let player_state = curr_state.overworld.interface().persisted_state().player_state();
+    let player_pos = player_state.position().unwrap();
     let registry = curr_state.overworld.main_registry();
     let delta_time = (start_t - curr_state.last_tick_start).as_secs_f64();
 
@@ -929,7 +964,7 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                 let set_pos = pos.offset(&dir);
 
                 let new_block_global_aabb = AABB::block().translate(&glm::convert(set_pos.0));
-                let player_global_aabb = curr_state.player_aabb.translate(&curr_state.player_pos);
+                let player_global_aabb = curr_state.player_aabb.translate(&player_pos);
 
                 if curr_state.set_water {
                     overworld
@@ -991,10 +1026,24 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
             .as_ref()
             .unwrap()
             .lock()
-            .set_stream_pos(curr_state.player_pos);
+            .set_stream_pos(player_pos);
     }
 
     let mut new_state = main_state.lock();
     new_state.last_tick_start = start_t;
     new_state.block_set_cooldown = new_block_set_cooldown;
+
+    curr_state.overworld.interface().update_persisted_state(&|state| {
+        state.update_player_state(|p_state| {
+            p_state.set_satiety(
+                (p_state.satiety() - MainApp::SATIETY_IDLE_DECREASE_SPEED * delta_time).max(0.0),
+            );
+
+            if p_state.health() < MainApp::HEALTH_REGEN_THRESHOLD {
+                let regen = p_state.satiety() * MainApp::HEALTH_MAX_REGEN_SPEED * delta_time;
+                p_state.set_health((p_state.health() + regen).min(MainApp::HEALTH_REGEN_THRESHOLD));
+            }
+            dbg!(p_state.health());
+        });
+    });
 }

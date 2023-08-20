@@ -224,8 +224,8 @@ impl OverworldInterface for LocalOverworldInterface {
         *self.params.lock()
     }
 
-    fn persist_state(&self, params: OverworldState) {
-        *self.params.lock() = params;
+    fn update_persisted_state(&self, f: &dyn Fn(&mut OverworldState)) {
+        f(&mut self.params.lock());
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -36,6 +36,8 @@ pub mod ui_root_states {
     pub const IN_GAME_PROCESS: &'static str = "in_game_process";
     pub const GAME_COLOR_FILTER: &'static str = "game_color_filter";
     pub const VISION_OBSTRUCTED: &'static str = "vision_obstructed";
+    pub const PLAYER_HEALTH: &'static str = "player_health";
+    pub const PLAYER_SATIETY: &'static str = "player_satiety";
     pub const WORLD_NAME_LIST: &'static str = "world_name_list";
 }
 
@@ -670,12 +672,20 @@ pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstru
                         ctx,
                         container_props().layout(UILayoutC::row().with_width_grow()),
                         |ctx, ()| {
+                            let player_health =
+                                ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+                            let player_satiety =
+                                ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_SATIETY));
+
                             container(
                                 make_static_id!(),
                                 ctx,
                                 container_props()
                                     .layout(UILayoutC::new().with_fixed_size(140.0))
-                                    .background(Some(backgrounds::health_indicators(0.3, 0.5))),
+                                    .background(Some(backgrounds::health_indicators(
+                                        *player_health as f32,
+                                        *player_satiety as f32,
+                                    ))),
                                 |ctx, ()| {},
                             )
                         },
@@ -711,6 +721,8 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
     ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
     ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
+    ctx.request_state(ui_root_states::PLAYER_HEALTH, || 0.0_f64);
+    ctx.request_state(ui_root_states::PLAYER_SATIETY, || 0.0_f64);
 
     let in_game_process_state = ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
     let in_game_process = ctx.subscribe(&in_game_process_state);
