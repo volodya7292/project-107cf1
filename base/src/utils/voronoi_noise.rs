@@ -78,3 +78,9 @@ impl VoronoiNoise2D {
     //     result
     // }
 }
+
+impl Default for VoronoiNoise2D {
+    fn default() -> Self {
+        Self::new()
+    }
+}

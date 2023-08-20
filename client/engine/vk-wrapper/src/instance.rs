@@ -68,7 +68,7 @@ impl Instance {
                 let surface_fn = ash::extensions::khr::XcbSurface::new(&self.entry.ash_entry, &self.native);
                 unsafe { surface_fn.create_xcb_surface(&surface_desc, None) }
             }
-            #[cfg(any(target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             RawWindowHandle::AppKit(handle) => {
                 let layer = unsafe { metal::metal_layer_from_handle(handle) };
                 let layer = match layer {

@@ -20,11 +20,12 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}/work_dir",
+      "cwd": "${workspaceFolder}/client/work_dir",
       "env": {
         "_NO_DEBUG_HEAP": "1"
       }
-    },{
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "Launch release",
@@ -41,7 +42,7 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}/work_dir",
+      "cwd": "${workspaceFolder}/client/work_dir",
       "env": {
         "_NO_DEBUG_HEAP": "1"
       }

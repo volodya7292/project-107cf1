@@ -21,8 +21,9 @@ impl<'a, T> UnsafeSlice<'a, T> {
         }
     }
 
-    /// Safety: it is UB if two threads write to the same index without
-    /// synchronization.
+    /// # Safety
+    /// It is UB if two threads write to the same index without synchronization.
+    #[allow(clippy::mut_from_ref)]
     pub unsafe fn slice_mut(&self, range: Range<usize>) -> &mut [T] {
         assert!(range.end <= self.len);
         slice::from_raw_parts_mut(self.ptr.add(range.start), range.len())

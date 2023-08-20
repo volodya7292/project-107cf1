@@ -213,7 +213,7 @@ impl WorldState {
             ),
             biome_partition_noise,
             biomes_by_climate,
-            cluster_xz_caches: ConcurrentCache::new(MAX_CLUSTER_BIOME_MAPS),
+            cluster_xz_caches: ConcurrentCache::new(512),
             flat_noise: ParamNoise::new(
                 noise::SuperSimplex::new(seed_gen.gen::<u32>()),
                 &[(1.0, 1.0), (2.0, 0.4), (4.0, 0.2)],

@@ -309,6 +309,8 @@ impl Device {
         self.wrapper.native.update_descriptor_sets(&native_writes, &[]);
     }
 
+    /// # Safety
+    /// See [update_descriptor_sets].
     pub unsafe fn update_descriptor_set(&self, set: DescriptorSet, bindings: &[Binding]) {
         self.update_descriptor_sets(bindings, &[(set, 0..bindings.len())])
     }

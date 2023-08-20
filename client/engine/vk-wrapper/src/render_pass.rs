@@ -67,6 +67,12 @@ impl Subpass {
     }
 }
 
+impl Default for Subpass {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct SubpassDependency {
     pub src_subpass: u32,
     pub dst_subpass: u32,
@@ -145,7 +151,7 @@ impl RenderPass {
                     ImageMod::OverrideImage(img) => {
                         assert_eq!(img.size_2d(), size);
                         assert_eq!(img.format(), attachment.format);
-                        override_image = Some(Arc::clone(&img));
+                        override_image = Some(Arc::clone(img));
                         override_image_view = Some(Arc::clone(&img.view));
                     }
                     ImageMod::OverrideImageView(view) => {

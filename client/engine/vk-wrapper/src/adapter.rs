@@ -329,11 +329,11 @@ impl Adapter {
     }
 
     pub(crate) fn is_linear_filter_supported(&self, format: vk::Format, tiling: vk::ImageTiling) -> bool {
-        return if tiling == vk::ImageTiling::OPTIMAL {
+        if tiling == vk::ImageTiling::OPTIMAL {
             self.formats_props[&format].optimal_tiling_features
         } else {
             self.formats_props[&format].linear_tiling_features
         }
-        .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR);
+        .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
     }
 }

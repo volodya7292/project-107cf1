@@ -1,9 +1,9 @@
 use crate::main_registry::MainRegistry;
 use crate::overworld::block_model::Quad;
 use crate::overworld::facing::Facing;
+use crate::overworld::interface::local_interface;
 use crate::overworld::position::{ClusterBlockPos, RelativeBlockPos};
 use crate::overworld::raw_cluster::{deserialize_cluster, serialize_cluster, BlockDataImpl, RawCluster};
-use crate::persistence;
 use approx::assert_abs_diff_eq;
 use common::glm;
 use common::glm::{I32Vec3, Vec3};
@@ -15,18 +15,18 @@ fn cluster_serialization() {
     let mut cluster = RawCluster::new();
 
     cluster.get_mut(&ClusterBlockPos::new(1, 4, 9)).set({
-        let mut s = main_registry.block_test_stateful.clone();
+        let mut s = main_registry.block_test_stateful;
         s.components.go = 3;
         s.components.go2 = 2353;
         s
     });
 
     let mut data = vec![];
-    let mut ser = bincode::Serializer::new(&mut data, *persistence::BINCODE_OPTIONS);
+    let mut ser = bincode::Serializer::new(&mut data, *local_interface::BINCODE_OPTIONS);
     serialize_cluster(&cluster, main_registry.registry(), &mut ser).unwrap();
-    assert!(data.len() > 0);
+    assert!(!data.is_empty());
 
-    let mut deser = bincode::Deserializer::from_slice(&data, *persistence::BINCODE_OPTIONS);
+    let mut deser = bincode::Deserializer::from_slice(&data, *local_interface::BINCODE_OPTIONS);
     let cluster = deserialize_cluster(main_registry.registry(), &mut deser).unwrap();
 
     let b_data = cluster.get(&ClusterBlockPos::new(1, 4, 9));

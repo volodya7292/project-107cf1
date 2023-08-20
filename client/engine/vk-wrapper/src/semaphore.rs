@@ -28,7 +28,8 @@ impl Semaphore {
             .semaphores(slice::from_ref(&self.native))
             .values(slice::from_ref(&value));
 
-        Ok(unsafe { self.device_wrapper.native.wait_semaphores(&wait_info, u64::MAX)? })
+        unsafe { self.device_wrapper.native.wait_semaphores(&wait_info, u64::MAX)? };
+        Ok(())
     }
 
     pub fn signal(&self, value: u64) -> Result<(), DeviceError> {
@@ -40,7 +41,8 @@ impl Semaphore {
             .semaphore(self.native)
             .value(value);
 
-        Ok(unsafe { self.device_wrapper.native.signal_semaphore(&signal_info)? })
+        unsafe { self.device_wrapper.native.signal_semaphore(&signal_info)? };
+        Ok(())
     }
 }
 

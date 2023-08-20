@@ -105,8 +105,7 @@ impl OverworldActionsStorage {
                 let mut state_uninit = mem::MaybeUninit::<BlockState<A>>::uninit();
 
                 let state = unsafe {
-                    (data as *const BlockState<A>)
-                        .copy_to_nonoverlapping(state_uninit.as_mut_ptr(), mem::size_of::<BlockState<A>>());
+                    (data as *const BlockState<A>).copy_to_nonoverlapping(state_uninit.as_mut_ptr(), 1);
                     state_uninit.assume_init()
                 };
 
@@ -126,8 +125,7 @@ impl OverworldActionsStorage {
                 let mut component_uninit = mem::MaybeUninit::<C>::uninit();
 
                 let component = unsafe {
-                    (data as *const C)
-                        .copy_to_nonoverlapping(component_uninit.as_mut_ptr(), mem::size_of::<C>());
+                    (data as *const C).copy_to_nonoverlapping(component_uninit.as_mut_ptr(), 1);
                     component_uninit.assume_init()
                 };
 

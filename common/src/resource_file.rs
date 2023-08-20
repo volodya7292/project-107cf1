@@ -61,7 +61,7 @@ impl ResourceFile {
         header_size: u32,
         res_entry: &mut ResourceEntry,
     ) -> Result<(), Error> {
-        let curr_pos = buf_reader.seek(SeekFrom::Current(0))?;
+        let curr_pos = buf_reader.stream_position()?;
         if curr_pos >= header_size as u64 {
             if curr_pos > header_size as u64 {
                 return Err(Error::InvalidHeader);
@@ -143,7 +143,7 @@ impl ResourceFile {
             }
         }
 
-        return Ok((entry.offset, entry.size));
+        Ok((entry.offset, entry.size))
     }
 
     fn read_range(&self, range: (u64, u64)) -> Result<Vec<u8>, Error> {
@@ -151,7 +151,7 @@ impl ResourceFile {
 
         buf_reader.seek(SeekFrom::Start(range.0))?;
         let mut data = vec![0u8; range.1 as usize];
-        buf_reader.read(&mut data)?;
+        buf_reader.read_exact(&mut data)?;
 
         Ok(data)
     }
@@ -198,7 +198,7 @@ impl BufferedResourceReader {
     pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
         self.cache.get(path.to_string(), || {
             let res = self.resources.get(path)?;
-            res.read().map(|v| Arc::from(v))
+            res.read().map(Arc::from)
         })
     }
 

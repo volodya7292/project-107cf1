@@ -1,4 +1,7 @@
-use std::ops::{Index, IndexMut};
+use std::{
+    cmp::Ordering,
+    ops::{Index, IndexMut},
+};
 
 pub struct SliceSplit<'a, T> {
     left: &'a mut [T],
@@ -8,22 +11,18 @@ pub struct SliceSplit<'a, T> {
 
 impl<T> SliceSplit<'_, T> {
     pub fn get(&self, index: usize) -> Option<&T> {
-        if index < self.mid_index {
-            self.left.get(index)
-        } else if index > self.mid_index {
-            self.right.get(index - self.left.len() - 1)
-        } else {
-            None
+        match index.cmp(&self.mid_index) {
+            Ordering::Less => self.left.get(index),
+            Ordering::Greater => self.right.get(index - self.left.len() - 1),
+            _ => None,
         }
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        if index < self.mid_index {
-            self.left.get_mut(index)
-        } else if index > self.mid_index {
-            self.right.get_mut(index - self.left.len() - 1)
-        } else {
-            None
+        match index.cmp(&self.mid_index) {
+            Ordering::Less => self.left.get_mut(index),
+            Ordering::Greater => self.right.get_mut(index - self.left.len() - 1),
+            _ => None,
         }
     }
 }

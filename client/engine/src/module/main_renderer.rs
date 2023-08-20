@@ -1453,9 +1453,7 @@ impl MainRenderer {
         self.stage_manager.wait_idle();
 
         if self.surface_changed {
-            unsafe {
-                Surface::update(&*ctx.window.borrow()).unwrap();
-            }
+            Surface::update(&*ctx.window.borrow()).unwrap();
 
             self.swapchain = Some(Arc::new(
                 device

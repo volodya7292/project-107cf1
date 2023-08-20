@@ -9,7 +9,7 @@ pub type IndexSet<T> = indexmap::IndexSet<T, Hasher>;
 pub type IndexMap<T, V> = indexmap::IndexMap<T, V, Hasher>;
 
 pub trait ConcurrentCacheExt<K, V> {
-    fn new(max_capacity: usize) -> ConcurrentCache<K, V>;
+    fn new(max_capacity: usize) -> Self;
     fn with_weigher(
         max_capacity: usize,
         weigher: impl Fn(&K, &V) -> u32 + Send + Sync + 'static,
@@ -21,7 +21,7 @@ where
     K: Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
-    fn new(max_capacity: usize) -> ConcurrentCache<K, V> {
+    fn new(max_capacity: usize) -> Self {
         moka::sync::CacheBuilder::new(max_capacity as u64).build_with_hasher(Hasher::new())
     }
 

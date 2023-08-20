@@ -127,7 +127,7 @@ fn read_resources(read_dir: fs::ReadDir, timestamps: &mut HashMap<String, System
         res_file.header_size += 8 * 2 + (entry_info.name.len() as u32 + 1);
     }
 
-    return res_file;
+    res_file
 }
 
 pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) {
@@ -158,13 +158,12 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
 
     // Create destination directories
     if !out_dir_path.exists() {
-        fs::create_dir_all(out_dir_path).expect(
-            format!(
+        fs::create_dir_all(out_dir_path).unwrap_or_else(|_| {
+            panic!(
                 "Cannot create output directory: {}",
                 output_file_path.to_str().unwrap()
             )
-            .as_str(),
-        );
+        });
     }
 
     // Read resources
@@ -173,7 +172,6 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
 
     res_file_struct.header_size += 4; // + sizeof(u32) for header size var
     let res_file_size = res_file_struct.header_size as u64 + res_file_struct.data_size;
-    let file_outdated;
 
     // Open destination file
     let mut out_file = OpenOptions::new()
@@ -181,11 +179,11 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
         .write(true)
         .create(true)
         .open(output_file_path)
-        .expect(format!("Cannot create file: {}", output_file_path.to_str().unwrap()).as_str());
+        .unwrap_or_else(|_| panic!("Cannot create file: {}", output_file_path.to_str().unwrap()));
 
     // Read file length
     out_file.seek(SeekFrom::End(0)).unwrap();
-    let file_len = out_file.seek(SeekFrom::Current(0)).unwrap();
+    let file_len = out_file.stream_position().unwrap();
     out_file.seek(SeekFrom::Start(0)).unwrap();
 
     // Read file header size
@@ -197,7 +195,7 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
     out_file.seek(SeekFrom::Start(0)).unwrap();
 
     // Check for updates
-    file_outdated = res_file_struct.header_size != file_header_size || res_file_size != file_len;
+    let file_outdated = res_file_struct.header_size != file_header_size || res_file_size != file_len;
     if !res_file_struct.modified && !file_outdated {
         return;
     }
@@ -205,7 +203,7 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
     // Resize file
     out_file
         .set_len(res_file_size)
-        .expect(format!("Cannot resize file: {}", res_file_size).as_str());
+        .unwrap_or_else(|_| panic!("Cannot resize file: {}", res_file_size));
 
     // Write header
     out_file

@@ -205,8 +205,7 @@ impl Device {
 
     pub fn align_for_uniform_dynamic_offset(&self, size: u64) -> u64 {
         let limits = &self.wrapper.adapter.props.limits;
-        let aligned_elem_size = utils::make_mul_of_u64(size, limits.min_uniform_buffer_offset_alignment);
-        aligned_elem_size
+        utils::make_mul_of_u64(size, limits.min_uniform_buffer_offset_alignment)
     }
 
     fn create_buffer(
@@ -224,7 +223,7 @@ impl Device {
             return Err(DeviceError::ZeroBufferSize);
         }
 
-        let bytesize = elem_size as u64 * len;
+        let bytesize = elem_size * len;
 
         let buffer_info = vk::BufferCreateInfo::builder()
             .usage(usage.0)
@@ -238,7 +237,7 @@ impl Device {
 
             let mut alloc_create_info: vma::VmaAllocationCreateInfo = mem::zeroed();
             if mem_usage == MemoryUsage::Host {
-                alloc_create_info.flags = vma::VMA_ALLOCATION_CREATE_MAPPED_BIT as u32;
+                alloc_create_info.flags = vma::VMA_ALLOCATION_CREATE_MAPPED_BIT;
                 alloc_create_info.pool = self.host_mem_pool;
             } else {
                 alloc_create_info.pool = self.device_mem_pool;
@@ -285,7 +284,7 @@ impl Device {
                 used_dev_memory,
                 elem_size,
                 len,
-                _bytesize: bytesize as u64,
+                _bytesize: bytesize,
             },
             alloc_info,
         ))
@@ -346,7 +345,7 @@ impl Device {
         name: &str,
     ) -> Result<Arc<Image>, DeviceError> {
         if params.ty == Image::TYPE_3D {
-            assert_eq!(params.is_array, false);
+            assert!(!params.is_array);
         }
 
         if !IMAGE_FORMATS.contains_key(&params.format)
@@ -500,7 +499,7 @@ impl Device {
     }
 
     pub fn swapchain_min_max_images(&self, surface: &Surface) -> Result<(u32, u32), DeviceError> {
-        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
+        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(surface)?;
         Ok((surface_capabs.min_image_count, surface_capabs.max_image_count))
     }
 
@@ -512,9 +511,9 @@ impl Device {
         preferred_n_images: u32,
         old_swapchain: Option<Arc<Swapchain>>,
     ) -> Result<Swapchain, DeviceError> {
-        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(&surface)?;
-        let surface_formats = self.wrapper.adapter.get_surface_formats(&surface)?;
-        let surface_present_modes = self.wrapper.adapter.get_surface_present_modes(&surface)?;
+        let surface_capabs = self.wrapper.adapter.get_surface_capabilities(surface)?;
+        let surface_formats = self.wrapper.adapter.get_surface_formats(surface)?;
+        let surface_present_modes = self.wrapper.adapter.get_surface_present_modes(surface)?;
 
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         if !surface_capabs.supported_usage_flags.contains(image_usage) {
@@ -1165,6 +1164,7 @@ impl Device {
         unsafe { self.wrapper.native.get_pipeline_cache_data(*pipeline_cache) }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_graphics_pipeline(
         self: &Arc<Self>,
         render_pass: &Arc<RenderPass>,
@@ -1217,13 +1217,13 @@ impl Device {
         for (location, (format, rate)) in &vertex_shader.vertex_location_inputs {
             let buffer_index = *location;
 
-            if !BUFFER_FORMATS[&format].contains(FormatFeatureFlags::VERTEX_BUFFER) {
+            if !BUFFER_FORMATS[format].contains(FormatFeatureFlags::VERTEX_BUFFER) {
                 panic!("Unsupported vertex format is used: {:?}", format);
             }
 
             vertex_binding_descs[buffer_index as usize] = vk::VertexInputBindingDescription {
                 binding: buffer_index,
-                stride: FORMAT_SIZES[&format] as u32,
+                stride: FORMAT_SIZES[format] as u32,
                 input_rate: rate.0,
             };
             vertex_attrib_descs[buffer_index as usize] = vk::VertexInputAttributeDescription {
@@ -1375,7 +1375,7 @@ impl Device {
                 .create_compute_pipelines(*pipeline_cache, slice::from_ref(&create_info), None)
         };
         if let Err((_, err)) = native_pipeline {
-            return Err(err.into());
+            return Err(err);
         }
         let pipeline = native_pipeline.unwrap()[0];
 

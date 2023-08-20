@@ -24,7 +24,7 @@ impl PipelineSignature {
     ) -> Result<DescriptorPool, vk::Result> {
         let mut pool = DescriptorPool {
             device: Arc::clone(&self.device),
-            signature: Arc::clone(&self),
+            signature: Arc::clone(self),
             name: name.to_owned(),
             set_layout_id,
             native: Default::default(),

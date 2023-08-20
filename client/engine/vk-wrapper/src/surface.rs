@@ -12,10 +12,11 @@ pub struct Surface {
 
 impl Surface {
     /// Updates surface backing properties such as scale factor if necessary.
-    pub unsafe fn update(window: impl HasRawWindowHandle) -> Result<(), DeviceError> {
+    /// # Safety
+    pub fn update(window: impl HasRawWindowHandle) -> Result<(), DeviceError> {
         match window.raw_window_handle() {
-            #[cfg(any(target_os = "macos"))]
-            RawWindowHandle::AppKit(handle) => metal::metal_layer_update(handle),
+            #[cfg(target_os = "macos")]
+            RawWindowHandle::AppKit(handle) => unsafe { metal::metal_layer_update(handle) },
             _ => {}
         }
         Ok(())

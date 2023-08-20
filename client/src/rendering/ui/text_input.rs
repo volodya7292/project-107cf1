@@ -107,8 +107,8 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
 
             let relative_cursor_offset = cursor_offset + *text_offset;
             if let Some(container_size) = *container_size {
-                let text_offset_x_min = (-text_size.x.max(container_size.x - CURSOR_X_PADDING)
-                    + (container_size.x - CURSOR_X_PADDING));
+                let text_offset_x_min = -text_size.x.max(container_size.x - CURSOR_X_PADDING)
+                    + (container_size.x - CURSOR_X_PADDING);
 
                 if relative_cursor_offset.x > container_size.x - CURSOR_X_PADDING {
                     text_offset.state().update_with(move |prev| {

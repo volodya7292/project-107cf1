@@ -33,6 +33,12 @@ impl InstantMeter {
     }
 }
 
+impl Default for InstantMeter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Display for InstantMeter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("InstantMeter [")?;

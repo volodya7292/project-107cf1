@@ -127,7 +127,7 @@ impl<T: Copy> HostBuffer<T> {
         unsafe { slice::from_raw_parts(self.p_data as *const T, self.buffer.len as usize) }
     }
 
-    pub fn as_mut_slice(&self) -> &mut [T] {
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
         assert_eq!(mem::size_of::<T>(), self.buffer.elem_size as usize);
         unsafe { slice::from_raw_parts_mut(self.p_data as *mut T, self.buffer.len as usize) }
     }

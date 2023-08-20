@@ -73,7 +73,7 @@ pub fn on_liquid_tick(
         let rel_pos = pos.offset_i32(dir);
 
         let bottom_is_solid = {
-            let bottom_pos = rel_pos.offset_i32(&Facing::NegativeY.direction());
+            let bottom_pos = rel_pos.offset_i32(Facing::NegativeY.direction());
             let Some(bottom_data) = access.get_block(&bottom_pos) else {
                 return true;
             };
@@ -108,7 +108,7 @@ pub fn on_liquid_tick(
     {
         // Check horizontal neighbours
         for dir in &Facing::XZ_DIRECTIONS {
-            let rel_pos = pos.offset_i32(&dir);
+            let rel_pos = pos.offset_i32(dir);
             let Some(rel_data) = access.get_block(&rel_pos) else {
                 return true;
             };
@@ -283,7 +283,7 @@ pub fn process_active_blocks(
                 tick,
                 &global_pos,
                 block_data,
-                &registry,
+                registry,
                 &mut accessor,
                 after_actions.builder(),
             );
@@ -292,7 +292,7 @@ pub fn process_active_blocks(
             keep_active |= on_light_tick(
                 &global_pos,
                 block_data,
-                &registry,
+                registry,
                 &mut accessor,
                 after_actions.builder(),
             );
@@ -301,7 +301,7 @@ pub fn process_active_blocks(
             keep_active |= on_sky_light_tick(
                 &global_pos,
                 block_data,
-                &registry,
+                registry,
                 &mut accessor,
                 after_actions.builder(),
             );
@@ -312,7 +312,7 @@ pub fn process_active_blocks(
                     tick,
                     &global_pos,
                     block_data,
-                    &registry,
+                    registry,
                     &mut accessor,
                     after_actions.builder(),
                 );
@@ -345,7 +345,7 @@ pub fn check_block(registry: &Registry, access: &mut OverworldAccessor, pos: &Bl
     }
 
     for dir in &Facing::DIRECTIONS {
-        let rel_pos = pos.offset_i32(&dir);
+        let rel_pos = pos.offset_i32(dir);
         access.update_block(&rel_pos, |data| {
             *data.active_mut() = true;
         });

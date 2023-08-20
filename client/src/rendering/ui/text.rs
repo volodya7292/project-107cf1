@@ -323,7 +323,7 @@ pub mod reactive {
                         {
                             let mut scene = ctx.scene();
 
-                            let mut obj = scene.object::<UIText>(&(*entity_state.value()).into());
+                            let obj = scene.object::<UIText>(&(*entity_state.value()).into());
                             let raw_text_entity = obj.state().raw_text_entity;
                             drop(obj);
 

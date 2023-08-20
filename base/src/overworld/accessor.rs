@@ -105,7 +105,7 @@ impl ClustersAccessorCache {
                         unreachable!()
                     };
 
-                    let rwlock = Arc::clone(&ArcRwLockReadGuard::rwlock(&read_guard));
+                    let rwlock = Arc::clone(ArcRwLockReadGuard::rwlock(&read_guard));
                     drop(read_guard);
 
                     AccessGuard::Write(rwlock.write_arc())

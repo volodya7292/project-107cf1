@@ -40,7 +40,7 @@ fn save_state(params: &OverworldState, overworld_folder: &Path) {
 }
 
 fn on_commit(
-    folder: &PathBuf,
+    folder: &Path,
     registry: &Arc<Registry>,
     sectors_cache: &SectorsCache,
     to_save: &Arc<Mutex<HashMap<ClusterPos, Arc<RwLock<ClusterState>>>>>,

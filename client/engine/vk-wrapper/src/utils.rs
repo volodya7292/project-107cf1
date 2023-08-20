@@ -5,7 +5,7 @@ pub(crate) unsafe fn c_ptr_to_string(ptr: *const c_char) -> String {
     String::from(CStr::from_ptr(ptr).to_str().unwrap())
 }
 
-pub(crate) fn filter_names(v: &Vec<String>, f: &[&str], required: bool) -> Result<Vec<CString>, String> {
+pub(crate) fn filter_names(v: &[String], f: &[&str], required: bool) -> Result<Vec<CString>, String> {
     let mut err_str = "".to_string();
 
     let v = f

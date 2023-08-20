@@ -23,7 +23,7 @@ pub struct VirtualProcessor {
 impl VirtualProcessor {
     pub fn new(pool: &Arc<SafeThreadPool>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let worker = spawn_coroutine(VirtualProcessor::worker_fn(Arc::clone(&pool), receiver));
+        let worker = spawn_coroutine(VirtualProcessor::worker_fn(Arc::clone(pool), receiver));
         Self {
             worker: Mutex::new(Some(worker)),
             sender: Mutex::new(Some(sender)),
