@@ -245,7 +245,7 @@ impl MainApp {
             game_state: None,
             settings: GameSettings { fov_y: FRAC_PI_2 },
             post_liquid_uniforms,
-            cursor_grab: true,
+            cursor_grab: false,
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
         };
@@ -289,9 +289,12 @@ impl MainApp {
     }
 
     pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
+        if self.cursor_grab == enabled {
+            return;
+        }
         self.cursor_grab = enabled;
 
-        if self.cursor_grab {
+        if enabled {
             window
                 .set_cursor_grab(CursorGrabMode::Locked)
                 .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
@@ -300,35 +303,26 @@ impl MainApp {
             window.set_cursor_grab(CursorGrabMode::None).unwrap();
         }
 
-        window.set_cursor_visible(!self.cursor_grab);
+        window.set_cursor_visible(!enabled);
 
         let mut ui_interactor = ctx.module_mut::<UIInteractionManager>();
-        ui_interactor.set_active(!self.cursor_grab);
+        ui_interactor.set_active(!enabled);
     }
 
     pub fn is_in_game(&self) -> bool {
         self.game_state.is_some()
     }
 
-    pub fn is_main_menu_visible(&self, _: &EngineContext) -> bool {
-        let mut ui_reactor = self.ui_reactor.borrow_mut();
-        ui_reactor
-            .root_state::<bool>(ui_root_states::MENU_VISIBLE.to_string())
-            .map_or(false, |v| *v.value())
+    pub fn is_cursor_grabbed(&self) -> bool {
+        self.cursor_grab
     }
 
-    pub fn show_main_menu(&mut self, ctx: &EngineContext, visible: bool) {
-        let mut ui_reactor = self.ui_reactor.borrow_mut();
+    pub fn show_main_menu(&mut self, visible: bool) {
+        let ui_reactor = self.ui_reactor.borrow_mut();
         ui_reactor
-            .state::<bool>(
-                UIReactor::ROOT_SCOPE_ID.to_string(),
-                ui_root_states::MENU_VISIBLE.to_string(),
-            )
+            .root_state::<bool>(ui_root_states::MENU_VISIBLE)
             .unwrap()
             .update(visible);
-        drop(ui_reactor);
-
-        self.grab_cursor(&ctx.window(), !visible, ctx);
     }
 
     pub fn make_world_path(overworld_name: &str) -> PathBuf {
@@ -428,15 +422,14 @@ impl MainApp {
             },
         ));
 
-        self.show_main_menu(ctx, false);
-        self.grab_cursor(&*ctx.window(), true, ctx);
+        self.show_main_menu(false);
     }
 
     pub fn exit_overworld(&mut self, ctx: &EngineContext) {
         self.tick_timer.take().unwrap().stop_and_join();
         println!("World timer stopped.");
 
-        let mut game_state = self.game_state.take().unwrap();
+        let game_state = self.game_state.take().unwrap();
         {
             let mut game_state = game_state.lock();
 
@@ -461,6 +454,25 @@ impl MainApp {
 
         println!("Cleaning up...");
         drop(game_state);
+    }
+
+    pub fn respawn_player(&self) {
+        let game_state = self.game_state.as_ref().unwrap().lock();
+
+        let player_pos = {
+            let block_spawn_point = game_state.overworld.interface().generator().gen_spawn_point().0;
+            let real_spawn_point: DVec3 = glm::convert(block_spawn_point);
+            real_spawn_point + glm::vec3(0.5, 0.5, 0.5)
+        };
+
+        game_state.overworld.interface().update_persisted_state(&|state| {
+            state.update_player_state(|p_state| {
+                p_state.set_health(1.0);
+                p_state.set_satiety(1.0);
+                p_state.set_position(player_pos);
+                p_state.set_velocity(Vec3::zeros());
+            });
+        });
     }
 
     pub fn data_dir() -> PathBuf {
@@ -603,9 +615,12 @@ impl MainApp {
         let kb = input.keyboard();
         let mut curr_state = main_state.lock();
         let player_state = curr_state.overworld.interface().persisted_state().player_state();
+        let Some(player_position) = player_state.position() else {
+            return;
+        };
 
         if kb.is_key_pressed(VirtualKeyCode::Space) && curr_state.fall_time == 0.0 {
-            curr_state.curr_jump_force = (MainApp::PLAYER_MASS * 5.5 / delta_time as f32);
+            curr_state.curr_jump_force = MainApp::PLAYER_MASS * 5.5 / delta_time as f32;
         }
 
         {
@@ -649,10 +664,7 @@ impl MainApp {
 
             if curr_state.player_collision_enabled {
                 let mut blocks = curr_state.overworld.access();
-                if blocks
-                    .get_block(&BlockPos::from_f64(&player_state.position().unwrap()))
-                    .is_some()
-                {
+                if blocks.get_block(&BlockPos::from_f64(&player_position)).is_some() {
                     let jump_force = Vec3::new(0.0, curr_state.curr_jump_force, 0.0);
                     total_force += g_force + jump_force;
                 }
@@ -667,11 +679,11 @@ impl MainApp {
 
         curr_state.curr_jump_force = 0.0;
         let mut new_jump_force = curr_state.curr_jump_force;
-        let mut new_player_pos = player_state.position().unwrap();
+        let mut new_player_pos = player_position;
         let mut health_decrease = 0.0;
 
         if curr_state.player_collision_enabled {
-            let prev_pos = player_state.position().unwrap();
+            let prev_pos = player_position;
 
             let new_pos =
                 curr_state
@@ -781,17 +793,6 @@ impl MainApp {
                 // TODO: death screen
             });
         });
-
-        // Update HUD
-        {
-            let reactor = self.ui_reactor();
-            let player_health_state = reactor.root_state::<f64>(ui_root_states::PLAYER_HEALTH).unwrap();
-            let player_satiety_state = reactor.root_state::<f64>(ui_root_states::PLAYER_SATIETY).unwrap();
-
-            let player_state = curr_state.overworld.interface().persisted_state().player_state();
-            player_health_state.update(player_state.health());
-            player_satiety_state.update(player_state.satiety());
-        }
     }
 }
 
@@ -833,7 +834,18 @@ impl EngineModule for MainApp {
             });
         }
 
-        if self.is_main_menu_visible(ctx) {
+        // Update HUD
+        if let Some(curr_state) = self.game_state.as_ref().map(|v| v.lock()) {
+            let reactor = self.ui_reactor();
+            let player_health_state = reactor.root_state::<f64>(ui_root_states::PLAYER_HEALTH).unwrap();
+            let player_satiety_state = reactor.root_state::<f64>(ui_root_states::PLAYER_SATIETY).unwrap();
+
+            let player_state = curr_state.overworld.interface().persisted_state().player_state();
+            player_health_state.update(player_state.health());
+            player_satiety_state.update(player_state.satiety());
+        };
+
+        if !self.is_cursor_grabbed() {
             return;
         }
 
@@ -852,7 +864,7 @@ impl EngineModule for MainApp {
     fn on_wsi_event(&mut self, main_window: &Window, event: &WSIEvent, ctx: &EngineContext) {
         use engine::winit::event::ElementState;
 
-        if !self.is_main_menu_visible(ctx) && self.game_state.is_some() {
+        if self.is_cursor_grabbed() && self.game_state.is_some() {
             self.on_game_wsi_event(main_window, event, ctx);
         }
 
@@ -868,7 +880,7 @@ impl EngineModule for MainApp {
                 match virtual_keycode {
                     VirtualKeyCode::Escape => {
                         if self.is_in_game() {
-                            self.show_main_menu(ctx, !self.is_main_menu_visible(ctx));
+                            self.show_main_menu(self.is_cursor_grabbed());
                         }
                     }
                     VirtualKeyCode::F11 => {
@@ -949,7 +961,9 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
     let start_t = Instant::now();
     let curr_state = main_state.lock().clone();
     let player_state = curr_state.overworld.interface().persisted_state().player_state();
-    let player_pos = player_state.position().unwrap();
+    let Some(player_pos)  = player_state.position() else {
+        return;
+    };
     let registry = curr_state.overworld.main_registry();
     let delta_time = (start_t - curr_state.last_tick_start).as_secs_f64();
 
@@ -1039,11 +1053,10 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
                 (p_state.satiety() - MainApp::SATIETY_IDLE_DECREASE_SPEED * delta_time).max(0.0),
             );
 
-            if p_state.health() < MainApp::HEALTH_REGEN_THRESHOLD {
+            if p_state.health() > 0.0 && p_state.health() < MainApp::HEALTH_REGEN_THRESHOLD {
                 let regen = p_state.satiety() * MainApp::HEALTH_MAX_REGEN_SPEED * delta_time;
                 p_state.set_health((p_state.health() + regen).min(MainApp::HEALTH_REGEN_THRESHOLD));
             }
-            dbg!(p_state.health());
         });
     });
 }

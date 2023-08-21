@@ -9,7 +9,7 @@ use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::scrollable_container::scrollable_container;
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
-use crate::rendering::ui::{backgrounds, STATE_ENTITY_ID};
+use crate::rendering::ui::{backgrounds, UICallbacks, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
@@ -34,7 +34,6 @@ pub mod ui_root_states {
 
     pub const CURR_MENU_TAB: &'static str = "curr_menu_tab";
     pub const IN_GAME_PROCESS: &'static str = "in_game_process";
-    pub const GAME_COLOR_FILTER: &'static str = "game_color_filter";
     pub const VISION_OBSTRUCTED: &'static str = "vision_obstructed";
     pub const PLAYER_HEALTH: &'static str = "player_health";
     pub const PLAYER_SATIETY: &'static str = "player_satiety";
@@ -107,14 +106,20 @@ fn world_control_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on
     );
 }
 
-fn action_button(local_id: &str, ctx: &mut UIScopeContext, text: &str, on_click: ClickedCallback) {
+fn action_button(
+    local_id: &str,
+    ctx: &mut UIScopeContext,
+    align: CrossAlign,
+    text: &str,
+    on_click: ClickedCallback,
+) {
     fancy_button(
         local_id,
         ctx,
         UILayoutC::new()
             .with_min_height(24.0)
             .with_padding(Padding::hv(14.0, 10.0))
-            .with_align(CrossAlign::End),
+            .with_align(align),
         StyledString::new(
             text,
             TextStyle::new()
@@ -139,7 +144,7 @@ fn update_overworlds_list(ctx: &EngineContext) {
 fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
     let mut app = ctx.app();
     app.enter_overworld(ctx, overworld_name);
-    app.show_main_menu(ctx, false);
+    app.show_main_menu(false);
 
     let reactor = app.ui_reactor();
     reactor
@@ -341,7 +346,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                     ctx,
                     "CONTINUE",
                     Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
-                        ctx.app().show_main_menu(ctx, false);
+                        ctx.app().show_main_menu(false);
                     }),
                 );
             } else {
@@ -473,7 +478,13 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
                 },
             );
             height_spacer(make_static_id!(), ctx, 10.0);
-            action_button(make_static_id!(), ctx, "> PROCEED", Arc::new(on_proceed));
+            action_button(
+                make_static_id!(),
+                ctx,
+                CrossAlign::End,
+                "> PROCEED",
+                Arc::new(on_proceed),
+            );
         },
     );
 }
@@ -552,15 +563,22 @@ fn game_menu(ctx: &mut UIScopeContext) {
         });
     });
 
-    let menu_visible = ctx.root_state(ui_root_states::MENU_VISIBLE);
-    let menu_visible = ctx.subscribe(&menu_visible);
+    let player_health = ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+    let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+
+    let menu_visible = {
+        let menu_visible = ctx.subscribe(&ctx.root_state(ui_root_states::MENU_VISIBLE));
+        let death_screen_visible = *is_in_game && *player_health == 0.0;
+        *menu_visible && !death_screen_visible
+    };
+
     remember_state!(ctx, menu_opacity, AnimatedValue::immediate(0.0));
 
     let menu_opacity_state = menu_opacity.state();
     ctx.descend(
         make_static_id!(),
-        *menu_visible,
-        move |ctx, menu_visible| {
+        menu_visible,
+        move |_, menu_visible| {
             menu_opacity_state.update_with(move |prev| {
                 let mut d = *prev;
                 let opacity = if menu_visible { 1.0 } else { 0.0 };
@@ -576,12 +594,14 @@ fn game_menu(ctx: &mut UIScopeContext) {
     container(
         make_static_id!(),
         ctx,
-        container_props().layout(
-            UILayoutC::row()
-                .with_position(Position::Relative(Vec2::zeros()))
-                .with_grow()
-                .with_visibility(Visibility::Opacity(*menu_opacity)),
-        ),
+        container_props()
+            .layout(
+                UILayoutC::row()
+                    .with_position(Position::Relative(Vec2::zeros()))
+                    .with_grow()
+                    .with_visibility(Visibility::Opacity(*menu_opacity)),
+            )
+            .callbacks(UICallbacks::new().with_interaction(menu_visible)),
         move |ctx, ()| {
             let curr_nav_view = ctx.subscribe(&ctx.root_state::<&str>(ui_root_states::CURR_MENU_TAB));
 
@@ -645,7 +665,22 @@ fn game_menu(ctx: &mut UIScopeContext) {
     }
 }
 
-pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstructed: bool) {
+pub fn game_overlay(ctx: &mut UIScopeContext) {
+    let vision_obstructed = ctx.subscribe(&ctx.root_state(ui_root_states::VISION_OBSTRUCTED));
+    let player_health = ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+
+    let color_filter = if *player_health == 0.0 {
+        // death
+        Color::new(0.0, 0.0, 0.0, 0.9)
+    } else {
+        Color::TRANSPARENT
+    };
+
+    fn on_respawn(_: &EntityId, ctx: &EngineContext, _: Vec2) {
+        let app = ctx.app();
+        app.respawn_player();
+    }
+
     container(
         make_static_id!(),
         ctx,
@@ -655,10 +690,44 @@ pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstru
                     .with_grow()
                     .with_position(Position::Relative(Vec2::zeros())),
             )
-            .background(Some(game_effects(color_filter, 0.0, vision_obstructed)))
-            .children_props(vision_obstructed),
-        move |ctx, vision_obstructed| {
+            .background(Some(game_effects(
+                color_filter,
+                1.0 - *player_health as f32,
+                *vision_obstructed,
+            )))
+            .children_props((*vision_obstructed, *player_health)),
+        move |ctx, (vision_obstructed, player_health)| {
             expander(make_static_id!(), ctx, 1.0);
+
+            if player_health == 0.0 {
+                container(
+                    make_static_id!(),
+                    ctx,
+                    container_props().layout(UILayoutC::column().with_grow()),
+                    |ctx, ()| {
+                        expander(make_static_id!(), ctx, 1.0);
+                        ui_text(
+                            make_static_id!(),
+                            ctx,
+                            ui_text_props("You have come to the dead")
+                                .layout(UILayoutC::row().with_align(CrossAlign::Center))
+                                .style(TextStyle::new().with_font_size(30.0))
+                                .wrap(false),
+                        );
+                        height_spacer(make_static_id!(), ctx, 100.0);
+                        action_button(
+                            make_static_id!(),
+                            ctx,
+                            CrossAlign::Center,
+                            "RESPAWN",
+                            Arc::new(on_respawn),
+                        );
+                        expander(make_static_id!(), ctx, 1.0);
+                    },
+                );
+            }
+
+            expander(make_static_id!(), ctx, 0.5);
 
             container(
                 make_static_id!(),
@@ -686,7 +755,7 @@ pub fn game_overlay(ctx: &mut UIScopeContext, color_filter: Color, vision_obstru
                                         *player_health as f32,
                                         *player_satiety as f32,
                                     ))),
-                                |ctx, ()| {},
+                                |_, ()| {},
                             )
                         },
                     );
@@ -723,27 +792,39 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
     ctx.request_state(ui_root_states::PLAYER_HEALTH, || 0.0_f64);
     ctx.request_state(ui_root_states::PLAYER_SATIETY, || 0.0_f64);
+    ctx.request_state(ui_root_states::VISION_OBSTRUCTED, || false);
 
     let in_game_process_state = ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
     let in_game_process = ctx.subscribe(&in_game_process_state);
 
-    let vision_obstructed_state = ctx.request_state(ui_root_states::VISION_OBSTRUCTED, || false);
-    let vision_obstructed = ctx.subscribe(&vision_obstructed_state);
+    ctx.descend(
+        make_static_id!(),
+        (),
+        |ui_ctx, ()| {
+            let is_in_game = ui_ctx.subscribe(&ui_ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+            let menu_visible = ui_ctx.subscribe(&ui_ctx.root_state::<bool>(ui_root_states::MENU_VISIBLE));
+            let player_health = ui_ctx.subscribe(&ui_ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
 
-    let game_color_filter_state = ctx.request_state(ui_root_states::GAME_COLOR_FILTER, || Color::TRANSPARENT);
-    let game_color_filter = ctx.subscribe(&game_color_filter_state);
+            let player_dead = *is_in_game && *player_health == 0.0;
+            let cursor_grabbed = !*menu_visible && !player_dead;
+
+            let mut app = ui_ctx.ctx().app();
+            app.grab_cursor(&*ui_ctx.ctx().window(), cursor_grabbed, ui_ctx.ctx());
+        },
+        |_, _| {},
+    );
 
     container(
         make_static_id!(),
         ctx,
         container_props()
             .layout(UILayoutC::new().with_grow())
-            .children_props((*in_game_process, *game_color_filter, *vision_obstructed)),
-        move |ctx, (in_game, color_filter, vision_obstructed)| {
+            .children_props(*in_game_process),
+        move |ctx, in_game| {
             if in_game {
-                game_overlay(ctx, color_filter, vision_obstructed);
+                game_overlay(ctx);
             }
-            game_menu(ctx)
+            game_menu(ctx);
         },
     );
 }

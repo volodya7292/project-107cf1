@@ -318,7 +318,7 @@ impl UILayoutC {
         self
     }
 
-    pub fn with_fixed_size(mut self, size: f32) -> Self {
+    pub fn with_fixed_size(self, size: f32) -> Self {
         self.with_fixed_width(size).with_fixed_height(size)
     }
 
