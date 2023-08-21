@@ -675,7 +675,7 @@ impl UIRenderer {
         'outer: loop {
             let entry = scene.entry(&to_visit);
 
-            let Some(children) = entry.get_checked::<Relation>().map(|v| v.ordered_children().collect::<SmallVec<[EntityId; 256]>>()) else {
+            let Some(children) = entry.get_checked::<Relation>().map(|v| v.ordered_children().rev().collect::<SmallVec<[EntityId; 256]>>()) else {
                 continue;
             };
             if children.is_empty() {

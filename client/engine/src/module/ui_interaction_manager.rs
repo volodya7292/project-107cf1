@@ -127,7 +127,7 @@ fn global_on_mouse_release(ctx: &EngineContext) {
 }
 
 fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
-    let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
+    let interaction_manager = ctx.module_mut::<UIInteractionManager>();
     let last_focus_entity = interaction_manager.curr_focused_entity;
     drop(interaction_manager);
 
