@@ -87,7 +87,9 @@ fn global_on_mouse_press(ctx: &EngineContext) {
     interaction_manager.mouse_button_press_entity = curr_hover_entity;
     drop(interaction_manager);
 
-    let entry = scene.entry(&curr_hover_entity);
+    let Some(entry) = scene.entry_checked(&curr_hover_entity) else {
+        return;
+    };
     let ui_handler = entry.get::<UIEventHandlerC>();
 
     if let Some(handler) = ui_handler.on_mouse_press.clone() {
@@ -172,10 +174,7 @@ fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
 }
 
 fn global_on_scroll(ctx: &EngineContext, delta: f64) {
-    let curr_mouse_pos = {
-        let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
-        interaction_manager.curr_mouse_position
-    };
+    let curr_mouse_pos = ctx.module_mut::<UIInteractionManager>().curr_mouse_position;
 
     let scroll_entity = {
         let mut scene = ctx.module_mut::<Scene>();
@@ -185,11 +184,10 @@ fn global_on_scroll(ctx: &EngineContext, delta: f64) {
             let Some(handler) = entry.get_checked::<UIEventHandlerC>() else {
                 return false;
             };
-            let found = handler.enabled && handler.on_scroll.is_some();
-            if found {
+            if handler.enabled && handler.on_scroll.is_some() {
                 scroll_entity = *entry.entity();
             }
-            found
+            handler.enabled
         });
         scroll_entity
     };

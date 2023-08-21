@@ -663,29 +663,43 @@ impl UIRenderer {
     }
 
     /// Outputs objects that contain the specified point to the specified closure.
-    /// If the closure returns `true` the traversal is stopped. Iterates children first.
+    /// The closure returns a `bool` specifing whether to select the current entity for traversal.
     pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
         &self,
         point: &Vec2,
         scene: &mut Scene,
         mut output: F,
     ) {
-        let linear_tree =
-            common::scene::collect_relation_tree(&scene.storage_mut().access(), &self.root_ui_entity);
+        let mut to_visit = *self.root_ui_entity;
 
-        // Iterate starting from children
-        for node in linear_tree.iter().rev() {
-            let entry = scene.entry(node);
-            let Some(cache) = entry.get_checked::<UILayoutCacheC>() else {
+        'outer: loop {
+            let entry = scene.entry(&to_visit);
+
+            let Some(children) = entry.get_checked::<Relation>().map(|v| v.ordered_children().collect::<SmallVec<[EntityId; 256]>>()) else {
                 continue;
             };
-
-            if !cache.clip_rect.contains_point(point) {
-                continue;
-            }
-            if output(entry) {
+            if children.is_empty() {
                 break;
             }
+            drop(entry);
+
+            for child in children {
+                let child_entry = scene.entry(&child);
+
+                let Some(child_cache) = child_entry.get_checked::<UILayoutCacheC>() else {
+                    continue;
+                };
+                if !child_cache.clip_rect.contains_point(point) {
+                    continue;
+                }
+
+                if output(child_entry) {
+                    to_visit = child;
+                    continue 'outer;
+                }
+            }
+
+            break;
         }
     }
 }
