@@ -147,11 +147,7 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
 
     // Read timestamp file
     let mut timestamps: HashMap<String, SystemTime> = fs::read(&ts_path)
-        .map(|v| {
-            bincode::decode_from_slice::<HashMap<String, SystemTime>, _>(&v, bincode::config::standard())
-                .map(|v| v.0)
-                .ok()
-        })
+        .map(|v| bincode::deserialize::<HashMap<String, SystemTime>>(&v).ok())
         .ok()
         .flatten()
         .unwrap_or(Default::default());
@@ -235,7 +231,7 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
     }
 
     // Write timestamp file
-    let timestamps = bincode::encode_to_vec(timestamps, bincode::config::standard()).unwrap();
+    let timestamps = bincode::serialize(&timestamps).unwrap();
     fs::write(&ts_path, timestamps).unwrap();
 
     println!(

@@ -155,6 +155,15 @@ fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
         .root_state(ui_root_states::IN_GAME_PROCESS)
         .unwrap()
         .update(true);
+    // This disables death screen when health = 0
+    reactor
+        .root_state(ui_root_states::PLAYER_HEALTH)
+        .unwrap()
+        .update(1.0_f64);
+    reactor
+        .root_state(ui_root_states::PLAYER_SATIETY)
+        .unwrap()
+        .update(1.0_f64);
 }
 
 fn close_overworld(ctx: &EngineContext) {
@@ -666,10 +675,13 @@ fn game_menu(ctx: &mut UIScopeContext) {
 }
 
 pub fn game_overlay(ctx: &mut UIScopeContext) {
-    let vision_obstructed = ctx.subscribe(&ctx.root_state(ui_root_states::VISION_OBSTRUCTED));
+    let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+    let vision_obstructed = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::VISION_OBSTRUCTED));
     let player_health = ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
 
-    let color_filter = if *player_health == 0.0 {
+    let player_dead = *is_in_game && *player_health == 0.0;
+
+    let color_filter = if player_dead {
         // death
         Color::new(0.0, 0.0, 0.0, 0.9)
     } else {
@@ -695,11 +707,11 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
                 1.0 - *player_health as f32,
                 *vision_obstructed,
             )))
-            .children_props((*vision_obstructed, *player_health)),
-        move |ctx, (vision_obstructed, player_health)| {
+            .children_props((*vision_obstructed, player_dead)),
+        move |ctx, (vision_obstructed, player_dead)| {
             expander(make_static_id!(), ctx, 1.0);
 
-            if player_health == 0.0 {
+            if player_dead {
                 container(
                     make_static_id!(),
                     ctx,

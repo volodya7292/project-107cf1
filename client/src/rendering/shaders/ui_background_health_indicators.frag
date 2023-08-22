@@ -31,9 +31,10 @@ void main() {
 
     vec2 normCoord = vec2(vs_in.texCoord.x, 1 - vs_in.texCoord.y);
     float dist = length(normCoord * 2 - 1);
+    float dDist = fwidth(dist);
 
-    float innerCutoutVis = extractIsosurface(dist, 0.9);
-    float outerCutoutVis = 1.0 - extractIsosurface(dist, 1.0);
+    float innerCutoutVis = extractIsosurface(dist, dDist, 0.9);
+    float outerCutoutVis = 1.0 - extractIsosurface(dist, dDist, 1.0);
     float combinedVis = innerCutoutVis * outerCutoutVis;
 
     float health_level = 0.5 * health_factor + 0.01 * sin(normCoord.x * 20.0 + info.time);

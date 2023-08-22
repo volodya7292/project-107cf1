@@ -284,12 +284,11 @@ float linearize_depth(float d, float z_near) {
 // Converts srgb color (usually used by devs) to linear (for correct calculations/interpolations)
 #define SRGB2LIN(rgb) pow(rgb, vec3(2.2))
 
-// Accepts signed distance field value `v`.
+// Accepts signed distance field value `v` and its pixel-delta `dV` (such as fwidth).
 // Result: `v` < isoValue => 0, `v` >= isoValue => 1.
 // Makes the transition between 0 and 1 smooth at the pixel level (antialised).
-float extractIsosurface(float v, float isoValue) {
-    float delta = fwidth(v);
-    return smoothstep(isoValue - delta, isoValue + delta, v);
+float extractIsosurface(float v, float dV, float isoValue) {
+    return smoothstep(isoValue - dV, isoValue + dV, v);
 }
 
 float luminance(vec3 v) {
