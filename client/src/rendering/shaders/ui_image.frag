@@ -22,7 +22,7 @@ layout(location = 0) in Input {
 
 void main() {
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
-    if (isOutsideCropRegion(normScreenCoord, clip_rect, 0.0, info.frame_size * info.scale_factor)) {
+    if (isOutsideCropRegion(normScreenCoord, clip_rect, 0.0, info.frame_size / info.scale_factor)) {
         discard;
     }
     // Remove repetitions

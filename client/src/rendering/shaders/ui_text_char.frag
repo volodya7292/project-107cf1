@@ -30,7 +30,7 @@ void main() {
     calculateCharShading(0.5, aa_alpha, sd);
 
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
-    if (isOutsideCropRegion(normScreenCoord, clip_rect, 0.0, info.frame_size * info.scale_factor)) {
+    if (isOutsideCropRegion(normScreenCoord, clip_rect, 0.0, info.frame_size / info.scale_factor)) {
         discard;
     }
 

@@ -25,7 +25,7 @@ const vec3 SATIETY_COLOR = SRGB2LIN(vec3(0.65, 0.65, 0.12));
 
 void main() {
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
-    if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size * info.scale_factor)) {
+    if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size / info.scale_factor)) {
         discard;
     }
 

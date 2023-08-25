@@ -1,6 +1,6 @@
 use crate::utils::wsi::vec2::WSizingInfo;
 use crate::utils::wsi::{WSIPosition, WSISize};
-use common::glm::{DVec2, DVec3};
+use common::glm::DVec2;
 use winit::event::{
     DeviceEvent, ElementState, ModifiersState, MouseButton, MouseScrollDelta, VirtualKeyCode,
 };

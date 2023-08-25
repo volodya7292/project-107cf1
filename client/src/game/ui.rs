@@ -13,12 +13,12 @@ use crate::rendering::ui::{backgrounds, UICallbacks, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
-use engine::ecs::component::ui::{
-    ClickedCallback, CrossAlign, Padding, Position, Sizing, UILayoutC, Visibility,
-};
+use engine::ecs::component::ui::{ClickedCallback, CrossAlign, Padding, Position, Sizing, UILayoutC};
+use engine::event::WSIKeyboardInput;
 use engine::module::ui::color::Color;
 use engine::module::ui::reactive::{ReactiveState, UIReactor, UIScopeContext};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
+use engine::winit::event::{ElementState, VirtualKeyCode};
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
 use std::sync::Arc;
@@ -607,9 +607,9 @@ fn game_menu(ctx: &mut UIScopeContext) {
             .layout(
                 UILayoutC::row()
                     .with_position(Position::Relative(Vec2::zeros()))
-                    .with_grow()
-                    .with_visibility(Visibility::Opacity(*menu_opacity)),
+                    .with_grow(),
             )
+            .opacity(*menu_opacity.current())
             .callbacks(UICallbacks::new().with_interaction(menu_visible)),
         move |ctx, ()| {
             let curr_nav_view = ctx.subscribe(&ctx.root_state(&ui_root_states::CURR_MENU_TAB));
@@ -795,14 +795,81 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
     );
 }
 
-pub fn game_inventory_overlay(ctx: &mut UIScopeContext) {
-    let opacity = ctx.subscribe(&ctx.root_state(&ui_root_states::INVENTORY_VISIBLE));
+pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ()) {
+    container(
+        local_name,
+        ctx,
+        container_props()
+            .layout(UILayoutC::new().with_fixed_size(60.0))
+            .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.3)))),
+        |ctx, ()| {},
+    )
+}
 
-    container(make_static_id!(), ctx, container_props(), |ctx, ()| {
-        expander(make_static_id!(), ctx, 1.0);
-        container(make_static_id!(), ctx, container_props(), |ctx, ()| {});
-        expander(make_static_id!(), ctx, 1.0);
-    });
+pub fn inventory_slots(local_name: &str, ctx: &mut UIScopeContext) {
+    container(
+        local_name,
+        ctx,
+        container_props().layout(UILayoutC::column()),
+        |ctx, ()| {
+            for i in 0..4 {
+                container(
+                    &make_static_id!(i),
+                    ctx,
+                    container_props().layout(UILayoutC::row()),
+                    |ctx, ()| {
+                        for j in 0..5 {
+                            inventory_slot(&make_static_id!(j), ctx, ());
+                            if j < 5 - 1 {
+                                width_spacer(&make_static_id!(j), ctx, 12.0);
+                            }
+                        }
+                    },
+                );
+                if i < 4 - 1 {
+                    height_spacer(&make_static_id!(i), ctx, 10.0);
+                }
+            }
+        },
+    );
+}
+
+pub fn game_inventory_overlay(ctx: &mut UIScopeContext) {
+    let visible = ctx.subscribe(&ctx.root_state(&ui_root_states::INVENTORY_VISIBLE));
+    let opacity = if *visible { 1.0 } else { 0.0 };
+
+    container(
+        make_static_id!(),
+        ctx,
+        container_props()
+            .layout(UILayoutC::new().with_grow())
+            .opacity(opacity),
+        |ctx, ()| {
+            expander(make_static_id!(), ctx, 1.0);
+            container(
+                make_static_id!(),
+                ctx,
+                container_props()
+                    .layout(
+                        UILayoutC::column()
+                            .with_align(CrossAlign::Center)
+                            .with_padding(Padding::equal(75.0)),
+                    )
+                    .background(Some(backgrounds::hud_popup(Color::BLACK.with_alpha(0.9))))
+                    .corner_radius(75.0),
+                |ctx, ()| {
+                    ui_text(
+                        make_static_id!(),
+                        ctx,
+                        ui_text_props("My stuff").style(TextStyle::new().with_font_size(36.0)),
+                    );
+                    height_spacer(make_static_id!(), ctx, 20.0);
+                    inventory_slots(make_static_id!(), ctx);
+                },
+            );
+            expander(make_static_id!(), ctx, 1.0);
+        },
+    );
 }
 
 pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
@@ -837,12 +904,30 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         |_, _| {},
     );
 
+    fn on_keyboard(_: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput) {
+        let WSIKeyboardInput::Virtual(code, state) = input else {
+            return;
+        };
+        if code == VirtualKeyCode::Tab {
+            let app = ctx.app();
+            let ui_reactor = app.ui_reactor();
+            let inventory_state = ui_reactor.root_state(&ui_root_states::INVENTORY_VISIBLE).unwrap();
+            inventory_state.update(state == ElementState::Pressed);
+        }
+    }
+
     container(
         make_static_id!(),
         ctx,
         container_props()
             .layout(UILayoutC::new().with_grow())
-            .children_props(*in_game_process),
+            .children_props(*in_game_process)
+            .callbacks(
+                UICallbacks::new()
+                    .with_focusable(true)
+                    .with_autofocus(true)
+                    .with_on_keyboard(Arc::new(on_keyboard)),
+            ),
         move |ctx, in_game| {
             if in_game {
                 game_overlay(ctx);

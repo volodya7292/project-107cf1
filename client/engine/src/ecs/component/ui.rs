@@ -1,6 +1,5 @@
 use crate::event::WSIKeyboardInput;
 use crate::module::scene::EntityAccess;
-use crate::utils::transition::AnimatedValue;
 use crate::EngineContext;
 use common::glm::Vec2;
 use entity_data::EntityId;
@@ -168,53 +167,6 @@ impl Default for Overflow {
     }
 }
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Visibility {
-    Opacity(AnimatedValue<f32>),
-    Collapsed,
-}
-
-impl Visibility {
-    pub fn visible() -> Self {
-        Self::Opacity(1.0.into())
-    }
-
-    pub fn hidden() -> Self {
-        Self::Opacity(0.0.into())
-    }
-
-    pub fn opacity(&self) -> f32 {
-        match self {
-            Visibility::Opacity(opacity) => *opacity.current(),
-            Visibility::Collapsed => 0.0,
-        }
-    }
-
-    pub fn is_visible(&self) -> bool {
-        match self {
-            Visibility::Opacity(opacity) if *opacity.current() < 0.001 => false,
-            Visibility::Opacity(_) => true,
-            Visibility::Collapsed => false,
-        }
-    }
-
-    pub fn as_opacity_mut(&mut self) -> &mut AnimatedValue<f32> {
-        match self {
-            Visibility::Opacity(opacity) => opacity,
-            Visibility::Collapsed => {
-                panic!("Invalid value");
-            }
-        }
-    }
-}
-
-impl Default for Visibility {
-    fn default() -> Self {
-        Self::visible()
-    }
-}
-
 #[derive(Copy, Clone, PartialEq)]
 pub struct UITransform {
     pub offset: Vec2,
@@ -251,7 +203,6 @@ pub struct UILayoutC {
     pub content_flow: ContentFlow,
     pub flow_align: FlowAlign,
     pub shader_inverted_y: bool,
-    pub visibility: Visibility,
 }
 
 impl UILayoutC {
@@ -379,11 +330,6 @@ impl UILayoutC {
         self
     }
 
-    pub fn with_visibility(mut self, visibility: Visibility) -> Self {
-        self.visibility = visibility;
-        self
-    }
-
     pub fn with_shader_inverted_y(mut self, enabled: bool) -> Self {
         self.shader_inverted_y = enabled;
         self
@@ -469,9 +415,9 @@ macro_rules! define_callback {
 pub type ClickedCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
 pub type ScrollCallback = Arc<dyn Fn(&EntityId, &EngineContext, f64) + Send + Sync>;
 pub type SizeUpdateCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
+pub type KeyboardCallback = Arc<dyn Fn(&EntityId, &EngineContext, WSIKeyboardInput) + Send + Sync>;
 
 define_callback!(BasicEventCallback(&EntityId, &EngineContext));
-define_callback!(KeyPressedCallback(&EntityId, &EngineContext, WSIKeyboardInput));
 
 pub struct UIEventHandlerC {
     pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
@@ -479,12 +425,13 @@ pub struct UIEventHandlerC {
     pub on_mouse_press: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_mouse_release: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_scroll: Option<ScrollCallback>,
-    pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
+    pub on_keyboard: Option<KeyboardCallback>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_click: Option<ClickedCallback>,
     pub on_size_update: Option<SizeUpdateCallback>,
     pub focusable: bool,
+    pub autofocus: bool,
     pub enabled: bool,
 }
 
@@ -496,12 +443,13 @@ impl Default for UIEventHandlerC {
             on_mouse_press: None,
             on_mouse_release: None,
             on_scroll: None,
-            on_key_press: None,
+            on_keyboard: None,
             on_focus_in: None,
             on_focus_out: None,
             on_click: None,
             on_size_update: None,
             focusable: false,
+            autofocus: false,
             enabled: true,
         }
     }

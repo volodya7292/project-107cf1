@@ -20,13 +20,16 @@ layout(location = 0) in Input {
 
 void main() {
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
-    if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size * info.scale_factor)) {
+    if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size / info.scale_factor)) {
         discard;
     }
 
     vec2 normCoord = vs_in.texCoord;
     float dist = length(normCoord * 2 - 1);
-    float density = smoothstep(0, 0.1, 1.0 - dist);
+    float dDist = fwidth(dist);
+
+    float outerCutoutVis = 1.0 - extractIsosurface(dist, dDist, 1.0);
+    float density = pow(dist, 8.0) * outerCutoutVis;
 
     vec4 finalColor = vec4(color.rgb, color.a * density * opacity);
 

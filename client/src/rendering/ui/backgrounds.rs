@@ -49,7 +49,7 @@ mod fancy {
     }
 }
 
-mod slot_circle {
+mod item_slot {
     use super::*;
     use common::glm::Vec4;
 
@@ -179,6 +179,48 @@ mod health_indicators {
     }
 }
 
+mod hud_popup {
+    use super::*;
+    use common::glm::Vec4;
+
+    pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
+
+    #[derive(Default, Copy, Clone)]
+    #[repr(C)]
+    pub struct UniformData {
+        pub background_color: Vec4,
+    }
+
+    pub fn register(ctx: &EngineContext) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+        let scene = ctx.module_mut::<Scene>();
+
+        let vertex = renderer
+            .device()
+            .create_vertex_shader(
+                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+                &[],
+                "ui_rect.vert",
+            )
+            .unwrap();
+        let pixel = renderer
+            .device()
+            .create_pixel_shader(
+                include_bytes!("../../../res/shaders/ui_background_hud_popup.frag.spv"),
+                "ui_background_slot_circle.frag",
+            )
+            .unwrap();
+
+        let mat_pipe_id = renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        );
+
+        scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
+    }
+}
+
 pub fn fancy(color: Color) -> ContainerBackground {
     ContainerBackground::new_raw(
         fancy::MATERIAL_PIPE_RES_NAME,
@@ -209,11 +251,30 @@ pub fn health_indicators(health_factor: f32, satiety_factor: f32) -> ContainerBa
     )
 }
 
+pub fn hud_popup(background_color: Color) -> ContainerBackground {
+    ContainerBackground::new_raw(
+        hud_popup::MATERIAL_PIPE_RES_NAME,
+        hud_popup::UniformData {
+            background_color: background_color.into_raw_linear(),
+        },
+    )
+}
+
+pub fn item_slot(background_color: Color) -> ContainerBackground {
+    ContainerBackground::new_raw(
+        item_slot::MATERIAL_PIPE_RES_NAME,
+        item_slot::UniformData {
+            background_color: background_color.into_raw_linear(),
+        },
+    )
+}
+
 pub fn register(ctx: &EngineContext) {
     fancy::register(ctx);
-    slot_circle::register(ctx);
     game_effects::register(ctx);
     health_indicators::register(ctx);
+    hud_popup::register(ctx);
+    item_slot::register(ctx);
 }
 
 pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.4, 0.5, 0.4);

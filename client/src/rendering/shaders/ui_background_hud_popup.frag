@@ -14,13 +14,21 @@ layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform Obje
     vec4 color;
 };
 
+layout(location = 0) in Input {
+    vec2 texCoord;
+} vs_in;
+
 void main() {
     vec2 normScreenCoord = gl_FragCoord.xy / vec2(info.frame_size);
-    if (isOutsideCropRegion(normScreenCoord, clip_rect, corner_radius, info.frame_size / info.scale_factor)) {
+    float sd = roundedRectSDF(normScreenCoord, clip_rect, corner_radius, info.frame_size / info.scale_factor);
+    if (sd > 1.0) {
         discard;
     }
 
-    vec4 finalColor = vec4(color.rgb, color.a * opacity);
+    vec2 normCoord = vs_in.texCoord;
+    float density = smoothstep(0, 0.5, 1.0 - sd);
+
+    vec4 finalColor = vec4(color.rgb, color.a * density * opacity);
 
     writeOutput(finalColor);
 }

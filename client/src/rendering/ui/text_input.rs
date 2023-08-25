@@ -1,4 +1,4 @@
-use crate::rendering::ui::container::{container, ContainerProps};
+use crate::rendering::ui::container::{container, container_props, ContainerProps};
 use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
 use crate::rendering::ui::{container, UICallbacks};
 use clipboard::ClipboardProvider;
@@ -6,9 +6,7 @@ use common::glm::Vec2;
 use common::make_static_id;
 use common::utils::StringExt;
 use engine::ecs::component::simple_text::TextStyle;
-use engine::ecs::component::ui::{
-    Constraint, Position, Sizing, UILayoutC, UILayoutCacheC, UITransform, Visibility,
-};
+use engine::ecs::component::ui::{Constraint, Position, Sizing, UILayoutC, UILayoutCacheC, UITransform};
 use engine::event::WSIKeyboardInput;
 use engine::module::input::Input;
 use engine::module::scene::Scene;
@@ -259,7 +257,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         .with_on_click(Arc::new(on_click))
                         .with_on_focus_in(Arc::new(on_focus_in))
                         .with_on_focus_out(Arc::new(on_focus_out))
-                        .with_on_key_press(Arc::new(on_key_press))
+                        .with_on_keyboard(Arc::new(on_key_press))
                         .with_on_size_update(Arc::new(on_text_size_update)),
                     children_props: (
                         props.style,
@@ -290,15 +288,15 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         container(
                             make_static_id!(),
                             ctx,
-                            ContainerProps {
-                                layout: UILayoutC::new()
-                                    .with_position(Position::Relative(cursor_offset))
-                                    .with_visibility(Visibility::Opacity(cursor_opacity))
-                                    .with_width_constraint(Constraint::exact(1.0))
-                                    .with_height_constraint(Constraint::exact(line_height)),
-                                background: Some(container::background::solid_color(Color::grayscale(0.5))),
-                                ..Default::default()
-                            },
+                            container_props()
+                                .layout(
+                                    UILayoutC::new()
+                                        .with_position(Position::Relative(cursor_offset))
+                                        .with_width_constraint(Constraint::exact(1.0))
+                                        .with_height_constraint(Constraint::exact(line_height)),
+                                )
+                                .background(Some(container::background::solid_color(Color::grayscale(0.5))))
+                                .opacity(*cursor_opacity.current()),
                             |_, ()| {},
                         );
                     }

@@ -4,7 +4,7 @@ pub mod reactive;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::ui::{
     ClipRect, Constraint, ContentFlow, CrossAlign, FlowAlign, Overflow, Padding, Position, RectUniformData,
-    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC, Visibility,
+    Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use crate::ecs::component::{MeshRenderConfigC, SceneEventHandler, TransformC, UniformDataC, VertexMeshC};
 use crate::event::WSIEvent;
@@ -500,10 +500,6 @@ impl UIRenderer {
                     child_cache.final_min_size[flow_axis]
                 };
 
-                if child_layout.visibility == Visibility::Collapsed {
-                    continue;
-                }
-
                 // Collect info for final size calculation
                 children_flow_sizings.push(ChildFlowSizingInfo {
                     entity: *child,
@@ -649,19 +645,6 @@ impl UIRenderer {
         }
     }
 
-    fn handle_ui_layout_updates(scene: &mut Scene, dirty_elements: &HashSet<EntityId>) {
-        // Calculate new final visibilities
-        for entity_id in dirty_elements {
-            let mut entry = scene.entry(entity_id);
-
-            let layout = entry.get::<UILayoutC>();
-            let visible = layout.visibility.is_visible();
-
-            let relation = entry.get_mut::<Relation>();
-            relation.active = visible;
-        }
-    }
-
     /// Outputs objects that contain the specified point to the specified closure.
     /// The closure returns a `bool` specifing whether to select the current entity for traversal.
     pub fn traverse_at_point<F: FnMut(EntityAccess<()>) -> bool>(
@@ -737,8 +720,6 @@ impl EngineModule for UIRenderer {
         if !self.force_update_transforms && dirty_elements.is_empty() {
             return;
         }
-
-        Self::handle_ui_layout_updates(&mut scene, &dirty_elements);
 
         let linear_tree =
             common::scene::collect_relation_tree(&scene.storage_mut().access(), &self.root_ui_entity);

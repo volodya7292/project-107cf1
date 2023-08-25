@@ -7,6 +7,7 @@ use crate::module::EngineModule;
 use crate::utils::wsi::WSIPosition;
 use crate::EngineContext;
 use common::glm::Vec2;
+use common::types::HashSet;
 use entity_data::EntityId;
 use winit::event::{ElementState, MouseButton};
 use winit::window::Window;
@@ -14,10 +15,11 @@ use winit::window::Window;
 pub struct UIInteractionManager {
     curr_hover_entity: EntityId,
     curr_focused_entity: EntityId,
+    autofocusable_entities: HashSet<EntityId>,
     mouse_button_press_entity: EntityId,
     curr_mouse_position: Vec2,
-    active: bool,
     ui_layout_changes: ComponentChangesHandle,
+    event_handler_changes: ComponentChangesHandle,
 }
 
 fn global_on_cursor_move(ctx: &EngineContext, position: WSIPosition<f32>) {
@@ -209,21 +211,19 @@ fn global_on_scroll(ctx: &EngineContext, delta: f64) {
 
 fn global_on_keyboard_input(ctx: &EngineContext, input: WSIKeyboardInput) {
     let mut scene = ctx.module_mut::<Scene>();
-    let interaction_manager = ctx.module::<UIInteractionManager>();
-    let curr_focused_entity = interaction_manager.curr_focused_entity;
-    drop(interaction_manager);
+    let focused_entity = ctx.module_mut::<UIInteractionManager>().get_focused_entity();
 
-    if curr_focused_entity == EntityId::NULL {
+    if focused_entity == EntityId::NULL {
         return;
     }
 
-    let entry = scene.entry(&curr_focused_entity);
+    let entry = scene.entry(&focused_entity);
     let ui_handler = entry.get::<UIEventHandlerC>();
 
-    if let Some(handler) = ui_handler.on_key_press.clone() {
+    if let Some(handler) = ui_handler.on_keyboard.clone() {
         drop(entry);
         drop(scene);
-        handler(&curr_focused_entity, ctx, input);
+        handler(&focused_entity, ctx, input);
     }
 }
 
@@ -231,43 +231,67 @@ impl UIInteractionManager {
     pub fn new(ctx: &EngineContext) -> Self {
         let scene = ctx.module_mut::<Scene>();
         let ui_layout_changes = scene.change_manager_mut().register_component_flow::<UILayoutC>();
+        let event_handler_changes = scene
+            .change_manager_mut()
+            .register_component_flow::<UIEventHandlerC>();
 
         Self {
             curr_hover_entity: Default::default(),
             curr_focused_entity: Default::default(),
             mouse_button_press_entity: Default::default(),
             curr_mouse_position: Default::default(),
-            active: true,
             ui_layout_changes,
+            event_handler_changes,
+            autofocusable_entities: Default::default(),
         }
     }
 
-    pub fn set_active(&mut self, active: bool) {
-        self.active = active;
+    pub fn get_focused_entity(&mut self) -> EntityId {
+        if self.curr_focused_entity == EntityId::NULL {
+            self.curr_focused_entity = self
+                .autofocusable_entities
+                .iter()
+                .cloned()
+                .next()
+                .unwrap_or_default();
+        }
+        self.curr_focused_entity
     }
 
     fn on_object_remove(&mut self, id: &EntityId) {
-        if id == &self.curr_hover_entity {
+        if *id == self.curr_hover_entity {
             self.curr_hover_entity = EntityId::NULL;
         }
+        if *id == self.curr_focused_entity {
+            self.curr_focused_entity = EntityId::NULL;
+        }
+        self.autofocusable_entities.remove(id);
     }
 }
 
 impl EngineModule for UIInteractionManager {
     fn on_update(&mut self, _: f64, ctx: &EngineContext) {
-        let scene = ctx.module_mut::<Scene>();
-        let changes = scene.change_manager_mut().take(self.ui_layout_changes);
+        let mut scene = ctx.module_mut::<Scene>();
+        let event_handler_changes: Vec<_> = scene.change_manager_mut().take_new(self.event_handler_changes);
+        let ui_layout_changes = scene.change_manager_mut().take(self.ui_layout_changes);
 
-        for change in changes.iter().filter(|v| v.ty() == ChangeType::Removed) {
+        for entity in event_handler_changes {
+            let entry = scene.entry(&entity);
+            let event_handler = entry.get::<UIEventHandlerC>();
+
+            if event_handler.focusable && event_handler.autofocus {
+                self.autofocusable_entities.insert(entity);
+            } else {
+                self.autofocusable_entities.remove(&entity);
+            }
+        }
+
+        for change in ui_layout_changes.iter().filter(|v| v.ty() == ChangeType::Removed) {
             self.on_object_remove(change.entity());
         }
     }
 
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, ctx: &EngineContext) {
-        if !self.active {
-            return;
-        }
-
         match *event {
             WSIEvent::CursorMoved { position, .. } => {
                 ctx.dispatch_callback(move |ctx, _| {

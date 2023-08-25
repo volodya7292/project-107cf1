@@ -7,14 +7,12 @@ pub mod scrollable_container;
 pub mod text;
 pub mod text_input;
 
-use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
 use engine::ecs::component::ui::{
-    BasicEventCallback, ClickedCallback, KeyPressedCallback, ScrollCallback, SizeUpdateCallback,
+    BasicEventCallback, ClickedCallback, KeyboardCallback, ScrollCallback, SizeUpdateCallback,
     UIEventHandlerC,
 };
-use engine::module::EngineModule;
 use engine::EngineContext;
 use std::sync::Arc;
 
@@ -32,13 +30,14 @@ pub fn register_ui_elements(ctx: &EngineContext) {
 pub struct UICallbacks {
     pub interaction_enabled: bool,
     pub focusable: bool,
+    pub autofocus: bool,
     pub on_click: Option<ClickedCallback>,
     pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_scroll: Option<ScrollCallback>,
     pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
     pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_key_press: Option<Arc<dyn KeyPressedCallback<Output = ()>>>,
+    pub on_keyboard: Option<KeyboardCallback>,
     pub on_size_update: Option<SizeUpdateCallback>,
 }
 
@@ -54,6 +53,11 @@ impl UICallbacks {
 
     pub fn with_focusable(mut self, focusable: bool) -> Self {
         self.focusable = focusable;
+        self
+    }
+
+    pub fn with_autofocus(mut self, autofocus: bool) -> Self {
+        self.autofocus = autofocus;
         self
     }
 
@@ -87,8 +91,8 @@ impl UICallbacks {
         self
     }
 
-    pub fn with_on_key_press(mut self, on_key_press: Arc<dyn KeyPressedCallback<Output = ()>>) -> Self {
-        self.on_key_press = Some(on_key_press);
+    pub fn with_on_keyboard(mut self, on_keyboard: KeyboardCallback) -> Self {
+        self.on_keyboard = Some(on_keyboard);
         self
     }
 
@@ -103,13 +107,14 @@ impl Default for UICallbacks {
         Self {
             interaction_enabled: true,
             focusable: false,
+            autofocus: false,
             on_click: None,
             on_cursor_enter: None,
             on_cursor_leave: None,
             on_scroll: None,
             on_focus_in: None,
             on_focus_out: None,
-            on_key_press: None,
+            on_keyboard: None,
             on_size_update: None,
         }
     }
@@ -117,7 +122,9 @@ impl Default for UICallbacks {
 
 impl PartialEq for UICallbacks {
     fn eq(&self, other: &Self) -> bool {
-        self.interaction_enabled == other.interaction_enabled && self.focusable == other.focusable
+        self.interaction_enabled == other.interaction_enabled
+            && self.focusable == other.focusable
+            && self.autofocus == other.autofocus
     }
 }
 
@@ -126,13 +133,14 @@ impl From<UICallbacks> for UIEventHandlerC {
         Self {
             enabled: value.interaction_enabled,
             focusable: value.focusable,
+            autofocus: value.autofocus,
             on_click: value.on_click,
             on_cursor_enter: value.on_cursor_enter,
             on_cursor_leave: value.on_cursor_leave,
             on_mouse_press: None,
             on_mouse_release: None,
             on_scroll: value.on_scroll,
-            on_key_press: value.on_key_press,
+            on_keyboard: value.on_keyboard,
             on_focus_in: value.on_focus_in,
             on_focus_out: value.on_focus_out,
             on_size_update: value.on_size_update,

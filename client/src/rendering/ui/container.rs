@@ -83,6 +83,11 @@ impl<P> ContainerProps<P> {
         self
     }
 
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity;
+        self
+    }
+
     pub fn children_props(mut self, props: P) -> Self {
         self.children_props = props;
         self
@@ -111,7 +116,7 @@ pub fn container_props_init<P>(children_props: P) -> ContainerProps<P> {
         layout: Default::default(),
         callbacks: Default::default(),
         background: None,
-        opacity: 0.0,
+        opacity: 1.0,
         corner_radius: 0.0,
         children_props,
     }
@@ -217,7 +222,7 @@ where
                         .set_child_order(&entity_state.value(), Some(child_num as u32));
                 }
 
-                let opacity = parent_opacity * props.layout.visibility.opacity();
+                let opacity = parent_opacity * props.opacity;
                 scope_ctx.set_local_var(LOCAL_VAR_OPACITY, opacity);
 
                 let mut scene = ctx.scene();

@@ -304,9 +304,6 @@ impl MainApp {
         }
 
         window.set_cursor_visible(!enabled);
-
-        let mut ui_interactor = ctx.module_mut::<UIInteractionManager>();
-        ui_interactor.set_active(!enabled);
     }
 
     pub fn is_in_game(&self) -> bool {
