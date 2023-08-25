@@ -172,20 +172,24 @@ impl PostProcessStage {
                     index: 0,
                     layout: ImageLayout::COLOR_ATTACHMENT,
                 }])],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: Subpass::EXTERNAL,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                        | PipelineStageFlags::PIXEL_SHADER,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                        | PipelineStageFlags::PIXEL_SHADER,
-                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE | AccessFlags::SHADER_READ,
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE | AccessFlags::SHADER_READ,
-                    // src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                    // dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                    // src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                    // dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                }],
+                &[
+                    SubpassDependency {
+                        src_subpass: Subpass::EXTERNAL,
+                        dst_subpass: 0,
+                        src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                    SubpassDependency {
+                        src_subpass: 0,
+                        dst_subpass: Subpass::EXTERNAL,
+                        src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                ],
             )
             .unwrap();
         let bloom_upscale_render_pass = device
@@ -200,16 +204,24 @@ impl PostProcessStage {
                     index: 0,
                     layout: ImageLayout::COLOR_ATTACHMENT,
                 }])],
-                &[SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: Subpass::EXTERNAL,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                        | PipelineStageFlags::PIXEL_SHADER,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                        | PipelineStageFlags::PIXEL_SHADER,
-                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE | AccessFlags::SHADER_READ,
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE | AccessFlags::SHADER_READ,
-                }],
+                &[
+                    SubpassDependency {
+                        src_subpass: Subpass::EXTERNAL,
+                        dst_subpass: 0,
+                        src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                    SubpassDependency {
+                        src_subpass: 0,
+                        dst_subpass: Subpass::EXTERNAL,
+                        src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                        dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    },
+                ],
             )
             .unwrap();
 

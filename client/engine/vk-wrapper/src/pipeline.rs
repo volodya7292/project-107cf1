@@ -32,6 +32,7 @@ vk_bitflags_impl!(AccessFlags, vk::AccessFlags);
 impl AccessFlags {
     pub const COLOR_ATTACHMENT_READ: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_READ);
     pub const COLOR_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+    pub const INPUT_ATTACHMENT_READ: Self = Self(vk::AccessFlags::INPUT_ATTACHMENT_READ);
     pub const DEPTH_STENCIL_ATTACHMENT_READ: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ);
     pub const DEPTH_STENCIL_ATTACHMENT_WRITE: Self = Self(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
     pub const UNIFORM_READ: Self = Self(vk::AccessFlags::UNIFORM_READ);

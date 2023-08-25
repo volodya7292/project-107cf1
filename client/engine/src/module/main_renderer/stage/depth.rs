@@ -105,14 +105,10 @@ impl DepthStage {
                 &[SubpassDependency {
                     src_subpass: 0,
                     dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::LATE_TESTS_AND_DS_STORE,
-                    dst_stage_mask: PipelineStageFlags::DS_LOAD_AND_EARLY_TESTS,
-                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                    // src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                    // dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                    // src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
-                    // dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    src_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                    dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                    src_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
+                    dst_access_mask: AccessFlags::MEMORY_READ | AccessFlags::MEMORY_WRITE,
                 }],
             )
             .unwrap();
@@ -885,7 +881,7 @@ impl RenderStage for DepthStage {
                 visibility_buffer
                     .barrier()
                     .src_access_mask(AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(AccessFlags::SHADER_WRITE),
+                    .dst_access_mask(AccessFlags::SHADER_WRITE | AccessFlags::SHADER_READ),
             ],
         );
 
