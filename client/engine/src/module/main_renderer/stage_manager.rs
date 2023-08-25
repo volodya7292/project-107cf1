@@ -177,7 +177,13 @@ impl StageManager {
                         .iter()
                         .map(|dep_id| {
                             let dep_info = &self.stages_infos[dep_id];
-                            let dep_job = dep_info.job.lock();
+                            let dep_job: common::parking_lot::lock_api::MutexGuard<
+                                '_,
+                                common::parking_lot::RawMutex,
+                                GPUJob,
+                            > = dep_info.job.lock();
+                            // TODO: fix this shrubbery. Wait value (that is +1 inside wait_semaphore_next())
+                            //   must be calculated automatically inside `device.run_jobs_sync()` function.
                             dep_job.wait_semaphore_next()
                         })
                         .chain(run_result.wait_semaphores.iter().cloned())
