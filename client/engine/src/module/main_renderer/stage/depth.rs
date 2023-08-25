@@ -458,7 +458,7 @@ impl RenderStage for DepthStage {
         let light_view = glm::look_at_rh(
             &(ctx.relative_camera_pos + glm::vec3(0.0, 256.0, 0.0).component_mul(&(-ctx.main_light_dir))),
             &ctx.relative_camera_pos,
-            &Vec3::new(0.0002324, 0.999224523453, 0.0006574),
+            &Vec3::new(0.0002324, 0.99922454, 0.0006574),
         );
         let light_proj_view = light_proj * light_view;
 

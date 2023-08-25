@@ -124,7 +124,7 @@ impl StageManager {
                 (
                     *id,
                     StageInfo {
-                        execution_dependencies: execution_dependencies.get(id).cloned().unwrap_or_default(), //,.unwrap_or(vec![]),
+                        execution_dependencies: execution_dependencies.get(id).cloned().unwrap_or_default(),
                         job: Mutex::new(
                             GPUJob::new(stages[id].lock().name(), device, QueueType::Graphics).unwrap(),
                         ),
@@ -178,7 +178,7 @@ impl StageManager {
                         .map(|dep_id| {
                             let dep_info = &self.stages_infos[dep_id];
                             let dep_job = dep_info.job.lock();
-                            dep_job.wait_semaphore()
+                            dep_job.wait_semaphore_next()
                         })
                         .chain(run_result.wait_semaphores.iter().cloned())
                         .collect::<Vec<_>>()

@@ -34,6 +34,14 @@ impl GPUJob {
         }
     }
 
+    pub fn wait_semaphore_next(&self) -> WaitSemaphore {
+        WaitSemaphore {
+            semaphore: Arc::clone(&self.completion_semaphore),
+            wait_dst_mask: PipelineStageFlags::ALL_COMMANDS,
+            wait_value: self.completion_value + 1,
+        }
+    }
+
     pub fn wait(&self) -> Result<(), DeviceError> {
         self.completion_semaphore.wait(self.completion_value)
     }
