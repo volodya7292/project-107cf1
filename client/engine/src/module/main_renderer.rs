@@ -523,6 +523,12 @@ impl WrapperObject {
     }
 }
 
+impl Default for WrapperObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SceneObject for WrapperObject {}
 
 pub trait UniformsBlock: Send + Sync + 'static {

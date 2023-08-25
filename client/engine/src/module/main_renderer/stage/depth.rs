@@ -192,30 +192,21 @@ impl DepthStage {
         let cull_objects = Mutex::new(Vec::<CullObject>::with_capacity(object_count));
 
         let proj_mat = ctx.active_camera.projection();
-        let view_mat = camera::create_view_matrix(&ctx.relative_camera_pos, &ctx.active_camera.rotation());
+        let view_mat = camera::create_view_matrix(&ctx.relative_camera_pos, ctx.active_camera.rotation());
         let frustum = Frustum::new(&(proj_mat * view_mat));
 
-        depth_cls.par_iter_mut()
+        depth_cls
+            .par_iter_mut()
             .zip(depth_translucency_cls)
             .enumerate()
             .for_each(|(i, (cl_sol, cl_trans))| {
                 let mut curr_cull_objects = Vec::with_capacity(draw_count_step);
 
                 cl_sol
-                    .begin_secondary_graphics(
-                        false,
-                        &self.depth_render_pass,
-                        0,
-                        Some(framebuffer),
-                    )
+                    .begin_secondary_graphics(false, &self.depth_render_pass, 0, Some(framebuffer))
                     .unwrap();
                 cl_trans
-                    .begin_secondary_graphics(
-                        false,
-                        &self.depth_render_pass,
-                        1,
-                        Some(framebuffer),
-                    )
+                    .begin_secondary_graphics(false, &self.depth_render_pass, 1, Some(framebuffer))
                     .unwrap();
 
                 for j in 0..draw_count_step {
@@ -227,12 +218,18 @@ impl DepthStage {
                     let renderable_id = ctx.ordered_entities[entity_index];
                     let entry = ctx.storage.entry(&renderable_id).unwrap();
 
-                    let (Some(h_cache), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<HierarchyCacheC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
+                    let (Some(h_cache), Some(render_config), Some(vertex_mesh)) = (
+                        entry.get::<HierarchyCacheC>(),
+                        entry.get::<MeshRenderConfigC>(),
+                        ctx.curr_vertex_meshes.get(&renderable_id),
+                    ) else {
                         continue;
                     };
 
-                    if render_config.render_layer != RenderLayer::Main || !h_cache.active || vertex_mesh.is_empty() {
+                    if render_config.render_layer != RenderLayer::Main
+                        || !h_cache.active
+                        || vertex_mesh.is_empty()
+                    {
                         continue;
                     }
 
@@ -275,10 +272,16 @@ impl DepthStage {
                         renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
                     );
 
-                    cl.bind_graphics_inputs(signature, 0, &descriptors, &[
-                        self.frame_infos_indices[0] as u32 * ctx.per_frame_ub.element_size() as u32,
-                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32
-                    ]);
+                    cl.bind_graphics_inputs(
+                        signature,
+                        0,
+                        &descriptors,
+                        &[
+                            self.frame_infos_indices[0] as u32 * ctx.per_frame_ub.element_size() as u32,
+                            renderable.uniform_buf_index as u32
+                                * ctx.uniform_buffer_basic.element_size() as u32,
+                        ],
+                    );
 
                     cl.bind_and_draw_vertex_mesh(vertex_mesh);
                 }
@@ -304,73 +307,74 @@ impl DepthStage {
         let draw_count_step = object_count / cls.len() + 1;
         let frustum = Frustum::new(proj_view);
 
-        cls.par_iter_mut()
-            .enumerate()
-            .for_each(|(i, cl)| {
-                cl.begin_secondary_graphics(false, framebuffer.render_pass(), 0, Some(framebuffer))
-                    .unwrap();
+        cls.par_iter_mut().enumerate().for_each(|(i, cl)| {
+            cl.begin_secondary_graphics(false, framebuffer.render_pass(), 0, Some(framebuffer))
+                .unwrap();
 
-                for j in 0..draw_count_step {
-                    let entity_index = i * draw_count_step + j;
-                    if entity_index >= object_count {
-                        break;
-                    }
-
-                    let renderable_id = ctx.ordered_entities[entity_index];
-                    let entry = ctx.storage.entry(&renderable_id).unwrap();
-
-                    let (Some(h_cache), Some(render_config), Some(vertex_mesh)) =
-                        (entry.get::<HierarchyCacheC>(), entry.get::<MeshRenderConfigC>(), ctx.curr_vertex_meshes.get(&renderable_id)) else {
-                        continue;
-                    };
-
-                    if render_config.render_layer != RenderLayer::Main
-                        || !h_cache.active
-                        || render_config.translucent
-                        || vertex_mesh.is_empty()
-                    {
-                        continue;
-                    }
-
-                    if let Some(sphere) = vertex_mesh.sphere() {
-                        let center = sphere.center() + h_cache.position_f32();
-                        let radius = sphere.radius() * h_cache.scale.max();
-
-                        if !frustum.is_sphere_visible(&center, radius) {
-                            continue;
-                        }
-                    }
-
-                    let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
-                        continue;
-                    };
-                    let renderable = &ctx.renderables[&renderable_id];
-
-                    let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();
-                    let signature = pipeline.signature();
-                    cl.bind_pipeline(pipeline);
-
-                    let descriptors = compose_descriptor_sets(
-                        ctx.g_per_frame_in,
-                        mat_pipeline.per_frame_desc,
-                        renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
-                    );
-
-                    cl.bind_graphics_inputs(
-                        signature,
-                        0,
-                        &descriptors,
-                        &[
-                            self.frame_infos_indices[1] as u32 * ctx.per_frame_ub.element_size() as u32,
-                            renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32,
-                        ],
-                    );
-
-                    cl.bind_and_draw_vertex_mesh(vertex_mesh);
+            for j in 0..draw_count_step {
+                let entity_index = i * draw_count_step + j;
+                if entity_index >= object_count {
+                    break;
                 }
 
-                cl.end().unwrap();
-            });
+                let renderable_id = ctx.ordered_entities[entity_index];
+                let entry = ctx.storage.entry(&renderable_id).unwrap();
+
+                let (Some(h_cache), Some(render_config), Some(vertex_mesh)) = (
+                    entry.get::<HierarchyCacheC>(),
+                    entry.get::<MeshRenderConfigC>(),
+                    ctx.curr_vertex_meshes.get(&renderable_id),
+                ) else {
+                    continue;
+                };
+
+                if render_config.render_layer != RenderLayer::Main
+                    || !h_cache.active
+                    || render_config.translucent
+                    || vertex_mesh.is_empty()
+                {
+                    continue;
+                }
+
+                if let Some(sphere) = vertex_mesh.sphere() {
+                    let center = sphere.center() + h_cache.position_f32();
+                    let radius = sphere.radius() * h_cache.scale.max();
+
+                    if !frustum.is_sphere_visible(&center, radius) {
+                        continue;
+                    }
+                }
+
+                let Some(mat_pipeline) = mat_pipelines.get(render_config.mat_pipeline as usize) else {
+                    continue;
+                };
+                let renderable = &ctx.renderables[&renderable_id];
+
+                let pipeline = mat_pipeline.get_pipeline(self.shadow_map_pipe).unwrap();
+                let signature = pipeline.signature();
+                cl.bind_pipeline(pipeline);
+
+                let descriptors = compose_descriptor_sets(
+                    ctx.g_per_frame_in,
+                    mat_pipeline.per_frame_desc,
+                    renderable.descriptor_sets[GENERAL_OBJECT_DESCRIPTOR_IDX],
+                );
+
+                cl.bind_graphics_inputs(
+                    signature,
+                    0,
+                    &descriptors,
+                    &[
+                        self.frame_infos_indices[1] as u32 * ctx.per_frame_ub.element_size() as u32,
+                        renderable.uniform_buf_index as u32 * ctx.uniform_buffer_basic.element_size() as u32,
+                    ],
+                );
+
+                cl.bind_and_draw_vertex_mesh(vertex_mesh);
+            }
+
+            cl.end().unwrap();
+        });
     }
 
     fn gen_shadow_maps(&mut self, cl: &mut CmdList, resources: &ResourceManagementScope, ctx: &StageContext) {

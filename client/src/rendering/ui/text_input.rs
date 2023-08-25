@@ -85,7 +85,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             let cursor_offset = if n_chars > 0 {
                 let text_renderer = ctx.ctx().module::<TextRenderer>();
                 let info = text_renderer.calculate_char_offset(
-                    &*text,
+                    &text,
                     &props.style,
                     if props.multiline {
                         container_size.map_or(0.0, |v| v.x)
@@ -240,7 +240,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
 
                 cursor_opacity_state.update_with(|prev| {
                     let mut new = *prev;
-                    new.retarget(prev.target().clone().with_value(1.0));
+                    new.retarget((*prev.target()).with_value(1.0));
                     new
                 });
             };

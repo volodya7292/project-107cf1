@@ -2,7 +2,7 @@ pub mod transition;
 pub mod wsi;
 
 use crate::module::main_renderer::vertex_mesh::{AttributesImpl, VertexNormalImpl, VertexPositionImpl};
-use common::glm::Vec3;
+use common::glm::{self, Vec3};
 use std::mem;
 
 /// Calculate interpolated normals using neighbour triangles.
@@ -33,7 +33,7 @@ where
         let ind = &indices[indices_i..(indices_i + 3)];
 
         // Check for NaN
-        if normal == normal {
+        if glm::any(&normal.map(|v| v.is_nan())) {
             vertices[ind[0] as usize].set_normal(vertices[ind[0] as usize].normal() + *normal);
             vertices[ind[1] as usize].set_normal(vertices[ind[1] as usize].normal() + *normal);
             vertices[ind[2] as usize].set_normal(vertices[ind[2] as usize].normal() + *normal);

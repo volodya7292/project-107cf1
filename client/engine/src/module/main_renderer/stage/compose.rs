@@ -189,7 +189,7 @@ impl RenderStage for ComposeStage {
 
         let signal_semaphores = if graphics_queue == present_queue {
             vec![SignalSemaphore {
-                semaphore: Arc::clone(&ctx.frame_completion_semaphore),
+                semaphore: Arc::clone(ctx.frame_completion_semaphore),
                 signal_value: 0,
             }]
         } else {

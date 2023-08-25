@@ -31,33 +31,33 @@ pub type PipelineKindId = u32;
 
 impl MaterialPipelineSet {
     pub fn prepare_pipeline(&mut self, id: PipelineKindId, params: &PipelineConfig) {
-        match self.pipelines.entry(id) {
-            hash_map::Entry::Vacant(entry) => {
-                let pipeline = self
-                    .device
-                    .create_graphics_pipeline(
-                        params.render_pass,
-                        params.subpass_index,
-                        self.topology,
-                        vkw::PipelineDepthStencil::new()
-                            .depth_test(params.depth_test)
-                            .depth_write(params.depth_write)
-                            // Reversed-Z
-                            .depth_compare_op(CompareOp::GREATER_OR_EQUAL),
-                        vkw::PipelineRasterization::new().cull(params.cull),
-                        &params
-                            .blend_attachments
-                            .iter()
-                            .map(|id| (*id, AttachmentColorBlend::default().enabled(true)))
-                            .collect::<Vec<_>>(),
-                        params.signature,
-                        &params.spec_consts,
-                    )
-                    .unwrap();
-                entry.insert(Arc::clone(&pipeline));
-            }
-            _ => {}
-        }
+        let hash_map::Entry::Vacant(entry) = self.pipelines.entry(id) else {
+            return;
+        };
+
+        let pipeline = self
+            .device
+            .create_graphics_pipeline(
+                params.render_pass,
+                params.subpass_index,
+                self.topology,
+                vkw::PipelineDepthStencil::new()
+                    .depth_test(params.depth_test)
+                    .depth_write(params.depth_write)
+                    // Reversed-Z
+                    .depth_compare_op(CompareOp::GREATER_OR_EQUAL),
+                vkw::PipelineRasterization::new().cull(params.cull),
+                &params
+                    .blend_attachments
+                    .iter()
+                    .map(|id| (*id, AttachmentColorBlend::default().enabled(true)))
+                    .collect::<Vec<_>>(),
+                params.signature,
+                params.spec_consts,
+            )
+            .unwrap();
+
+        entry.insert(Arc::clone(&pipeline));
     }
 
     pub fn get_pipeline(&self, id: PipelineKindId) -> Option<&Arc<vkw::Pipeline>> {

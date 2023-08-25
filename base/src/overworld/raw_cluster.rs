@@ -323,6 +323,12 @@ impl RawCluster {
     }
 }
 
+impl Default for RawCluster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CompressedCluster {
     cells_data: Vec<u8>,
     block_state_storage: EntityStorage,

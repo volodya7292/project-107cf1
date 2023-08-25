@@ -185,7 +185,7 @@ impl<T: Copy> HostBuffer<T> {
                 unsafe {
                     ptr::copy_nonoverlapping(
                         (elements.as_ptr()).offset(first_element as isize + i as isize) as *mut u8,
-                        (self.p_data as *mut u8)
+                        self.p_data
                             .offset((first_element as isize + i as isize) * self.buffer.elem_size as isize),
                         1,
                     );

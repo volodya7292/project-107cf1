@@ -19,7 +19,6 @@ embed_plist::embed_info_plist!("../Info.plist");
 
 fn parking_lot_deadlock_detection() {
     use common::parking_lot::deadlock;
-    use std::thread;
     use std::time::Duration;
 
     thread::spawn(move || loop {

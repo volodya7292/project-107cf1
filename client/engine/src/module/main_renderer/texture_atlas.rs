@@ -70,7 +70,7 @@ impl TextureAtlas {
         gpu_job.wait()?;
 
         Ok(TextureAtlas {
-            device: Arc::clone(&device),
+            device: Arc::clone(device),
             gpu_job,
             image,
             _width: width,

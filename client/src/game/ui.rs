@@ -29,15 +29,21 @@ const BUTTON_TEXT_COLOR: Color = Color::rgb(0.9, 2.0, 0.9);
 const TEXT_COLOR: Color = Color::grayscale(0.9);
 
 pub mod ui_root_states {
-    pub const MENU_VISIBLE: &'static str = "menu_visible";
-    pub const ACTIVE_MODAL_VIEWS: &'static str = "curr_modal_view";
+    use super::ModalFn;
+    use engine::module::ui::reactive::StateId;
+    use lazy_static::lazy_static;
 
-    pub const CURR_MENU_TAB: &'static str = "curr_menu_tab";
-    pub const IN_GAME_PROCESS: &'static str = "in_game_process";
-    pub const VISION_OBSTRUCTED: &'static str = "vision_obstructed";
-    pub const PLAYER_HEALTH: &'static str = "player_health";
-    pub const PLAYER_SATIETY: &'static str = "player_satiety";
-    pub const WORLD_NAME_LIST: &'static str = "world_name_list";
+    lazy_static! {
+        pub static ref MENU_VISIBLE: StateId<bool> = "menu_visible".into();
+        pub static ref ACTIVE_MODAL_VIEWS: StateId<Vec<ModalFn>> = "curr_modal_view".into();
+        pub static ref CURR_MENU_TAB: StateId<&'static str> = "curr_menu_tab".into();
+        pub static ref IN_GAME_PROCESS: StateId<bool> = "in_game_process".into();
+        pub static ref VISION_OBSTRUCTED: StateId<bool> = "vision_obstructed".into();
+        pub static ref PLAYER_HEALTH: StateId<f64> = "player_health".into();
+        pub static ref PLAYER_SATIETY: StateId<f64> = "player_satiety".into();
+        pub static ref WORLD_NAME_LIST: StateId<Vec<String>> = "world_name_list".into();
+        pub static ref INVENTORY_VISIBLE: StateId<bool> = "inventory_visible".into();
+    }
 }
 
 type ModalFn = Arc<dyn Fn(&mut UIScopeContext) + Send + Sync + 'static>;
@@ -46,9 +52,7 @@ fn push_modal_view<F>(ctx: &mut UIReactor, view_fn: F)
 where
     F: Fn(&mut UIScopeContext) + Send + Sync + 'static,
 {
-    let views_state = ctx
-        .root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS)
-        .unwrap();
+    let views_state = ctx.root_state(&ui_root_states::ACTIVE_MODAL_VIEWS).unwrap();
     views_state.update_with(move |prev| {
         let mut new = prev.clone();
         new.push(Arc::new(view_fn));
@@ -57,9 +61,7 @@ where
 }
 
 fn pop_modal_view(ctx: &mut UIReactor) {
-    let views_state = ctx
-        .root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS)
-        .unwrap();
+    let views_state = ctx.root_state(&ui_root_states::ACTIVE_MODAL_VIEWS).unwrap();
     views_state.update_with(move |prev| {
         let mut new = prev.clone();
         new.pop().unwrap();
@@ -135,9 +137,7 @@ fn update_overworlds_list(ctx: &EngineContext) {
     let reactor = app.ui_reactor();
     let world_names = app.get_world_name_list();
 
-    let names_state = reactor
-        .root_state::<Vec<String>>(ui_root_states::WORLD_NAME_LIST)
-        .unwrap();
+    let names_state = reactor.root_state(&ui_root_states::WORLD_NAME_LIST).unwrap();
     names_state.update(world_names);
 }
 
@@ -148,20 +148,20 @@ fn load_overworld(ctx: &EngineContext, overworld_name: &str) {
 
     let reactor = app.ui_reactor();
     reactor
-        .root_state(ui_root_states::CURR_MENU_TAB)
+        .root_state(&ui_root_states::CURR_MENU_TAB)
         .unwrap()
         .update("");
     reactor
-        .root_state(ui_root_states::IN_GAME_PROCESS)
+        .root_state(&ui_root_states::IN_GAME_PROCESS)
         .unwrap()
         .update(true);
     // This disables death screen when health = 0
     reactor
-        .root_state(ui_root_states::PLAYER_HEALTH)
+        .root_state(&ui_root_states::PLAYER_HEALTH)
         .unwrap()
         .update(1.0_f64);
     reactor
-        .root_state(ui_root_states::PLAYER_SATIETY)
+        .root_state(&ui_root_states::PLAYER_SATIETY)
         .unwrap()
         .update(1.0_f64);
 }
@@ -172,7 +172,7 @@ fn close_overworld(ctx: &EngineContext) {
 
     let reactor = app.ui_reactor();
     reactor
-        .root_state(ui_root_states::IN_GAME_PROCESS)
+        .root_state(&ui_root_states::IN_GAME_PROCESS)
         .unwrap()
         .update(false);
 }
@@ -306,7 +306,7 @@ fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
             ..Default::default()
         },
         |ctx, ()| {
-            let world_names = ctx.subscribe(&ctx.root_state::<Vec<String>>(ui_root_states::WORLD_NAME_LIST));
+            let world_names = ctx.subscribe(&ctx.root_state::<Vec<String>>(&ui_root_states::WORLD_NAME_LIST));
 
             for (i, name) in world_names.iter().enumerate() {
                 world_item(&make_static_id!(format!("{}_{}", i, name)), ctx, name.clone());
@@ -339,7 +339,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
             ..Default::default()
         },
         move |ctx, ()| {
-            let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+            let is_in_game = ctx.subscribe(&ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
 
             expander(make_static_id!(), ctx, 1.0);
 
@@ -564,7 +564,7 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
 }
 
 fn game_menu(ctx: &mut UIScopeContext) {
-    let active_modal_views_state = ctx.root_state::<Vec<ModalFn>>(ui_root_states::ACTIVE_MODAL_VIEWS);
+    let active_modal_views_state = ctx.root_state(&ui_root_states::ACTIVE_MODAL_VIEWS);
 
     ctx.once(make_static_id!(), |ctx| {
         ctx.ctx().dispatch_callback(|ctx, _| {
@@ -572,11 +572,11 @@ fn game_menu(ctx: &mut UIScopeContext) {
         });
     });
 
-    let player_health = ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
-    let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
+    let player_health = ctx.subscribe(&ctx.root_state(&ui_root_states::PLAYER_HEALTH));
+    let is_in_game = ctx.subscribe(&ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
 
     let menu_visible = {
-        let menu_visible = ctx.subscribe(&ctx.root_state(ui_root_states::MENU_VISIBLE));
+        let menu_visible = ctx.subscribe(&ctx.root_state(&ui_root_states::MENU_VISIBLE));
         let death_screen_visible = *is_in_game && *player_health == 0.0;
         *menu_visible && !death_screen_visible
     };
@@ -612,7 +612,7 @@ fn game_menu(ctx: &mut UIScopeContext) {
             )
             .callbacks(UICallbacks::new().with_interaction(menu_visible)),
         move |ctx, ()| {
-            let curr_nav_view = ctx.subscribe(&ctx.root_state::<&str>(ui_root_states::CURR_MENU_TAB));
+            let curr_nav_view = ctx.subscribe(&ctx.root_state(&ui_root_states::CURR_MENU_TAB));
 
             expander(make_static_id!(), ctx, 0.2);
 
@@ -675,9 +675,9 @@ fn game_menu(ctx: &mut UIScopeContext) {
 }
 
 pub fn game_overlay(ctx: &mut UIScopeContext) {
-    let is_in_game = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
-    let vision_obstructed = ctx.subscribe(&ctx.root_state::<bool>(ui_root_states::VISION_OBSTRUCTED));
-    let player_health = ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+    let is_in_game = ctx.subscribe(&ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
+    let vision_obstructed = ctx.subscribe(&ctx.root_state(&ui_root_states::VISION_OBSTRUCTED));
+    let player_health = ctx.subscribe(&ctx.root_state(&ui_root_states::PLAYER_HEALTH));
 
     let player_dead = *is_in_game && *player_health == 0.0;
 
@@ -754,9 +754,9 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
                         container_props().layout(UILayoutC::row().with_width_grow()),
                         |ctx, ()| {
                             let player_health =
-                                ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+                                ctx.subscribe(&ctx.root_state(&ui_root_states::PLAYER_HEALTH));
                             let player_satiety =
-                                ctx.subscribe(&ctx.root_state::<f64>(ui_root_states::PLAYER_SATIETY));
+                                ctx.subscribe(&ctx.root_state(&ui_root_states::PLAYER_SATIETY));
 
                             container(
                                 make_static_id!(),
@@ -795,33 +795,44 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
     );
 }
 
+pub fn game_inventory_overlay(ctx: &mut UIScopeContext) {
+    let opacity = ctx.subscribe(&ctx.root_state(&ui_root_states::INVENTORY_VISIBLE));
+
+    container(make_static_id!(), ctx, container_props(), |ctx, ()| {
+        expander(make_static_id!(), ctx, 1.0);
+        container(make_static_id!(), ctx, container_props(), |ctx, ()| {});
+        expander(make_static_id!(), ctx, 1.0);
+    });
+}
+
 pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(STATE_ENTITY_ID, || root_entity);
 
-    ctx.request_state(ui_root_states::MENU_VISIBLE, || true);
-    ctx.request_state(ui_root_states::CURR_MENU_TAB, || "");
-    ctx.request_state(ui_root_states::WORLD_NAME_LIST, || Vec::<String>::new());
-    ctx.request_state(ui_root_states::ACTIVE_MODAL_VIEWS, || Vec::<ModalFn>::new());
-    ctx.request_state(ui_root_states::PLAYER_HEALTH, || 0.0_f64);
-    ctx.request_state(ui_root_states::PLAYER_SATIETY, || 0.0_f64);
-    ctx.request_state(ui_root_states::VISION_OBSTRUCTED, || false);
+    ctx.request_state(&*ui_root_states::MENU_VISIBLE, || true);
+    ctx.request_state(&*ui_root_states::CURR_MENU_TAB, || "");
+    ctx.request_state(&*ui_root_states::WORLD_NAME_LIST, Vec::<String>::new);
+    ctx.request_state(&*ui_root_states::ACTIVE_MODAL_VIEWS, Vec::<ModalFn>::new);
+    ctx.request_state(&*ui_root_states::PLAYER_HEALTH, || 0.0_f64);
+    ctx.request_state(&*ui_root_states::PLAYER_SATIETY, || 0.0_f64);
+    ctx.request_state(&*ui_root_states::VISION_OBSTRUCTED, || false);
+    ctx.request_state(&*ui_root_states::INVENTORY_VISIBLE, || false);
 
-    let in_game_process_state = ctx.request_state(ui_root_states::IN_GAME_PROCESS, || false);
+    let in_game_process_state = ctx.request_state(&*ui_root_states::IN_GAME_PROCESS, || false);
     let in_game_process = ctx.subscribe(&in_game_process_state);
 
     ctx.descend(
         make_static_id!(),
         (),
         |ui_ctx, ()| {
-            let is_in_game = ui_ctx.subscribe(&ui_ctx.root_state::<bool>(ui_root_states::IN_GAME_PROCESS));
-            let menu_visible = ui_ctx.subscribe(&ui_ctx.root_state::<bool>(ui_root_states::MENU_VISIBLE));
-            let player_health = ui_ctx.subscribe(&ui_ctx.root_state::<f64>(ui_root_states::PLAYER_HEALTH));
+            let is_in_game = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
+            let menu_visible = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::MENU_VISIBLE));
+            let player_health = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::PLAYER_HEALTH));
 
             let player_dead = *is_in_game && *player_health == 0.0;
             let cursor_grabbed = !*menu_visible && !player_dead;
 
             let mut app = ui_ctx.ctx().app();
-            app.grab_cursor(&*ui_ctx.ctx().window(), cursor_grabbed, ui_ctx.ctx());
+            app.grab_cursor(&ui_ctx.ctx().window(), cursor_grabbed, ui_ctx.ctx());
         },
         |_, _| {},
     );
@@ -835,6 +846,7 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         move |ctx, in_game| {
             if in_game {
                 game_overlay(ctx);
+                game_inventory_overlay(ctx);
             }
             game_menu(ctx);
         },

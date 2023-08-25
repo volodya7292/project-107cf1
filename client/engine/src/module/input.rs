@@ -70,6 +70,12 @@ impl Input {
     }
 }
 
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineModule for Input {
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
         match event {

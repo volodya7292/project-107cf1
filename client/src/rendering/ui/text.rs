@@ -155,7 +155,7 @@ pub trait UITextImpl {
         scene.register_resource(TextImplContext { mat_pipe_id });
     }
 
-    fn new(
+    fn create(
         ctx: &EngineContext,
         parent: EntityId,
         text: StyledString,
@@ -308,7 +308,7 @@ pub mod reactive {
 
                         let ctx = *scope_ctx.ctx();
                         let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
-                            *UIText::new(&ctx, parent_entity, styled_string.clone(), wrap, align)
+                            *UIText::create(&ctx, parent_entity, styled_string.clone(), wrap, align)
                         });
 
                         let opacity = parent_opacity;
@@ -327,7 +327,7 @@ pub mod reactive {
                             let raw_text_entity = obj.state().raw_text_entity;
                             drop(obj);
 
-                            let mut raw_text = scene.entry(&*raw_text_entity);
+                            let mut raw_text = scene.entry(&raw_text_entity);
                             let raw_uniform_data = raw_text.get_mut::<UniformDataC>();
                             UniformDataC::copy_from_with_offset(
                                 raw_uniform_data,

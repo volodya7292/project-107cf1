@@ -46,12 +46,9 @@ impl Quad {
 
     /// Returns true if quads have the same shape
     pub fn cmp_shape(&self, other: &Self) -> bool {
-        self.vertices.iter().all(|v0| {
-            other
-                .vertices
-                .iter()
-                .any(|v1| v1.abs_diff_eq(&v0, EQUITY_EPSILON))
-        })
+        self.vertices
+            .iter()
+            .all(|v0| other.vertices.iter().any(|v1| v1.abs_diff_eq(v0, EQUITY_EPSILON)))
     }
 }
 
@@ -163,10 +160,10 @@ impl BlockModel {
 
         let mut offset = model.inner_quads_range.end;
 
-        for i in 0..6 {
-            let end = offset + side_quads[i].len();
-            model.side_quads_range[i] = offset..end;
-            model.quads.extend(&side_quads[i]);
+        for (side_quads_i, side_quads_range) in side_quads.iter().zip(model.side_quads_range.iter_mut()) {
+            let end = offset + side_quads_i.len();
+            *side_quads_range = offset..end;
+            model.quads.extend(side_quads_i);
             offset = end;
         }
 
@@ -192,7 +189,7 @@ impl BlockModel {
     }
 
     pub fn aabbs(&self) -> &[AABB] {
-        return &self.aabbs;
+        &self.aabbs
     }
 
     pub fn all_quads(&self) -> &[Quad] {

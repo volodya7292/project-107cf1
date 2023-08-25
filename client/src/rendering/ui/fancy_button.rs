@@ -40,7 +40,7 @@ pub fn fancy_button(
                 active_color.z *= MUL_FACTOR;
 
                 text_color2.update_with(move |prev| {
-                    let mut new = prev.clone();
+                    let mut new = *prev;
                     new.retarget(TransitionTarget::new(active_color.into(), 0.2));
                     new
                 });
@@ -49,7 +49,7 @@ pub fn fancy_button(
             let text_color2 = text_color.state();
             let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
                 text_color2.update_with(move |prev| {
-                    let mut new = prev.clone();
+                    let mut new = *prev;
                     new.retarget(TransitionTarget::new(curr_text_color, 0.2));
                     new
                 });

@@ -244,7 +244,7 @@ where
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
             let mut scene = ctx.module_mut::<Scene>();
-            scene.remove_object(&*entity);
+            scene.remove_object(&entity);
         },
     );
 }

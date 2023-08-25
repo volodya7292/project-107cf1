@@ -370,7 +370,7 @@ impl UIRenderer {
                 let Some(child_layout) = child_entry.get::<UILayoutC>() else {
                     continue;
                 };
-                if &child_layout.position != &Position::Auto {
+                if child_layout.position != Position::Auto {
                     continue;
                 }
                 let child_cache = child_entry.get::<UILayoutCacheC>().unwrap();
@@ -567,7 +567,7 @@ impl UIRenderer {
 
             // Calculate clipping regions
             for (child, child_final_flow_size) in &calculated_children_flow_sizes {
-                let mut child_entry = scene.entry(&child);
+                let mut child_entry = scene.entry(child);
                 let ui_transform = child_entry.get::<UILayoutC>().content_transform;
                 let child_cache = child_entry.get_mut::<UILayoutCacheC>();
 
@@ -675,7 +675,10 @@ impl UIRenderer {
         'outer: loop {
             let entry = scene.entry(&to_visit);
 
-            let Some(children) = entry.get_checked::<Relation>().map(|v| v.ordered_children().rev().collect::<SmallVec<[EntityId; 256]>>()) else {
+            let Some(children) = entry
+                .get_checked::<Relation>()
+                .map(|v| v.ordered_children().rev().collect::<SmallVec<[EntityId; 256]>>())
+            else {
                 continue;
             };
             if children.is_empty() {
@@ -760,8 +763,7 @@ impl EngineModule for UIRenderer {
                     let handler = scene
                         .entry(entity)
                         .get_checked::<UIEventHandlerC>()
-                        .map(|v| v.on_size_update.as_ref().map(|v| Arc::clone(v)))
-                        .flatten()?;
+                        .and_then(|v| v.on_size_update.as_ref().map(|v| Arc::clone(v)))?;
                     Some((*entity, handler))
                 })
                 .collect();

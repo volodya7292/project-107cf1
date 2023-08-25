@@ -18,8 +18,8 @@ use engine::module::EngineModule;
 use engine::EngineContext;
 use std::sync::Arc;
 
-pub const STATE_ENTITY_ID: &'static str = "__entity_id";
-pub const LOCAL_VAR_OPACITY: &'static str = "__opacity";
+pub const STATE_ENTITY_ID: &str = "__entity_id";
+pub const LOCAL_VAR_OPACITY: &str = "__opacity";
 
 pub fn register_ui_elements(ctx: &EngineContext) {
     container::background::register_backgrounds(ctx);

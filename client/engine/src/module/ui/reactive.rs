@@ -10,14 +10,39 @@ use std::sync;
 use std::sync::Arc;
 
 pub type ScopeId = String;
-pub type StateId = String;
+type GenericStateId = String;
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct StateId<T>(String, PhantomData<T>);
+
+impl<T> StateId<T> {
+    pub const fn new(name: String) -> Self {
+        Self(name, PhantomData)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<T, S: Into<String>> From<S> for StateId<T> {
+    fn from(value: S) -> Self {
+        Self::new(value.into())
+    }
+}
+
+impl<T> From<&StateId<T>> for String {
+    fn from(val: &StateId<T>) -> Self {
+        val.0.clone()
+    }
+}
 
 pub struct UIScope {
     props: Rc<dyn Any>,
     children_func: Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>,
     on_remove_func: fn(&EngineContext, &UIScope),
     children: Vec<ScopeId>,
-    states: HashMap<StateId, Arc<Mutex<Arc<dyn Any + Send + Sync>>>>,
+    states: HashMap<GenericStateId, Arc<Mutex<Arc<dyn Any + Send + Sync>>>>,
     local_vars: HashMap<String, Rc<dyn Any>>,
     subscribed_to: HashSet<StateUID>,
 }
@@ -37,14 +62,14 @@ impl UIScope {
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
-struct StateUID(ScopeId, StateId);
+struct StateUID(ScopeId, GenericStateId);
 
 impl StateUID {
     pub fn scope_id(&self) -> &ScopeId {
         &self.0
     }
 
-    pub fn state_id(&self) -> &StateId {
+    pub fn state_id(&self) -> &GenericStateId {
         &self.1
     }
 }
@@ -98,9 +123,7 @@ impl UIReactor {
 
         // Update states and collect corresponding subscribers
         for (uid, modifiers) in modified_states {
-            let Some(scope) = self
-                .scopes
-                .get(uid.scope_id()) else {
+            let Some(scope) = self.scopes.get(uid.scope_id()) else {
                 continue;
             };
             let mut state_value = scope.states.get(uid.state_id()).unwrap().lock();
@@ -147,7 +170,7 @@ impl UIReactor {
     pub fn state<T: Send + Sync + 'static>(
         &self,
         scope_id: ScopeId,
-        state_id: StateId,
+        state_id: GenericStateId,
     ) -> Option<ReactiveState<T>> {
         let scope = self.scopes.get(&scope_id)?;
         let state = scope.states.get(&state_id)?;
@@ -162,8 +185,8 @@ impl UIReactor {
         })
     }
 
-    pub fn root_state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> Option<ReactiveState<T>> {
-        self.state(UIReactor::ROOT_SCOPE_ID.to_string(), name.into())
+    pub fn root_state<T: Send + Sync + 'static>(&self, name: &StateId<T>) -> Option<ReactiveState<T>> {
+        self.state(UIReactor::ROOT_SCOPE_ID.to_string(), name.name().into())
     }
 
     /// Performs rebuilding of the specified scope of `parent`.
@@ -203,7 +226,7 @@ impl UIReactor {
         }
 
         for scope_id in queue.into_iter().rev() {
-            let mut scope = self.scopes.remove(&scope_id).unwrap();
+            let scope = self.scopes.remove(&scope_id).unwrap();
             let on_remove = scope.on_remove_func;
             on_remove(ctx, &scope);
 
@@ -391,9 +414,9 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         self.reactor.set_local_var(&self.scope_id, name, value);
     }
 
-    pub fn root_state<T: Send + Sync + 'static>(&self, name: impl Into<String>) -> ReactiveState<T> {
+    pub fn root_state<T: Send + Sync + 'static>(&self, id: &StateId<T>) -> ReactiveState<T> {
         self.reactor
-            .state(UIReactor::ROOT_SCOPE_ID.to_string(), name.into())
+            .state(UIReactor::ROOT_SCOPE_ID.to_string(), id.name().into())
             .unwrap()
     }
 
@@ -405,10 +428,11 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     /// creates a new one with the return value from `init` closure.
     pub fn request_state<T: Send + Sync + 'static, F: FnOnce() -> T>(
         &mut self,
-        name: impl Into<String>,
+        id: impl Into<StateId<T>>,
         init: F,
     ) -> ReactiveState<T> {
-        let name = name.into();
+        let id = id.into();
+        let name: String = id.name().to_string();
 
         if self.used_states.contains(&name) {
             panic!("State '{name}' has already been requested!");

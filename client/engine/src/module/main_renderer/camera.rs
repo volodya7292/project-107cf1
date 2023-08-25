@@ -90,8 +90,8 @@ impl PerspectiveCamera {
             0.0,
             (-self.rotation.y).cos() as f64,
         );
-        self.position -= d * (front_back as f64);
-        self.position -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * (left_right) as f64;
+        self.position -= d * front_back;
+        self.position -= d.cross(&DVec3::new(0.0, 1.0, 0.0)).normalize() * left_right;
     }
 }
 
@@ -140,6 +140,12 @@ impl OrthoCamera {
 
     pub fn set_rotation(&mut self, rotation: Vec3) {
         self.rotation = rotation.map(|x| x % (std::f32::consts::PI * 2.0));
+    }
+}
+
+impl Default for OrthoCamera {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

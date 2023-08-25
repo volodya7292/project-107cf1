@@ -81,7 +81,7 @@ impl Serialize for SerializableEntityStorage<'_> {
 
             let elem = GenericStateEntity {
                 value: GenericStateValue {
-                    storage: &self.storage,
+                    storage: self.storage,
                     entity_id: entity,
                     state_serialize_fn: ser_info.func,
                 },

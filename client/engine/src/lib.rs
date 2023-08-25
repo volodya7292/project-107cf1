@@ -216,10 +216,10 @@ impl Engine {
             }
 
             if let Some(event) =
-                WSIEvent::from_winit(&event, &*self.main_window.borrow(), &self.curr_sizing_info)
+                WSIEvent::from_winit(&event, &self.main_window.borrow(), &self.curr_sizing_info)
             {
                 self.module_manager.borrow().on_wsi_event(
-                    &*self.main_window.borrow(),
+                    &self.main_window.borrow(),
                     &event,
                     &self.context(),
                 );

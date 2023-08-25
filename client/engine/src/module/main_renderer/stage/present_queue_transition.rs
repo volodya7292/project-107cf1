@@ -45,7 +45,7 @@ impl RenderStage for PresentQueueTransitionStage {
         cl.end().unwrap();
 
         StageRunResult::new().with_signal_semaphores(vec![SignalSemaphore {
-            semaphore: Arc::clone(&ctx.frame_completion_semaphore),
+            semaphore: Arc::clone(ctx.frame_completion_semaphore),
             signal_value: 0,
         }])
     }

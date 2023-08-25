@@ -237,6 +237,12 @@ impl Scene {
     }
 }
 
+impl Default for Scene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineModule for Scene {
     fn on_update(&mut self, _: f64, ctx: &EngineContext) {
         let comp_changes: HashMap<_, _> = self
@@ -258,7 +264,7 @@ impl EngineModule for Scene {
                     let Some(event_handler) = storage.get::<SceneEventHandler>(entity) else {
                         return None;
                     };
-                    let Some(on_comp_update) = event_handler.on_component_update(&comp_id) else {
+                    let Some(on_comp_update) = event_handler.on_component_update(comp_id) else {
                         return None;
                     };
                     Some((*entity, *on_comp_update))
@@ -372,16 +378,13 @@ impl<T> From<&EntityId> for ObjectEntityId<T> {
     }
 }
 
+impl<T> Copy for ObjectEntityId<T> {}
+
 impl<T> Clone for ObjectEntityId<T> {
     fn clone(&self) -> Self {
-        Self {
-            entity_id: self.entity_id,
-            _ty: Default::default(),
-        }
+        *self
     }
 }
-
-impl<T> Copy for ObjectEntityId<T> {}
 
 impl<T> Default for ObjectEntityId<T> {
     fn default() -> Self {

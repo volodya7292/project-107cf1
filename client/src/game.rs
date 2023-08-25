@@ -184,7 +184,7 @@ impl MainApp {
         ];
         let renderer = MainRenderer::new(
             "VulkanRenderer",
-            &*ctx.window(),
+            &ctx.window(),
             main_renderer::Settings {
                 fps_limit: main_renderer::FPSLimit::VSync,
                 prefer_triple_buffering: true,
@@ -214,7 +214,7 @@ impl MainApp {
 
         let mat_pipelines;
         {
-            mat_pipelines = material_pipelines::create(resources.file(), &ctx);
+            mat_pipelines = material_pipelines::create(resources.file(), ctx);
 
             let mut renderer = ctx.module_mut::<MainRenderer>();
 
@@ -320,7 +320,7 @@ impl MainApp {
     pub fn show_main_menu(&mut self, visible: bool) {
         let ui_reactor = self.ui_reactor.borrow_mut();
         ui_reactor
-            .root_state::<bool>(ui_root_states::MENU_VISIBLE)
+            .root_state(&ui_root_states::MENU_VISIBLE)
             .unwrap()
             .update(visible);
     }
@@ -527,7 +527,7 @@ impl MainApp {
                         println!("{:?}", player_state.position());
                     }
                     VirtualKeyCode::T => {
-                        self.grab_cursor(main_window, !self.cursor_grab, &ctx);
+                        self.grab_cursor(main_window, !self.cursor_grab, ctx);
                     }
                     VirtualKeyCode::J => {
                         // TODO: move into on_tick
@@ -647,13 +647,11 @@ impl MainApp {
 
             curr_state.bobbing_offset.retarget(bobbing_offset_smoothed.into());
             curr_state.walk_time += delta_time;
-        } else {
-            if curr_state.walk_time != 0.0 {
-                curr_state.walk_time = 0.0;
-                curr_state
-                    .bobbing_offset
-                    .retarget(TransitionTarget::new(Vec3::zeros(), 0.2));
-            }
+        } else if curr_state.walk_time != 0.0 {
+            curr_state.walk_time = 0.0;
+            curr_state
+                .bobbing_offset
+                .retarget(TransitionTarget::new(Vec3::zeros(), 0.2));
         }
         curr_state.bobbing_offset.advance(delta_time);
 
@@ -712,7 +710,7 @@ impl MainApp {
         }
         curr_state.curr_jump_force = new_jump_force;
 
-        let mut new_player_orientation = player_state.orientation();
+        let new_player_orientation;
         {
             let mut renderer = ctx.module_mut::<MainRenderer>();
             let camera = renderer.active_camera_mut();
@@ -742,16 +740,14 @@ impl MainApp {
             let cam_dir = camera.direction();
 
             let mut access = curr_state.overworld.access();
-            curr_state.look_at_block = access.get_block_at_ray(&cam_pos, &glm::convert(cam_dir), 3.0);
+            curr_state.look_at_block = access.get_block_at_ray(cam_pos, &glm::convert(cam_dir), 3.0);
         }
 
         // Handle inside-block vision filters
         {
             let registry = self.main_registry.registry();
             let reactor = self.ui_reactor();
-            let vision_obstructed_state = reactor
-                .root_state::<bool>(ui_root_states::VISION_OBSTRUCTED)
-                .unwrap();
+            let vision_obstructed_state = reactor.root_state(&ui_root_states::VISION_OBSTRUCTED).unwrap();
             let mut access = curr_state.overworld.access();
 
             let block_pos = BlockPos::from_f64(&(new_player_pos + PLAYER_CAMERA_OFFSET));
@@ -837,8 +833,8 @@ impl EngineModule for MainApp {
         // Update HUD
         if let Some(curr_state) = self.game_state.as_ref().map(|v| v.lock()) {
             let reactor = self.ui_reactor();
-            let player_health_state = reactor.root_state::<f64>(ui_root_states::PLAYER_HEALTH).unwrap();
-            let player_satiety_state = reactor.root_state::<f64>(ui_root_states::PLAYER_SATIETY).unwrap();
+            let player_health_state = reactor.root_state(&ui_root_states::PLAYER_HEALTH).unwrap();
+            let player_satiety_state = reactor.root_state(&ui_root_states::PLAYER_SATIETY).unwrap();
 
             let player_state = curr_state.overworld.interface().persisted_state().player_state();
             player_health_state.update(player_state.health());
@@ -936,7 +932,7 @@ fn on_tick(main_state: Arc<Mutex<GameProcessState>>, overworld_renderer: Arc<Mut
 
     let update_res = base::on_tick(
         curr_tick,
-        &curr_state.overworld.main_registry().registry(),
+        curr_state.overworld.main_registry().registry(),
         &mut curr_state.overworld_orchestrator.as_ref().unwrap().lock(),
         &new_actions,
     );
@@ -961,7 +957,7 @@ fn player_on_update(main_state: &Arc<Mutex<GameProcessState>>, new_actions: &mut
     let start_t = Instant::now();
     let curr_state = main_state.lock().clone();
     let player_state = curr_state.overworld.interface().persisted_state().player_state();
-    let Some(player_pos)  = player_state.position() else {
+    let Some(player_pos) = player_state.position() else {
         return;
     };
     let registry = curr_state.overworld.main_registry();

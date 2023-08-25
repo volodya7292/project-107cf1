@@ -548,7 +548,7 @@ impl PostProcessStage {
                 },
             );
 
-            let custom_ub_present = uniform_data.lock().as_raw().len() > 0;
+            let custom_ub_present = !uniform_data.lock().as_raw().is_empty();
             let custom_info_ub = custom_ub_present.then(|| {
                 resources.request_uniform_buffer_raw(
                     &format!("post_{name}_ub"),
@@ -626,12 +626,12 @@ impl PostProcessStage {
                     desc.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(&main_source_image), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(main_source_image), None, ImageLayout::SHADER_READ),
                     ),
                     desc.create_binding(
                         1,
                         0,
-                        BindingRes::Image(Arc::clone(&g_overlay_albedo), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_overlay_albedo), None, ImageLayout::SHADER_READ),
                     ),
                 ],
             );
@@ -735,7 +735,7 @@ impl PostProcessStage {
                         self.bloom_downscale_render_pass
                             .create_framebuffer(
                                 bloom_image.mip_size(i as u32),
-                                &[(0, ImageMod::OverrideImageView(Arc::clone(&view)))],
+                                &[(0, ImageMod::OverrideImageView(Arc::clone(view)))],
                             )
                             .unwrap()
                     })
@@ -857,12 +857,12 @@ impl PostProcessStage {
                     tonemap_desc.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(&main_source_image), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(main_source_image), None, ImageLayout::SHADER_READ),
                     ),
                     tonemap_desc.create_binding(
                         1,
                         0,
-                        BindingRes::Image(Arc::clone(&g_overlay_albedo), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(g_overlay_albedo), None, ImageLayout::SHADER_READ),
                     ),
                     tonemap_desc.create_binding(
                         2,

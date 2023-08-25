@@ -288,8 +288,10 @@ impl GBufferStage {
             .unwrap();
 
         for renderable_id in ctx.ordered_entities {
-            let (Some(h_cache), Some(render_config)) =
-                (ctx.storage.get::<HierarchyCacheC>(renderable_id), ctx.storage.get::<MeshRenderConfigC>(renderable_id)) else {
+            let (Some(h_cache), Some(render_config)) = (
+                ctx.storage.get::<HierarchyCacheC>(renderable_id),
+                ctx.storage.get::<MeshRenderConfigC>(renderable_id),
+            ) else {
                 continue;
             };
             if render_config.render_layer != RenderLayer::Overlay || !h_cache.active {
@@ -372,7 +374,7 @@ impl RenderStage for GBufferStage {
             self.color_with_blending_pipe,
             &PipelineConfig {
                 render_pass: &self.render_pass,
-                signature: &params.main_signature,
+                signature: params.main_signature,
                 subpass_index: 1,
                 cull: params.cull,
                 blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
@@ -388,7 +390,7 @@ impl RenderStage for GBufferStage {
             self.overlay_pipe,
             &PipelineConfig {
                 render_pass: &self.overlay_render_pass,
-                signature: &params.main_signature,
+                signature: params.main_signature,
                 subpass_index: 0,
                 cull: params.cull,
                 blend_attachments: &[Self::OVERLAY_ALBEDO_ATTACHMENT_ID],
@@ -506,8 +508,8 @@ impl RenderStage for GBufferStage {
                                     ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
                                 ),
                             ),
-                            (5, ImageMod::OverrideImage(Arc::clone(&depth_image))),
-                            (6, ImageMod::OverrideImage(Arc::clone(&overlay_depth_image))),
+                            (5, ImageMod::OverrideImage(Arc::clone(depth_image))),
+                            (6, ImageMod::OverrideImage(Arc::clone(overlay_depth_image))),
                         ],
                     )
                     .unwrap()
@@ -532,7 +534,7 @@ impl RenderStage for GBufferStage {
                                     ImageUsageFlags::INPUT_ATTACHMENT | ImageUsageFlags::SAMPLED,
                                 ),
                             ),
-                            (1, ImageMod::OverrideImage(Arc::clone(&overlay_depth_image))),
+                            (1, ImageMod::OverrideImage(Arc::clone(overlay_depth_image))),
                         ],
                     )
                     .unwrap()

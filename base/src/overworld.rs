@@ -275,6 +275,12 @@ impl OverworldCluster {
     }
 }
 
+impl Default for OverworldCluster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type LoadedClusters = Arc<RwLock<HashMap<ClusterPos, OverworldCluster>>>;
 
 pub struct Overworld {
@@ -341,6 +347,12 @@ impl PlayerState {
 
     pub fn set_satiety(&mut self, satiety: f64) {
         self.satiety = satiety.clamp(0.0, 1.0);
+    }
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

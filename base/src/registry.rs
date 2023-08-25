@@ -215,3 +215,9 @@ impl Registry {
         self.inner_block_state_empty.as_ref().unwrap()
     }
 }
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}

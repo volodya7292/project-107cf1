@@ -4,9 +4,7 @@ use crate::rendering::ui::container::{
 };
 use common::glm::Vec2;
 use common::make_static_id;
-use engine::ecs::component::ui::{ContentFlow, Padding, Position, Sizing, UILayoutC, UILayoutCacheC};
-use engine::module::scene::Scene;
-use engine::module::ui::color::Color;
+use engine::ecs::component::ui::{ContentFlow, Padding, Position, Sizing, UILayoutC};
 use engine::module::ui::reactive::UIScopeContext;
 use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
@@ -52,13 +50,13 @@ pub fn scrollable_container<P, F>(
 
             let on_wrapper_size_update = {
                 let wrapper_height_state = wrapper_height.state();
-                Arc::new(move |entity: &EntityId, ctx: &EngineContext, new_size: Vec2| {
+                Arc::new(move |_: &EntityId, _: &EngineContext, new_size: Vec2| {
                     wrapper_height_state.update(new_size.y);
                 })
             };
             let on_content_size_update = {
                 let content_height_state = content_height.state();
-                Arc::new(move |entity: &EntityId, ctx: &EngineContext, new_size: Vec2| {
+                Arc::new(move |_: &EntityId, _: &EngineContext, new_size: Vec2| {
                     content_height_state.update(new_size.y);
                 })
             };
@@ -67,7 +65,7 @@ pub fn scrollable_container<P, F>(
                 let vertical_pos_state = content_pos.state();
                 let max_content_neg_offset_state = max_content_neg_offset.state();
 
-                Arc::new(move |entity: &EntityId, ctx: &EngineContext, delta: f64| {
+                Arc::new(move |_: &EntityId, _: &EngineContext, delta: f64| {
                     let max_content_neg_offset_state = max_content_neg_offset_state.clone();
                     vertical_pos_state.update_with(move |prev| {
                         (*prev + delta as f32).clamp(*max_content_neg_offset_state.value(), 0.0)

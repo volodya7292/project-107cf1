@@ -173,7 +173,7 @@ impl LocalOverworldInterface {
 
         Self {
             folder,
-            registry: Arc::clone(&generator.main_registry().registry()),
+            registry: Arc::clone(generator.main_registry().registry()),
             generator,
             sectors_cache,
             to_save,

@@ -77,8 +77,7 @@ impl ResourceMapping {
     pub fn textured_model_for_block(&self, block_id: u16) -> &TexturedBlockModel {
         self.textured_block_models
             .get(block_id as usize)
-            .map(|v| v.as_ref())
-            .flatten()
+            .and_then(|v| v.as_ref())
             .unwrap_or(self.null_textured_block_model.as_ref().unwrap())
     }
 

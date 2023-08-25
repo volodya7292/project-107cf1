@@ -240,7 +240,7 @@ impl OverworldOrchestrator {
             &self.stream_pos,
             self.xz_render_distance,
             self.y_render_distance,
-            &r_clusters,
+            r_clusters,
         );
 
         // Cancel tasks associated with removed clusters
@@ -364,7 +364,7 @@ impl OverworldOrchestrator {
                 }
             }
 
-            let r_cluster = r_clusters.get_mut(&pos).unwrap();
+            let r_cluster = r_clusters.get_mut(pos).unwrap();
             if r_cluster
                 .compress_task
                 .as_ref()

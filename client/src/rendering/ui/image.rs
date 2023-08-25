@@ -150,7 +150,7 @@ pub trait ImageImpl {
         });
     }
 
-    fn new(
+    fn create(
         ctx: &EngineContext,
         parent: EntityId,
         layout: UILayoutC,
@@ -303,7 +303,7 @@ pub mod reactive {
                 {
                     let ctx = *scope_ctx.ctx();
                     let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
-                        *UIImage::new(&ctx, parent_entity, props.layout, None, props.fitness)
+                        *UIImage::create(&ctx, parent_entity, props.layout, None, props.fitness)
                     });
 
                     // Set consecutive order
@@ -337,7 +337,7 @@ pub mod reactive {
             move |ctx, scope| {
                 let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
                 let mut scene = ctx.module_mut::<Scene>();
-                scene.remove_object(&*entity);
+                scene.remove_object(&entity);
             },
         );
     }
