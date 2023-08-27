@@ -5,7 +5,7 @@ use crate::rendering::ui::container::{
 };
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
-use crate::rendering::ui::image::reactive::{ui_image, UIImageProps};
+use crate::rendering::ui::image::reactive::{ui_image, ui_image_props, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::scrollable_container::scrollable_container;
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
@@ -800,9 +800,33 @@ pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ()) {
         local_name,
         ctx,
         container_props()
-            .layout(UILayoutC::new().with_fixed_size(60.0))
-            .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.3)))),
-        |ctx, ()| {},
+            .layout(
+                UILayoutC::new()
+                    .with_fixed_size(60.0)
+                    .with_padding(Padding::equal(10.0)),
+            )
+            .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.5)))),
+        |ctx, ()| {
+            let image_source =
+                EngineContext::resource_image(&ctx.ctx().scene(), "/textures/health_icon.png").unwrap();
+            // ui_image(
+            //     make_static_id!(),
+            //     ctx,
+            //     ui_image_props()
+            //         .layout(UILayoutC::new().with_grow())
+            //         .source(ImageSource::Data(image_source))
+            //         .fitness(ImageFitness::Contain),
+            //     |_, ()| {},
+            // );
+            container(
+                make_static_id!(),
+                ctx,
+                container_props()
+                    .layout(UILayoutC::new().with_grow())
+                    .background(Some(backgrounds::material_item(ImageSource::Data(image_source)))),
+                |ctx, ()| {},
+            );
+        },
     )
 }
 

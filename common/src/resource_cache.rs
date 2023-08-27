@@ -63,7 +63,16 @@ where
         self.cache.remove(&(key, TypeId::of::<T>()));
     }
 
-    pub fn get<T: CachedResource, E: Sync + Send + 'static, F: FnOnce() -> Result<Arc<T>, E>>(
+    pub fn get<T: CachedResource, F: FnOnce() -> Arc<T>>(&self, key: K, init: F) -> Arc<T> {
+        let entry = self
+            .cache
+            .entry((key, TypeId::of::<T>()))
+            .or_insert_with(|| Arc::new(init()) as Arc<dyn CachedResource>);
+
+        Arc::clone(entry.into_value().as_any().downcast_ref::<Arc<T>>().unwrap())
+    }
+
+    pub fn try_get<T: CachedResource, E: Sync + Send + 'static, F: FnOnce() -> Result<Arc<T>, E>>(
         &self,
         key: K,
         init: F,

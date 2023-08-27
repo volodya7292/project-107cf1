@@ -8,36 +8,102 @@ use std::{mem, slice};
 use vk_wrapper as vkw;
 use vk_wrapper::image::ImageParams;
 use vk_wrapper::shader::BindingId;
+use vkw::buffer::BufferHandleImpl;
+
+pub struct GPUBufferResource {
+    pub(crate) new_source_data: Mutex<Option<Vec<u8>>>,
+    pub(crate) name: String,
+    pub(crate) buffer: Mutex<Option<vkw::DeviceBuffer>>,
+}
+
+impl GPUBufferResource {
+    pub fn new<T: Copy>(name: impl Into<String>, source_data: &[T]) -> Arc<Self> {
+        let size = std::mem::size_of_val(source_data);
+        let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr() as *const u8, size) };
+        assert!(size > 0);
+
+        Arc::new(GPUBufferResource {
+            new_source_data: Mutex::new(Some(byte_slice.to_vec())),
+            buffer: Mutex::new(None),
+            name: name.into(),
+        })
+    }
+
+    pub(crate) fn acquire_buffer(
+        &self,
+        device: &Arc<vkw::Device>,
+    ) -> Result<vkw::BufferHandle, vkw::DeviceError> {
+        let mut curr_buffer = self.buffer.lock();
+        if let Some(buffer) = &*curr_buffer {
+            return Ok(buffer.handle());
+        }
+
+        let size = self.new_source_data.lock().as_ref().unwrap().len() as u64;
+        let buffer = device.create_device_buffer_named(
+            vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::STORAGE,
+            size,
+            1,
+            &self.name,
+        )?;
+        let buffer_handle = buffer.handle();
+        *curr_buffer = Some(buffer);
+
+        Ok(buffer_handle)
+    }
+}
 
 pub struct GPUImageResource {
     pub(crate) new_source_data: Mutex<Option<Vec<u8>>>,
-    pub(crate) image: Arc<vkw::Image>,
+    pub(crate) name: String,
+    pub(crate) params: ImageParams,
+    pub(crate) image: Mutex<Option<Arc<vkw::Image>>>,
 }
 
 impl GPUImageResource {
-    pub fn new(
-        device: &Arc<vkw::Device>,
-        name: &str,
-        params: ImageParams,
-        source_data: Vec<u8>,
-    ) -> Result<Arc<Self>, vkw::DeviceError> {
-        let image = device.create_image(&params.add_usage(vkw::ImageUsageFlags::TRANSFER_DST), name)?;
+    pub fn new(name: impl Into<String>, params: ImageParams, source_data: Vec<u8>) -> Arc<Self> {
+        assert!(!source_data.is_empty());
         let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr(), source_data.len()) };
 
-        Ok(Arc::new(GPUImageResource {
+        Arc::new(GPUImageResource {
             new_source_data: Mutex::new(Some(byte_slice.to_vec())),
-            image,
-        }))
+            params,
+            image: Mutex::new(None),
+            name: name.into(),
+        })
     }
 
     pub fn size(&self) -> (u32, u32) {
-        self.image.size_2d()
+        self.params.size_2d()
+    }
+
+    pub(crate) fn acquire_image(
+        &self,
+        device: &Arc<vkw::Device>,
+    ) -> Result<Arc<vkw::Image>, vkw::DeviceError> {
+        let mut curr_image = self.image.lock();
+        if let Some(image) = &*curr_image {
+            return Ok(Arc::clone(image));
+        }
+
+        let image = device.create_image(
+            &self.params.add_usage(vkw::ImageUsageFlags::TRANSFER_DST),
+            &self.name,
+        )?;
+        *curr_image = Some(Arc::clone(&image));
+
+        Ok(image)
     }
 }
 
 impl CachedResource for GPUImageResource {
     fn footprint(&self) -> usize {
-        self.image.bytesize() as usize
+        if let Some(image) = &*self.image.lock() {
+            return image.bytesize() as usize;
+        }
+        if let Some(source) = &*self.new_source_data.lock() {
+            return source.len();
+        }
+        unreachable!()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -45,53 +111,46 @@ impl CachedResource for GPUImageResource {
     }
 }
 
+#[derive(Clone)]
 pub enum GPUResource {
-    Buffer {
-        new_source_data: Option<Vec<u8>>,
-        buffer: vkw::DeviceBuffer,
-    },
+    Buffer(Arc<GPUBufferResource>),
     Image(Arc<GPUImageResource>),
     None,
+}
+
+impl PartialEq for GPUResource {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Buffer(b0), Self::Buffer(b1)) => {
+                let b0 = b0.buffer.lock();
+                let b1 = b1.buffer.lock();
+                b0.as_ref().zip(b1.as_ref()).map_or(false, |(a, b)| a.ptr_eq(b))
+            }
+            (Self::Image(i0), Self::Image(i1)) => {
+                let i0 = i0.image.lock();
+                let i1 = i1.image.lock();
+                *i0 == *i1
+            }
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl From<Arc<GPUBufferResource>> for GPUResource {
+    fn from(value: Arc<GPUBufferResource>) -> Self {
+        Self::Buffer(value)
+    }
+}
+
+impl From<Arc<GPUImageResource>> for GPUResource {
+    fn from(value: Arc<GPUImageResource>) -> Self {
+        Self::Image(value)
+    }
 }
 
 impl Default for GPUResource {
     fn default() -> Self {
         Self::None
-    }
-}
-
-impl GPUResource {
-    pub fn image(
-        device: &Arc<vkw::Device>,
-        name: &str,
-        params: ImageParams,
-        source_data: Vec<u8>,
-    ) -> Result<GPUResource, vkw::DeviceError> {
-        Ok(GPUResource::Image(GPUImageResource::new(
-            device,
-            name,
-            params,
-            source_data,
-        )?))
-    }
-
-    pub fn buffer<T: Copy>(
-        device: &Arc<vkw::Device>,
-        source_data: &[T],
-    ) -> Result<GPUResource, vkw::DeviceError> {
-        let size = source_data.len() * mem::size_of::<T>();
-
-        let device_buffer = device.create_device_buffer(
-            vkw::BufferUsageFlags::TRANSFER_DST | vkw::BufferUsageFlags::STORAGE,
-            size as u64,
-            1,
-        )?;
-        let byte_slice = unsafe { slice::from_raw_parts(source_data.as_ptr() as *const u8, size) };
-
-        Ok(GPUResource::Buffer {
-            new_source_data: Some(byte_slice.to_vec()),
-            buffer: device_buffer,
-        })
     }
 }
 

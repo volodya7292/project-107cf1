@@ -54,6 +54,14 @@ impl ImageSource {
             ImageSource::Data(img) => img.as_raw().to_vec(),
         }
     }
+
+    pub fn to_gpu_resource(&self, name: &str) -> Arc<GPUImageResource> {
+        GPUImageResource::new(
+            name,
+            ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, self.size()),
+            self.to_raw(),
+        )
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -78,7 +86,6 @@ pub struct ImageState {
 impl UIState for ImageState {
     fn on_update(entity: &EntityId, ctx: &EngineContext, _dt: f64) {
         let mut scene = ctx.module_mut::<Scene>();
-        let renderer = ctx.module::<MainRenderer>();
 
         let impl_ctx = scene.resource::<ImageImplContext>();
 
@@ -89,18 +96,14 @@ impl UIState for ImageState {
         let new_source_uid = new_source.uid();
         let new_source_size = new_source.size();
 
-        let res = impl_ctx
-            .image_cache
-            .get(new_source_uid, || {
-                GPUImageResource::new(
-                    renderer.device(),
-                    "UIImage",
-                    ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, new_source.size())
-                        .with_preferred_mip_levels(1),
-                    new_source.to_raw(),
-                )
-            })
-            .unwrap();
+        let res = impl_ctx.image_cache.get(new_source_uid, || {
+            GPUImageResource::new(
+                "UIImage",
+                ImageParams::d2(Format::RGBA8_SRGB, ImageUsageFlags::SAMPLED, new_source.size())
+                    .with_preferred_mip_levels(1),
+                new_source.to_raw(),
+            )
+        });
 
         if let Some(curr_source) = obj.state_mut().curr_source.take() {
             impl_ctx.image_cache.evict::<GPUImageResource>(curr_source.uid());
@@ -158,16 +161,13 @@ pub trait ImageImpl {
         fitness: ImageFitness,
     ) -> ObjectEntityId<UIImage> {
         let mut scene = ctx.scene();
-        let renderer = ctx.module::<MainRenderer>();
 
         let impl_ctx = scene.resource::<ImageImplContext>();
-        let initial_image = GPUResource::image(
-            renderer.device(),
+        let initial_image = GPUImageResource::new(
             "UIImage_initial",
             ImageParams::d2(Format::RGBA8_UNORM, ImageUsageFlags::SAMPLED, (1, 1)),
             vec![0_u8; 4],
-        )
-        .unwrap();
+        );
 
         let ui_image = UIImage::new_raw(
             layout,
@@ -181,7 +181,7 @@ pub trait ImageImpl {
         .with_renderer(
             MeshRenderConfigC::new(impl_ctx.mat_pipe_id, true)
                 .with_render_layer(RenderLayer::Overlay)
-                .with_shader_resources(smallvec![initial_image]),
+                .with_shader_resources(smallvec![initial_image.into()]),
         )
         .with_mesh(VertexMeshC::without_data(4, 1));
 
@@ -284,6 +284,27 @@ pub mod reactive {
         pub source: Option<ImageSource>,
         pub fitness: ImageFitness,
         pub children_props: P,
+    }
+
+    impl<P> UIImageProps<P> {
+        pub fn source(mut self, source: ImageSource) -> Self {
+            self.source = Some(source);
+            self
+        }
+
+        pub fn fitness(mut self, fitness: ImageFitness) -> Self {
+            self.fitness = fitness;
+            self
+        }
+
+        pub fn layout(mut self, layout: UILayoutC) -> Self {
+            self.layout = layout;
+            self
+        }
+    }
+
+    pub fn ui_image_props<P: Default>() -> UIImageProps<P> {
+        Default::default()
     }
 
     pub fn ui_image<P: Clone + PartialEq + 'static, F: Fn(&mut UIScopeContext, &P) + 'static>(

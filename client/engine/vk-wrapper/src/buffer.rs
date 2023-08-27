@@ -222,6 +222,10 @@ pub struct DeviceBuffer {
 }
 
 impl DeviceBuffer {
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        self.buffer.native == other.buffer.native
+    }
+
     pub fn size(&self) -> u64 {
         self.buffer.len
     }

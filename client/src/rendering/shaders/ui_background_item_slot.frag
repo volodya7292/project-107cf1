@@ -29,7 +29,7 @@ void main() {
     float dDist = fwidth(dist);
 
     float outerCutoutVis = 1.0 - extractIsosurface(dist, dDist, 1.0);
-    float density = pow(dist, 8.0) * outerCutoutVis;
+    float density = pow(dist, 15.0) * outerCutoutVis;
 
     vec4 finalColor = vec4(color.rgb, color.a * density * opacity);
 

@@ -1,11 +1,14 @@
 use crate::rendering::ui::container::ContainerBackground;
 use common::make_static_id;
+use engine::ecs::component::render_config::GPUImageResource;
 use engine::module::main_renderer::MainRenderer;
 use engine::module::scene::Scene;
 use engine::module::ui::color::Color;
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::PrimitiveTopology;
 use engine::EngineContext;
+
+use super::image::ImageSource;
 
 mod fancy {
     use super::*;
@@ -36,48 +39,6 @@ mod fancy {
             .create_pixel_shader(
                 include_bytes!("../../../res/shaders/fancy_background.frag.spv"),
                 "fancy_background.frag",
-            )
-            .unwrap();
-
-        let mat_pipe_id = renderer.register_material_pipeline(
-            &[vertex, pixel],
-            PrimitiveTopology::TRIANGLE_STRIP,
-            CullMode::BACK,
-        );
-
-        scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
-    }
-}
-
-mod item_slot {
-    use super::*;
-    use common::glm::Vec4;
-
-    pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
-
-    #[derive(Default, Copy, Clone)]
-    #[repr(C)]
-    pub struct UniformData {
-        pub background_color: Vec4,
-    }
-
-    pub fn register(ctx: &EngineContext) {
-        let mut renderer = ctx.module_mut::<MainRenderer>();
-        let scene = ctx.module_mut::<Scene>();
-
-        let vertex = renderer
-            .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
-                &[],
-                "ui_rect.vert",
-            )
-            .unwrap();
-        let pixel = renderer
-            .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_slot_circle.frag.spv"),
-                "ui_background_slot_circle.frag",
             )
             .unwrap();
 
@@ -221,12 +182,97 @@ mod hud_popup {
     }
 }
 
+mod item_slot {
+    use super::*;
+    use common::glm::Vec4;
+
+    pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
+
+    #[derive(Default, Copy, Clone)]
+    #[repr(C)]
+    pub struct UniformData {
+        pub background_color: Vec4,
+    }
+
+    pub fn register(ctx: &EngineContext) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+        let scene = ctx.module_mut::<Scene>();
+
+        let vertex = renderer
+            .device()
+            .create_vertex_shader(
+                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+                &[],
+                "ui_rect.vert",
+            )
+            .unwrap();
+        let pixel = renderer
+            .device()
+            .create_pixel_shader(
+                include_bytes!("../../../res/shaders/ui_background_item_slot.frag.spv"),
+                "ui_background_item_slot.frag",
+            )
+            .unwrap();
+
+        let mat_pipe_id = renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        );
+
+        scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
+    }
+}
+
+mod material_item {
+    use super::*;
+    use common::glm::Vec4;
+
+    pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
+
+    #[derive(Default, Copy, Clone)]
+    #[repr(C)]
+    pub struct UniformData {
+        // pub background_color: Vec4,
+    }
+
+    pub fn register(ctx: &EngineContext) {
+        let mut renderer = ctx.module_mut::<MainRenderer>();
+        let scene = ctx.module_mut::<Scene>();
+
+        let vertex = renderer
+            .device()
+            .create_vertex_shader(
+                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+                &[],
+                "ui_rect.vert",
+            )
+            .unwrap();
+        let pixel = renderer
+            .device()
+            .create_pixel_shader(
+                include_bytes!("../../../res/shaders/ui_background_material_item.frag.spv"),
+                "ui_background_material_item.frag",
+            )
+            .unwrap();
+
+        let mat_pipe_id = renderer.register_material_pipeline(
+            &[vertex, pixel],
+            PrimitiveTopology::TRIANGLE_STRIP,
+            CullMode::BACK,
+        );
+
+        scene.register_named_resource(MATERIAL_PIPE_RES_NAME, mat_pipe_id);
+    }
+}
+
 pub fn fancy(color: Color) -> ContainerBackground {
     ContainerBackground::new_raw(
         fancy::MATERIAL_PIPE_RES_NAME,
         fancy::UniformData {
             background_color: color.into_raw_linear(),
         },
+        vec![],
     )
 }
 
@@ -238,6 +284,7 @@ pub fn game_effects(filter: Color, pain_factor: f32, vision_obstructed: bool) ->
             pain_factor,
             vision_obstructed: vision_obstructed as u32,
         },
+        vec![],
     )
 }
 
@@ -248,6 +295,7 @@ pub fn health_indicators(health_factor: f32, satiety_factor: f32) -> ContainerBa
             health_factor,
             satiety_factor,
         },
+        vec![],
     )
 }
 
@@ -257,6 +305,7 @@ pub fn hud_popup(background_color: Color) -> ContainerBackground {
         hud_popup::UniformData {
             background_color: background_color.into_raw_linear(),
         },
+        vec![],
     )
 }
 
@@ -266,6 +315,17 @@ pub fn item_slot(background_color: Color) -> ContainerBackground {
         item_slot::UniformData {
             background_color: background_color.into_raw_linear(),
         },
+        vec![],
+    )
+}
+
+pub fn material_item(image: ImageSource) -> ContainerBackground {
+    ContainerBackground::new_raw(
+        material_item::MATERIAL_PIPE_RES_NAME,
+        material_item::UniformData {
+            // background_color: background_color.into_raw_linear(),
+        },
+        vec![image.to_gpu_resource("material_item").into()],
     )
 }
 
@@ -275,6 +335,7 @@ pub fn register(ctx: &EngineContext) {
     health_indicators::register(ctx);
     hud_popup::register(ctx);
     item_slot::register(ctx);
+    material_item::register(ctx);
 }
 
 pub const DEFAULT_FANCY_COLOR: Color = Color::rgb(0.4, 0.5, 0.4);

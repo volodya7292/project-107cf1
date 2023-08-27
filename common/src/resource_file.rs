@@ -196,7 +196,7 @@ impl BufferedResourceReader {
     }
 
     pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
-        self.cache.get(path.to_string(), || {
+        self.cache.try_get(path.to_string(), || {
             let res = self.resources.get(path)?;
             res.read().map(Arc::from)
         })
@@ -207,6 +207,6 @@ impl BufferedResourceReader {
         path: &str,
         init: F,
     ) -> Result<Arc<T>, Error> {
-        self.cache.get(path.to_string(), || self.get(path).map(init))
+        self.cache.try_get(path.to_string(), || self.get(path).map(init))
     }
 }

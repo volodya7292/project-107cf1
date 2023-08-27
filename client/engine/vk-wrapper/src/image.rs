@@ -355,4 +355,8 @@ impl ImageParams {
         self.preferred_mip_levels = max_mip_levels;
         self
     }
+
+    pub fn size_2d(&self) -> (u32, u32) {
+        (self.preferred_size.0, self.preferred_size.1)
+    }
 }

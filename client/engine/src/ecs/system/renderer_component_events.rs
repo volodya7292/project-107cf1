@@ -43,6 +43,7 @@ impl RenderConfigComponentEvents<'_> {
         material_pipelines: &mut [MaterialPipelineSet],
         desc_updates: &mut Vec<(DescriptorSet, Range<usize>)>,
         uniform_buffer_basic: &DeviceBuffer,
+        device: &Arc<vkw::Device>,
     ) {
         let mat_pipe = &mut material_pipelines[renderable.mat_pipeline as usize];
         let object_desc_pool = &mat_pipe.per_object_desc_pool;
@@ -64,13 +65,12 @@ impl RenderConfigComponentEvents<'_> {
 
         for (binding_id, res) in &mut config.resources {
             match res {
-                GPUResource::Buffer {
-                    new_source_data,
-                    buffer,
-                } => {
-                    if let Some(data) = new_source_data.take() {
+                GPUResource::Buffer(res) => {
+                    let buffer_handle = res.acquire_buffer(device).unwrap();
+
+                    if let Some(data) = res.new_source_data.lock().take() {
                         buffer_updates.push(BufferUpdate::WithOffset(BufferUpdate1 {
-                            buffer: buffer.handle(),
+                            buffer: buffer_handle,
                             dst_offset: 0,
                             data: data.into(),
                         }));
@@ -78,20 +78,22 @@ impl RenderConfigComponentEvents<'_> {
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
-                        BindingRes::Buffer(buffer.handle()),
+                        BindingRes::Buffer(buffer_handle),
                     ));
                 }
                 GPUResource::Image(res) => {
+                    let image = res.acquire_image(device).unwrap();
+
                     if let Some(data) = res.new_source_data.lock().take() {
                         buffer_updates.push(BufferUpdate::Image(ImageUpdate {
-                            image: Arc::clone(&res.image),
+                            image: Arc::clone(&image),
                             data,
                         }));
                     };
                     new_binding_updates.push(object_desc_pool.create_binding(
                         *binding_id,
                         0,
-                        BindingRes::Image(Arc::clone(&res.image), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(image, None, ImageLayout::SHADER_READ),
                     ));
                 }
                 GPUResource::None => {}
@@ -168,6 +170,7 @@ impl SystemHandler for RenderConfigComponentEvents<'_> {
                 self.material_pipelines,
                 &mut desc_updates,
                 self.uniform_buffer_basic,
+                &self.device,
             );
             self.renderables.insert(*entity, renderable);
         }

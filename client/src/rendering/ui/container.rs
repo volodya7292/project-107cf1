@@ -3,7 +3,7 @@ use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
 use common::glm::{Vec2, Vec4};
 use common::memoffset::offset_of;
 use common::scene::relation::Relation;
-use engine::ecs::component::render_config::RenderLayer;
+use engine::ecs::component::render_config::{GPUResource, RenderLayer};
 use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::MaterialPipelineId;
@@ -11,11 +11,10 @@ use engine::module::scene::Scene;
 use engine::module::ui::reactive::UIScopeContext;
 use engine::module::ui::UIObject;
 use engine::module::ui::UIObjectEntityImpl;
-use engine::module::ui::UIState;
 use engine::utils::U8SliceHelper;
 use engine::EngineContext;
 use entity_data::EntityId;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::mem;
 use std::sync::Arc;
 
@@ -29,16 +28,18 @@ pub struct SolidColorUniformData {
 pub struct ContainerBackground {
     mat_pipe_res_name: &'static str,
     uniform_data: SmallVec<[u8; 128]>,
+    resources: Vec<GPUResource>,
 }
 
 impl ContainerBackground {
-    pub fn new_raw<U: Copy>(mat_pipe_res_name: &'static str, data: U) -> Self {
+    pub fn new_raw<U: Copy>(mat_pipe_res_name: &'static str, data: U, resources: Vec<GPUResource>) -> Self {
         let mut uniform_data: SmallVec<[u8; 128]> = smallvec![0; mem::size_of::<U>()];
         uniform_data.raw_copy_from(data);
 
         Self {
             mat_pipe_res_name,
             uniform_data,
+            resources,
         }
     }
 }
@@ -169,6 +170,7 @@ pub mod background {
             SolidColorUniformData {
                 color: color.into_raw_linear(),
             },
+            vec![],
         )
     }
 }
@@ -208,7 +210,9 @@ where
                     let mat_pipe_id = ctx
                         .scene()
                         .named_resource::<MaterialPipelineId>(background.mat_pipe_res_name);
-                    MeshRenderConfigC::new(*mat_pipe_id, true).with_render_layer(RenderLayer::Overlay)
+                    MeshRenderConfigC::new(*mat_pipe_id, true)
+                        .with_render_layer(RenderLayer::Overlay)
+                        .with_shader_resources(background.resources.clone().into())
                 } else {
                     Default::default()
                 };
