@@ -152,7 +152,7 @@ fn global_on_click(entity: &EntityId, ctx: &EngineContext, pos: Vec2) {
 
     if *entity != last_focus_entity {
         let mut interaction_manager = ctx.module_mut::<UIInteractionManager>();
-        interaction_manager.curr_focused_entity = *entity;
+        interaction_manager.curr_focused_entity = if focusable { *entity } else { EntityId::NULL };
         drop(interaction_manager);
 
         if focusable {
@@ -209,14 +209,45 @@ fn global_on_scroll(ctx: &EngineContext, delta: f64) {
     }
 }
 
-fn global_on_keyboard_input(ctx: &EngineContext, input: WSIKeyboardInput) {
-    let mut scene = ctx.module_mut::<Scene>();
-    let focused_entity = ctx.module_mut::<UIInteractionManager>().get_focused_entity();
+fn manage_focused_entity(ctx: &EngineContext) -> EntityId {
+    let last_focused_entity = ctx.module_mut::<UIInteractionManager>().curr_focused_entity;
 
+    if last_focused_entity == EntityId::NULL {
+        let new_focused_entity = ctx
+            .module_mut::<UIInteractionManager>()
+            .autofocusable_entities
+            .iter()
+            .cloned()
+            .next()
+            .unwrap_or_default();
+
+        if new_focused_entity != last_focused_entity {
+            let mut scene = ctx.module_mut::<Scene>();
+            let entry = scene.entry(&new_focused_entity);
+            let ui_handler = entry.get::<UIEventHandlerC>();
+
+            if let Some(on_focus_in) = ui_handler.on_focus_in.clone() {
+                drop(entry);
+                drop(scene);
+                on_focus_in(&new_focused_entity, ctx);
+            }
+
+            ctx.module_mut::<UIInteractionManager>().curr_focused_entity = new_focused_entity;
+        }
+
+        new_focused_entity
+    } else {
+        last_focused_entity
+    }
+}
+
+fn global_on_keyboard_input(ctx: &EngineContext, input: WSIKeyboardInput) {
+    let focused_entity = manage_focused_entity(ctx);
     if focused_entity == EntityId::NULL {
         return;
     }
 
+    let mut scene = ctx.module_mut::<Scene>();
     let entry = scene.entry(&focused_entity);
     let ui_handler = entry.get::<UIEventHandlerC>();
 
@@ -244,18 +275,6 @@ impl UIInteractionManager {
             event_handler_changes,
             autofocusable_entities: Default::default(),
         }
-    }
-
-    pub fn get_focused_entity(&mut self) -> EntityId {
-        if self.curr_focused_entity == EntityId::NULL {
-            self.curr_focused_entity = self
-                .autofocusable_entities
-                .iter()
-                .cloned()
-                .next()
-                .unwrap_or_default();
-        }
-        self.curr_focused_entity
     }
 
     fn on_object_remove(&mut self, id: &EntityId) {
