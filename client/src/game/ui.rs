@@ -808,23 +808,14 @@ pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ()) {
             .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.5)))),
         |ctx, ()| {
             let image_source =
-                EngineContext::resource_image(&ctx.ctx().scene(), "/textures/health_icon.png").unwrap();
-            // ui_image(
-            //     make_static_id!(),
-            //     ctx,
-            //     ui_image_props()
-            //         .layout(UILayoutC::new().with_grow())
-            //         .source(ImageSource::Data(image_source))
-            //         .fitness(ImageFitness::Contain),
-            //     |_, ()| {},
-            // );
+                EngineContext::resource_image(&ctx.ctx().scene(), "/textures/lawn.png").unwrap();
             container(
                 make_static_id!(),
                 ctx,
                 container_props()
                     .layout(UILayoutC::new().with_grow())
                     .background(Some(backgrounds::material_item(ImageSource::Data(image_source)))),
-                |ctx, ()| {},
+                |_, ()| {},
             );
         },
     )
