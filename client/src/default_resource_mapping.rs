@@ -1,15 +1,16 @@
+use crate::rendering::item_visuals::ItemVisuals;
 use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
+use crate::rendering::ui::backgrounds;
+use crate::rendering::ui::image::ImageSource;
 use crate::resource_mapping::ResourceMapping;
 use base::main_registry::MainRegistry;
+use base::registry::Registry;
 use common::glm::Vec4;
-use common::resource_file::ResourceFile;
+use common::resource_file::BufferedResourceReader;
 use engine::module::main_renderer::material::MatComponent;
 use engine::module::main_renderer::TextureAtlasType;
 use std::sync::Arc;
-
-const MAX_BLOCKS: usize = 16384;
-const MAX_LIQUIDS: usize = 1024;
 
 macro_rules! add_getters {
     ($t: ty, $($name: ident)*) => ($(
@@ -25,30 +26,31 @@ pub struct DefaultResourceMapping {
 }
 
 impl DefaultResourceMapping {
-    pub fn init(main_reg: &MainRegistry, resources: &Arc<ResourceFile>) -> Arc<Self> {
+    pub fn init(main_reg: &MainRegistry, resources: &Arc<BufferedResourceReader>) -> Arc<Self> {
         let reg = main_reg.registry();
-        let null_tex_res = resources.get("textures/test_texture.basis").unwrap();
+        let null_tex_res = resources.file().get("textures/test_texture.basis").unwrap();
 
         let mut map = ResourceMapping::new(
             reg.get_block_model(main_reg.model_cube()).unwrap(),
             null_tex_res,
-            MAX_BLOCKS,
-            MAX_LIQUIDS,
+            Registry::MAX_BLOCKS,
+            Registry::MAX_LIQUIDS,
+            Registry::MAX_ITEMS,
         );
 
         // Textures
         let tex_default = map.register_texture(
             TextureAtlasType::ALBEDO,
-            resources.get("textures/lawn.basis").unwrap(),
+            resources.file().get("textures/lawn.basis").unwrap(),
         );
 
         let tex_glow = map.register_texture(
             TextureAtlasType::ALBEDO,
-            resources.get("textures/glow_texture.basis").unwrap(),
+            resources.file().get("textures/glow_texture.basis").unwrap(),
         );
         let tex_water = map.register_texture(
             TextureAtlasType::ALBEDO,
-            resources.get("textures/water.basis").unwrap(),
+            resources.file().get("textures/water.basis").unwrap(),
         );
 
         // Materials
@@ -81,6 +83,14 @@ impl DefaultResourceMapping {
         );
 
         map.set_liquid_material(main_reg.liquid_water, material_water);
+
+        {
+            let image_data = resources.get_image("/textures/lawn.png").unwrap();
+            map.set_item_visuals(
+                main_reg.item_block_default,
+                ItemVisuals::new(backgrounds::material_item(ImageSource::Data(image_data))),
+            );
+        }
 
         Arc::new(Self {
             mapping: Arc::new(map),

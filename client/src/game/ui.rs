@@ -1,7 +1,9 @@
 use crate::game::{EngineCtxGameExt, MainApp};
+use crate::rendering::item_visuals::ItemVisuals;
 use crate::rendering::ui::backgrounds::game_effects;
 use crate::rendering::ui::container::{
-    background, container, container_props, expander, height_spacer, width_spacer, ContainerProps,
+    background, container, container_props, container_props_init, expander, height_spacer, width_spacer,
+    ContainerProps,
 };
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
@@ -795,26 +797,24 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
     );
 }
 
-pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ()) {
+pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ItemVisuals) {
     container(
         local_name,
         ctx,
-        container_props()
+        container_props_init(item)
             .layout(
                 UILayoutC::new()
                     .with_fixed_size(60.0)
                     .with_padding(Padding::equal(10.0)),
             )
             .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.5)))),
-        |ctx, ()| {
-            let image_source =
-                EngineContext::resource_image(&ctx.ctx().scene(), "/textures/lawn.png").unwrap();
+        |ctx, item| {
             container(
                 make_static_id!(),
                 ctx,
                 container_props()
                     .layout(UILayoutC::new().with_grow())
-                    .background(Some(backgrounds::material_item(ImageSource::Data(image_source)))),
+                    .background(Some(item.ui_background().clone())),
                 |_, ()| {},
             );
         },
@@ -834,7 +834,13 @@ pub fn inventory_slots(local_name: &str, ctx: &mut UIScopeContext) {
                     container_props().layout(UILayoutC::row()),
                     |ctx, ()| {
                         for j in 0..5 {
-                            inventory_slot(&make_static_id!(j), ctx, ());
+                            let visuals = {
+                                let app = ctx.ctx().app();
+                                let item_id = app.main_registry.item_block_default;
+                                app.res_map.storage().get_item_visuals(item_id).unwrap().clone()
+                            };
+
+                            inventory_slot(&make_static_id!(j), ctx, visuals);
                             if j < 5 - 1 {
                                 width_spacer(&make_static_id!(j), ctx, 12.0);
                             }

@@ -1,5 +1,5 @@
 mod client;
-mod default_resources;
+mod default_resource_mapping;
 mod game;
 pub mod proto;
 mod rendering;

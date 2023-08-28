@@ -121,16 +121,8 @@ pub enum GPUResource {
 impl PartialEq for GPUResource {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Buffer(b0), Self::Buffer(b1)) => {
-                let b0 = b0.buffer.lock();
-                let b1 = b1.buffer.lock();
-                b0.as_ref().zip(b1.as_ref()).map_or(false, |(a, b)| a.ptr_eq(b))
-            }
-            (Self::Image(i0), Self::Image(i1)) => {
-                let i0 = i0.image.lock();
-                let i1 = i1.image.lock();
-                *i0 == *i1
-            }
+            (Self::Buffer(b0), Self::Buffer(b1)) => Arc::ptr_eq(b0, b1),
+            (Self::Image(i0), Self::Image(i1)) => Arc::ptr_eq(i0, i1),
             _ => mem::discriminant(self) == mem::discriminant(other),
         }
     }

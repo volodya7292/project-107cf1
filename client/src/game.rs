@@ -1,13 +1,12 @@
 mod ui;
 
-use crate::default_resources::DefaultResourceMapping;
+use crate::default_resource_mapping::DefaultResourceMapping;
 use crate::game::ui::ui_root_states;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::image::{ImageAccess, ImageImpl};
+use crate::rendering::ui::image::ImageImpl;
 use crate::rendering::ui::register_ui_elements;
-use crate::rendering::ui::text::UITextImpl;
 use approx::AbsDiffEq;
 use base::check_block;
 use base::execution::default_queue;
@@ -29,7 +28,6 @@ use base::physics::{calc_acceleration, calc_force, G_ACCEL, MOTION_EPSILON};
 use common::glm::{DVec3, I64Vec3, Vec2, Vec3};
 use common::lrc::{Lrc, LrcExtSized, OwnedRefMut};
 use common::parking_lot::Mutex;
-use common::rayon::prelude::*;
 use common::resource_file::{BufferedResourceReader, ResourceFile};
 use common::threading::SafeThreadPool;
 use common::{glm, image};
@@ -50,7 +48,6 @@ use engine::winit::event_loop::EventLoop;
 use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
 use engine::{winit, EngineContext};
 use entity_data::EntityId;
-use std::any::Any;
 use std::cell::RefMut;
 use std::f32::consts::FRAC_PI_2;
 use std::f64::consts::PI;
@@ -96,10 +93,7 @@ impl EngineCtxGameExt for EngineContext<'_> {
         filename: &str,
     ) -> Result<Arc<image::RgbaImage>, common::resource_file::Error> {
         let resources = scene.resources();
-        resources.get_map(filename, |data| {
-            let dyn_img = image::load_from_memory(&data).unwrap();
-            Arc::new(dyn_img.into_rgba8())
-        })
+        resources.get_image(filename)
     }
 }
 
@@ -210,7 +204,7 @@ impl MainApp {
         let resources = BufferedResourceReader::new(ResourceFile::open("resources").unwrap());
 
         let main_registry = MainRegistry::init();
-        let res_map = DefaultResourceMapping::init(&main_registry, resources.file());
+        let res_map = DefaultResourceMapping::init(&main_registry, &resources);
 
         let mat_pipelines;
         {

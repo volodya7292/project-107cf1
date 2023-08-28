@@ -14,7 +14,7 @@ use engine::module::ui::UIObjectEntityImpl;
 use engine::utils::U8SliceHelper;
 use engine::EngineContext;
 use entity_data::EntityId;
-use smallvec::{smallvec, SmallVec, ToSmallVec};
+use smallvec::{smallvec, SmallVec};
 use std::mem;
 use std::sync::Arc;
 

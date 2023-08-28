@@ -1,5 +1,6 @@
 use crate::overworld::block::{BlockBuilder, BlockState, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
+use crate::overworld::item::Item;
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::world::Biome;
 use crate::overworld::structure::{world, Structure};
@@ -33,6 +34,7 @@ pub struct MainRegistry {
     pub block_glow: BlockState<StatelessBlock>,
     pub block_test_stateful: BlockState<TestStatefulBlock>,
     pub liquid_water: u16,
+    pub item_block_default: u32,
 }
 
 macro_rules! add_getters {
@@ -82,6 +84,10 @@ impl MainRegistry {
         // Liquids
         // ----------------------------------------------------------------------------------------------------
         let liquid_water = reg.register_liquid();
+
+        // Items
+        // ----------------------------------------------------------------------------------------------------
+        let item_block_default = reg.register_item(Item::new());
 
         // Biomes
         // ----------------------------------------------------------------------------------------------------
@@ -168,6 +174,7 @@ impl MainRegistry {
             // block_water,
             // water_states,
             liquid_water,
+            item_block_default,
         })
     }
 

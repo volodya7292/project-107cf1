@@ -15,6 +15,7 @@ pub mod cluster_part_set;
 pub mod facing;
 pub mod generator;
 pub mod interface;
+pub mod item;
 pub mod light_state;
 pub mod liquid_state;
 pub mod occluder;

@@ -1,3 +1,4 @@
+pub mod item_visuals;
 pub mod material_pipelines;
 pub mod overworld_renderer;
 pub mod texture_material;

@@ -1,6 +1,7 @@
 use crate::overworld::block::{Block, BlockBuilder, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::interface::block_states::{StateDeserializeFn, StateSerializeInfo};
+use crate::overworld::item::Item;
 use crate::overworld::raw_cluster::{CellInfo, LightType};
 use crate::overworld::structure::world::Biome;
 use crate::overworld::structure::Structure;
@@ -27,11 +28,8 @@ pub struct Registry {
     // structures_by_level: [Vec<Structure>; overworld::LOD_LEVELS],
     models: Vec<BlockModel>,
     liquids: Vec<LiquidType>,
-    // textures: Vec<(TextureAtlasType, ResourceRef)>,
-    // materials: Vec<Material>,
-    material_count: u16,
-    // textured_models: Vec<TexturedBlockModel>,
     blocks: Vec<Block>,
+    items: Vec<Item>,
     block_state_serializers: HashMap<TypeId, StateSerializeInfo>,
     block_state_deserializers: HashMap<&'static str, StateDeserializeFn>,
     block_empty: u16,
@@ -40,9 +38,10 @@ pub struct Registry {
 
 impl Registry {
     pub const MODEL_ID_NULL: u16 = u16::MAX;
-    pub const MAX_BLOCKS: u16 = u16::MAX - 1;
-    pub const MAX_LIQUIDS: u16 = u16::MAX - 1;
-    pub const MAX_MODELS: u16 = u16::MAX - 1;
+    pub const MAX_BLOCKS: u16 = u16::MAX;
+    pub const MAX_LIQUIDS: u16 = u16::MAX;
+    pub const MAX_MODELS: u16 = u16::MAX;
+    pub const MAX_ITEMS: u16 = u16::MAX;
 
     pub fn new() -> Self {
         let mut registry = Registry {
@@ -50,12 +49,9 @@ impl Registry {
             // structures_by_level: Default::default(),
             biomes: vec![],
             models: vec![],
-            // textures: vec![],
-            // materials: vec![],
             liquids: vec![],
-            material_count: 0,
-            // textured_models: vec![],
             blocks: vec![],
+            items: vec![],
             block_state_serializers: Default::default(),
             block_state_deserializers: Default::default(),
             block_empty: u16::MAX,
@@ -83,7 +79,7 @@ impl Registry {
     }
 
     pub fn register_block_model(&mut self, block_model: BlockModel) -> u16 {
-        if self.models.len() == Self::MAX_MODELS as usize {
+        if self.models.len() >= Self::MAX_MODELS as usize {
             panic!("Maximum number of materials is reached!");
         }
         self.models.push(block_model);
@@ -94,50 +90,8 @@ impl Registry {
         self.block_empty
     }
 
-    // pub fn register_texture(&mut self, ty: TextureAtlasType, res_ref: ResourceRef) -> u16 {
-    //     if self.textures.len() == Self::MAX_TEXTURES as usize {
-    //         panic!("Maximum number of textures is reached!");
-    //     }
-    //     self.textures.push((ty, res_ref));
-    //     (self.textures.len() - 1).try_into().unwrap()
-    // }
-
-    // pub fn alloc_material(&mut self) -> u16 {
-    //     if self.material_count == Self::MAX_MATERIALS {
-    //         panic!("Maximum number of materials is reached!");
-    //     }
-    //     let id = self.material_count;
-    //     self.material_count += 1;
-    //     id
-    // }
-
-    // pub fn register_material(&mut self, material: Material) -> u16 {
-    //     if self.materials.len() == Self::MAX_MATERIALS as usize {
-    //         panic!("Maximum number of materials is reached!");
-    //     }
-    //     self.materials.push(material);
-    //     (self.materials.len() - 1).try_into().unwrap()
-    // }
-
-    // pub fn alloc_textured_block_model(&mut self) -> u16 {
-    //     if self.material_count == Self::MAX_MATERIALS {
-    //         panic!("Maximum number of materials is reached!");
-    //     }
-    //     let id = self.material_count;
-    //     self.material_count += 1;
-    //     id
-    // }
-
-    // pub fn register_textured_block_model(&mut self, textured_block_model: TexturedBlockModel) -> u16 {
-    //     if self.models.len() == Self::MAX_MODELS as usize {
-    //         panic!("Maximum number of block models is reached!");
-    //     }
-    //     self.textured_models.push(textured_block_model);
-    //     (self.textured_models.len() - 1).try_into().unwrap()
-    // }
-
     pub fn register_block<S: BlockStateArchetype>(&mut self, builder: BlockBuilder) -> u16 {
-        if self.blocks.len() == Self::MAX_BLOCKS as usize {
+        if self.blocks.len() >= Self::MAX_BLOCKS as usize {
             panic!("Maximum number of blocks is reached!");
         }
 
@@ -158,21 +112,29 @@ impl Registry {
     }
 
     pub fn register_liquid(&mut self) -> u16 {
-        if self.liquids.len() == Self::MAX_LIQUIDS as usize {
+        if self.liquids.len() >= Self::MAX_LIQUIDS as usize {
             panic!("Maximum number of liquids is reached!");
         }
         self.liquids.push(LiquidType {});
-        (self.liquids.len() - 1) as u16
+        self.liquids.len() as u16 - 1
     }
 
     pub fn register_biome(&mut self, biome: Biome) -> u32 {
         self.biomes.push(biome);
-        (self.biomes.len() - 1) as u32
+        self.biomes.len() as u32 - 1
     }
 
     pub fn register_structure(&mut self, structure: Structure) -> u32 {
         self.structures.push(structure);
-        (self.structures.len() - 1) as u32
+        self.structures.len() as u32 - 1
+    }
+
+    pub fn register_item(&mut self, item: Item) -> u32 {
+        if self.items.len() >= Self::MAX_ITEMS as usize {
+            panic!("Maximum number of items is reached!");
+        }
+        self.items.push(item);
+        self.items.len() as u32 - 1
     }
 
     pub fn biomes(&self) -> &[Biome] {
@@ -191,19 +153,19 @@ impl Registry {
         self.models.get(id as usize)
     }
 
-    // pub fn get_textured_block_model(&self, id: u16) -> Option<&TexturedBlockModel> {
-    //     self.textured_models.get(id as usize)
-    // }
+    pub fn get_item(&self, id: u32) -> Option<&Item> {
+        self.items.get(id as usize)
+    }
 
     pub fn get_structure(&self, id: u32) -> Option<&Structure> {
         self.structures.get(id as usize)
     }
 
-    pub fn get_state_serializer(&self, state_id: &TypeId) -> Option<&StateSerializeInfo> {
+    pub fn get_block_state_serializer(&self, state_id: &TypeId) -> Option<&StateSerializeInfo> {
         self.block_state_serializers.get(state_id)
     }
 
-    pub fn get_state_deserializer(&self, type_canon_name: &str) -> Option<&StateDeserializeFn> {
+    pub fn get_block_state_deserializer(&self, type_canon_name: &str) -> Option<&StateDeserializeFn> {
         self.block_state_deserializers.get(type_canon_name)
     }
 

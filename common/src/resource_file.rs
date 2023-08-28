@@ -209,4 +209,11 @@ impl BufferedResourceReader {
     ) -> Result<Arc<T>, Error> {
         self.cache.try_get(path.to_string(), || self.get(path).map(init))
     }
+
+    pub fn get_image(&self, path: &str) -> Result<Arc<image::RgbaImage>, Error> {
+        self.get_map(path, |data| {
+            let dyn_img = image::load_from_memory(&data).unwrap();
+            Arc::new(dyn_img.into_rgba8())
+        })
+    }
 }

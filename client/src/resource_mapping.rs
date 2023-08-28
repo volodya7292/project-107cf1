@@ -1,3 +1,4 @@
+use crate::rendering::item_visuals::ItemVisuals;
 use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use base::overworld::block_model::BlockModel;
@@ -12,6 +13,7 @@ pub struct ResourceMapping {
     null_textured_block_model: Option<TexturedBlockModel>,
     null_material: u16,
     liquid_materials: Vec<Option<u16>>,
+    item_visuals: Vec<Option<ItemVisuals>>,
 }
 
 impl ResourceMapping {
@@ -21,11 +23,10 @@ impl ResourceMapping {
     pub fn new(
         null_model: &BlockModel,
         null_texture_res: ResourceRef,
-        max_textured_models: usize,
-        max_textured_liquid: usize,
+        max_textured_models: u16,
+        max_textured_liquid: u16,
+        max_items: u16,
     ) -> Self {
-        assert!(max_textured_models < (u16::MAX - 1) as usize);
-
         let mut this = Self {
             textures: vec![],
             materials: vec![],
@@ -33,6 +34,7 @@ impl ResourceMapping {
             null_textured_block_model: None,
             null_material: u16::MAX,
             liquid_materials: (0..max_textured_liquid).map(|_| None).collect(),
+            item_visuals: (0..max_items).map(|_| None).collect(),
         };
 
         let null_texture = this.register_texture(TextureAtlasType::ALBEDO, null_texture_res);
@@ -70,6 +72,10 @@ impl ResourceMapping {
         self.liquid_materials[liquid_id as usize] = Some(material_id);
     }
 
+    pub fn set_item_visuals(&mut self, item_id: u32, visuals: ItemVisuals) {
+        self.item_visuals[item_id as usize] = Some(visuals);
+    }
+
     pub fn get_material(&self, id: u16) -> Option<&TextureMaterial> {
         self.materials.get(id as usize)
     }
@@ -87,6 +93,10 @@ impl ResourceMapping {
             .cloned()
             .flatten()
             .unwrap_or(self.null_material)
+    }
+
+    pub fn get_item_visuals(&self, item_id: u32) -> Option<&ItemVisuals> {
+        self.item_visuals[item_id as usize].as_ref()
     }
 
     pub fn textures(&self) -> &[(TextureAtlasType, ResourceRef)] {

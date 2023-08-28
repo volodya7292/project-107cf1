@@ -77,7 +77,7 @@ impl Serialize for SerializableEntityStorage<'_> {
         for entity in self.storage.entities().iter() {
             let arch = self.storage.get_archetype_by_id(entity.archetype_id).unwrap();
             let arch_ty = arch.ty();
-            let ser_info = self.registry.get_state_serializer(arch_ty).unwrap();
+            let ser_info = self.registry.get_block_state_serializer(arch_ty).unwrap();
 
             let elem = GenericStateEntity {
                 value: GenericStateValue {
@@ -135,7 +135,7 @@ impl<'de> serde::de::Visitor<'de> for DataTupleVisitor<'_> {
             EntityId::new(arch_id, raw_id)
         };
 
-        let state_deserialize_fn = self.registry.get_state_deserializer(canon_name).unwrap();
+        let state_deserialize_fn = self.registry.get_block_state_deserializer(canon_name).unwrap();
         let value_deserializer = StateValueDeserializer {
             storage: self.storage,
             state_deserialize_fn: *state_deserialize_fn,
