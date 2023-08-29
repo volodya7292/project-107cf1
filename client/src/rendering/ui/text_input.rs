@@ -30,8 +30,6 @@ pub struct TextInputProps {
     pub style: TextStyle,
 }
 
-const CURSOR_X_PADDING: f32 = 10.0;
-
 fn cursor_blink_time_fn(_: f32) -> f32 {
     1.0
 }
@@ -52,7 +50,6 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             };
 
             remember_state!(ctx, cursor_pos, 0);
-            remember_state!(ctx, cursor_opacity, AnimatedValue::immediate(1.0));
             remember_state!(ctx, text_offset, Vec2::new(0.0, 0.0));
             remember_state!(ctx, text_size, Vec2::new(0.0, 0.0));
             remember_state!(ctx, text_global_pos, Vec2::new(0.0, 0.0));
@@ -62,19 +59,8 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             let text = ctx.subscribe(&props.text_state);
             let n_chars = text.chars().count();
 
-            let cursor_opacity_state = cursor_opacity.state();
-
-            if cursor_opacity.is_finished() {
-                cursor_opacity_state.update_with(|prev| {
-                    let mut new = *prev;
-                    new.retarget(
-                        TransitionTarget::new(1.0 - *prev.target().value(), 0.5)
-                            .with_time_fn(cursor_blink_time_fn),
-                    );
-                    new
-                });
-            }
-            ctx.drive_transition(&cursor_opacity);
+            let cursor_opacity_state =
+                ctx.request_state(make_static_id!(), || AnimatedValue::immediate(1.0_f32));
 
             if *cursor_pos > n_chars {
                 cursor_pos.state().update(n_chars);
@@ -105,18 +91,18 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
 
             let relative_cursor_offset = cursor_offset + *text_offset;
             if let Some(container_size) = *container_size {
-                let text_offset_x_min = -text_size.x.max(container_size.x - CURSOR_X_PADDING)
-                    + (container_size.x - CURSOR_X_PADDING);
+                let text_offset_x_min = (-text_size.x + container_size.x).min(0.0);
 
-                if relative_cursor_offset.x > container_size.x - CURSOR_X_PADDING {
-                    text_offset.state().update_with(move |prev| {
-                        Vec2::new(-cursor_offset.x + container_size.x - CURSOR_X_PADDING, prev.y)
-                    });
-                } else if relative_cursor_offset.x < CURSOR_X_PADDING {
-                    text_offset.state().update_with(move |prev| {
-                        Vec2::new((-cursor_offset.x + CURSOR_X_PADDING).min(0.0), prev.y)
-                    });
+                if relative_cursor_offset.x > container_size.x {
+                    text_offset
+                        .state()
+                        .update_with(move |prev| Vec2::new(-cursor_offset.x + container_size.x, prev.y));
+                } else if relative_cursor_offset.x < 0.0 {
+                    text_offset
+                        .state()
+                        .update_with(move |prev| Vec2::new((-cursor_offset.x).min(0.0), prev.y));
                 }
+
                 if text_offset.x < text_offset_x_min {
                     text_offset
                         .state()
@@ -177,7 +163,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             };
 
             let cursor_pos_state = cursor_pos.state();
-            let cursor_opacity_state = cursor_opacity.state();
+            let cursor_opacity_state2 = cursor_opacity_state.clone();
             let text_state = text.state();
             let on_key_press = move |_: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput| {
                 let super_key_pressed = {
@@ -186,6 +172,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 };
 
                 let cursor_pos_state = cursor_pos_state.clone();
+                let cursor_opacity_state = cursor_opacity_state2.clone();
                 let text_state = text_state.clone();
 
                 text_state.update_with(move |prev| {
@@ -260,15 +247,16 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                         .with_on_keyboard(Arc::new(on_key_press))
                         .with_on_size_update(Arc::new(on_text_size_update)),
                     children_props: (
+                        text.clone(),
                         props.style,
                         props.multiline,
                         cursor_offset,
-                        *cursor_opacity,
                         line_height,
+                        *focused,
                     ),
                     ..Default::default()
                 },
-                move |ctx, (style, multiline, cursor_offset, cursor_opacity, line_height)| {
+                move |ctx, (text, style, multiline, cursor_offset, line_height, focused)| {
                     ui_text(
                         make_static_id!(),
                         ctx,
@@ -278,13 +266,26 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                                 .with_height(Sizing::FitContent)
                                 .with_min_height(line_height),
                             callbacks: UICallbacks::new().with_interaction(false),
-                            text: text.clone(),
-                            style: props.style,
-                            wrap: props.multiline,
+                            text,
+                            style,
+                            wrap: multiline,
                             ..Default::default()
                         },
                     );
-                    if *focused {
+                    if focused {
+                        let cursor_opacity = ctx.subscribe(&cursor_opacity_state);
+                        if cursor_opacity.is_finished() {
+                            cursor_opacity_state.update_with(|prev| {
+                                let mut new = *prev;
+                                new.retarget(
+                                    TransitionTarget::new(1.0 - *prev.target().value(), 0.5)
+                                        .with_time_fn(cursor_blink_time_fn),
+                                );
+                                new
+                            });
+                        }
+                        ctx.drive_transition(&cursor_opacity);
+
                         container(
                             make_static_id!(),
                             ctx,

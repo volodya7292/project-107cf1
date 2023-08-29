@@ -77,6 +77,15 @@ pub struct Padding {
 impl Padding {
     pub const ZERO: Self = Padding::equal(0.0);
 
+    pub const fn new(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+        Self {
+            left,
+            right,
+            top,
+            bottom,
+        }
+    }
+
     pub const fn equal(value: f32) -> Self {
         Self {
             left: value,
