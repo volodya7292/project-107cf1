@@ -1,5 +1,5 @@
 use ahash::{AHashMap, AHashSet};
-use std::hash::Hash;
+use std::{hash::Hash, ops::Deref, sync::Arc};
 
 pub type Hasher = ahash::RandomState;
 pub type HashSet<T> = AHashSet<T>;
@@ -74,3 +74,45 @@ macro_rules! uint_impl {
 }
 
 uint_impl! { u8 u16 u32 u64 }
+
+/// An `Arc` that implements pointer-comparison.
+#[derive(Eq)]
+pub struct CmpArc<T: ?Sized>(pub Arc<T>);
+
+impl<T> CmpArc<T> {
+    pub fn new(value: Arc<T>) -> CmpArc<T> {
+        Self(value)
+    }
+}
+
+impl<T: ?Sized> PartialEq for CmpArc<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::as_ptr(&self.0) == Arc::as_ptr(&other.0)
+    }
+}
+
+impl<T: ?Sized> Clone for CmpArc<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T: ?Sized> Deref for CmpArc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: ?Sized> Hash for CmpArc<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+
+impl<T> From<T> for CmpArc<T> {
+    fn from(value: T) -> Self {
+        CmpArc(Arc::new(value))
+    }
+}

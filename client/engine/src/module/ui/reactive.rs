@@ -37,12 +37,33 @@ impl<T> From<&StateId<T>> for String {
     }
 }
 
+pub trait State: Send + Sync + 'static {
+    fn as_any(&self) -> &dyn Any;
+    fn eq(&self, other: &dyn State) -> bool;
+}
+
+impl<T: Send + Sync + PartialEq + 'static> State for Arc<T> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn eq(&self, other: &dyn State) -> bool {
+        if let Some(other) = other.as_any().downcast_ref::<Arc<T>>() {
+            self == other
+        } else {
+            panic!("the type of `other` should be the same as `Self`");
+        }
+    }
+}
+
+type ChildrenFunction = Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>;
+
 pub struct UIScope {
     props: Rc<dyn Any>,
-    children_func: Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>,
+    children_func: ChildrenFunction,
     on_remove_func: fn(&EngineContext, &UIScope),
     children: Vec<ScopeId>,
-    states: HashMap<GenericStateId, Arc<Mutex<Arc<dyn Any + Send + Sync>>>>,
+    states: HashMap<GenericStateId, Arc<Mutex<AnyState>>>,
     local_vars: HashMap<String, Rc<dyn Any>>,
     subscribed_to: HashSet<StateUID>,
 }
@@ -57,11 +78,11 @@ impl UIScope {
     pub fn state<T: Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
         self.states
             .get(name)
-            .map(|v| v.lock().clone().downcast::<T>().unwrap())
+            .map(|v| v.lock().as_any().downcast_ref::<Arc<T>>().unwrap().clone())
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 struct StateUID(ScopeId, GenericStateId);
 
 impl StateUID {
@@ -74,9 +95,9 @@ impl StateUID {
     }
 }
 
-type AnyState = Arc<dyn Any + Send + Sync>;
-type ModifierFunctions = Vec<Box<dyn FnOnce(&AnyState) -> AnyState + Sync + Send>>;
-type ModifiedStates = HashMap<StateUID, ModifierFunctions>;
+type AnyState = Box<dyn State>;
+type ModifierFunction = Box<dyn FnOnce(&AnyState) -> AnyState + Sync + Send>;
+type ModifiedStates = HashMap<StateUID, Vec<ModifierFunction>>;
 
 /// Provides reactive ui management
 pub struct UIReactor {
@@ -119,21 +140,36 @@ impl UIReactor {
     pub fn on_update(&mut self, ctx: EngineContext, delta_time: f64) {
         let mut dirty_scopes: HashSet<_> = self.dirty_scopes.drain().collect();
 
-        let modified_states: Vec<_> = self.modified_states.lock().drain().collect();
+        // Update states until there are no modifications left.
+        // Warning: cyclic state updates (via update functions) make this loop infinite.
+        loop {
+            let modified_states: Vec<_> = self.modified_states.lock().drain().collect();
 
-        // Update states and collect corresponding subscribers
-        for (uid, modifiers) in modified_states {
-            let Some(scope) = self.scopes.get(uid.scope_id()) else {
-                continue;
-            };
-            let mut state_value = scope.states.get(uid.state_id()).unwrap().lock();
-
-            for modifier in modifiers {
-                *state_value = modifier(&state_value);
+            if modified_states.is_empty() {
+                break;
             }
 
-            if let Some(subs) = self.state_subscribers.get(&uid) {
-                dirty_scopes.extend(subs.iter().cloned());
+            // Update states and collect corresponding subscribers
+            for (uid, modifiers) in modified_states {
+                let Some(scope) = self.scopes.get(uid.scope_id()) else {
+                    continue;
+                };
+                let mut state_value = scope.states.get(uid.state_id()).unwrap().lock();
+                let mut value_changed = false;
+
+                for modifier in modifiers {
+                    let new_value = modifier(&state_value);
+                    if !state_value.eq(&*new_value) {
+                        *state_value = new_value;
+                        value_changed = true;
+                    }
+                }
+
+                if value_changed {
+                    if let Some(subs) = self.state_subscribers.get(&uid) {
+                        dirty_scopes.extend(subs.iter().cloned());
+                    }
+                }
             }
         }
 
@@ -293,11 +329,14 @@ pub struct ReactiveState<T> {
     owner: ScopeId,
     name: String,
     modified_states: sync::Weak<Mutex<ModifiedStates>>,
-    value: Arc<Mutex<Arc<dyn Any + Send + Sync>>>,
+    value: Arc<Mutex<AnyState>>,
     _ty: PhantomData<T>,
 }
 
-impl<T: Send + Sync + 'static> ReactiveState<T> {
+impl<T: Send + Sync + PartialEq + 'static> ReactiveState<T>
+where
+    Arc<T>: State,
+{
     fn uid(&self) -> StateUID {
         StateUID(self.owner.clone(), self.name.clone())
     }
@@ -311,7 +350,9 @@ impl<T: Send + Sync + 'static> ReactiveState<T> {
 
         let modifiers = modified_states.entry(self.uid()).or_default();
         modifiers.push(Box::new(|prev| {
-            Arc::new(new_state_fn(prev.downcast_ref::<T>().unwrap()))
+            Box::new(Arc::new(new_state_fn(
+                prev.as_any().downcast_ref::<Arc<T>>().unwrap(),
+            )))
         }));
     }
 
@@ -321,7 +362,12 @@ impl<T: Send + Sync + 'static> ReactiveState<T> {
     }
 
     pub fn value(&self) -> Arc<T> {
-        self.value.lock().clone().downcast::<T>().unwrap()
+        self.value
+            .lock()
+            .as_any()
+            .downcast_ref::<Arc<T>>()
+            .unwrap()
+            .clone()
     }
 }
 
@@ -343,13 +389,16 @@ impl<T> PartialEq for ReactiveState<T> {
     }
 }
 
-impl<T: Default + Send + Sync + 'static> Default for ReactiveState<T> {
+impl<T: Default> Default for ReactiveState<T>
+where
+    Arc<T>: State,
+{
     fn default() -> Self {
         Self {
             owner: "".to_string(),
             name: "".to_string(),
             modified_states: Default::default(),
-            value: Arc::new(Mutex::new(Arc::new(T::default()))),
+            value: Arc::new(Mutex::new(Box::new(Arc::new(T::default())))),
             _ty: Default::default(),
         }
     }
@@ -430,7 +479,10 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         &mut self,
         id: impl Into<StateId<T>>,
         init: F,
-    ) -> ReactiveState<T> {
+    ) -> ReactiveState<T>
+    where
+        T: PartialEq,
+    {
         let id = id.into();
         let name: String = id.name().to_string();
 
@@ -445,7 +497,7 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
         let state_value = scope
             .states
             .entry(name.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(Arc::new(init()))));
+            .or_insert_with(|| Arc::new(Mutex::new(Box::new(Arc::new(init())))));
 
         ReactiveState {
             owner: self.scope_id.clone(),
@@ -457,7 +509,10 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
     }
 
     /// Subscribes this scope to updates of the state. This scope will be rebuild it `state` changes.
-    pub fn subscribe<T: Send + Sync + 'static>(&mut self, state: &ReactiveState<T>) -> StateReceiver<T> {
+    pub fn subscribe<T: Send + Sync + PartialEq + 'static>(
+        &mut self,
+        state: &ReactiveState<T>,
+    ) -> StateReceiver<T> {
         let scope = self.reactor.scopes.get_mut(&self.scope_id).unwrap();
         scope.subscribed_to.insert(state.uid());
 
@@ -472,7 +527,12 @@ impl<'a, 'b> UIScopeContext<'a, 'b> {
 
         StateReceiver {
             state,
-            curr_value: latest_value.lock().clone().downcast::<T>().unwrap(),
+            curr_value: latest_value
+                .lock()
+                .as_any()
+                .downcast_ref::<Arc<T>>()
+                .unwrap()
+                .clone(),
             _ty: Default::default(),
             _not_sync_not_send: Default::default(),
         }

@@ -170,7 +170,7 @@ impl SystemHandler for RenderConfigComponentEvents<'_> {
                 self.material_pipelines,
                 &mut desc_updates,
                 self.uniform_buffer_basic,
-                &self.device,
+                self.device,
             );
             self.renderables.insert(*entity, renderable);
         }

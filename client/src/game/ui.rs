@@ -14,6 +14,7 @@ use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
 use crate::rendering::ui::{backgrounds, UICallbacks, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
+use common::types::CmpArc;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
 use engine::ecs::component::ui::{ClickedCallback, CrossAlign, Padding, Position, Sizing, UILayoutC};
 use engine::event::WSIKeyboardInput;
@@ -48,7 +49,7 @@ pub mod ui_root_states {
     }
 }
 
-type ModalFn = Arc<dyn Fn(&mut UIScopeContext) + Send + Sync + 'static>;
+type ModalFn = CmpArc<dyn Fn(&mut UIScopeContext) + Send + Sync + 'static>;
 
 fn push_modal_view<F>(ctx: &mut UIReactor, view_fn: F)
 where
@@ -57,7 +58,7 @@ where
     let views_state = ctx.root_state(&ui_root_states::ACTIVE_MODAL_VIEWS).unwrap();
     views_state.update_with(move |prev| {
         let mut new = prev.clone();
-        new.push(Arc::new(view_fn));
+        new.push(CmpArc(Arc::new(view_fn)));
         new
     });
 }
