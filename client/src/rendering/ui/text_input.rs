@@ -51,7 +51,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                 text_renderer.get_min_line_height(&props.style)
             };
 
-            remember_state!(ctx, cursor_pos, 1);
+            remember_state!(ctx, cursor_pos, 0);
             remember_state!(ctx, cursor_opacity, AnimatedValue::immediate(1.0));
             remember_state!(ctx, text_offset, Vec2::new(0.0, 0.0));
             remember_state!(ctx, text_size, Vec2::new(0.0, 0.0));
@@ -147,10 +147,10 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             let cursor_pos_state = cursor_pos.state();
             let text2 = text.clone();
             let props2 = props.clone();
-            let on_click = move |entity: &EntityId, ctx: &EngineContext, pos: Vec2| {
+            let on_click = move |_: &EntityId, ctx: &EngineContext, pos: Vec2| {
                 let text_renderer = ctx.module::<TextRenderer>();
 
-                let char_idx = text_renderer.find_char_index(
+                let char_idx = text_renderer.find_nearest_char_index(
                     &text2,
                     &props2.style,
                     if props2.multiline {
@@ -167,19 +167,19 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             };
 
             let focused_state = focused.state();
-            let on_focus_in = move |entity: &EntityId, ctx: &EngineContext| {
+            let on_focus_in = move |_: &EntityId, _: &EngineContext| {
                 focused_state.update(true);
             };
 
             let focused_state = focused.state();
-            let on_focus_out = move |entity: &EntityId, ctx: &EngineContext| {
+            let on_focus_out = move |_: &EntityId, _: &EngineContext| {
                 focused_state.update(false);
             };
 
             let cursor_pos_state = cursor_pos.state();
             let cursor_opacity_state = cursor_opacity.state();
             let text_state = text.state();
-            let on_key_press = move |entity: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput| {
+            let on_key_press = move |_: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput| {
                 let super_key_pressed = {
                     let input_manager = ctx.module::<Input>();
                     input_manager.keyboard().is_super_key_pressed()

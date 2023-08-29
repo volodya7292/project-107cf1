@@ -788,7 +788,7 @@ impl TextRenderer {
         }
     }
 
-    pub fn find_char_index(
+    pub fn find_nearest_char_index(
         &self,
         seq: &str,
         style: &TextStyle,
@@ -813,16 +813,14 @@ impl TextRenderer {
         let (min_elem_idx, _) = positions
             .into_iter()
             .enumerate()
-            .filter_map(|(idx, v)| {
+            .map(|(idx, v)| {
                 let offset = (v.offset - glm::vec2(0.0, v_metrics.ascent)) * style.font_size();
                 let size = v.size * style.font_size();
 
-                (position >= offset && position <= (offset + size)).then(|| {
-                    let center = offset + size * 0.5;
-                    let dist = glm::distance2(&center, &position);
-                    let idx = if position.x > center.x { idx + 1 } else { idx };
-                    (idx, dist)
-                })
+                let center = offset + size * 0.5;
+                let dist = glm::distance2(&center, &position);
+                let idx = if position.x > center.x { idx + 1 } else { idx };
+                (idx, dist)
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b))?;
 
