@@ -2,6 +2,7 @@ pub mod execution;
 pub mod main_registry;
 pub mod overworld;
 pub mod physics;
+pub mod player;
 pub mod registry;
 #[cfg(test)]
 mod tests;

@@ -98,19 +98,8 @@ impl<P> ContainerProps<P> {
 
 impl<P: Default> Default for ContainerProps<P> {
     fn default() -> Self {
-        Self {
-            layout: Default::default(),
-            callbacks: Default::default(),
-            background: None,
-            opacity: 1.0,
-            corner_radius: 0.0,
-            children_props: Default::default(),
-        }
+        container_props_init(Default::default())
     }
-}
-
-pub fn container_props<P: Default>() -> ContainerProps<P> {
-    Default::default()
 }
 
 pub fn container_props_init<P>(children_props: P) -> ContainerProps<P> {
@@ -122,6 +111,10 @@ pub fn container_props_init<P>(children_props: P) -> ContainerProps<P> {
         corner_radius: 0.0,
         children_props,
     }
+}
+
+pub fn container_props<P: Default>() -> ContainerProps<P> {
+    Default::default()
 }
 
 pub mod background {

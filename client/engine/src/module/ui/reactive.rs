@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub type ScopeId = String;
 type GenericStateId = String;
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq)]
 pub struct StateId<T>(String, PhantomData<T>);
 
 impl<T> StateId<T> {
@@ -31,9 +31,15 @@ impl<T, S: Into<String>> From<S> for StateId<T> {
     }
 }
 
-impl<T> From<&StateId<T>> for String {
+impl<T> Clone for StateId<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), Default::default())
+    }
+}
+
+impl<T> From<&StateId<T>> for StateId<T> {
     fn from(val: &StateId<T>) -> Self {
-        val.0.clone()
+        val.clone()
     }
 }
 

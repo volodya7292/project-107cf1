@@ -123,18 +123,17 @@ pub struct MainApp {
 const WALK_VELOCITY: f64 = 3.0;
 
 fn calc_bobbing_displacement(walk_time: f64, walk_vel: f64, camera_orientation: Vec3) -> DVec3 {
-    const BOBBING_MAX_HEIGHT: f64 = 0.07;
+    const BOBBING_HEIGHT: f64 = 0.05;
     const BOBBING_WIDTH: f64 = 0.04;
 
     let bobbing_freq: f64 = 0.7 * walk_vel;
-
     let wave = (walk_time * 2.0 * PI * bobbing_freq * 0.5).sin();
 
-    let disp_y_norm = 1.0 - (1.0 - wave.powi(2)).sqrt();
+    let disp_y_norm = wave.powi(2);
 
     let mut displacement = DVec3::zeros();
-    displacement += camera::move_xz(camera_orientation, 0.0, wave * BOBBING_WIDTH * 0.5);
-    displacement.y += disp_y_norm * BOBBING_MAX_HEIGHT;
+    displacement += camera::move_xz(camera_orientation, 0.0, (wave) * BOBBING_WIDTH * 0.5);
+    displacement.y -= disp_y_norm * BOBBING_HEIGHT;
 
     displacement
 }
@@ -308,12 +307,18 @@ impl MainApp {
         self.cursor_grab
     }
 
-    pub fn show_main_menu(&mut self, visible: bool) {
-        let ui_reactor = self.ui_reactor.borrow_mut();
+    pub fn show_main_menu(&self, visible: bool) {
+        let ui_reactor = self.ui_reactor.borrow();
+        if let Some(state) = ui_reactor.root_state(&ui_root_states::MENU_VISIBLE) {
+            state.update(visible);
+        }
+    }
+
+    pub fn is_menu_visible(&self) -> Option<bool> {
+        let ui_reactor = self.ui_reactor.borrow();
         ui_reactor
             .root_state(&ui_root_states::MENU_VISIBLE)
-            .unwrap()
-            .update(visible);
+            .map(|v| *v.value())
     }
 
     pub fn make_world_path(overworld_name: &str) -> PathBuf {
@@ -832,7 +837,7 @@ impl EngineModule for MainApp {
             player_satiety_state.update(player_state.satiety());
         };
 
-        if !self.is_cursor_grabbed() {
+        if self.is_menu_visible().unwrap_or(true) {
             return;
         }
 
@@ -867,7 +872,7 @@ impl EngineModule for MainApp {
                 match virtual_keycode {
                     VirtualKeyCode::Escape => {
                         if self.is_in_game() {
-                            self.show_main_menu(self.is_cursor_grabbed());
+                            self.show_main_menu(!self.is_menu_visible().unwrap_or(false));
                         }
                     }
                     VirtualKeyCode::F11 => {

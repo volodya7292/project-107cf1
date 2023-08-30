@@ -11,6 +11,8 @@ use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::scrollable_container::scrollable_container;
 use crate::rendering::ui::text::reactive::{ui_text, ui_text_props};
 use crate::rendering::ui::{backgrounds, ui_callbacks, STATE_ENTITY_ID};
+use base::overworld::item::ItemStack;
+use base::player::{self, NUM_INTENTORY_ITEM_SLOTS};
 use common::glm::Vec2;
 use common::make_static_id;
 use common::types::CmpArc;
@@ -32,6 +34,7 @@ const TEXT_COLOR: Color = Color::grayscale(0.9);
 
 pub mod ui_root_states {
     use super::ModalFn;
+    use base::overworld::item::ItemStack;
     use engine::module::ui::reactive::StateId;
     use lazy_static::lazy_static;
 
@@ -45,6 +48,8 @@ pub mod ui_root_states {
         pub static ref PLAYER_SATIETY: StateId<f64> = "player_satiety".into();
         pub static ref WORLD_NAME_LIST: StateId<Vec<String>> = "world_name_list".into();
         pub static ref INVENTORY_VISIBLE: StateId<bool> = "inventory_visible".into();
+        pub static ref INVENTORY_ITEMS: StateId<Vec<ItemStack>> = "inventory_items".into();
+        pub static ref SELECTED_INVENTORY_ITEM_IDX: StateId<u32> = "selected_inventory_item_idx".into();
     }
 }
 
@@ -401,7 +406,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
 
 const TAB_WORLD_CREATION: &str = "world_creation";
 const TAB_SETTINGS: &str = "settings";
-const TABS: [&'static str; 2] = [TAB_WORLD_CREATION, TAB_SETTINGS];
+const TABS: [&str; 2] = [TAB_WORLD_CREATION, TAB_SETTINGS];
 
 fn tab_name(tab_id: &str) -> &'static str {
     match tab_id {
@@ -772,12 +777,17 @@ pub fn game_overlay(ctx: &mut UIScopeContext) {
     );
 }
 
-pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ItemVisuals) {
+pub fn inventory_slot(
+    local_name: &str,
+    ctx: &mut UIScopeContext,
+    item: ItemVisuals,
+    on_click: ClickedCallback,
+) {
     container(
         local_name,
         ctx,
-        container_props_init(item).layout(UILayoutC::new().with_fixed_size(60.0)),
-        |ctx, item| {
+        container_props_init(item).layout(UILayoutC::new().with_fixed_size(100.0)),
+        move |ctx, item| {
             remember_state!(ctx, hovered, false);
 
             let on_cursor_enter = {
@@ -800,6 +810,7 @@ pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ItemVisu
                     .layout(UILayoutC::new().with_grow().with_padding(Padding::equal(10.0)))
                     .callbacks(
                         ui_callbacks()
+                            .on_click(on_click.clone())
                             .on_cursor_enter(Arc::new(on_cursor_enter))
                             .on_cursor_leave(Arc::new(on_cursor_leave)),
                     )
@@ -825,25 +836,43 @@ pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ItemVisu
 }
 
 pub fn inventory_slots(local_name: &str, ctx: &mut UIScopeContext) {
+    const ROWS: u32 = 3;
+    const COLS: u32 = 5;
+    assert_eq!(ROWS * COLS, player::NUM_INTENTORY_ITEM_SLOTS);
+
     container(
         local_name,
         ctx,
         container_props().layout(UILayoutC::column()),
         |ctx, ()| {
-            for i in 0..4 {
+            for i in 0..3 {
                 container(
                     &make_static_id!(i),
                     ctx,
                     container_props().layout(UILayoutC::row()),
-                    |ctx, ()| {
+                    move |ctx, ()| {
                         for j in 0..5 {
+                            let item_idx = COLS * i + j;
                             let visuals = {
                                 let app = ctx.ctx().app();
                                 let item_id = app.main_registry.item_block_default;
                                 app.res_map.storage().get_item_visuals(item_id).unwrap().clone()
                             };
 
-                            inventory_slot(&make_static_id!(j), ctx, visuals);
+                            inventory_slot(
+                                &make_static_id!(j),
+                                ctx,
+                                visuals,
+                                Arc::new(move |_, ctx, _| {
+                                    let app = ctx.app();
+                                    let ui_reactor = app.ui_reactor();
+                                    let selected_item_idx = ui_reactor
+                                        .root_state(&ui_root_states::SELECTED_INVENTORY_ITEM_IDX)
+                                        .unwrap();
+                                    selected_item_idx.update(item_idx);
+                                }),
+                            );
+
                             if j < 5 - 1 {
                                 width_spacer(&make_static_id!(j), ctx, 12.0);
                             }
@@ -907,6 +936,8 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(&*ui_root_states::PLAYER_SATIETY, || 0.0_f64);
     ctx.request_state(&*ui_root_states::VISION_OBSTRUCTED, || false);
     ctx.request_state(&*ui_root_states::INVENTORY_VISIBLE, || false);
+    ctx.request_state(&*ui_root_states::INVENTORY_ITEMS, Vec::<ItemStack>::new);
+    ctx.request_state(&*ui_root_states::SELECTED_INVENTORY_ITEM_IDX, || 0);
 
     let in_game_process_state = ctx.request_state(&*ui_root_states::IN_GAME_PROCESS, || false);
     let in_game_process = ctx.subscribe(&in_game_process_state);
@@ -918,9 +949,10 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             let is_in_game = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
             let menu_visible = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::MENU_VISIBLE));
             let player_health = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::PLAYER_HEALTH));
+            let inventory_visible = ui_ctx.subscribe(&ui_ctx.root_state(&ui_root_states::INVENTORY_VISIBLE));
 
             let player_dead = *is_in_game && *player_health == 0.0;
-            let cursor_grabbed = !*menu_visible && !player_dead;
+            let cursor_grabbed = !*menu_visible && !player_dead && !*inventory_visible;
 
             let mut app = ui_ctx.ctx().app();
             app.grab_cursor(&ui_ctx.ctx().window(), cursor_grabbed, ui_ctx.ctx());
@@ -932,11 +964,27 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         let WSIKeyboardInput::Virtual(code, state) = input else {
             return;
         };
+
+        let app = ctx.app();
+        let ui_reactor = app.ui_reactor();
+
         if code == VirtualKeyCode::Tab {
-            let app = ctx.app();
-            let ui_reactor = app.ui_reactor();
             let inventory_state = ui_reactor.root_state(&ui_root_states::INVENTORY_VISIBLE).unwrap();
             inventory_state.update(state == ElementState::Pressed);
+        }
+        if code == VirtualKeyCode::Q {
+            let selected_item_idx = ui_reactor
+                .root_state(&ui_root_states::SELECTED_INVENTORY_ITEM_IDX)
+                .unwrap();
+            selected_item_idx
+                .update_with(|v| (*v as i32 - 1).rem_euclid(NUM_INTENTORY_ITEM_SLOTS as i32) as u32);
+        }
+        if code == VirtualKeyCode::E {
+            let selected_item_idx = ui_reactor
+                .root_state(&ui_root_states::SELECTED_INVENTORY_ITEM_IDX)
+                .unwrap();
+            selected_item_idx
+                .update_with(|v| (*v as i32 + 1).rem_euclid(NUM_INTENTORY_ITEM_SLOTS as i32) as u32);
         }
     }
 

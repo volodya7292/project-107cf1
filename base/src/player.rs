@@ -1,0 +1,2 @@
+pub const NUM_INTENTORY_ITEM_SLOTS: u32 = 15;
+pub const MAX_INVENTORY_ITEMS: u32 = 512;

@@ -11,3 +11,9 @@ impl Item {
         }
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ItemStack {
+    item_id: u32,
+    count: u32,
+}
