@@ -3,15 +3,14 @@ use crate::rendering::item_visuals::ItemVisuals;
 use crate::rendering::ui::backgrounds::game_effects;
 use crate::rendering::ui::container::{
     background, container, container_props, container_props_init, expander, height_spacer, width_spacer,
-    ContainerProps,
 };
 use crate::rendering::ui::fancy_button::fancy_button;
 use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
 use crate::rendering::ui::image::reactive::{ui_image, ui_image_props, UIImageProps};
 use crate::rendering::ui::image::{ImageFitness, ImageSource};
 use crate::rendering::ui::scrollable_container::scrollable_container;
-use crate::rendering::ui::text::reactive::{ui_text, ui_text_props, UITextProps};
-use crate::rendering::ui::{backgrounds, UICallbacks, STATE_ENTITY_ID};
+use crate::rendering::ui::text::reactive::{ui_text, ui_text_props};
+use crate::rendering::ui::{backgrounds, ui_callbacks, STATE_ENTITY_ID};
 use common::glm::Vec2;
 use common::make_static_id;
 use common::types::CmpArc;
@@ -239,32 +238,25 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, overworld_name: String) 
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::column()
-                .with_width(Sizing::Grow(1.0))
-                .with_padding(Padding::equal(10.0)),
-            background: Some(background::solid_color(Color::WHITE.with_alpha(0.02))),
-            ..Default::default()
-        },
+        container_props()
+            .layout(
+                UILayoutC::column()
+                    .with_width(Sizing::Grow(1.0))
+                    .with_padding(Padding::equal(10.0)),
+            )
+            .background(Some(background::solid_color(Color::WHITE.with_alpha(0.02)))),
         move |ctx, ()| {
             let overworld_name = overworld_name.clone();
             ui_text(
                 make_static_id!(),
                 ctx,
-                UITextProps {
-                    text: overworld_name.clone(),
-                    style: TextStyle::new().with_font_size(24.0),
-                    ..Default::default()
-                },
+                ui_text_props(overworld_name.clone()).style(TextStyle::new().with_font_size(24.0)),
             );
             height_spacer(make_static_id!(), ctx, 4.0);
             container(
                 make_static_id!(),
                 ctx,
-                ContainerProps {
-                    layout: UILayoutC::row().with_width(Sizing::Grow(1.0)),
-                    ..Default::default()
-                },
+                container_props().layout(UILayoutC::row().with_width(Sizing::Grow(1.0))),
                 move |ctx, ()| {
                     let name = overworld_name.clone();
                     let on_continue = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
@@ -302,12 +294,11 @@ fn world_selection_list(local_id: &str, ctx: &mut UIScopeContext) {
     scrollable_container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::column()
+        container_props().layout(
+            UILayoutC::column()
                 .with_width(Sizing::Grow(1.0))
                 .with_height(Sizing::Grow(2.0)),
-            ..Default::default()
-        },
+        ),
         |ctx, ()| {
             let world_names = ctx.subscribe(&ctx.root_state::<Vec<String>>(&ui_root_states::WORLD_NAME_LIST));
 
@@ -424,10 +415,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::column().with_grow(),
-            ..Default::default()
-        },
+        container_props().layout(UILayoutC::column().with_grow()),
         |ctx, ()| {
             remember_state!(ctx, name, "world".to_string());
             remember_state!(ctx, seed, rand::random::<u64>().to_string());
@@ -436,7 +424,7 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             let name_state = name.state();
             let seed_state = seed.state();
             let error_state = error.state();
-            let on_proceed = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+            let on_proceed = move |_: &EntityId, ctx: &EngineContext, _: Vec2| {
                 let mut app = ctx.app();
                 let overworld_name = name_state.value();
 
@@ -480,14 +468,11 @@ fn world_creation_view(local_id: &str, ctx: &mut UIScopeContext) {
             ui_text(
                 make_static_id!(),
                 ctx,
-                UITextProps {
-                    layout: UILayoutC::new().with_width_grow().with_align(CrossAlign::End),
-                    text: error.clone(),
-                    align: TextHAlign::Right,
-                    style: TextStyle::new().with_color(Color::DARK_RED).with_font_size(20.0),
-                    wrap: true,
-                    ..Default::default()
-                },
+                ui_text_props(error.clone())
+                    .layout(UILayoutC::new().with_width_grow().with_align(CrossAlign::End))
+                    .align(TextHAlign::Right)
+                    .style(TextStyle::new().with_color(Color::DARK_RED).with_font_size(20.0))
+                    .wrap(true),
             );
             height_spacer(make_static_id!(), ctx, 10.0);
             action_button(
@@ -505,10 +490,7 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::column(),
-            ..Default::default()
-        },
+        container_props().layout(UILayoutC::column()),
         |ctx, ()| {
             // ui_text(
             //     make_static_id!(),
@@ -527,29 +509,24 @@ fn navigation_view(local_id: &str, ctx: &mut UIScopeContext, tab_id: &'static st
     let image_source =
         EngineContext::resource_image(&ctx.ctx().scene(), "/textures/main_menu_background.jpg").unwrap();
 
-    if TABS.into_iter().find(|v| *v == tab_id).is_none() {
+    if !TABS.into_iter().any(|v| v == tab_id) {
         return;
     }
 
     ui_image(
         local_id,
         ctx,
-        UIImageProps {
-            layout: UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)),
-            source: Some(ImageSource::Data(image_source)),
-            fitness: ImageFitness::Cover,
-            children_props: (tab_id,),
-            ..Default::default()
-        },
+        ui_image_props()
+            .layout(UILayoutC::column().with_grow().with_padding(Padding::equal(30.0)))
+            .source(ImageSource::Data(image_source))
+            .fitness(ImageFitness::Cover)
+            .children_props((tab_id,)),
         move |ctx, &(tab_id,)| {
             ui_text(
                 make_static_id!(),
                 ctx,
-                UITextProps {
-                    text: tab_name(tab_id).to_string(),
-                    style: TextStyle::new().with_color(TAB_TITLE_COLOR).with_font_size(30.0),
-                    ..Default::default()
-                },
+                ui_text_props(tab_name(tab_id))
+                    .style(TextStyle::new().with_color(TAB_TITLE_COLOR).with_font_size(30.0)),
             );
             height_spacer(make_static_id!(), ctx, 30.0);
             match tab_id {
@@ -613,7 +590,7 @@ fn game_menu(ctx: &mut UIScopeContext) {
                     .with_grow(),
             )
             .opacity(*menu_opacity.current())
-            .callbacks(UICallbacks::new().with_interaction(menu_visible)),
+            .callbacks(ui_callbacks().interaction(menu_visible)),
         move |ctx, ()| {
             let curr_nav_view = ctx.subscribe(&ctx.root_state(&ui_root_states::CURR_MENU_TAB));
 
@@ -625,13 +602,11 @@ fn game_menu(ctx: &mut UIScopeContext) {
             container(
                 make_static_id!(),
                 ctx,
-                ContainerProps {
-                    layout: UILayoutC::new()
+                container_props_init((*curr_nav_view,)).layout(
+                    UILayoutC::new()
                         .with_width(Sizing::Grow(1.5))
                         .with_height(Sizing::Grow(1.0)),
-                    children_props: (*curr_nav_view,),
-                    ..Default::default()
-                },
+                ),
                 move |ctx, (tab_id,)| {
                     navigation_view(make_static_id!(), ctx, tab_id);
                 },
@@ -647,26 +622,25 @@ fn game_menu(ctx: &mut UIScopeContext) {
         container(
             "modal_wrapper",
             ctx,
-            ContainerProps {
-                layout: UILayoutC::column()
-                    .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
-                    .with_grow(),
-                background: Some(background::solid_color(Color::BLACK.with_alpha(0.4))),
-                ..Default::default()
-            },
+            container_props()
+                .layout(
+                    UILayoutC::column()
+                        .with_position(Position::Relative(Vec2::new(0.0, 0.0)))
+                        .with_grow(),
+                )
+                .background(Some(background::solid_color(Color::BLACK.with_alpha(0.4)))),
             move |ctx, ()| {
                 let modal_fn = modal_fn.clone();
                 expander(make_static_id!(), ctx, 1.0);
                 container(
                     make_static_id!(),
                     ctx,
-                    ContainerProps {
-                        layout: UILayoutC::new()
+                    container_props().layout(
+                        UILayoutC::new()
                             .with_width(Sizing::FitContent)
                             .with_height(Sizing::FitContent)
                             .with_align(CrossAlign::Center),
-                        ..Default::default()
-                    },
+                    ),
                     move |ctx, ()| {
                         modal_fn(ctx);
                     },
@@ -802,24 +776,52 @@ pub fn inventory_slot(local_name: &str, ctx: &mut UIScopeContext, item: ItemVisu
     container(
         local_name,
         ctx,
-        container_props_init(item)
-            .layout(
-                UILayoutC::new()
-                    .with_fixed_size(60.0)
-                    .with_padding(Padding::equal(10.0)),
-            )
-            .background(Some(backgrounds::item_slot(Color::WHITE.with_alpha(0.5)))),
+        container_props_init(item).layout(UILayoutC::new().with_fixed_size(60.0)),
         |ctx, item| {
+            remember_state!(ctx, hovered, false);
+
+            let on_cursor_enter = {
+                let hovered = hovered.state();
+                move |_: &EntityId, _: &EngineContext| {
+                    hovered.update(true);
+                }
+            };
+            let on_cursor_leave = {
+                let hovered = hovered.state();
+                move |_: &EntityId, _: &EngineContext| {
+                    hovered.update(false);
+                }
+            };
+
             container(
                 make_static_id!(),
                 ctx,
-                container_props()
-                    .layout(UILayoutC::new().with_grow())
-                    .background(Some(item.ui_background().clone())),
-                |_, ()| {},
+                container_props_init(item)
+                    .layout(UILayoutC::new().with_grow().with_padding(Padding::equal(10.0)))
+                    .callbacks(
+                        ui_callbacks()
+                            .on_cursor_enter(Arc::new(on_cursor_enter))
+                            .on_cursor_leave(Arc::new(on_cursor_leave)),
+                    )
+                    .background(Some(backgrounds::item_slot(if *hovered {
+                        Color::WHITE
+                    } else {
+                        Color::WHITE.with_alpha(0.5)
+                    }))),
+                |ctx, item| {
+                    container(
+                        make_static_id!(),
+                        ctx,
+                        container_props()
+                            .layout(UILayoutC::new().with_grow())
+                            .callbacks(ui_callbacks().interaction(false))
+                            .background(Some(item.ui_background().clone())),
+                        |_, ()| {},
+                    );
+                },
             );
         },
-    )
+    );
 }
 
 pub fn inventory_slots(local_name: &str, ctx: &mut UIScopeContext) {
@@ -945,10 +947,10 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
             .layout(UILayoutC::new().with_grow())
             .children_props(*in_game_process)
             .callbacks(
-                UICallbacks::new()
-                    .with_focusable(true)
-                    .with_autofocus(true)
-                    .with_on_keyboard(Arc::new(on_keyboard)),
+                ui_callbacks()
+                    .focusable(true)
+                    .autofocus(true)
+                    .on_keyboard(Arc::new(on_keyboard)),
             ),
         move |ctx, in_game| {
             if in_game {

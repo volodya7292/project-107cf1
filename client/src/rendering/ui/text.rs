@@ -234,7 +234,7 @@ impl UITextImpl for UIText {}
 pub mod reactive {
     use super::UniformData;
     use crate::game::EngineCtxGameExt;
-    use crate::rendering::ui::container::{container, ContainerProps};
+    use crate::rendering::ui::container::{container, container_props_init};
     use crate::rendering::ui::text::{on_size_update, UIText, UITextImpl};
     use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
     use common::make_static_id;
@@ -260,6 +260,11 @@ pub mod reactive {
     impl UITextProps {
         pub fn layout(mut self, layout: UILayoutC) -> Self {
             self.layout = layout;
+            self
+        }
+
+        pub fn callbacks(mut self, callbacks: UICallbacks) -> Self {
+            self.callbacks = callbacks;
             self
         }
 
@@ -290,12 +295,9 @@ pub mod reactive {
         container(
             local_name,
             ctx,
-            ContainerProps {
-                layout: props.layout,
-                callbacks: props.callbacks.clone(),
-                children_props: (props.text, props.style, props.wrap, props.align),
-                ..Default::default()
-            },
+            container_props_init((props.text, props.style, props.wrap, props.align))
+                .layout(props.layout)
+                .callbacks(props.callbacks.clone()),
             move |ctx, props| {
                 let parent_entity = *ctx.state(STATE_ENTITY_ID).value();
                 let parent_opacity = *ctx.local_var::<f32>(LOCAL_VAR_OPACITY, 1.0);

@@ -1,12 +1,15 @@
 use crate::rendering::ui::backgrounds;
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
-use crate::rendering::ui::container::{container, ContainerProps};
-use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
+use crate::rendering::ui::container::container;
+use crate::rendering::ui::text::reactive::ui_text;
 use crate::rendering::ui::text_input::{ui_text_input, TextInputProps};
 use common::make_static_id;
 use engine::ecs::component::simple_text::TextStyle;
 use engine::ecs::component::ui::{Padding, UILayoutC};
 use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
+
+use super::container::container_props;
+use super::text::reactive::ui_text_props;
 
 pub struct FancyTextInputProps {
     pub label: String,
@@ -20,11 +23,9 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
     container(
         local_name,
         ctx,
-        ContainerProps {
-            layout: props.layout.with_padding(Padding::equal(2.0)),
-            background: Some(backgrounds::fancy(DEFAULT_FANCY_COLOR)),
-            ..Default::default()
-        },
+        container_props()
+            .layout(props.layout.with_padding(Padding::equal(2.0)))
+            .background(Some(backgrounds::fancy(DEFAULT_FANCY_COLOR))),
         move |ctx, ()| {
             let label = props.label.clone();
             let label_style = props
@@ -35,20 +36,12 @@ pub fn fancy_text_input(local_name: &str, ctx: &mut UIScopeContext, props: Fancy
             container(
                 make_static_id!(),
                 ctx,
-                ContainerProps {
-                    layout: UILayoutC::new().with_padding(Padding::hv(10.0, 0.0)),
-                    ..Default::default()
-                },
+                container_props().layout(UILayoutC::new().with_padding(Padding::hv(10.0, 0.0))),
                 move |ctx, ()| {
                     ui_text(
                         make_static_id!(),
                         ctx,
-                        UITextProps {
-                            text: label.clone(),
-                            style: label_style,
-                            wrap: false,
-                            ..Default::default()
-                        },
+                        ui_text_props(label.clone()).style(label_style).wrap(false),
                     );
                 },
             );

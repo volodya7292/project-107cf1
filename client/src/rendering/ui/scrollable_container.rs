@@ -89,8 +89,8 @@ pub fn scrollable_container<P, F>(
                         props
                             .callbacks
                             .clone()
-                            .with_on_scroll(on_scroll)
-                            .with_on_size_update(on_wrapper_size_update),
+                            .on_scroll(on_scroll)
+                            .on_size_update(on_wrapper_size_update),
                     ),
                 move |ctx, props| {
                     let children_fn = Arc::clone(&children_fn);
@@ -109,12 +109,7 @@ pub fn scrollable_container<P, F>(
                                     .with_position(Position::Relative(Vec2::new(0.0, *vertical_pos)))
                                     .with_height(Sizing::FitContent),
                             )
-                            .callbacks(
-                                props
-                                    .callbacks
-                                    .clone()
-                                    .with_on_size_update(on_content_size_update),
-                            ),
+                            .callbacks(props.callbacks.clone().on_size_update(on_content_size_update)),
                         move |ctx, props| {
                             children_fn(ctx, props);
                         },
@@ -129,8 +124,8 @@ pub fn scrollable_container<P, F>(
                     ctx,
                     container_props()
                         .layout(UILayoutC::new().with_fixed_width(6.0).with_height_grow())
-                        .children_props(bar_offset),
-                    move |ctx, bar_offset| {
+                        .children_props((bar_offset, bar_grow_ratio)),
+                    move |ctx, (bar_offset, bar_grow_ratio)| {
                         container(
                             make_static_id!(),
                             ctx,

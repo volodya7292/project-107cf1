@@ -1,3 +1,4 @@
+use super::ui_callbacks;
 use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
 use common::glm::{Vec2, Vec4};
@@ -262,13 +263,13 @@ pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::new()
-                .with_width(Sizing::Grow(fraction))
-                .with_height(Sizing::Grow(fraction)),
-            callbacks: UICallbacks::new().with_interaction(false),
-            ..Default::default()
-        },
+        container_props()
+            .layout(
+                UILayoutC::new()
+                    .with_width(Sizing::Grow(fraction))
+                    .with_height(Sizing::Grow(fraction)),
+            )
+            .callbacks(ui_callbacks().interaction(false)),
         |_, ()| {},
     );
 }
@@ -277,11 +278,9 @@ pub fn width_spacer(local_id: &str, ctx: &mut UIScopeContext, width: f32) {
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::new().with_min_width(width),
-            callbacks: UICallbacks::new().with_interaction(false),
-            ..Default::default()
-        },
+        container_props()
+            .layout(UILayoutC::new().with_min_width(width))
+            .callbacks(ui_callbacks().interaction(false)),
         |_, ()| {},
     );
 }
@@ -290,11 +289,9 @@ pub fn height_spacer(local_id: &str, ctx: &mut UIScopeContext, height: f32) {
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::new().with_min_height(height),
-            callbacks: UICallbacks::new().with_interaction(false),
-            ..Default::default()
-        },
+        container_props()
+            .layout(UILayoutC::new().with_min_height(height))
+            .callbacks(ui_callbacks().interaction(false)),
         |_, ()| {},
     );
 }

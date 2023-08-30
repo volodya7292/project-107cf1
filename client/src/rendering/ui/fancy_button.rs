@@ -1,8 +1,8 @@
+use super::container::container_props_init;
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
-use crate::rendering::ui::container::{container, ContainerProps};
-use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
-use crate::rendering::ui::text::UITextImpl;
-use crate::rendering::ui::{backgrounds, UICallbacks};
+use crate::rendering::ui::container::container;
+use crate::rendering::ui::text::reactive::{ui_text, ui_text_props};
+use crate::rendering::ui::{backgrounds, ui_callbacks};
 use common::make_static_id;
 use engine::ecs::component::simple_text::StyledString;
 use engine::ecs::component::ui::{ClickedCallback, Padding, UILayoutC};
@@ -22,17 +22,13 @@ pub fn fancy_button(
     container(
         local_id,
         ctx,
-        ContainerProps {
-            layout: layout.with_padding(Padding::ZERO),
-            children_props: (layout, text),
-            ..Default::default()
-        },
+        container_props_init((layout, text)).layout(layout.with_padding(Padding::ZERO)),
         move |ctx, (layout, text)| {
             remember_state!(ctx, text_color, AnimatedValue::immediate(*text.style().color()));
             let curr_text_color = *text.style().color();
 
             let text_color2 = text_color.state();
-            let on_cursor_enter = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
+            let on_cursor_enter = Arc::new(move |_: &EntityId, _: &EngineContext| {
                 const MUL_FACTOR: f32 = 3.0;
                 let mut active_color = curr_text_color.into_raw_linear();
                 active_color.x *= MUL_FACTOR;
@@ -47,7 +43,7 @@ pub fn fancy_button(
             });
 
             let text_color2 = text_color.state();
-            let on_cursor_leave = Arc::new(move |_: &EntityId, ctx: &EngineContext| {
+            let on_cursor_leave = Arc::new(move |_: &EntityId, _: &EngineContext| {
                 text_color2.update_with(move |prev| {
                     let mut new = *prev;
                     new.retarget(TransitionTarget::new(curr_text_color, 0.2));
@@ -60,26 +56,22 @@ pub fn fancy_button(
             container(
                 make_static_id!(),
                 ctx,
-                ContainerProps {
-                    layout: layout.with_grow(),
-                    background: Some(backgrounds::fancy(DEFAULT_FANCY_COLOR)),
-                    callbacks: UICallbacks::new()
-                        .with_on_click(on_click.clone())
-                        .with_on_cursor_enter(on_cursor_enter)
-                        .with_on_cursor_leave(on_cursor_leave),
-                    children_props: (text.clone(), *text_color),
-                    ..Default::default()
-                },
+                container_props_init((text.clone(), *text_color))
+                    .layout(layout.with_grow())
+                    .background(Some(backgrounds::fancy(DEFAULT_FANCY_COLOR)))
+                    .callbacks(
+                        ui_callbacks()
+                            .on_click(on_click.clone())
+                            .on_cursor_enter(on_cursor_enter)
+                            .on_cursor_leave(on_cursor_leave),
+                    ),
                 move |ctx, (text, text_color)| {
                     ui_text(
                         make_static_id!(),
                         ctx,
-                        UITextProps {
-                            text: text.data().to_string(),
-                            callbacks: UICallbacks::new().with_interaction(false),
-                            style: text.style().clone().with_color(*text_color.current()),
-                            ..Default::default()
-                        },
+                        ui_text_props(text.data().to_string())
+                            .callbacks(ui_callbacks().interaction(false))
+                            .style(text.style().with_color(*text_color.current())),
                     );
                 },
             );

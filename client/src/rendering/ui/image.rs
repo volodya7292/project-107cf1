@@ -301,6 +301,11 @@ pub mod reactive {
             self.layout = layout;
             self
         }
+
+        pub fn children_props(mut self, props: P) -> Self {
+            self.children_props = props;
+            self
+        }
     }
 
     pub fn ui_image_props<P: Default>() -> UIImageProps<P> {

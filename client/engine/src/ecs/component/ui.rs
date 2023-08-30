@@ -413,30 +413,21 @@ impl UILayoutCacheC {
     }
 }
 
-#[macro_export]
-macro_rules! define_callback {
-    ($name: ident ($($params: ty $(,)?)*)) => {
-        pub trait $name: Fn($($params,)*) + Send + Sync + 'static {}
-        impl<F: Fn($($params,)*) + Send + Sync + 'static> $name for F {}
-    };
-}
-
+pub type BasicEventCallback = Arc<dyn Fn(&EntityId, &EngineContext) + Send + Sync>;
 pub type ClickedCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
 pub type ScrollCallback = Arc<dyn Fn(&EntityId, &EngineContext, f64) + Send + Sync>;
 pub type SizeUpdateCallback = Arc<dyn Fn(&EntityId, &EngineContext, Vec2) + Send + Sync>;
 pub type KeyboardCallback = Arc<dyn Fn(&EntityId, &EngineContext, WSIKeyboardInput) + Send + Sync>;
 
-define_callback!(BasicEventCallback(&EntityId, &EngineContext));
-
 pub struct UIEventHandlerC {
-    pub on_cursor_enter: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_cursor_leave: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_mouse_press: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_mouse_release: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_cursor_enter: Option<BasicEventCallback>,
+    pub on_cursor_leave: Option<BasicEventCallback>,
+    pub on_mouse_press: Option<BasicEventCallback>,
+    pub on_mouse_release: Option<BasicEventCallback>,
     pub on_scroll: Option<ScrollCallback>,
     pub on_keyboard: Option<KeyboardCallback>,
-    pub on_focus_in: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
-    pub on_focus_out: Option<Arc<dyn BasicEventCallback<Output = ()>>>,
+    pub on_focus_in: Option<BasicEventCallback>,
+    pub on_focus_out: Option<BasicEventCallback>,
     pub on_click: Option<ClickedCallback>,
     pub on_size_update: Option<SizeUpdateCallback>,
     pub focusable: bool,

@@ -1,6 +1,6 @@
-use crate::rendering::ui::container::{container, container_props, ContainerProps};
-use crate::rendering::ui::text::reactive::{ui_text, UITextProps};
-use crate::rendering::ui::{container, UICallbacks};
+use crate::rendering::ui::container::{container, container_props, container_props_init};
+use crate::rendering::ui::text::reactive::{ui_text, ui_text_props};
+use crate::rendering::ui::{container, ui_callbacks};
 use clipboard::ClipboardProvider;
 use common::glm::Vec2;
 use common::make_static_id;
@@ -16,11 +16,9 @@ use engine::module::ui::reactive::{ReactiveState, UIScopeContext};
 use engine::utils::transition::AnimatedValue;
 use engine::utils::transition::TransitionTarget;
 use engine::winit::event::{ElementState, VirtualKeyCode};
-use engine::{define_callback, remember_state, EngineContext};
+use engine::{remember_state, EngineContext};
 use entity_data::EntityId;
 use std::sync::Arc;
-
-define_callback!(TextChangeCallback(&EngineContext, String));
 
 #[derive(Default, Clone, PartialEq)]
 pub struct TextInputProps {
@@ -38,11 +36,7 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
     container(
         local_name,
         ctx,
-        ContainerProps {
-            layout: UILayoutC::new().with_width_grow(),
-            children_props: props,
-            ..Default::default()
-        },
+        container_props_init(props).layout(UILayoutC::new().with_width_grow()),
         move |ctx, props| {
             let line_height = {
                 let text_renderer = ctx.ctx().module::<TextRenderer>();
@@ -233,44 +227,44 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
             container(
                 make_static_id!(),
                 ctx,
-                ContainerProps {
-                    layout: props
+                container_props_init((
+                    text.clone(),
+                    props.style,
+                    props.multiline,
+                    cursor_offset,
+                    line_height,
+                    *focused,
+                ))
+                .layout(
+                    props
                         .layout
                         .with_content_transform(UITransform::new().with_offset(*text_offset))
                         .with_min_height(line_height)
                         .with_grow(),
-                    callbacks: UICallbacks::new()
-                        .with_focusable(true)
-                        .with_on_click(Arc::new(on_click))
-                        .with_on_focus_in(Arc::new(on_focus_in))
-                        .with_on_focus_out(Arc::new(on_focus_out))
-                        .with_on_keyboard(Arc::new(on_key_press))
-                        .with_on_size_update(Arc::new(on_text_size_update)),
-                    children_props: (
-                        text.clone(),
-                        props.style,
-                        props.multiline,
-                        cursor_offset,
-                        line_height,
-                        *focused,
-                    ),
-                    ..Default::default()
-                },
+                )
+                .callbacks(
+                    ui_callbacks()
+                        .focusable(true)
+                        .on_click(Arc::new(on_click))
+                        .on_focus_in(Arc::new(on_focus_in))
+                        .on_focus_out(Arc::new(on_focus_out))
+                        .on_keyboard(Arc::new(on_key_press))
+                        .on_size_update(Arc::new(on_text_size_update)),
+                ),
                 move |ctx, (text, style, multiline, cursor_offset, line_height, focused)| {
                     ui_text(
                         make_static_id!(),
                         ctx,
-                        UITextProps {
-                            layout: UILayoutC::new()
-                                .with_width_grow()
-                                .with_height(Sizing::FitContent)
-                                .with_min_height(line_height),
-                            callbacks: UICallbacks::new().with_interaction(false),
-                            text,
-                            style,
-                            wrap: multiline,
-                            ..Default::default()
-                        },
+                        ui_text_props(text)
+                            .layout(
+                                UILayoutC::new()
+                                    .with_width_grow()
+                                    .with_height(Sizing::FitContent)
+                                    .with_min_height(line_height),
+                            )
+                            .callbacks(ui_callbacks().interaction(false))
+                            .style(style)
+                            .wrap(multiline),
                     );
                     if focused {
                         let cursor_opacity = ctx.subscribe(&cursor_opacity_state);
