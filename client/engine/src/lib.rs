@@ -2,6 +2,7 @@
 pub mod ecs;
 pub mod event;
 pub mod execution;
+pub mod gltf;
 pub mod module;
 mod platform;
 #[cfg(test)]

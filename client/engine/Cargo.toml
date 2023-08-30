@@ -21,6 +21,7 @@ rusttype = "0.9"
 unicode-normalization = "0.1"
 bitvec = "1.0"
 bumpalo = "3.13"
+gltf = { version = "1.3", features = ["utils"], default-features = false }
 
 [build-dependencies]
 common = { path = "../../common" }
@@ -29,4 +30,8 @@ common = { path = "../../common" }
 core-graphics = "0.23"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
+windows-sys = { version = "0.48", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+] }
