@@ -9,7 +9,7 @@ use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
 use engine::module::main_renderer::MaterialPipelineId;
 use engine::module::scene::Scene;
-use engine::module::ui::reactive::UIScopeContext;
+use engine::module::ui::reactive::{Props, UIScopeContext};
 use engine::module::ui::UIObject;
 use engine::module::ui::UIObjectEntityImpl;
 use engine::utils::U8SliceHelper;
@@ -64,7 +64,7 @@ pub struct ContainerProps<P> {
     pub children_props: P,
 }
 
-impl<P> ContainerProps<P> {
+impl<P: Props> ContainerProps<P> {
     pub fn layout(mut self, layout: UILayoutC) -> Self {
         self.layout = layout;
         self
@@ -93,6 +93,17 @@ impl<P> ContainerProps<P> {
     pub fn children_props(mut self, props: P) -> Self {
         self.children_props = props;
         self
+    }
+
+    pub fn into_dyn(self) -> ContainerProps<Arc<dyn Props>> {
+        ContainerProps {
+            layout: self.layout,
+            callbacks: self.callbacks,
+            background: self.background,
+            opacity: self.opacity,
+            corner_radius: self.corner_radius,
+            children_props: Arc::new(self.children_props),
+        }
     }
 }
 
@@ -180,11 +191,14 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext, _new_size: Vec2) {
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
 }
 
-pub fn container<P, F>(local_name: &str, ctx: &mut UIScopeContext, props: ContainerProps<P>, children_fn: F)
-where
-    P: Clone + PartialEq + 'static,
-    F: Fn(&mut UIScopeContext, P) + 'static,
-{
+type ChildrenFn = Arc<dyn Fn(&mut UIScopeContext, &dyn Props)>;
+
+fn container_impl(
+    local_name: &str,
+    ctx: &mut UIScopeContext,
+    props: ContainerProps<Arc<dyn Props>>,
+    children_fn: ChildrenFn,
+) {
     let child_num = ctx.num_children();
     let parent_entity = *ctx.state::<EntityId>(STATE_ENTITY_ID).value();
     let parent_opacity = *ctx.local_var::<f32>(LOCAL_VAR_OPACITY, 1.0);
@@ -242,7 +256,7 @@ where
 
                 drop(obj);
             }
-            children_fn(scope_ctx, props.children_props);
+            children_fn(scope_ctx, &props.children_props);
         },
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
@@ -250,6 +264,20 @@ where
             scene.remove_object(&entity);
         },
     );
+}
+
+pub fn container<P, F>(local_name: &str, ctx: &mut UIScopeContext, props: ContainerProps<P>, children_fn: F)
+where
+    P: Clone + PartialEq + 'static,
+    F: Fn(&mut UIScopeContext, P) + 'static,
+{
+    container_impl(
+        local_name,
+        ctx,
+        props.into_dyn(),
+        Arc::new(move |ctx, props| children_fn(ctx, props.as_any().downcast_ref::<P>().unwrap().clone())),
+    );
+    todo!()
 }
 
 pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {

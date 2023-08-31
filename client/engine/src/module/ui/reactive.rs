@@ -62,6 +62,27 @@ impl<T: Send + Sync + PartialEq + 'static> State for Arc<T> {
     }
 }
 
+pub trait Props: 'static {
+    fn as_any(&self) -> &dyn Any;
+    fn dyn_eq(&self, other: &dyn Props) -> bool;
+}
+
+impl<T: PartialEq + 'static> Props for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn dyn_eq(&self, other: &dyn Props) -> bool {
+        self == other.as_any().downcast_ref::<T>().unwrap()
+    }
+}
+
+impl PartialEq for dyn Props {
+    fn eq(&self, other: &Self) -> bool {
+        self.dyn_eq(other)
+    }
+}
+
 type ChildrenFunction = Rc<dyn Fn(&mut UIScopeContext, &dyn Any)>;
 
 pub struct UIScope {
