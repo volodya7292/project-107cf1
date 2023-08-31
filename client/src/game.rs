@@ -1,7 +1,6 @@
 mod ui;
 
 use crate::default_resource_mapping::DefaultResourceMapping;
-use crate::game::ui::ui_root_states;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
@@ -37,7 +36,7 @@ use engine::module::main_renderer::{camera, MainRenderer, PostProcess, WrapperOb
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
 use engine::module::ui::reactive::UIReactor;
-use engine::module::ui::{UIObjectEntityImpl, UIRenderer};
+use engine::module::ui::UIRenderer;
 use engine::module::ui_interaction_manager::UIInteractionManager;
 use engine::module::{main_renderer, EngineModule};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
@@ -55,6 +54,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use self::ui::common::ui_root_states;
 
 const PROGRAM_NAME: &str = "project-107cf1";
 const DEF_WINDOW_SIZE: (u32, u32) = (1280, 720);
@@ -226,6 +227,15 @@ impl MainApp {
         };
 
         let ui_reactor = { UIReactor::new(move |ctx| ui::overlay_root(ctx, ui_root_element)) };
+
+        let res =
+            engine::gltf::load_simple_gltf(&resources.get("models/material_item_blob.glb").unwrap()).unwrap();
+        println!(
+            "{} {:?} {:?}",
+            res.positions.len(),
+            res.normals.map(|v| v.len()),
+            res.indices.map(|v| v.len()),
+        );
 
         let game = MainApp {
             resources: Arc::clone(&resources),

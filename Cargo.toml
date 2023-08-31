@@ -16,8 +16,28 @@ resolver = "2"
 [profile.dev.package."*"]
 opt-level = 1
 
+[profile.dev.package."serde"]
+opt-level = 3
+
+[profile.dev.package."serde_derive"]
+opt-level = 3
+
+[profile.dev.package."serde_bytes"]
+opt-level = 3
+
+[profile.dev.package."erased-serde"]
+opt-level = 3
+
+[profile.dev.package."tokio"]
+opt-level = 3
 
 [profile.dev.package."basis-universal-sys"]
+opt-level = 3
+
+[profile.dev.package."nalgebra"]
+opt-level = 3
+
+[profile.dev.package."nalgebra-glm"]
 opt-level = 3
 
 [profile.dev.package."ash"]

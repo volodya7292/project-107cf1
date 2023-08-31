@@ -2,3 +2,5 @@
 /.idea/deployment.xml
 /.idea/shelf
 /target
+
+*.blend1
