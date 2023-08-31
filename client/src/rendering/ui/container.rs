@@ -191,7 +191,7 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext, _new_size: Vec2) {
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), clip_rect);
 }
 
-type ChildrenFn = Arc<dyn Fn(&mut UIScopeContext, &dyn Props)>;
+type ChildrenFn = Arc<dyn Fn(&mut UIScopeContext, Arc<dyn Props>)>;
 
 fn container_impl(
     local_name: &str,
@@ -256,7 +256,7 @@ fn container_impl(
 
                 drop(obj);
             }
-            children_fn(scope_ctx, &props.children_props);
+            children_fn(scope_ctx, props.children_props);
         },
         move |ctx, scope| {
             let entity = scope.state::<EntityId>(STATE_ENTITY_ID).unwrap();
@@ -275,9 +275,11 @@ where
         local_name,
         ctx,
         props.into_dyn(),
-        Arc::new(move |ctx, props| children_fn(ctx, props.as_any().downcast_ref::<P>().unwrap().clone())),
+        Arc::new(move |ctx, props| {
+            let props = (&*props).as_any().downcast_ref::<P>().unwrap();
+            children_fn(ctx, props.clone());
+        }),
     );
-    todo!()
 }
 
 pub fn expander(local_id: &str, ctx: &mut UIScopeContext, fraction: f32) {
