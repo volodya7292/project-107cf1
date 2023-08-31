@@ -13,6 +13,67 @@ members = [
 resolver = "2"
 
 
+[workspace.dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+erased-serde = "0.3"
+serde_yaml = "0.9"
+serde_json = "1.0"
+lazy_static = "1.4"
+entity_data = { version = "1.11", features = ["rayon"] }
+glob = "0.3"
+byteorder = "1.4"
+bincode = { version = "1.3.3" }
+indexmap = "2.0"
+moka = "0.11"
+ahash = "0.8"
+parking_lot = { version = "0.12", features = [
+    "arc_lock",
+    "hardware-lock-elision",
+    "deadlock_detection",
+] }
+rayon = "1.7"
+nalgebra = "0.32"
+nalgebra-glm = "0.18"
+tokio = { version = "1", features = ["rt", "time", "sync", "parking_lot"] }
+futures-lite = "1.13"
+bumpalo = "3.13"
+memoffset = "0.9"
+index-pool = "1.0"
+ring = "0.16"
+image = { version = "0.24", default-features = false, features = [
+    "png",
+    "jpeg",
+] }
+noise = { version = "0.8", default-features = false }
+rand = "0.8"
+rand_distr = "0.4"
+approx = "0.5"
+smallvec = { version = "1.11", features = ["const_generics"] }
+bit-vec = "0.6"
+fixedbitset = "0.4"
+replace_with = "0.1"
+rstar = "0.11"
+rand_xoshiro = "0.6"
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+simple_logger = "4.1"
+dirs = "5.0"
+clipboard = "0.5"
+basis-universal = "0.3"
+winit = "0.28"
+rusttype = "0.9"
+unicode-normalization = "0.1"
+bitvec = "1.0"
+gltf = { version = "1.3", features = ["utils"], default-features = false }
+ash = "0.37"
+raw-window-handle = "0.5"
+spirv_cross = { version = "0.23", features = ["glsl"] }
+bindgen = "0.66"
+cc = "1.0"
+cxx = "1.0"
+cxx-build = "1.0"
+
 [profile.dev.package."*"]
 opt-level = 1
 

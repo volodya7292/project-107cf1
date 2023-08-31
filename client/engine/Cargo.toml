@@ -9,19 +9,18 @@ vk-wrapper = { path = "vk-wrapper" }
 common = { path = "../../common" }
 msdfgen = { path = "msdfgen" }
 shader_ids = { path = "shader_ids" }
-basis-universal = "0.3"
-fixedbitset = "0.4"
-index-pool = "1.0"
-entity_data = { version = "1.11", features = ["rayon"] }
-#entity_data = { path = "../../../entity_data", features = ["rayon"] }
-smallvec = { version = "1.11", features = ["const_generics"] }
-lazy_static = "1.4"
-winit = "0.28"
-rusttype = "0.9"
-unicode-normalization = "0.1"
-bitvec = "1.0"
-bumpalo = "3.13"
-gltf = { version = "1.3", features = ["utils"], default-features = false }
+basis-universal = { workspace = true }
+fixedbitset = { workspace = true }
+index-pool = { workspace = true }
+entity_data = { workspace = true }
+smallvec = { workspace = true }
+lazy_static = { workspace = true }
+winit = { workspace = true }
+rusttype = { workspace = true }
+unicode-normalization = { workspace = true }
+bitvec = { workspace = true }
+bumpalo = { workspace = true }
+gltf = { workspace = true }
 
 [build-dependencies]
 common = { path = "../../common" }

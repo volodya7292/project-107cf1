@@ -8,19 +8,18 @@ edition = "2021"
 common = { path = "../common" }
 engine = { path = "engine" }
 base = { path = "../base" }
-simple_logger = "4.1"
-noise = { version = "0.8", default-features = false }
-rand = "0.8"
-rand_distr = "0.4"
-approx = "0.5"
-entity_data = "1.11"
-#entity_data = { path = "../../entity_data"}
-smallvec = "1.11"
-bit-vec = "0.6"
-fixedbitset = "0.4"
-lazy_static = "1.4"
-dirs = "5.0"
-clipboard = "0.5"
+simple_logger = { workspace = true }
+noise = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+approx = { workspace = true }
+entity_data = { workspace = true }
+smallvec = { workspace = true }
+bit-vec = { workspace = true }
+fixedbitset = { workspace = true }
+lazy_static = { workspace = true }
+dirs = { workspace = true }
+clipboard = { workspace = true }
 
 [build-dependencies]
 common = { path = "../common" }

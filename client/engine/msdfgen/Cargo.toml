@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cxx = "1.0"
-rusttype = "0.9"
+cxx = { workspace = true }
+rusttype = { workspace = true }
 
 [build-dependencies]
-cxx-build = "1.0"
+cxx-build = { workspace = true }
