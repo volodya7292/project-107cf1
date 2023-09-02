@@ -86,6 +86,10 @@ impl EngineContext<'_> {
         self.module_manager.borrow().module_mut()
     }
 
+    pub fn module_last_update_time<M: EngineModule>(&self) -> f64 {
+        self.module_manager.borrow().module_last_update_time::<M>()
+    }
+
     pub fn dispatch_callback<F: FnOnce(&EngineContext, f64) + 'static>(&self, callback: F) {
         self.callbacks.borrow_mut().push(Box::new(callback));
     }
@@ -156,8 +160,8 @@ impl Engine {
 
                     let t0 = Instant::now();
 
-                    for module in module_manger.modules() {
-                        module.borrow_mut().on_update(self.delta_time, &ctx);
+                    for (module_id, module) in module_manger.modules() {
+                        module_manger.update_module(module_id, self.delta_time, &ctx);
 
                         // Call dispatched callbacks as soon as possible
                         let callbacks: Vec<_> = self.callbacks.borrow_mut().drain(..).collect();

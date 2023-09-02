@@ -1,16 +1,19 @@
+mod actions;
 pub mod common;
+mod debug_overlay;
 mod elements;
 mod hud;
 mod inventory;
 mod main_menu;
-mod actions;
 
-use crate::game::ui::{hud::hud_overlay, main_menu::main_menu_overlay};
+use crate::game::ui::{debug_overlay::debug_overlay, hud::hud_overlay, main_menu::main_menu_overlay};
 use common::*;
 
 pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     ctx.request_state(STATE_ENTITY_ID, || root_entity);
 
+    ctx.request_state(&*ui_root_states::DEBUG_INFO, Vec::<String>::new);
+    ctx.request_state(&*ui_root_states::DEBUG_INFO_VISIBLE, || false);
     ctx.request_state(&*ui_root_states::MENU_VISIBLE, || true);
     ctx.request_state(&*ui_root_states::CURR_MENU_TAB, || "");
     ctx.request_state(&*ui_root_states::WORLD_NAME_LIST, Vec::<String>::new);
@@ -51,6 +54,14 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
         let app = ctx.app();
         let ui_reactor = app.ui_reactor();
 
+        if code == VirtualKeyCode::RBracket {
+            let debug_info_visible = ui_reactor
+                .root_state(&ui_root_states::DEBUG_INFO_VISIBLE)
+                .unwrap();
+            if state == ElementState::Released {
+                debug_info_visible.update_with(|visible| !*visible);
+            }
+        }
         if code == VirtualKeyCode::Tab {
             let inventory_state = ui_reactor.root_state(&ui_root_states::INVENTORY_VISIBLE).unwrap();
             inventory_state.update(state == ElementState::Pressed);
@@ -89,6 +100,7 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
                 game_inventory_overlay(ctx);
             }
             main_menu_overlay(ctx);
+            debug_overlay(ctx);
         },
     );
 }

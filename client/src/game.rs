@@ -617,10 +617,14 @@ impl MainApp {
         };
 
         let input = ctx.module::<Input>();
-
         let kb = input.keyboard();
+
         let mut curr_state = main_state.lock();
         let player_state = curr_state.overworld.interface().persisted_state().player_state();
+
+        if player_state.is_dead() {
+            return;
+        }
         let Some(player_position) = player_state.position() else {
             return;
         };
@@ -836,15 +840,45 @@ impl EngineModule for MainApp {
             });
         }
 
-        // Update HUD
         if let Some(curr_state) = self.game_state.as_ref().map(|v| v.lock()) {
             let reactor = self.ui_reactor();
-            let player_health_state = reactor.root_state(&ui_root_states::PLAYER_HEALTH).unwrap();
-            let player_satiety_state = reactor.root_state(&ui_root_states::PLAYER_SATIETY).unwrap();
+            // Update HUD
+            {
+                let player_health_state = reactor.root_state(&ui_root_states::PLAYER_HEALTH).unwrap();
+                let player_satiety_state = reactor.root_state(&ui_root_states::PLAYER_SATIETY).unwrap();
 
-            let player_state = curr_state.overworld.interface().persisted_state().player_state();
-            player_health_state.update(player_state.health());
-            player_satiety_state.update(player_state.satiety());
+                let player_state = curr_state.overworld.interface().persisted_state().player_state();
+                player_health_state.update(player_state.health());
+                player_satiety_state.update(player_state.satiety());
+            }
+
+            // Update debug info
+            {
+                let fps = 1.0 / delta_time;
+                let app_time = ctx.module_last_update_time::<MainApp>();
+                let input_time = ctx.module_last_update_time::<Input>();
+                let ui_inter_manager_time = ctx.module_last_update_time::<UIInteractionManager>();
+                let ui_renderer_time = ctx.module_last_update_time::<UIRenderer>();
+                let main_renderer_time = ctx.module_last_update_time::<MainRenderer>();
+                let scene_time = ctx.module_last_update_time::<Scene>();
+
+                let renderer_timings = ctx.module::<MainRenderer>().last_timings();
+
+                let debug_info_state = reactor.root_state(&ui_root_states::DEBUG_INFO).unwrap();
+                debug_info_state.update(vec![
+                    format!("{fps:.1} fps"),
+                    format!("MainApp: {:.1} ms", app_time * 1000.0),
+                    format!("Input: {:.1} ms", input_time * 1000.0),
+                    format!("UIInteractionManager: {:.1} ms", ui_inter_manager_time * 1000.0),
+                    format!("UIRenderer: {:.1} ms", ui_renderer_time * 1000.0),
+                    format!(
+                        "MainRenderer: {:.1} ms: {}",
+                        main_renderer_time * 1000.0,
+                        renderer_timings
+                    ),
+                    format!("Scene: {:.1} ms", scene_time * 1000.0),
+                ]);
+            }
         };
 
         if self.is_menu_visible().unwrap_or(true) {

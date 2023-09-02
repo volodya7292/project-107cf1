@@ -4,6 +4,7 @@ use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageConte
 use common::parking_lot::Mutex;
 use common::types::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 use vk_wrapper::{Device, DeviceError, QueueType};
 
 struct StageInfo {
@@ -21,6 +22,7 @@ pub(crate) struct StageManager {
     device: Arc<Device>,
     res_manager: ResourceManager,
     stages: HashMap<RenderStageId, Mutex<Box<dyn RenderStage>>>,
+    last_stage_timings: Vec<(String, f64)>,
     stages_infos: HashMap<RenderStageId, StageInfo>,
     submits: Vec<SubmitStages>,
 }
@@ -139,6 +141,7 @@ impl StageManager {
             stages,
             stages_infos,
             submits,
+            last_stage_timings: vec![],
         }
     }
 
@@ -151,6 +154,8 @@ impl StageManager {
         // is done inside Device::run_jobs()
 
         let scope = self.res_manager.scope();
+        let mut last_stage_timings = vec![];
+        last_stage_timings.clear();
 
         for submit_batch in &self.submits {
             let run_results: Vec<_> = submit_batch
@@ -163,7 +168,14 @@ impl StageManager {
                     let mut job = info.job.lock();
                     let cmd_list = job.get_cmd_list_for_recording();
 
-                    stage.run(cmd_list, &scope, ctx)
+                    let t0 = Instant::now();
+                    let result = stage.run(cmd_list, &scope, ctx);
+                    let t1 = Instant::now();
+
+                    let time = (t1 - t0).as_secs_f64();
+                    last_stage_timings.push((stage.name().to_owned(), time));
+
+                    result
                 })
                 .collect();
 
@@ -207,7 +219,13 @@ impl StageManager {
             self.device.run_jobs_sync(&mut exec_infos)?;
         }
 
+        self.last_stage_timings = last_stage_timings;
+
         Ok(())
+    }
+
+    pub fn last_stage_timings(&self) -> &[(String, f64)] {
+        &self.last_stage_timings
     }
 
     pub fn wait_idle(&self) {

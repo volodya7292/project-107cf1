@@ -37,6 +37,8 @@ pub mod ui_root_states {
     use lazy_static::lazy_static;
 
     lazy_static! {
+        pub static ref DEBUG_INFO: StateId<Vec<String>> = "debug_info".into();
+        pub static ref DEBUG_INFO_VISIBLE: StateId<bool> = "debug_info_visible".into();
         pub static ref MENU_VISIBLE: StateId<bool> = "menu_visible".into();
         pub static ref ACTIVE_MODAL_VIEWS: StateId<Vec<ModalFn>> = "curr_modal_view".into();
         pub static ref CURR_MENU_TAB: StateId<&'static str> = "curr_menu_tab".into();

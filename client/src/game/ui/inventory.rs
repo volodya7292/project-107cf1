@@ -118,7 +118,12 @@ pub fn game_inventory_overlay(ctx: &mut UIScopeContext) {
         make_static_id!(),
         ctx,
         container_props()
-            .layout(UILayoutC::new().with_grow())
+            .layout(
+                UILayoutC::new()
+                    .with_grow()
+                    .with_position(Position::Relative(Vec2::zeros())),
+            )
+            .callbacks(ui_callbacks().interaction(*visible))
             .opacity(opacity),
         |ctx, ()| {
             expander(make_static_id!(), ctx, 1.0);

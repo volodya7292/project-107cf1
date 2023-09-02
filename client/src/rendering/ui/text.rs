@@ -31,6 +31,7 @@ pub struct UniformData {
 
 #[derive(Clone)]
 pub struct TextState {
+    main_obj_size: Vec2,
     wrapper_entity: ObjectEntityId<UIObject<WrapperState>>,
     raw_text_entity: ObjectEntityId<RawTextObject>,
     text: StyledString,
@@ -77,18 +78,27 @@ impl UIState for TextState {
 fn on_size_update(entity: &EntityId, ctx: &EngineContext, new_size: Option<Vec2>) {
     let mut scene = ctx.module_mut::<Scene>();
     let mut entry = scene.entry(entity);
-    let state = entry.get_mut::<TextState>().clone();
+    let state = {
+        let state = entry.get_mut::<TextState>();
+        if let Some(new_size) = new_size {
+            state.main_obj_size = new_size;
+        }
+        state.clone()
+    };
 
     let cache = entry.get::<UILayoutCacheC>();
     let rect_data = *cache.normalized_clip_rect();
-    let new_size = new_size.unwrap_or(Vec2::new(f32::INFINITY, 0.0));
 
     let text_block_size = {
         let text_renderer = ctx.module_mut::<TextRenderer>();
         text_renderer.calculate_minimum_text_size(
             state.text.data(),
             state.text.style(),
-            if state.wrap { new_size.x } else { f32::INFINITY },
+            if state.wrap {
+                state.main_obj_size.x
+            } else {
+                f32::INFINITY
+            },
         )
     };
 
@@ -104,7 +114,11 @@ fn on_size_update(entity: &EntityId, ctx: &EngineContext, new_size: Option<Vec2>
     let mut raw_text_entry = scene.entry(&state.raw_text_entity);
     let simple_text = raw_text_entry.get_mut::<SimpleTextC>();
 
-    simple_text.max_width = if state.wrap { new_size.x } else { f32::INFINITY };
+    simple_text.max_width = if state.wrap {
+        state.main_obj_size.x
+    } else {
+        f32::INFINITY
+    };
 
     let uniform_data = raw_text_entry.get_mut::<UniformDataC>();
     uniform_data.copy_from_with_offset(offset_of!(UniformData, clip_rect), rect_data);
@@ -169,6 +183,7 @@ pub trait UITextImpl {
                 .with_width(Sizing::Grow(1.0))
                 .with_height(Sizing::FitContent),
             TextState {
+                main_obj_size: Vec2::new(f32::INFINITY, 0.0),
                 wrapper_entity: Default::default(),
                 raw_text_entity: Default::default(),
                 text: text.clone(),

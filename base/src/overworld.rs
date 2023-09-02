@@ -349,6 +349,10 @@ impl PlayerState {
     pub fn set_satiety(&mut self, satiety: f64) {
         self.satiety = satiety.clamp(0.0, 1.0);
     }
+
+    pub fn is_dead(&self) -> bool {
+        self.health == 0.0
+    }
 }
 
 impl Default for PlayerState {

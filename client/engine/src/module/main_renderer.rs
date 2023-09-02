@@ -107,14 +107,13 @@ pub struct UpdateTimings {
     pub total: f64,
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct RenderTimings {
-    pub depth_pass: f64,
-    pub color_pass: f64,
+    pub stages: Vec<(String, f64)>,
     pub total: f64,
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct RendererTimings {
     pub update: UpdateTimings,
     pub render: RenderTimings,
@@ -124,13 +123,17 @@ impl Display for RendererTimings {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "batch0 {:.5} | batch1 {:.5} | uniforms_update {:.5} || \
-            depth_pass {:.5} | color_pass {:.5} || upd_total {:.5} | render_total {:.5}",
+             upd_total {:.5} | {} | render_total {:.5}",
             self.update.systems_batch0,
             self.update.systems_batch1,
             self.update.uniform_buffers_update,
-            self.render.depth_pass,
-            self.render.color_pass,
             self.update.total,
+            self.render
+                .stages
+                .iter()
+                .map(|v| format!("{} {:.5}", v.0, v.1))
+                .collect::<Vec<String>>()
+                .join(" | "),
             self.render.total
         ))
     }
@@ -179,6 +182,8 @@ pub struct MainRenderer {
     update_handlers: Vec<Box<UpdateHandler>>,
     stage_manager: StageManager,
     main_light_dir: Vec3,
+
+    last_timings: RendererTimings,
 }
 
 #[derive(Copy, Clone)]
@@ -812,11 +817,12 @@ impl MainRenderer {
             material_updates: Default::default(),
             vertex_meshes_to_update: HashMap::with_capacity(1024),
             vertex_meshes_pending_updates: HashMap::with_capacity(1024),
-            ordered_entities: Vec::with_capacity(N_MAX_OBJECTS as usize),
+            ordered_entities: Vec::with_capacity(N_MAX_OBJECTS),
             res: resources,
             update_handlers: vec![],
             stage_manager,
             main_light_dir: Vec3::new(0.0, -1.0, 0.0),
+            last_timings: Default::default(),
         };
         renderer.on_resize(curr_size);
 
@@ -1441,6 +1447,7 @@ impl MainRenderer {
         }
         let t1 = Instant::now();
 
+        timings.stages = self.stage_manager.last_stage_timings().to_vec();
         timings.total = (t1 - t0).as_secs_f64();
         timings
     }
@@ -1535,11 +1542,15 @@ impl MainRenderer {
         self.active_camera
             .set_aspect(self.render_size.x, self.render_size.y);
     }
+
+    pub fn last_timings(&self) -> RendererTimings {
+        self.last_timings.clone()
+    }
 }
 
 impl EngineModule for MainRenderer {
     fn on_update(&mut self, dt: f64, ctx: &EngineContext) {
-        self.on_draw(ctx);
+        self.last_timings = self.on_draw(ctx);
         self.shader_time = (self.shader_time + dt as f32) % 65536.0;
     }
 

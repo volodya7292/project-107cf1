@@ -21,6 +21,7 @@ layout(location = 0) in Output {
 } vs_in;
 
 vec2 triplan_coord[3];
+vec2 triplan_coord2;
 vec2 normal_coord[3];
 vec3 triplan_weight;
 
@@ -130,13 +131,19 @@ void sample_material(uint id, vec2 coord, out SampledMaterial sampled_mat) {
 //    } else {
 //        sampled_mat.diffuse += textureAtlas(albedoAtlas, info.tex_atlas_info.x, coord, mat.diffuse_tex_id);
 //    }
-    for (uint i = 0; i < 3; i++) {
-        if (mat.diffuse_tex_id == -1) {
-            sampled_mat.diffuse = mat.diffuse;
-        } else {
-            sampled_mat.diffuse += textureNoTile(albedoAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.diffuse_tex_id) * triplan_weight[i];
-        }
+    // for (uint i = 0; i < 3; i++) {
+    //     if (mat.diffuse_tex_id == -1) {
+    //         sampled_mat.diffuse = mat.diffuse;
+    //     } else {
+    //         sampled_mat.diffuse += textureNoTile(albedoAtlas, info.tex_atlas_info.x, triplan_coord[i], mat.diffuse_tex_id) * triplan_weight[i];
+    //     }
+    // }
+    if (mat.diffuse_tex_id == -1) {
+        sampled_mat.diffuse = mat.diffuse;
+    } else {
+        sampled_mat.diffuse += textureNoTile(albedoAtlas, info.tex_atlas_info.x, triplan_coord2, mat.diffuse_tex_id);
     }
+
 
     // Specular
     if (mat.specular_tex_id == -1) {
@@ -181,6 +188,11 @@ void main() {
     triplan_coord[0] = vs_in.world_pos.yz;
     triplan_coord[1] = vs_in.world_pos.zx;
     triplan_coord[2] = vs_in.world_pos.xy;
+
+    triplan_coord2 = vs_in.surface_normal.z * vs_in.world_pos.xy
+                    + vs_in.surface_normal.y * vs_in.world_pos.xz
+                    + vs_in.surface_normal.x * vs_in.world_pos.yz;
+
 
     normal_coord[0] = vs_in.surface_normal.yz;
     normal_coord[1] = vs_in.surface_normal.zx;
