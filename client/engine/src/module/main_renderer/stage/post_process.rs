@@ -449,18 +449,18 @@ impl PostProcessStage {
             .get_image(GBufferStage::DEPTH_ATTACHMENT_ID)
             .unwrap();
 
-        let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
-        let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
-        let main_light_view: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_VIEW);
+        // let main_shadow_map = resources.get_image(DepthStage::RES_MAIN_SHADOW_MAP);
+        // let main_light_proj: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_PROJ);
+        // let main_light_view: Arc<Mat4> = resources.get(DepthStage::RES_LIGHT_VIEW);
 
-        let main_shadow_info = MainShadowInfo {
-            light_view: *main_light_view,
-            light_proj_view: *main_light_proj * *main_light_view,
-            light_dir: DepthStage::MAIN_LIGHT_DIR.push(0.0),
-        };
+        // let main_shadow_info = MainShadowInfo {
+        //     light_view: *main_light_view,
+        //     light_proj_view: *main_light_proj * *main_light_view,
+        //     light_dir: DepthStage::MAIN_LIGHT_DIR.push(0.0),
+        // };
 
-        let main_shadow_info_ub =
-            resources.request_uniform_buffer("post-main_shadow_ub", main_shadow_info, cl);
+        // let main_shadow_info_ub =
+        //     resources.request_uniform_buffer("post-main_shadow_ub", main_shadow_info, cl);
 
         unsafe {
             self.device.update_descriptor_set(
@@ -507,16 +507,16 @@ impl PostProcessStage {
                         0,
                         BindingRes::Image(Arc::clone(&translucency_colors_image), None, ImageLayout::GENERAL),
                     ),
-                    merge_descriptor.create_binding(
-                        9,
-                        0,
-                        BindingRes::Image(
-                            Arc::clone(&main_shadow_map),
-                            Some(Arc::clone(&self.shadow_map_sampler)),
-                            ImageLayout::SHADER_READ,
-                        ),
-                    ),
-                    merge_descriptor.create_binding(10, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
+                    // merge_descriptor.create_binding(
+                    //     9,
+                    //     0,
+                    //     BindingRes::Image(
+                    //         Arc::clone(&main_shadow_map),
+                    //         Some(Arc::clone(&self.shadow_map_sampler)),
+                    //         ImageLayout::SHADER_READ,
+                    //     ),
+                    // ),
+                    // merge_descriptor.create_binding(10, 0, BindingRes::Buffer(main_shadow_info_ub.handle())),
                 ],
             )
         }

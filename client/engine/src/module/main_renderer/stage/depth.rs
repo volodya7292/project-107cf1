@@ -789,8 +789,7 @@ impl RenderStage for DepthStage {
 
         // Render main shadow map
         // ----------------------------------------------------------------------------------------
-
-        self.gen_shadow_maps(cl, resources, ctx);
+        // self.gen_shadow_maps(cl, resources, ctx);
 
         // Build depth pyramid
         // ----------------------------------------------------------------------------------------

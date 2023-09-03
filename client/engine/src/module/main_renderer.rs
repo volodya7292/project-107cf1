@@ -1032,7 +1032,7 @@ impl MainRenderer {
                                 CopyRegion::new(
                                     curr_offset + region.src_offset(),
                                     region.dst_offset(),
-                                    (region.size() as u64).try_into().unwrap(),
+                                    region.size().try_into().unwrap(),
                                 )
                             })
                             .collect();
@@ -1315,7 +1315,7 @@ impl MainRenderer {
             let cam_proj = camera.projection();
             let cam_view: Mat4 = glm::convert(camera::create_view_matrix(
                 &glm::convert(cam_pos),
-                &camera.rotation(),
+                camera.rotation(),
             ));
 
             let default_frame_info = FrameInfo {
@@ -1349,9 +1349,7 @@ impl MainRenderer {
                 let num_frame_infos = stage.num_per_frame_infos() as usize;
                 let indices = per_frame_infos.len()..(per_frame_infos.len() + num_frame_infos);
 
-                per_frame_infos.resize_with(per_frame_infos.len() + num_frame_infos, || {
-                    default_frame_info.clone()
-                });
+                per_frame_infos.resize_with(per_frame_infos.len() + num_frame_infos, || default_frame_info);
 
                 stage.update_frame_infos(&mut per_frame_infos, &indices.collect::<Vec<_>>(), &frame_ctx);
             }
@@ -1462,17 +1460,17 @@ impl MainRenderer {
             return timings;
         }
 
-        // Wait for previous frame completion
-        self.stage_manager.wait_idle();
-
         if self.surface_changed {
+            // Wait for previous frame completion
+            self.stage_manager.wait_idle();
+
             Surface::update(&*ctx.window.borrow()).unwrap();
 
             self.swapchain = Some(Arc::new(
                 device
                     .create_swapchain(
                         &self.surface,
-                        (self.surface_size.x as u32, self.surface_size.y as u32),
+                        (self.surface_size.x, self.surface_size.y),
                         self.settings.fps_limit == FPSLimit::VSync,
                         if self.settings.prefer_triple_buffering {
                             3
@@ -1492,6 +1490,9 @@ impl MainRenderer {
         match acquire_result {
             Ok((sw_image, suboptimal)) => {
                 self.surface_changed |= suboptimal;
+
+                // Wait for previous frame completion
+                self.stage_manager.wait_idle();
 
                 timings.update = self.on_update(ctx);
                 timings.render = self.on_render(&sw_image, ctx);

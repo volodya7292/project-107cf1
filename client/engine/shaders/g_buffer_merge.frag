@@ -22,54 +22,54 @@ layout(binding = 7, std430) readonly buffer TranslucentDepthsArray {
 };
 layout(binding = 8, rgba8) uniform image2DArray translucencyColorsArray;
 
-layout(binding = 9) uniform sampler2D mainShadowMap;
+// layout(binding = 9) uniform sampler2D mainShadowMap;
 
-layout(binding = 10, scalar) uniform MainShadowInfoBlock {
-    mat4 lightView;
-    mat4 lightProjView;
-    vec4 lightDir;
-} mainShadowInfo;
+// layout(binding = 10, scalar) uniform MainShadowInfoBlock {
+//     mat4 lightView;
+//     mat4 lightProjView;
+//     vec4 lightDir;
+// } mainShadowInfo;
 
 
-float calc_shadow(vec3 worldPos, vec3 normal) {
+// float calc_shadow(vec3 worldPos, vec3 normal) {
 
-    vec4 worldPosLightClipSpace = mainShadowInfo.lightProjView * vec4(worldPos, 1);
-    worldPosLightClipSpace = shadowClipPosMapping(worldPosLightClipSpace);
-    worldPosLightClipSpace.y = -worldPosLightClipSpace.y;
+//     vec4 worldPosLightClipSpace = mainShadowInfo.lightProjView * vec4(worldPos, 1);
+//     worldPosLightClipSpace = shadowClipPosMapping(worldPosLightClipSpace);
+//     worldPosLightClipSpace.y = -worldPosLightClipSpace.y;
 
-    vec3 worldPosLightNDC = worldPosLightClipSpace.xyz / worldPosLightClipSpace.w;
-    vec2 worldPosLightNorm = worldPosLightNDC.xy * 0.5 + 0.5;
-    float depthAtWorldPos = worldPosLightNDC.z;
+//     vec3 worldPosLightNDC = worldPosLightClipSpace.xyz / worldPosLightClipSpace.w;
+//     vec2 worldPosLightNorm = worldPosLightNDC.xy * 0.5 + 0.5;
+//     float depthAtWorldPos = worldPosLightNDC.z;
 
-    float shadowFactor = 0;
-    float pfcRange = 4;
-    uint samples = 8;
+//     float shadowFactor = 0;
+//     float pfcRange = 4;
+//     uint samples = 8;
 
-    uint texId = floatBitsToUint(worldPos.x) ^ floatBitsToUint(worldPos.y) ^ floatBitsToUint(worldPos.z);
-    ivec2 texSize = textureSize(mainShadowMap, 0).xy;
-    vec2 texelSize = 1.0 / texSize;
+//     uint texId = floatBitsToUint(worldPos.x) ^ floatBitsToUint(worldPos.y) ^ floatBitsToUint(worldPos.z);
+//     ivec2 texSize = textureSize(mainShadowMap, 0).xy;
+//     vec2 texelSize = 1.0 / texSize;
 
-    vec4 normalOffset = mainShadowInfo.lightView * vec4(normal, 0);
-    normalOffset.y = -normalOffset.y;
+//     vec4 normalOffset = mainShadowInfo.lightView * vec4(normal, 0);
+//     normalOffset.y = -normalOffset.y;
 
-    for (int i = 0; i < samples; i++) {
-    	vec2 jitter = r2_seq_2d(texId + i) * 2.0 - 1.0;
-    	jitter += normalOffset.xy;
-    	jitter *= pfcRange;
+//     for (int i = 0; i < samples; i++) {
+//     	vec2 jitter = r2_seq_2d(texId + i) * 2.0 - 1.0;
+//     	jitter += normalOffset.xy;
+//     	jitter *= pfcRange;
 
-    	vec2 offset = texelSize * jitter;
-        float shadowMapDepth = texture(mainShadowMap, worldPosLightNorm.xy + offset).r;
+//     	vec2 offset = texelSize * jitter;
+//         float shadowMapDepth = texture(mainShadowMap, worldPosLightNorm.xy + offset).r;
 
-        float bias = 0.0001;// max(0.5 * (1.0 - dot(normal, -mainShadowInfo.lightDir.xyz)), 0.001);
+//         float bias = 0.0001;// max(0.5 * (1.0 - dot(normal, -mainShadowInfo.lightDir.xyz)), 0.001);
 
-        float shadow = float((depthAtWorldPos + bias) > shadowMapDepth);
-        shadowFactor += shadow;
-    }
+//         float shadow = float((depthAtWorldPos + bias) > shadowMapDepth);
+//         shadowFactor += shadow;
+//     }
 
-    shadowFactor /= samples;
+//     shadowFactor /= samples;
 
-    return shadowFactor;
-}
+//     return shadowFactor;
+// }
 
 void main() {
     ivec2 coord = ivec2(gl_FragCoord.xy);
