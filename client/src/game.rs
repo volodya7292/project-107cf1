@@ -391,6 +391,12 @@ impl MainApp {
         );
         let overworld_renderer = Arc::new(Mutex::new(overworld_renderer));
 
+        overworld.interface().update_persisted_state(&|state| {
+            state.update_player_state(|p_state| {
+                p_state.set_position(player_pos);
+            })
+        });
+
         // TODO: save tick_count_state to disk
 
         let new_game_state = Arc::new(Mutex::new(GameProcessState {
