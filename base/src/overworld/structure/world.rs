@@ -505,11 +505,14 @@ pub fn gen_fn(
                     data.set(registry.block_test);
                 } else {
                     data.set(registry.block_empty);
-                    *data.sky_light_state_mut() = LightLevel::MAX;
 
                     if global_y <= WATER_LEVEL_ALTITUDE as i64 {
                         *data.liquid_state_mut() = LiquidState::source(registry.liquid_water);
+
+                        let liquid_depth = (WATER_LEVEL_ALTITUDE as i64 - global_y) as u8;
+                        *data.sky_light_state_mut() = crate::sky_light_value_in_liquid(liquid_depth);
                     } else {
+                        *data.sky_light_state_mut() = LightLevel::MAX;
                     }
                 }
             }

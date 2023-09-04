@@ -139,6 +139,20 @@ pub fn on_liquid_tick(
     false
 }
 
+#[inline]
+pub fn sky_light_attenuation_in_liquid(top_light: U8Vec3) -> U8Vec3 {
+    top_light.map(|v| v.saturating_sub(1))
+}
+
+#[inline]
+pub fn sky_light_value_in_liquid(liquid_depth: u8) -> LightLevel {
+    LightLevel::from_intensity(
+        LightLevel::MAX_COMPONENT_VALUE
+            .saturating_sub(liquid_depth)
+            .max(1),
+    )
+}
+
 pub fn on_light_tick(
     pos: &BlockPos,
     block_data: BlockData,
@@ -207,6 +221,7 @@ pub fn on_sky_light_tick(
     // Collect neighbouring light (vanishing)
     let new_light = if block.can_pass_light() {
         let mut new_light = block_data.sky_light_source().components();
+        let liquid_present = block_data.liquid_state().level() > 0;
 
         for dir in Facing::DIRECTIONS {
             let rel_pos = pos.offset_i32(&dir);
@@ -225,7 +240,11 @@ pub fn on_sky_light_tick(
             };
 
             let rel_curr_light = if &dir == Facing::PositiveY.direction() {
-                rel_light
+                if liquid_present {
+                    sky_light_attenuation_in_liquid(rel_light)
+                } else {
+                    rel_light
+                }
             } else {
                 rel_light.map(|v| v.saturating_sub(1))
             };

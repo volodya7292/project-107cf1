@@ -19,7 +19,10 @@ impl LightLevel {
         Self(((r as u16) << 10) | ((g as u16) << 5) | (b as u16))
     }
 
-    pub const fn from_intensity(intensity: u8) -> Self {
+    pub const fn from_intensity(mut intensity: u8) -> Self {
+        if intensity > Self::MAX_COMPONENT_VALUE {
+            intensity = Self::MAX_COMPONENT_VALUE;
+        }
         Self::from_rgb(intensity, intensity, intensity)
     }
 
