@@ -1,7 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #define ENGINE_VERTEX_SHADER
-#include "../../../engine/shaders/common.glsl"
+#include "../../../engine/shaders/object3d.glsl"
 
 #define CLUSTER_SIZE 24
 

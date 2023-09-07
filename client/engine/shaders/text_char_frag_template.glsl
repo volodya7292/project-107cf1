@@ -1,7 +1,7 @@
 layout(early_fragment_tests) in;
 
 #define ENGINE_PIXEL_SHADER
-#include "./common.glsl"
+#include "./object3d.glsl"
 
 layout(set = SET_CUSTOM_PER_FRAME, binding = 1) uniform sampler2DArray msdfArray;
 

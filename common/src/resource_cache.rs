@@ -76,12 +76,11 @@ where
         &self,
         key: K,
         init: F,
-    ) -> Result<Arc<T>, E> {
+    ) -> Result<Arc<T>, Arc<E>> {
         let entry = self
             .cache
             .entry((key, TypeId::of::<T>()))
-            .or_try_insert_with(|| init().map(|v: Arc<T>| Arc::new(v) as Arc<dyn CachedResource>))
-            .map_err(|e| Arc::into_inner(e).unwrap())?;
+            .or_try_insert_with(|| init().map(|v: Arc<T>| Arc::new(v) as Arc<dyn CachedResource>))?;
 
         Ok(Arc::clone(
             entry.into_value().as_any().downcast_ref::<Arc<T>>().unwrap(),

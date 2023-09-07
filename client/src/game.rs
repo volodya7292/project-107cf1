@@ -77,7 +77,7 @@ pub trait EngineCtxGameExt {
     fn resource_image(
         scene: &Scene,
         filename: &str,
-    ) -> Result<Arc<image::RgbaImage>, common::resource_file::Error>;
+    ) -> Result<Arc<image::RgbaImage>, Arc<common::resource_file::Error>>;
 }
 
 impl EngineCtxGameExt for EngineContext<'_> {
@@ -92,7 +92,7 @@ impl EngineCtxGameExt for EngineContext<'_> {
     fn resource_image(
         scene: &Scene,
         filename: &str,
-    ) -> Result<Arc<image::RgbaImage>, common::resource_file::Error> {
+    ) -> Result<Arc<image::RgbaImage>, Arc<common::resource_file::Error>> {
         let resources = scene.resources();
         resources.get_image(filename)
     }
@@ -114,7 +114,7 @@ pub struct MainApp {
     material_pipelines: MaterialPipelines,
     game_state: Option<Arc<Mutex<GameProcessState>>>,
     settings: GameSettings,
-    post_liquid_uniforms: Arc<Mutex<PostProcessLiquidUniforms>>,
+    post_distortions_uniforms: Arc<Mutex<PostProcessDistortionsUniforms>>,
 
     cursor_grab: bool,
     root_entity: EntityId,
@@ -141,8 +141,8 @@ fn calc_bobbing_displacement(walk_time: f64, walk_vel: f64, camera_orientation: 
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
-struct PostProcessLiquidUniforms {
-    enabled: GLSLBool,
+struct PostProcessDistortionsUniforms {
+    inside_water: GLSLBool,
 }
 
 impl MainApp {
@@ -163,17 +163,17 @@ impl MainApp {
             .add_object(None, WrapperObject::new())
             .unwrap();
 
-        let post_liquid_uniforms = Arc::new(Mutex::new(PostProcessLiquidUniforms::default()));
+        let post_distortions_uniforms = Arc::new(Mutex::new(PostProcessDistortionsUniforms::default()));
         let renderer_post_processes = vec![
             PostProcess {
                 name: "sky".to_string(),
-                shader_code: include_bytes!("../res/shaders/post_sky.frag.spv").to_vec(),
+                shader_code: include_bytes!("../res/shaders/post_process/post_sky.frag.spv").to_vec(),
                 uniform_data: Arc::new(Mutex::new(())),
             },
             PostProcess {
                 name: "liquid_distortions".to_string(),
-                shader_code: include_bytes!("../res/shaders/post_liquid_distortions.frag.spv").to_vec(),
-                uniform_data: post_liquid_uniforms.clone(),
+                shader_code: include_bytes!("../res/shaders/post_process/post_distortions.frag.spv").to_vec(),
+                uniform_data: post_distortions_uniforms.clone(),
             },
         ];
         let renderer = MainRenderer::new(
@@ -208,7 +208,7 @@ impl MainApp {
 
         let mat_pipelines;
         {
-            mat_pipelines = material_pipelines::create(resources.file(), ctx);
+            mat_pipelines = material_pipelines::create(&resources, ctx);
 
             let mut renderer = ctx.module_mut::<MainRenderer>();
 
@@ -247,7 +247,7 @@ impl MainApp {
             material_pipelines: mat_pipelines,
             game_state: None,
             settings: GameSettings { fov_y: FRAC_PI_2 },
-            post_liquid_uniforms,
+            post_distortions_uniforms,
             cursor_grab: false,
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
@@ -777,8 +777,8 @@ impl MainApp {
                 let inside_liquid = !data.liquid_state().is_empty();
 
                 {
-                    let mut post_liquid = self.post_liquid_uniforms.lock();
-                    post_liquid.enabled = inside_liquid as GLSLBool;
+                    let mut post_distortions = self.post_distortions_uniforms.lock();
+                    post_distortions.inside_water = inside_liquid as GLSLBool;
                 };
 
                 let mut renderer = ctx.module_mut::<MainRenderer>();

@@ -8,7 +8,10 @@
 				"$rustc"
 			],
 			"options": {
-				"cwd": "${workspaceFolder}/client/work_dir"
+				"cwd": "${workspaceFolder}/client/work_dir",
+				"env": {
+					"RUST_BACKTRACE": "1"
+				},
 			},
 			"label": "rust: cargo build",
 			"group": {

@@ -7,9 +7,10 @@ use engine::ecs::component::ui::{
     Position, RectUniformData, Sizing, UIEventHandlerC, UILayoutC, UILayoutCacheC,
 };
 use engine::ecs::component::{SimpleTextC, TransformC, UniformDataC};
+use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
-use engine::module::text_renderer::{RawTextObject, TextRenderer};
+use engine::module::text_renderer::{self, RawTextObject, TextRenderer};
 use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
 use engine::EngineContext;
@@ -156,15 +157,23 @@ pub trait UITextImpl {
         let mut text_renderer = ctx.module_mut::<TextRenderer>();
         let scene = ctx.module_mut::<Scene>();
 
+        let vertex = renderer
+            .device()
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/text_char.vert.b"),
+                &text_renderer::VERTEX_INPUTS,
+                "ui_text_char.frag",
+            )
+            .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_text_char.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_text_char.frag.b"),
                 "ui_text_char.frag",
             )
             .unwrap();
 
-        let mat_pipe_id = text_renderer.register_text_pipeline(&mut renderer, pixel);
+        let mat_pipe_id = text_renderer.register_text_pipeline(&mut renderer, &[vertex, pixel]);
 
         scene.register_resource(TextImplContext { mat_pipe_id });
     }

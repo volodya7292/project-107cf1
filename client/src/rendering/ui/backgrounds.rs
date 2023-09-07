@@ -1,6 +1,5 @@
 use crate::rendering::ui::container::ContainerBackground;
 use common::make_static_id;
-use engine::ecs::component::render_config::GPUImageResource;
 use engine::module::main_renderer::MainRenderer;
 use engine::module::scene::Scene;
 use engine::module::ui::color::Color;
@@ -13,6 +12,7 @@ use super::image::ImageSource;
 mod fancy {
     use super::*;
     use common::glm::Vec4;
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -28,16 +28,16 @@ mod fancy {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/fancy_background.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/fancy_background.frag.b"),
                 "fancy_background.frag",
             )
             .unwrap();
@@ -55,7 +55,7 @@ mod fancy {
 mod game_effects {
     use super::*;
     use common::glm::Vec4;
-    use engine::vkw::utils::GLSLBool;
+    use engine::{module::main_renderer::shader::VkwShaderBundleDeviceExt, vkw::utils::GLSLBool};
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -74,16 +74,16 @@ mod game_effects {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/game_effects_background.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/game_effects_background.frag.b"),
                 "game_effects_background.frag",
             )
             .unwrap();
@@ -99,6 +99,8 @@ mod game_effects {
 }
 
 mod health_indicators {
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
+
     use super::*;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
@@ -116,16 +118,16 @@ mod health_indicators {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_health_indicators.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_background_health_indicators.frag.b"),
                 "ui_background_health_indicators.frag",
             )
             .unwrap();
@@ -143,6 +145,7 @@ mod health_indicators {
 mod hud_popup {
     use super::*;
     use common::glm::Vec4;
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -158,16 +161,16 @@ mod hud_popup {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_hud_popup.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_background_hud_popup.frag.b"),
                 "ui_background_slot_circle.frag",
             )
             .unwrap();
@@ -185,6 +188,7 @@ mod hud_popup {
 mod item_slot {
     use super::*;
     use common::glm::Vec4;
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -200,16 +204,16 @@ mod item_slot {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_item_slot.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_background_item_slot.frag.b"),
                 "ui_background_item_slot.frag",
             )
             .unwrap();
@@ -226,7 +230,7 @@ mod item_slot {
 
 mod material_item {
     use super::*;
-    use common::glm::Vec4;
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 
     pub const MATERIAL_PIPE_RES_NAME: &str = make_static_id!();
 
@@ -242,16 +246,16 @@ mod material_item {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_material_item.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_background_material_item.frag.b"),
                 "ui_background_material_item.frag",
             )
             .unwrap();

@@ -110,9 +110,11 @@ void main() {
     // Blend solid color into sky color
     mainColor.rgb = mix(mainColor.rgb, solidColor.rgb, solidColor.a);
     mainColor.a = mix(mainColor.a, 1, solidColor.a);
+
     // Blend transparent with solid colors
     mainColor.rgb = mix(mainColor.rgb, transpColor.rgb, transpColor.a);
     mainColor.a = mix(mainColor.a, 1, transpColor.a);
+
     // Apply additional emission
     mainColor.rgb += emission.rgb;
 

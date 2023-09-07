@@ -1,6 +1,7 @@
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
 use crate::module::main_renderer::texture_atlas::TextureAtlas;
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
+use common::shader_compiler::ShaderVariantConfig;
 use common::types::HashMap;
 use entity_data::EntityId;
 use index_pool::IndexPool;
@@ -41,8 +42,8 @@ pub struct Renderable {
 }
 
 pub struct MaterialPipelineParams<'a> {
-    pub shaders: &'a [Arc<Shader>],
     pub topology: PrimitiveTopology,
     pub cull: CullMode,
-    pub main_signature: &'a Arc<PipelineSignature>,
+    // pub main_signature: &'a Arc<PipelineSignature>,
+    pub signatures: &'a HashMap<ShaderVariantConfig, Arc<PipelineSignature>>,
 }

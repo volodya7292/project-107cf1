@@ -14,6 +14,7 @@ use crate::module::main_renderer::{camera, compose_descriptor_sets, CameraInfo, 
 use common::glm::Vec4;
 use common::rayon::prelude::*;
 use common::{glm, rayon};
+use shader_ids::shader_variant;
 use std::iter;
 use std::sync::Arc;
 use vk_wrapper::image::ImageParams;
@@ -361,45 +362,39 @@ impl RenderStage for GBufferStage {
             self.color_pipe,
             &PipelineConfig {
                 render_pass: &self.render_pass,
-                signature: params.main_signature,
+                signature: &params.signatures[&shader_variant::GBUFFER_SOLID],
                 subpass_index: 0,
                 cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
-                spec_consts: &[(shader_ids::CONST_ID_PASS_TYPE, shader_ids::PASS_TYPE_G_BUFFER)],
+                spec_consts: &[],
             },
         );
         pipeline_set.prepare_pipeline(
             self.color_with_blending_pipe,
             &PipelineConfig {
                 render_pass: &self.render_pass,
-                signature: params.main_signature,
+                signature: &params.signatures[&shader_variant::GBUFFER_TRANSPARENT],
                 subpass_index: 1,
                 cull: params.cull,
                 blend_attachments: &[Self::ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: false,
-                spec_consts: &[(
-                    shader_ids::CONST_ID_PASS_TYPE,
-                    shader_ids::PASS_TYPE_G_BUFFER_TRANSLUCENCY,
-                )],
+                spec_consts: &[],
             },
         );
         pipeline_set.prepare_pipeline(
             self.overlay_pipe,
             &PipelineConfig {
                 render_pass: &self.overlay_render_pass,
-                signature: params.main_signature,
+                signature: &params.signatures[&shader_variant::GBUFFER_OVERLAY],
                 subpass_index: 0,
                 cull: params.cull,
                 blend_attachments: &[Self::OVERLAY_ALBEDO_ATTACHMENT_ID],
                 depth_test: true,
                 depth_write: true,
-                spec_consts: &[(
-                    shader_ids::CONST_ID_PASS_TYPE,
-                    shader_ids::PASS_TYPE_G_BUFFER_OVERLAY,
-                )],
+                spec_consts: &[],
             },
         );
     }
@@ -600,12 +595,17 @@ impl RenderStage for GBufferStage {
                 .layout(ImageLayout::GENERAL)],
         );
 
+        let farthest_pos = {
+            let cam_dir = ctx.active_camera.direction();
+            ctx.relative_camera_pos + cam_dir * 10_000.0
+        };
+
         // Main g-buffer pass
         cl.begin_render_pass(
             &self.render_pass,
             &framebuffer,
             &[
-                ClearValue::ColorU32([0; 4]),
+                ClearValue::ColorF32([farthest_pos[0], farthest_pos[1], farthest_pos[2], 0.0]),
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),
                 ClearValue::ColorU32([0; 4]),

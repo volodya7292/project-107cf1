@@ -5,7 +5,7 @@ layout(early_fragment_tests) in;
 
 #define FN_TEXTURE_ATLAS
 #define ENGINE_PIXEL_SHADER
-#include "../../../engine/shaders/common.glsl"
+#include "../../../engine/shaders/object3d.glsl"
 
 const vec3 ambient_light = vec3(0.6);
 

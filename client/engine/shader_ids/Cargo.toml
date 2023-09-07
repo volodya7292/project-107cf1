@@ -3,5 +3,9 @@ name = "shader_ids"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+lazy_static = { workspace = true }
+common = { path = "../../../common" }
+
 [build-dependencies]
 bindgen = { workspace = true }

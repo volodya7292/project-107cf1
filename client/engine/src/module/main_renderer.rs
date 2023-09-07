@@ -20,6 +20,7 @@ pub(crate) mod gpu_executor;
 pub mod material;
 mod resource_manager;
 pub(crate) mod resources;
+pub mod shader;
 mod stage;
 mod stage_manager;
 
@@ -34,6 +35,7 @@ mod stage_manager;
 // HLSL `globallycoherent` and GLSL `coherent` modifiers do not work with MoltenVK (Metal).
 //
 
+use self::shader::VkwShaderBundle;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
@@ -67,10 +69,12 @@ use common::lrc::LrcExt;
 use common::parking_lot::Mutex;
 use common::resource_file::ResourceRef;
 use common::scene::relation::Relation;
+use common::shader_compiler::ShaderVariantConfig;
 use common::types::HashMap;
 use entity_data::{Archetype, EntityId, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
+use shader_ids::shader_variant;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -88,6 +92,7 @@ use vk_wrapper::{
     SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain,
     SwapchainImage, FORMAT_SIZES,
 };
+use vkw::PipelineSignature;
 use winit::window::Window;
 
 // TODO: Defragment VK memory (every frame?).
@@ -299,11 +304,11 @@ impl MaterialInfo {
 
         match diffuse {
             MatComponent::Texture(id) => info.diffuse_tex_id = id as u32,
-            MatComponent::Color(col) => info.diffuse = col,
+            MatComponent::Color(col) => info.diffuse = col.into_raw_linear(),
         }
         match specular {
             MatComponent::Texture(id) => info.specular_tex_id = id as u32,
-            MatComponent::Color(col) => info.specular = col,
+            MatComponent::Color(col) => info.specular = col.into_raw_linear(),
         }
 
         info
@@ -906,16 +911,31 @@ impl MainRenderer {
     /// Returns id of registered material pipeline.
     pub fn register_material_pipeline(
         &mut self,
-        shaders: &[Arc<Shader>],
+        shader_components: &[Arc<VkwShaderBundle>],
         topology: PrimitiveTopology,
         cull: CullMode,
     ) -> MaterialPipelineId {
-        let main_signature = self
-            .device
-            .create_pipeline_signature(shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
-            .unwrap();
+        let signatures: HashMap<ShaderVariantConfig, Arc<PipelineSignature>> = shader_variant::ALL
+            .iter()
+            .map(|config| {
+                let shaders: Vec<Arc<Shader>> = shader_components
+                    .iter()
+                    .map(|bundle| bundle.variants.get(config).unwrap())
+                    .cloned()
+                    .collect();
+
+                let signature = self
+                    .device
+                    .create_pipeline_signature(&shaders, &*ADDITIONAL_PIPELINE_BINDINGS)
+                    .unwrap();
+
+                (config.clone(), signature)
+            })
+            .collect();
 
         let stages = self.stage_manager.stages();
+
+        let main_signature = signatures.get(&shader_variant::GBUFFER_SOLID).unwrap();
 
         let mut per_frame_desc_pool = main_signature
             .create_pool(shader_ids::SET_CUSTOM_PER_FRAME, 1, "per-frame-custom")
@@ -926,7 +946,7 @@ impl MainRenderer {
             .unwrap();
         let mut pipeline_set = MaterialPipelineSet {
             device: Arc::clone(&self.device),
-            main_signature: Arc::clone(&main_signature),
+            main_signature: Arc::clone(main_signature),
             pipelines: Default::default(),
             topology,
             per_object_desc_pool,
@@ -937,10 +957,9 @@ impl MainRenderer {
         for stage in stages.values() {
             stage.lock().register_pipeline_kind(
                 MaterialPipelineParams {
-                    shaders,
                     topology,
                     cull,
-                    main_signature: &main_signature,
+                    signatures: &signatures,
                 },
                 &mut pipeline_set,
             );

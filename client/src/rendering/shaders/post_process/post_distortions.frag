@@ -1,13 +1,13 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "../../../engine/shaders/common.glsl"
+#include "../../../../engine/shaders/common.glsl"
 
 layout(location = 0) in vec2 inUV;
 
 layout(location = 0) out vec4 outAlbedo;
 
-layout(binding = 0) uniform sampler2D backPosition;
-layout(binding = 1) uniform sampler2D backAlbedoImage;
+layout(binding = 0) uniform sampler2D previousComposition;
+layout(binding = 1) uniform sampler2D backPosition;
 layout(binding = 2) uniform sampler2D backDepth;
 
 layout(binding = 3, scalar) uniform FrameInfoBlock {
@@ -37,8 +37,8 @@ void main() {
             sin(clipScreenCoord.x * FREQ + info.time + 10.0) * INTENSITY
         );
         vec2 distortedUV = inUV + jitter * smoothFactor;
-        vec3 backPosition = texture(backAlbedoImage, distortedUV).xyz;
-        vec4 backAlbedo = texture(backAlbedoImage, distortedUV);
+        vec3 backPosition = texture(previousComposition, distortedUV).xyz;
+        vec4 backAlbedo = texture(previousComposition, distortedUV);
         float backDepth = texture(backDepth, distortedUV).r;
 
         mainColor = backAlbedo;
@@ -47,7 +47,7 @@ void main() {
         float fog = pow(1.0 - backDepth, VISIBILITY);
         mainColor.rgb = mix(mainColor.rgb, LIQUID_COLOR, fog);
     } else {
-        mainColor = texture(backAlbedoImage, inUV);
+        mainColor = texture(previousComposition, inUV);
     }
 
     outAlbedo = mainColor;

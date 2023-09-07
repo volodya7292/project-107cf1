@@ -486,6 +486,7 @@ dependencies = [
  "rayon",
  "ring",
  "serde",
+ "serde_bytes",
  "serde_yaml",
  "tokio",
 ]
@@ -1786,6 +1787,7 @@ dependencies = [
  "noise",
  "rand 0.8.5",
  "rand_distr",
+ "shader_ids",
  "simple_logger",
  "smallvec",
 ]
@@ -2239,6 +2241,8 @@ name = "shader_ids"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "common",
+ "lazy_static",
 ]
 
 [[package]]

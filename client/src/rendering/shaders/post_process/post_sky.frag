@@ -1,13 +1,13 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#include "../../../engine/shaders/sky.glsl"
+#include "../../../../engine/shaders/sky.glsl"
 
 layout(location = 0) in vec2 inUV;
 
 layout(location = 0) out vec4 outAlbedo;
 
-layout(binding = 0) uniform sampler2D backPosition;
-layout(binding = 1) uniform sampler2D backAlbedoImage;
+layout(binding = 0) uniform sampler2D previousComposition;
+layout(binding = 1) uniform sampler2D backPosition;
 layout(binding = 2) uniform sampler2D backDepth;
 
 layout(binding = 3, scalar) uniform FrameInfoBlock {
@@ -15,7 +15,7 @@ layout(binding = 3, scalar) uniform FrameInfoBlock {
 };
 
 void main() {
-    vec4 backAlbedo = texture(backAlbedoImage, inUV);
+    vec4 backAlbedo = texture(previousComposition, inUV);
     float backDepth = texture(backDepth, inUV).r;
 
     vec3 mainColor = vec3(0);

@@ -131,6 +131,7 @@ pub fn container_props<P: Default>() -> ContainerProps<P> {
 pub mod background {
     use crate::rendering::ui::container::{ContainerBackground, SolidColorUniformData};
     use common::make_static_id;
+    use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
     use engine::module::main_renderer::MainRenderer;
     use engine::module::scene::Scene;
     use engine::module::ui::color::Color;
@@ -146,16 +147,16 @@ pub mod background {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_rect.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_rect.vert.b"),
                 &[],
                 "ui_rect.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_background_solid.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_background_solid.frag.b"),
                 "ui_background_solid.frag",
             )
             .unwrap();

@@ -18,6 +18,7 @@ use common::parking_lot::Mutex;
 use common::rayon::prelude::*;
 use common::utils::prev_power_of_two;
 use common::{glm, rayon};
+use shader_ids::shader_variant;
 use std::mem;
 use std::sync::Arc;
 use vk_wrapper::buffer::BufferHandleImpl;
@@ -25,7 +26,7 @@ use vk_wrapper::image::ImageParams;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentRef, BindingRes, BufferUsageFlags, ClearValue, CmdList, Device,
     Format, Framebuffer, ImageLayout, ImageMod, ImageUsageFlags, LoadStore, Pipeline, PipelineStageFlags,
-    QueueType, RenderPass, Shader, ShaderStageFlags, Subpass, SubpassDependency,
+    QueueType, RenderPass, Subpass, SubpassDependency,
 };
 
 const TRANSLUCENCY_N_DEPTH_LAYERS: u32 = 4;
@@ -35,7 +36,6 @@ pub type VisibilityType = u32;
 pub struct DepthStage {
     device: Arc<Device>,
     depth_render_pass: Arc<RenderPass>,
-    translucency_depths_pixel_shader: Arc<Shader>,
 
     depth_pyramid_pipeline: Arc<Pipeline>,
     cull_pipeline: Arc<Pipeline>,
@@ -150,19 +150,9 @@ impl DepthStage {
         let cull_signature = device.create_pipeline_signature(&[cull_compute], &[]).unwrap();
         let cull_pipeline = device.create_compute_pipeline(&cull_signature).unwrap();
 
-        // Translucency depth pipeline
-        // -----------------------------------------------------------------------------------------------------------------
-        let translucency_depths_pixel_shader = device
-            .create_pixel_shader(
-                include_bytes!("../../../../shaders/build/translucency_closest_depths.frag.spv"),
-                "translucency_closest_depths",
-            )
-            .unwrap();
-
         Self {
             device: Arc::clone(device),
             depth_render_pass,
-            translucency_depths_pixel_shader,
             depth_pyramid_pipeline,
             cull_pipeline,
             shadow_map_render_pass,
@@ -433,17 +423,18 @@ impl RenderStage for DepthStage {
     }
 
     fn num_pipeline_kinds(&self) -> u32 {
-        3
+        2
     }
 
     fn num_per_frame_infos(&self) -> u32 {
-        1 + 1 // main depth map + main shadow depth map
+        // 1 + 1 // main depth map + main shadow depth map
+        1
     }
 
     fn setup(&mut self, pipeline_kinds: &[PipelineKindId]) {
         self.depth_write_pipe = pipeline_kinds[0];
         self.translucency_depths_pipe = pipeline_kinds[1];
-        self.shadow_map_pipe = pipeline_kinds[2];
+        // self.shadow_map_pipe = pipeline_kinds[2];
     }
 
     fn update_frame_infos(
@@ -460,97 +451,68 @@ impl RenderStage for DepthStage {
             &ctx.relative_camera_pos,
             &Vec3::new(0.0002324, 0.99922454, 0.0006574),
         );
-        let light_proj_view = light_proj * light_view;
+        // let light_proj_view = light_proj * light_view;
 
-        let shadow_info = &mut infos[frame_infos_indices[1]];
-        shadow_info.camera = CameraInfo {
-            pos: Default::default(), // TODO
-            dir: Default::default(), // TODO
-            proj: light_proj,
-            view: light_view,
-            view_inverse: Default::default(), // TODO
-            proj_view: light_proj_view,
-            z_near: 0.0,
-            fovy: 0.0,
-        };
-        shadow_info.frame_size = glm::vec2(1024, 1024);
+        // let shadow_info = &mut infos[frame_infos_indices[1]];
+        // shadow_info.camera = CameraInfo {
+        //     pos: Default::default(), // TODO
+        //     dir: Default::default(), // TODO
+        //     proj: light_proj,
+        //     view: light_view,
+        //     view_inverse: Default::default(), // TODO
+        //     proj_view: light_proj_view,
+        //     z_near: 0.0,
+        //     fovy: 0.0,
+        // };
+        // shadow_info.frame_size = glm::vec2(1024, 1024);
 
         self.last_light_proj = light_proj;
         self.last_light_view = light_view;
     }
 
     fn register_pipeline_kind(&self, params: MaterialPipelineParams, pipeline_set: &mut MaterialPipelineSet) {
-        let combined_bindings: Vec<_> = params.main_signature.bindings().clone().into_iter().collect();
-
-        let vertex_shader = Arc::clone(
-            params
-                .shaders
-                .iter()
-                .find(|v| v.stage() == ShaderStageFlags::VERTEX)
-                .unwrap(),
-        );
-
-        let depth_signature = self
-            .device
-            .create_pipeline_signature(&[Arc::clone(&vertex_shader)], &combined_bindings)
-            .unwrap();
-
-        let translucency_depth_signature = self
-            .device
-            .create_pipeline_signature(
-                &[
-                    Arc::clone(&vertex_shader),
-                    Arc::clone(&self.translucency_depths_pixel_shader),
-                ],
-                &combined_bindings,
-            )
-            .unwrap();
+        let depth_signature = &params.signatures[&shader_variant::DEPTH_SOLID];
+        let translucency_depth_signature = &params.signatures[&shader_variant::DEPTH_TRANSPARENT];
 
         pipeline_set.prepare_pipeline(
             self.depth_write_pipe,
             &PipelineConfig {
                 render_pass: &self.depth_render_pass,
-                signature: &depth_signature,
+                signature: depth_signature,
                 subpass_index: 0,
                 cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: true,
-                spec_consts: &[(shader_ids::CONST_ID_PASS_TYPE, shader_ids::PASS_TYPE_DEPTH)],
+                spec_consts: &[],
             },
         );
         pipeline_set.prepare_pipeline(
             self.translucency_depths_pipe,
             &PipelineConfig {
                 render_pass: &self.depth_render_pass,
-                signature: &translucency_depth_signature,
+                signature: translucency_depth_signature,
                 subpass_index: 1,
                 cull: params.cull,
                 blend_attachments: &[],
                 depth_test: true,
                 depth_write: false,
-                spec_consts: &[(
-                    shader_ids::CONST_ID_PASS_TYPE,
-                    shader_ids::PASS_TYPE_DEPTH_TRANSLUCENCY,
-                )],
+                spec_consts: &[],
             },
         );
-        pipeline_set.prepare_pipeline(
-            self.shadow_map_pipe,
-            &PipelineConfig {
-                render_pass: &self.shadow_map_render_pass,
-                signature: &depth_signature,
-                subpass_index: 0,
-                cull: params.cull,
-                blend_attachments: &[],
-                depth_test: true,
-                depth_write: true,
-                spec_consts: &[(
-                    shader_ids::CONST_ID_PASS_TYPE,
-                    shader_ids::PASS_TYPE_DEPTH_MAIN_SHADOW_MAP,
-                )],
-            },
-        );
+        // pipeline_set.prepare_pipeline(
+        //     self.shadow_map_pipe,
+        //     &PipelineConfig {
+        //         render_pass: &self.shadow_map_render_pass,
+        //         signature: &depth_signature,
+        //         subpass_index: 0,
+        //         cull: params.cull,
+        //         blend_attachments: &[],
+        //         depth_test: true,
+        //         depth_write: true,
+        //         spec_consts: &[],
+        //     },
+        // );
     }
 
     fn run(

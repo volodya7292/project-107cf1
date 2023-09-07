@@ -577,12 +577,12 @@ impl PostProcessStage {
                     resources_desc.create_binding(
                         0,
                         0,
-                        BindingRes::Image(Arc::clone(input_position), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(&curr_back_image), None, ImageLayout::SHADER_READ),
                     ),
                     resources_desc.create_binding(
                         1,
                         0,
-                        BindingRes::Image(Arc::clone(&curr_back_image), None, ImageLayout::SHADER_READ),
+                        BindingRes::Image(Arc::clone(input_position), None, ImageLayout::SHADER_READ),
                     ),
                     resources_desc.create_binding(
                         2,

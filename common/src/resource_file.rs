@@ -32,11 +32,11 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
-struct ResourceEntry {
+pub struct ResourceEntry {
     offset: u64,
     size: u64,
     data: Vec<u8>,
-    entries: HashMap<String, ResourceEntry>,
+    pub entries: HashMap<String, ResourceEntry>,
 }
 
 impl fmt::Debug for ResourceEntry {
@@ -52,7 +52,7 @@ impl fmt::Debug for ResourceEntry {
 
 pub struct ResourceFile {
     buf_reader: Mutex<BufReader<File>>,
-    main_entry: ResourceEntry,
+    pub main_entry: ResourceEntry,
 }
 
 impl ResourceFile {
@@ -195,7 +195,7 @@ impl BufferedResourceReader {
         &self.resources
     }
 
-    pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
+    pub fn get(&self, path: &str) -> Result<Arc<Vec<u8>>, Arc<Error>> {
         self.cache.try_get(path.to_string(), || {
             let res = self.resources.get(path)?;
             res.read().map(Arc::from)
@@ -206,11 +206,13 @@ impl BufferedResourceReader {
         &self,
         path: &str,
         init: F,
-    ) -> Result<Arc<T>, Error> {
-        self.cache.try_get(path.to_string(), || self.get(path).map(init))
+    ) -> Result<Arc<T>, Arc<Error>> {
+        self.cache
+            .try_get(path.to_string(), || self.get(path).map(init))
+            .map_err(|e| Arc::clone(&*e))
     }
 
-    pub fn get_image(&self, path: &str) -> Result<Arc<image::RgbaImage>, Error> {
+    pub fn get_image(&self, path: &str) -> Result<Arc<image::RgbaImage>, Arc<Error>> {
         self.get_map(path, |data| {
             let dyn_img = image::load_from_memory(&data).unwrap();
             Arc::new(dyn_img.into_rgba8())

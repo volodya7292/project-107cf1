@@ -6,10 +6,10 @@ use crate::rendering::ui::image::ImageSource;
 use crate::resource_mapping::ResourceMapping;
 use base::main_registry::MainRegistry;
 use base::registry::Registry;
-use common::glm::Vec4;
 use common::resource_file::BufferedResourceReader;
 use engine::module::main_renderer::material::MatComponent;
 use engine::module::main_renderer::TextureAtlasType;
+use engine::module::ui::color::Color;
 use std::sync::Arc;
 
 macro_rules! add_getters {
@@ -60,7 +60,7 @@ impl DefaultResourceMapping {
         let material_water = map.register_material(
             TextureMaterial::new(
                 // MatComponent::Texture(tex_water),
-                MatComponent::Color(Vec4::new(0.0, 0.0, 1.0, 0.5)),
+                MatComponent::Color(Color::from_hex(0x2036c5ff).with_alpha(0.4)),
             )
             .with_translucent(true),
         );

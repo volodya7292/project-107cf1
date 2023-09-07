@@ -1,9 +1,11 @@
 use common::glm::Vec4;
 
+use crate::module::ui::color::Color;
+
 #[derive(Copy, Clone)]
 pub enum MatComponent {
     Texture(u16),
-    Color(Vec4),
+    Color(Color),
 }
 
 const TEXTURE_ID_NONE: u16 = u16::MAX;

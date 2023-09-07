@@ -1,6 +1,7 @@
-use common::resource_file::ResourceFile;
+use common::resource_file::BufferedResourceReader;
+use engine::module::main_renderer::shader::{VkwShaderBundle, VkwShaderBundleDeviceExt};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
-use engine::module::text_renderer::TextRenderer;
+use engine::module::text_renderer::{self, TextRenderer};
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::shader::VInputRate;
 use engine::vkw::PrimitiveTopology;
@@ -12,14 +13,14 @@ pub struct MaterialPipelines {
     pub text_3d: MaterialPipelineId,
 }
 
-fn create_vertex_shader(
+fn load_vertex_shader_bundle(
     device: &Arc<vkw::Device>,
-    code: &[u8],
+    bundle_data: &[u8],
     input_formats: &[(&str, vkw::Format)],
     name: &str,
-) -> Result<Arc<vkw::Shader>, vkw::DeviceError> {
-    device.create_vertex_shader(
-        code,
+) -> Result<Arc<VkwShaderBundle>, vkw::DeviceError> {
+    device.load_vertex_shader_bundle(
+        bundle_data,
         &input_formats
             .iter()
             .cloned()
@@ -29,16 +30,16 @@ fn create_vertex_shader(
     )
 }
 
-pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPipelines {
+pub fn create(resources: &Arc<BufferedResourceReader>, ctx: &EngineContext) -> MaterialPipelines {
     let mut renderer = ctx.module_mut::<MainRenderer>();
     let mut text_renderer = ctx.module_mut::<TextRenderer>();
 
     let device = Arc::clone(renderer.device());
 
     let cluster = {
-        let vertex = create_vertex_shader(
+        let vertex = load_vertex_shader_bundle(
             &device,
-            &resources.get("shaders/cluster.vert.spv").unwrap().read().unwrap(),
+            &resources.get("shaders/cluster.vert.b").unwrap(),
             &[
                 ("inPack1", vkw::Format::RGBA32_UINT),
                 ("inPack2", vkw::Format::R32_UINT),
@@ -47,10 +48,7 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
         )
         .unwrap();
         let pixel = device
-            .create_pixel_shader(
-                &resources.get("shaders/cluster.frag.spv").unwrap().read().unwrap(),
-                "cluster.frag",
-            )
+            .load_pixel_shader_bundle(&resources.get("shaders/cluster.frag.b").unwrap(), "cluster.frag")
             .unwrap();
 
         renderer.register_material_pipeline(
@@ -61,19 +59,21 @@ pub fn create(resources: &Arc<ResourceFile>, ctx: &EngineContext) -> MaterialPip
     };
 
     let text_3d = {
+        let vertex = device
+            .load_vertex_shader_bundle(
+                &resources.get("shaders/text_char.vert.b").unwrap(),
+                &text_renderer::VERTEX_INPUTS,
+                "text_char.vert",
+            )
+            .unwrap();
         let pixel = device
-            .create_pixel_shader(
-                include_bytes!("../../res/shaders/text_char_3d.frag.spv"),
-                // &resources
-                //     .get("shaders/text_char_3d.frag.spv")
-                //     .unwrap()
-                //     .read()
-                //     .unwrap(),
+            .load_pixel_shader_bundle(
+                &resources.get("shaders/text_char_3d.frag.b").unwrap(),
                 "text_char_3d.frag",
             )
             .unwrap();
 
-        text_renderer.register_text_pipeline(&mut renderer, pixel)
+        text_renderer.register_text_pipeline(&mut renderer, &[vertex, pixel])
     };
 
     MaterialPipelines { cluster, text_3d }

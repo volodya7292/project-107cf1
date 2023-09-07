@@ -4,7 +4,7 @@
 #define ENGINE_PIXEL_SHADER
 #define ENGINE_PIXEL_SHADER_UI
 #include "ui.glsl"
-#include "../../../engine/shaders/common.glsl"
+#include "../../../engine/shaders/object3d.glsl"
 
 layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO, scalar) uniform ObjectData {
     mat4 model;

@@ -6,6 +6,7 @@ use common::resource_cache::ResourceCache;
 use engine::ecs::component::render_config::{GPUImageResource, GPUResource, RenderLayer};
 use engine::ecs::component::ui::{RectUniformData, UIEventHandlerC, UILayoutC, UILayoutCacheC};
 use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
+use engine::module::main_renderer::shader::VkwShaderBundleDeviceExt;
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::scene::{EntityAccess, ObjectEntityId, Scene};
 use engine::module::ui::UIState;
@@ -127,16 +128,16 @@ pub trait ImageImpl {
 
         let vertex = renderer
             .device()
-            .create_vertex_shader(
-                include_bytes!("../../../res/shaders/ui_image.vert.spv"),
+            .load_vertex_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_image.vert.b"),
                 &[],
                 "ui_image.vert",
             )
             .unwrap();
         let pixel = renderer
             .device()
-            .create_pixel_shader(
-                include_bytes!("../../../res/shaders/ui_image.frag.spv"),
+            .load_pixel_shader_bundle(
+                include_bytes!("../../../res/shaders/ui_image.frag.b"),
                 "ui_image.frag",
             )
             .unwrap();

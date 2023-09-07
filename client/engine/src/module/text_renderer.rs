@@ -34,8 +34,10 @@ use vk_wrapper::shader::VInputRate;
 use vk_wrapper::{
     AccessFlags, BindingRes, BufferUsageFlags, CmdList, Device, DeviceBuffer, Format, HostBuffer, Image,
     ImageLayout, ImageUsageFlags, PipelineStageFlags, PrimitiveTopology, QueueType, Sampler, SamplerFilter,
-    SamplerMipmap, Shader,
+    SamplerMipmap,
 };
+
+use super::main_renderer::shader::VkwShaderBundle;
 
 const GLYPH_SIZE: u32 = 64;
 const GLYPH_BYTE_SIZE: usize = (GLYPH_SIZE * GLYPH_SIZE * 4) as usize; // RGBA8
@@ -479,6 +481,14 @@ struct FrameUniformData {
     px_range: f32,
 }
 
+pub const VERTEX_INPUTS: [(&str, Format, VInputRate); 5] = [
+    ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
+    ("inGlyphSize", Format::RG32_FLOAT, VInputRate::INSTANCE),
+    ("inColor", Format::RGBA32_FLOAT, VInputRate::INSTANCE),
+    ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
+    ("inScale", Format::RG32_FLOAT, VInputRate::INSTANCE),
+];
+
 #[derive(Archetype)]
 pub struct RawTextObject {
     relation: Relation,
@@ -621,25 +631,10 @@ impl TextRenderer {
     pub fn register_text_pipeline(
         &mut self,
         renderer: &mut MainRenderer,
-        pixel_shader: Arc<Shader>,
+        shader_components: &[Arc<VkwShaderBundle>],
     ) -> MaterialPipelineId {
-        let vertex_shader = renderer
-            .device()
-            .create_vertex_shader(
-                include_bytes!("../../shaders/build/text_char.vert.spv"),
-                &[
-                    ("inGlyphIndex", Format::R32_UINT, VInputRate::INSTANCE),
-                    ("inGlyphSize", Format::RG32_FLOAT, VInputRate::INSTANCE),
-                    ("inColor", Format::RGBA32_FLOAT, VInputRate::INSTANCE),
-                    ("inOffset", Format::RG32_FLOAT, VInputRate::INSTANCE),
-                    ("inScale", Format::RG32_FLOAT, VInputRate::INSTANCE),
-                ],
-                "text_char.vert",
-            )
-            .unwrap();
-
         let mat_pipe_id = renderer.register_material_pipeline(
-            &[vertex_shader, pixel_shader],
+            shader_components,
             PrimitiveTopology::TRIANGLE_STRIP,
             CullMode::BACK,
         );
