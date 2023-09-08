@@ -1,8 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-layout(early_fragment_tests) in;
-
 #define FN_TEXTURE_ATLAS
 #define ENGINE_PIXEL_SHADER
 #include "../../../engine/shaders/object3d.glsl"
@@ -171,13 +169,19 @@ void sample_material(uint id, vec2 coord, out SampledMaterial sampled_mat) {
 }
 
 void main() {
+    float dist = distance(info.camera.pos.xyz, vs_in.world_pos);
+    if (dist >= 100.0) {
+        discard;
+    }
+    float fog = 1 - exp(-pow(-1./50. * dist, 10));
+
     vec3 color = clamp((vs_in.world_pos.xyz + 128) / 256.0, 0, 1);
     color = vec3(pow(color.r * color.g * color.b, 1. / 3.), 1, 1);
     color = hsv2rgb(color);
     color = (vs_in.surface_normal + 1.0) / 2.0;
 
     if (color.r != color.r)
-    color = vec3(1.0);
+        color = vec3(1.0);
 
     // Calculate triplanar texture mapping
     // -------------------------------------------------------
@@ -232,5 +236,8 @@ void main() {
     vec3 diffuse = mat.diffuse.rgb * ao * combined_light;
     vec3 emission = vec3(0);//mat.diffuse.rgb * combined_light;
 
-    writeOutput(vs_in.world_pos, vec4(diffuse.rgb, mat.diffuse.a), vec4(0.0), emission, vs_in.surface_normal);
+    vec4 outAlbedo = vec4(diffuse.rgb, mat.diffuse.a);
+    outAlbedo = mix(outAlbedo, vec4(vec3(0.7), 1.0), fog);
+
+    writeOutput(vs_in.world_pos, outAlbedo, vec4(0.0), emission, vs_in.surface_normal);
 }

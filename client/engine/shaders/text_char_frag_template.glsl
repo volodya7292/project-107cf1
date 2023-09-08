@@ -1,5 +1,3 @@
-layout(early_fragment_tests) in;
-
 #define ENGINE_PIXEL_SHADER
 #include "./object3d.glsl"
 

@@ -9,7 +9,7 @@ use winit::window::Window;
 pub type WSIPosition<T> = WSIVec2<T>;
 pub type WSISize<T> = WSIVec2<T>;
 
-/// `monitor_scale_factor()` for monitor with this DPI is equal to 1.
+/// `real_scale_factor()` for monitor with this DPI is equal to 1.
 pub const DEFAULT_DPI: u32 = 109;
 
 pub fn find_best_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::monitor::VideoMode {

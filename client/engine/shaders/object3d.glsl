@@ -17,13 +17,16 @@
 #ifdef ENGINE_PIXEL_SHADER_UI
 layout(location = 0) out vec4 outAlbedo;
 #else
+#if RENDER_DEPTH_ONLY == 0 || RENDER_CLOSEST_DEPTHS == 1
+layout(early_fragment_tests) in;
+#endif 
 #if RENDER_DEPTH_ONLY == 0
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outSpecular;
 layout(location = 3) out vec4 outEmission;
 layout(location = 4) out vec4 outNormal;
-#endif
+#endif // RENDER_DEPTH_ONLY == 0
 #endif
 
 #if RENDER_CLOSEST_DEPTHS == 1
