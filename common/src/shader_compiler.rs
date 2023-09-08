@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{hash_map, BTreeSet, HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -196,6 +197,10 @@ pub fn read_shader_bundle(data: &[u8]) -> ShaderBundle {
     bincode::deserialize::<ShaderBundle>(data).unwrap()
 }
 
+pub fn is_shader_source_ext(ext: &str) -> bool {
+    matches!(ext, "vert" | "frag" | "comp" | "hlsl")
+}
+
 pub fn compile_shader_bundles(
     src_dir: &Path,
     dst_dir: &Path,
@@ -229,7 +234,7 @@ pub fn compile_shader_bundles(
         }
 
         let ext = entry.extension().map_or("", |v| v.to_str().unwrap());
-        if ext != "vert" && ext != "frag" && ext != "comp" && ext != "hlsl" {
+        if !is_shader_source_ext(ext) {
             continue;
         }
 
@@ -255,6 +260,10 @@ pub fn compile_shader_bundles(
     for entry in dst_dir.read_dir().unwrap().filter_map(Result::ok) {
         let entry = entry.path();
         if entry.is_dir() {
+            continue;
+        }
+
+        if entry.extension() != Some(OsStr::new("b")) {
             continue;
         }
 
