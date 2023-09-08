@@ -18,6 +18,8 @@
 layout(location = 0) out vec4 outAlbedo;
 #else
 #if RENDER_DEPTH_ONLY == 0 || RENDER_CLOSEST_DEPTHS == 1
+// This helps filtering solids particularly in RENDER_CLOSEST_DEPTHS stage
+// Must not be enabled at solid depths stage to be able to use `discard`.
 layout(early_fragment_tests) in;
 #endif 
 #if RENDER_DEPTH_ONLY == 0
