@@ -73,25 +73,25 @@ pub fn compile_shader(
     }
 
     // Optimize shader
-    if !cfg!(debug_assertions) {
-        let mut cmd = &mut Command::new("spirv-opt");
-        cmd = cmd
-            .arg(dst_path.clone())
-            .arg("-o")
-            .arg(dst_path.clone())
-            .arg("--target-env=vulkan1.2")
-            .arg("--skip-validation")
-            .arg("--preserve-bindings")
-            .arg("--scalar-block-layout")
-            .arg("-O");
+    let mut cmd = &mut Command::new("spirv-opt");
+    cmd = cmd
+        .arg(dst_path.clone())
+        .arg("-o")
+        .arg(dst_path.clone())
+        .arg("--target-env=vulkan1.2")
+        .arg("--eliminate-dead-variables")
+        .arg("--eliminate-dead-input-components")
+        .arg("--skip-validation")
+        .arg("--preserve-bindings")
+        .arg("--scalar-block-layout")
+        .arg("-O");
 
-        let output = cmd.output().unwrap();
-        log.write_all(&output.stdout).unwrap();
-        print!("{}", String::from_utf8_lossy(&output.stdout));
+    let output = cmd.output().unwrap();
+    log.write_all(&output.stdout).unwrap();
+    print!("{}", String::from_utf8_lossy(&output.stdout));
 
-        if !output.status.success() {
-            return Err("Failed to optimize shader".to_string());
-        }
+    if !output.status.success() {
+        return Err("Failed to optimize shader".to_string());
     }
 
     Ok(())
