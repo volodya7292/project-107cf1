@@ -14,9 +14,33 @@ pub enum LoadStore {
     None,
     InitLoad,
     InitClear,
-    FinalSave,
+    FinalStore,
     InitClearFinalStore,
     InitLoadFinalStore,
+}
+
+impl LoadStore {
+    pub(crate) fn to_native_load(self) -> vk::AttachmentLoadOp {
+        match self {
+            LoadStore::None => vk::AttachmentLoadOp::DONT_CARE,
+            LoadStore::InitLoad => vk::AttachmentLoadOp::LOAD,
+            LoadStore::InitClear => vk::AttachmentLoadOp::CLEAR,
+            LoadStore::FinalStore => vk::AttachmentLoadOp::DONT_CARE,
+            LoadStore::InitClearFinalStore => vk::AttachmentLoadOp::CLEAR,
+            LoadStore::InitLoadFinalStore => vk::AttachmentLoadOp::LOAD,
+        }
+    }
+
+    pub(crate) fn to_native_store(self) -> vk::AttachmentStoreOp {
+        match self {
+            LoadStore::None => vk::AttachmentStoreOp::DONT_CARE,
+            LoadStore::InitLoad => vk::AttachmentStoreOp::DONT_CARE,
+            LoadStore::InitClear => vk::AttachmentStoreOp::DONT_CARE,
+            LoadStore::FinalStore => vk::AttachmentStoreOp::STORE,
+            LoadStore::InitClearFinalStore => vk::AttachmentStoreOp::STORE,
+            LoadStore::InitLoadFinalStore => vk::AttachmentStoreOp::STORE,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -99,6 +123,7 @@ pub enum ImageMod {
     AdditionalUsage(ImageUsageFlags),
 }
 
+#[derive(Clone, Copy)]
 pub enum ClearValue {
     Undefined,
     ColorF32([f32; 4]),

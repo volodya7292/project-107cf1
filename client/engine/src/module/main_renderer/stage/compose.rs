@@ -77,7 +77,7 @@ impl RenderStage for ComposeStage {
                             format: *format,
                             init_layout: ImageLayout::UNDEFINED,
                             final_layout: ImageLayout::PRESENT,
-                            load_store: LoadStore::FinalSave,
+                            load_store: LoadStore::FinalStore,
                         }],
                         &[Subpass::new().with_color(vec![AttachmentRef {
                             index: 0,
@@ -95,8 +95,10 @@ impl RenderStage for ComposeStage {
             |(render_pass,), _| {
                 self.device
                     .create_graphics_pipeline(
-                        render_pass,
-                        0,
+                        vk_wrapper::PipelineOutputInfo::RenderPass {
+                            pass: render_pass.clone(),
+                            subpass: 0,
+                        },
                         PrimitiveTopology::TRIANGLE_LIST,
                         Default::default(),
                         Default::default(),

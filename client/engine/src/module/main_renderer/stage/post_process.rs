@@ -13,8 +13,8 @@ use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
     AccessFlags, Attachment, AttachmentColorBlend, AttachmentRef, BindingRes, CmdList, Device, DeviceBuffer,
     Format, Framebuffer, Image, ImageLayout, ImageMod, ImageUsageFlags, ImageView, LoadStore, Pipeline,
-    PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler, SamplerFilter, SamplerMipmap, Shader,
-    Subpass, SubpassDependency,
+    PipelineOutputInfo, PipelineStageFlags, PrimitiveTopology, RenderPass, Sampler, SamplerFilter,
+    SamplerMipmap, Shader, Subpass, SubpassDependency,
 };
 
 pub type PostProcessUniformData = Arc<Mutex<dyn UniformsBlock>>;
@@ -73,7 +73,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::FinalSave,
+                    load_store: LoadStore::FinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -108,8 +108,10 @@ impl PostProcessStage {
             .unwrap();
         let merge_pipeline = device
             .create_graphics_pipeline(
-                &merge_render_pass,
-                0,
+                vk_wrapper::PipelineOutputInfo::RenderPass {
+                    pass: merge_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),
@@ -125,7 +127,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::FinalSave,
+                    load_store: LoadStore::FinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -149,8 +151,10 @@ impl PostProcessStage {
             .unwrap();
         let combine_main_overlay_pipeline = device
             .create_graphics_pipeline(
-                &combine_main_overlay_render_pass,
-                0,
+                vk_wrapper::PipelineOutputInfo::RenderPass {
+                    pass: combine_main_overlay_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),
@@ -166,7 +170,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::FinalSave,
+                    load_store: LoadStore::FinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -246,8 +250,10 @@ impl PostProcessStage {
 
         let bloom_downscale_pipeline = device
             .create_graphics_pipeline(
-                &bloom_downscale_render_pass,
-                0,
+                PipelineOutputInfo::RenderPass {
+                    pass: bloom_downscale_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),
@@ -259,8 +265,10 @@ impl PostProcessStage {
 
         let bloom_upscale_pipeline = device
             .create_graphics_pipeline(
-                &bloom_upscale_render_pass,
-                0,
+                PipelineOutputInfo::RenderPass {
+                    pass: bloom_upscale_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),
@@ -276,7 +284,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::FinalSave,
+                    load_store: LoadStore::FinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -301,7 +309,7 @@ impl PostProcessStage {
                     format: Format::RGBA16_FLOAT,
                     init_layout: ImageLayout::UNDEFINED,
                     final_layout: ImageLayout::SHADER_READ,
-                    load_store: LoadStore::FinalSave,
+                    load_store: LoadStore::FinalStore,
                 }],
                 &[Subpass::new().with_color(vec![AttachmentRef {
                     index: 0,
@@ -322,8 +330,10 @@ impl PostProcessStage {
             .unwrap();
         let tonemap_pipeline = device
             .create_graphics_pipeline(
-                &tonemap_render_pass,
-                0,
+                PipelineOutputInfo::RenderPass {
+                    pass: tonemap_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),
@@ -387,8 +397,10 @@ impl PostProcessStage {
         let pipeline = self
             .device
             .create_graphics_pipeline(
-                &self.custom_process_render_pass,
-                0,
+                PipelineOutputInfo::RenderPass {
+                    pass: self.custom_process_render_pass.clone(),
+                    subpass: 0,
+                },
                 PrimitiveTopology::TRIANGLE_LIST,
                 Default::default(),
                 Default::default(),

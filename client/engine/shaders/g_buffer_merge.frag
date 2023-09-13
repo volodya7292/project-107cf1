@@ -107,7 +107,7 @@ void main() {
 
     vec4 mainColor = vec4(0);
 
-    // Blend solid color into sky color
+    // Blend in solid color
     mainColor.rgb = mix(mainColor.rgb, solidColor.rgb, solidColor.a);
     mainColor.a = mix(mainColor.a, 1, solidColor.a);
 

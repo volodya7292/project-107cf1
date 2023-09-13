@@ -1,5 +1,5 @@
 use crate::shader::{BindingLoc, ShaderStage};
-use crate::{DescriptorPool, Device, Shader, ShaderBinding};
+use crate::{DescriptorPool, Device, Shader, ShaderBindingDescription};
 use ash::vk;
 use common::types::HashMap;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ pub struct PipelineSignature {
     pub(crate) binding_types: [HashMap<u32, vk::DescriptorType>; 4],
     pub(crate) _push_constants_size: u32,
     pub(crate) shaders: HashMap<ShaderStage, Arc<Shader>>,
-    pub(crate) bindings: HashMap<BindingLoc, ShaderBinding>,
+    pub(crate) bindings: HashMap<BindingLoc, ShaderBindingDescription>,
 }
 
 impl PipelineSignature {
@@ -35,7 +35,7 @@ impl PipelineSignature {
         Ok(pool)
     }
 
-    pub fn bindings(&self) -> &HashMap<BindingLoc, ShaderBinding> {
+    pub fn bindings(&self) -> &HashMap<BindingLoc, ShaderBindingDescription> {
         &self.bindings
     }
 }

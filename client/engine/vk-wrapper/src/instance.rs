@@ -6,6 +6,7 @@ use crate::FORMAT_SIZES;
 use crate::{format, surface::Surface, utils, Entry};
 use ash::vk;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
+use std::ptr::addr_of_mut;
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
 
@@ -185,7 +186,7 @@ impl Instance {
             // Check extensions
             // ------------------------------------------------------------------------------------
             let available_extensions = self.enumerate_device_extension_names(p_device).unwrap();
-            let required_extensions = ["VK_KHR_swapchain"];
+            let required_extensions = ["VK_KHR_swapchain", "VK_KHR_dynamic_rendering"];
             let mut preferred_extensions = vec!["VK_KHR_portability_subset"];
 
             if cfg!(debug_assertions) {
@@ -203,10 +204,13 @@ impl Instance {
 
             // Check features
             // ------------------------------------------------------------------------------------
+            let mut available_dyn_render_features = vk::PhysicalDeviceDynamicRenderingFeaturesKHR::default();
+
             let mut available_vulkan12_features = vk::PhysicalDeviceVulkan12Features::default();
+            available_vulkan12_features.p_next = addr_of_mut!(available_dyn_render_features) as *mut c_void;
 
             let mut available_features2 = vk::PhysicalDeviceFeatures2 {
-                p_next: &mut available_vulkan12_features as *mut _ as *mut c_void,
+                p_next: addr_of_mut!(available_vulkan12_features) as *mut c_void,
                 ..Default::default()
             };
             unsafe {
@@ -217,6 +221,7 @@ impl Instance {
 
             let mut enabled_features = vk::PhysicalDeviceFeatures::default();
             let mut enabled_vulkan12_features = vk::PhysicalDeviceVulkan12Features::default();
+            let mut enabled_dyn_render_features = vk::PhysicalDeviceDynamicRenderingFeaturesKHR::default();
 
             macro_rules! require_features {
                 ($available: ident, $to_set: ident, $($name: ident),+) => {
@@ -251,6 +256,11 @@ impl Instance {
                 scalar_block_layout,
                 descriptor_binding_partially_bound,
                 runtime_descriptor_array
+            );
+            require_features!(
+                available_dyn_render_features,
+                enabled_dyn_render_features,
+                dynamic_rendering
             );
 
             // Check formats

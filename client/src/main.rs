@@ -56,7 +56,7 @@ fn init_threads() -> RuntimeGuard {
 }
 
 fn main() {
-    parking_lot_deadlock_detection();
+    // parking_lot_deadlock_detection();
     let _rt_guard = init_threads();
 
     SimpleLogger::new()

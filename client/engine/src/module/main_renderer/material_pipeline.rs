@@ -38,8 +38,10 @@ impl MaterialPipelineSet {
         let pipeline = self
             .device
             .create_graphics_pipeline(
-                params.render_pass,
-                params.subpass_index,
+                vkw::PipelineOutputInfo::RenderPass {
+                    pass: Arc::clone(params.render_pass),
+                    subpass: params.subpass_index,
+                },
                 self.topology,
                 vkw::PipelineDepthStencil::new()
                     .depth_test(params.depth_test)

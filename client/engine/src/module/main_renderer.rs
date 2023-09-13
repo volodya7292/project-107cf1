@@ -92,7 +92,7 @@ use vk_wrapper::{
     SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain,
     SwapchainImage, FORMAT_SIZES,
 };
-use vkw::PipelineSignature;
+use vkw::{PipelineSignature, ShaderBindingDescription};
 use winit::window::Window;
 
 // TODO: Defragment VK memory (every frame?).
@@ -379,7 +379,7 @@ lazy_static! {
         "pipeline_cache"
     };
 
-    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBinding); 9] = [
+    static ref ADDITIONAL_PIPELINE_BINDINGS: [(BindingLoc, ShaderBindingDescription); 9] = [
         // Per frame info
         (
             BindingLoc::new(shader_ids::SET_GENERAL_PER_FRAME, shader_ids::BINDING_FRAME_INFO),
@@ -387,7 +387,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::PIXEL,
                 binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Material buffer
         (
@@ -396,7 +396,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_BUFFER,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Albedo atlas
         (
@@ -405,7 +405,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Specular atlas
         (
@@ -414,7 +414,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Normal atlas
         (
@@ -423,7 +423,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::SAMPLED_IMAGE,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Translucency depths (only used in translucency passes)
         (
@@ -432,7 +432,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_BUFFER,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Translucency colors (only used in translucency passes)
         (
@@ -441,7 +441,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::STORAGE_IMAGE,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Solid depths attachment (only used in translucency depths pass)
         (
@@ -450,7 +450,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::PIXEL,
                 binding_type: BindingType::INPUT_ATTACHMENT,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
         // Per object info
         (
@@ -459,7 +459,7 @@ lazy_static! {
                 stage_flags: ShaderStageFlags::VERTEX,
                 binding_type: BindingType::UNIFORM_BUFFER_DYNAMIC,
                 count: 1,
-            },
+            }.auto_describe(),
         ),
     ];
 }
@@ -1086,7 +1086,7 @@ impl MainRenderer {
                                 .dst_access_mask(AccessFlags::TRANSFER_WRITE)],
                         );
                         cl.copy_host_buffer_to_image_2d(
-                            &self.staging_buffer,
+                            self.staging_buffer.handle(),
                             curr_offset,
                             &update.image,
                             ImageLayout::TRANSFER_DST,

@@ -1,12 +1,12 @@
 use crate::buffer::BufferHandleImpl;
 use crate::render_pass::vk_clear_value;
-use crate::DescriptorSet;
+use crate::{AccessFlags, DescriptorSet, LoadStore};
 use crate::{
     BufferBarrier, ClearValue, Framebuffer, HostBuffer, Image, ImageBarrier, ImageLayout, Pipeline,
     PipelineSignature, PipelineStageFlags, QueryPool, RenderPass,
 };
 use crate::{BufferHandle, DeviceWrapper};
-use ash::vk;
+use ash::vk::{self};
 use smallvec::SmallVec;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -146,7 +146,7 @@ impl CmdList {
                 } else {
                     vk::SubpassContents::INLINE
                 },
-            )
+            );
         }
 
         if !secondary_cmd_lists {
@@ -176,6 +176,70 @@ impl CmdList {
 
     pub fn end_render_pass(&mut self) {
         unsafe { self.device_wrapper.native.cmd_end_render_pass(self.native) };
+    }
+
+    pub fn begin_rendering(
+        &mut self,
+        attachments: &[(Arc<Image>, LoadStore)],
+        depth_attachment: Option<(Arc<Image>, LoadStore)>,
+        clear_values: &[ClearValue],
+        depth_clear_value: ClearValue,
+    ) {
+        let render_size = attachments
+            .get(0)
+            .or(depth_attachment.as_ref())
+            .map(|v| v.0.size_2d())
+            .unwrap();
+
+        let color_attachments_infos: Vec<_> = attachments
+            .iter()
+            .zip(clear_values)
+            .map(|((image, load_store), clear_value)| {
+                vk::RenderingAttachmentInfoKHR::builder()
+                    .image_view(image.view().native)
+                    .image_layout(ImageLayout::COLOR_ATTACHMENT.0)
+                    .load_op(load_store.to_native_load())
+                    .store_op(load_store.to_native_store())
+                    .clear_value(vk_clear_value(clear_value))
+                    .build()
+            })
+            .collect();
+
+        let depth_attachment_info = if let Some((image, load_store)) = depth_attachment {
+            vk::RenderingAttachmentInfoKHR::builder()
+                .image_view(image.view().native)
+                .image_layout(ImageLayout::DEPTH_STENCIL_ATTACHMENT.0)
+                .load_op(load_store.to_native_load())
+                .store_op(load_store.to_native_store())
+                .clear_value(vk_clear_value(&depth_clear_value))
+                .build()
+        } else {
+            Default::default()
+        };
+
+        let rendering_info = vk::RenderingInfoKHR::builder()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: vk::Extent2D {
+                    width: render_size.0,
+                    height: render_size.1,
+                },
+            })
+            .layer_count(1)
+            .color_attachments(&color_attachments_infos)
+            .depth_attachment(&depth_attachment_info);
+
+        unsafe {
+            self.device_wrapper
+                .native
+                .cmd_begin_rendering(self.native, &rendering_info);
+        }
+    }
+
+    pub fn end_rendering(&mut self) {
+        unsafe {
+            self.device_wrapper.native.cmd_end_rendering(self.native);
+        }
     }
 
     pub fn reset_query_pool(&mut self, query_pool: &Arc<QueryPool>, first_query: u32, query_count: u32) {
@@ -537,7 +601,7 @@ impl CmdList {
     #[allow(clippy::too_many_arguments)]
     pub fn copy_host_buffer_to_image_2d(
         &mut self,
-        src_buffer: &HostBuffer<u8>,
+        src_buffer: BufferHandle,
         src_offset: u64,
         dst_image: &Arc<Image>,
         dst_image_layout: ImageLayout,
@@ -574,7 +638,7 @@ impl CmdList {
         unsafe {
             self.device_wrapper.native.cmd_copy_buffer_to_image(
                 self.native,
-                src_buffer.buffer.native,
+                src_buffer.0,
                 dst_image.wrapper.native,
                 dst_image_layout.0,
                 &[region],
@@ -828,6 +892,37 @@ impl CmdList {
                     &[range],
                 );
             }
+        }
+    }
+
+    pub fn barrier_all(
+        &mut self,
+        src_stage_mask: PipelineStageFlags,
+        dst_stage_mask: PipelineStageFlags,
+        src_access: AccessFlags,
+        dst_access: AccessFlags,
+        buffer_barriers: &[BufferBarrier],
+        image_barriers: &[ImageBarrier],
+    ) {
+        let native_image_barriers: SmallVec<[vk::ImageMemoryBarrier; 4]> =
+            image_barriers.iter().map(|v| v.native).collect();
+
+        unsafe {
+            self.device_wrapper.native.cmd_pipeline_barrier(
+                self.native,
+                src_stage_mask.0,
+                dst_stage_mask.0,
+                vk::DependencyFlags::default(),
+                &[vk::MemoryBarrier::builder()
+                    .src_access_mask(src_access.0)
+                    .dst_access_mask(dst_access.0)
+                    .build()],
+                slice::from_raw_parts(
+                    buffer_barriers.as_ptr() as *const vk::BufferMemoryBarrier,
+                    buffer_barriers.len(),
+                ),
+                &native_image_barriers,
+            );
         }
     }
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use vk_wrapper as vkw;
 use vk_wrapper::image::ImageParams;
 use vk_wrapper::QueueType;
+use vkw::buffer::BufferHandleImpl;
 
 #[derive(Debug)]
 pub enum Error {
@@ -144,7 +145,7 @@ impl TextureAtlas {
                 let texture_byte_size = mip_size * mip_size * vkw::FORMAT_SIZES[&self.image.format()] as u32;
 
                 cl.copy_host_buffer_to_image_2d(
-                    &buffer,
+                    buffer.handle(),
                     offset,
                     &self.image,
                     vkw::ImageLayout::TRANSFER_DST,

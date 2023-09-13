@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{Device, PipelineSignature, RenderPass};
+use crate::{Device, Format, PipelineSignature, RenderPass};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PipelineStageFlags(pub(crate) vk::PipelineStageFlags);
@@ -187,9 +187,31 @@ impl Default for AttachmentColorBlend {
     }
 }
 
+pub enum PipelineOutputInfo {
+    None,
+    RenderPass { pass: Arc<RenderPass>, subpass: u32 },
+    DynamicRender(Vec<Format>),
+}
+
+impl PipelineOutputInfo {
+    pub fn num_color_attachments(&self) -> usize {
+        match self {
+            PipelineOutputInfo::None => 0,
+            PipelineOutputInfo::RenderPass { pass, subpass } => pass.subpasses[*subpass as usize].color.len(),
+            PipelineOutputInfo::DynamicRender(formats) => formats.len(),
+        }
+    }
+}
+
+impl Default for PipelineOutputInfo {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 pub struct Pipeline {
     pub(crate) device: Arc<Device>,
-    pub(crate) _render_pass: Option<Arc<RenderPass>>,
+    pub(crate) _output_info: PipelineOutputInfo,
     pub(crate) signature: Arc<PipelineSignature>,
     pub(crate) native: vk::Pipeline,
     pub(crate) bind_point: vk::PipelineBindPoint,

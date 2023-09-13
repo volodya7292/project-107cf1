@@ -2,6 +2,7 @@ use ash::vk;
 use common::types::HashMap;
 use lazy_static::lazy_static;
 
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Format(pub(crate) vk::Format);
 
@@ -57,10 +58,9 @@ lazy_static! {
         | FormatFeatureFlags::BLIT_DST
         | FormatFeatureFlags::TRANSFER_SRC
         | FormatFeatureFlags::TRANSFER_DST;
-    pub static ref SAMPLE_IMAGE_FEATURES: FormatFeatureFlags =
-        FormatFeatureFlags::SAMPLED_IMAGE| FormatFeatureFlags::TRANSFER_SRC
-            | FormatFeatureFlags::TRANSFER_DST;
-
+    pub static ref SAMPLE_IMAGE_FEATURES: FormatFeatureFlags = FormatFeatureFlags::SAMPLED_IMAGE
+        | FormatFeatureFlags::TRANSFER_SRC
+        | FormatFeatureFlags::TRANSFER_DST;
     pub static ref BUFFER_FORMATS: HashMap<Format, FormatFeatureFlags> = [
         (Format::R32_UINT, FormatFeatureFlags::VERTEX_BUFFER),
         (Format::R32_FLOAT, FormatFeatureFlags::VERTEX_BUFFER),

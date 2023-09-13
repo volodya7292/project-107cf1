@@ -52,6 +52,25 @@ impl BindingLoc {
 }
 
 #[derive(Copy, Clone)]
+pub struct ShaderBindingDescription {
+    pub stage_flags: ShaderStageFlags,
+    pub binding_type: BindingType,
+    pub count: u32,
+    pub readable: bool,
+    pub writable: bool,
+}
+
+impl ShaderBindingDescription {
+    pub fn pure_binding(&self) -> ShaderBinding {
+        ShaderBinding {
+            stage_flags: self.stage_flags,
+            binding_type: self.binding_type,
+            count: self.count,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
 pub struct ShaderBinding {
     pub stage_flags: ShaderStageFlags,
     pub binding_type: BindingType,
@@ -66,6 +85,19 @@ impl ShaderBinding {
             count: 1,
         }
     }
+
+    pub fn auto_describe(&self) -> ShaderBindingDescription {
+        ShaderBindingDescription {
+            stage_flags: self.stage_flags,
+            binding_type: self.binding_type,
+            count: self.count,
+            readable: true,
+            writable: matches!(
+                self.binding_type,
+                BindingType::STORAGE_BUFFER | BindingType::STORAGE_IMAGE
+            ),
+        }
+    }
 }
 
 pub struct Shader {
@@ -74,7 +106,7 @@ pub struct Shader {
     pub(crate) stage: ShaderStage,
     // [location, format]
     pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
-    pub(crate) named_bindings: HashMap<String, (BindingLoc, ShaderBinding)>,
+    pub(crate) named_bindings: HashMap<String, (BindingLoc, ShaderBindingDescription)>,
     pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,
     pub(crate) push_constants_size: u32,
 }
@@ -88,7 +120,7 @@ impl Shader {
         &self.vertex_location_inputs
     }
 
-    pub fn named_bindings(&self) -> &HashMap<String, (BindingLoc, ShaderBinding)> {
+    pub fn named_bindings(&self) -> &HashMap<String, (BindingLoc, ShaderBindingDescription)> {
         &self.named_bindings
     }
 }

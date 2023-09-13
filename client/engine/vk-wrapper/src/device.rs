@@ -1,8 +1,8 @@
 use crate::format::{FormatFeatureFlags, BUFFER_FORMATS};
 use crate::image::ImageParams;
+use crate::pipeline::PipelineOutputInfo;
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::{BindingLoc, ShaderStage, VInputRate};
-use crate::PipelineSignature;
 use crate::FORMAT_SIZES;
 use crate::IMAGE_FORMATS;
 use crate::{
@@ -10,8 +10,9 @@ use crate::{
     {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
 };
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
-use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBinding};
+use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBindingDescription};
 use crate::{AttachmentColorBlend, ImageWrapper};
+use crate::{Fence, PipelineSignature};
 use crate::{LoadStore, RenderPass, Shader};
 use crate::{QueryPool, Subpass};
 use crate::{Sampler, DEPTH_FORMAT};
@@ -23,8 +24,8 @@ use common::types::HashMap;
 use spirv_cross::glsl;
 use spirv_cross::spirv;
 use std::collections::hash_map;
-use std::ffi::CString;
-use std::ptr;
+use std::ffi::{c_void, CString};
+use std::ptr::{self, addr_of};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
 use std::{ffi::CStr, marker::PhantomData, mem, slice};
@@ -160,14 +161,14 @@ pub(crate) fn create_timeline_semaphore(
     create_semaphore(device_wrapper, vk::SemaphoreType::TIMELINE)
 }
 
-// pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence, vk::Result> {
-//     let mut create_info = vk::FenceCreateInfo::builder().build();
-//     create_info.flags = vk::FenceCreateFlags::SIGNALED;
-//     Ok(Fence {
-//         device_wrapper: Arc::clone(device_wrapper),
-//         native: unsafe { device_wrapper.native.create_fence(&create_info, None)? },
-//     })
-// }
+pub(crate) fn create_fence(device_wrapper: &Arc<DeviceWrapper>) -> Result<Fence, vk::Result> {
+    let mut create_info = vk::FenceCreateInfo::builder().build();
+    create_info.flags = vk::FenceCreateFlags::SIGNALED;
+    Ok(Fence {
+        device_wrapper: Arc::clone(device_wrapper),
+        native: unsafe { device_wrapper.native.create_fence(&create_info, None)? },
+    })
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MemoryUsage {
@@ -201,6 +202,10 @@ impl Device {
 
     pub fn create_timeline_semaphore(self: &Arc<Self>) -> Result<Semaphore, DeviceError> {
         Ok(create_timeline_semaphore(&self.wrapper)?)
+    }
+
+    pub fn create_fence(self: &Arc<Self>) -> Result<Fence, DeviceError> {
+        Ok(create_fence(&self.wrapper)?)
     }
 
     pub fn align_for_uniform_dynamic_offset(&self, size: u64) -> u64 {
@@ -685,7 +690,7 @@ impl Device {
                             .unwrap(),
                         ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     ),
-                    ShaderBinding {
+                    ShaderBindingDescription {
                         stage_flags: stage,
                         binding_type: BindingType(vk::DescriptorType::$desc_type),
                         count: match var_type {
@@ -698,6 +703,14 @@ impl Device {
                             }
                             _ => unreachable!(),
                         },
+                        readable: ast
+                            .get_decoration($res.id, spirv::Decoration::NonReadable)
+                            .unwrap_or(1)
+                            != 0,
+                        writable: ast
+                            .get_decoration($res.id, spirv::Decoration::NonWritable)
+                            .unwrap_or(1)
+                            != 0,
                     },
                 )
             }};
@@ -712,7 +725,7 @@ impl Device {
                             .unwrap(),
                         ast.get_decoration($res.id, spirv::Decoration::Binding)?,
                     ),
-                    ShaderBinding {
+                    ShaderBindingDescription {
                         stage_flags: stage,
                         binding_type: BindingType(vk::DescriptorType::$desc_type0),
                         count: match var_type {
@@ -728,6 +741,14 @@ impl Device {
                             }
                             _ => unreachable!(),
                         },
+                        readable: !ast
+                            .get_decoration($res.id, spirv::Decoration::NonReadable)
+                            .unwrap_or(1)
+                            != 0,
+                        writable: !ast
+                            .get_decoration($res.id, spirv::Decoration::NonWritable)
+                            .unwrap_or(1)
+                            != 0,
                     },
                 )
             }};
@@ -870,7 +891,7 @@ impl Device {
                         native_info.load_op = vk::AttachmentLoadOp::CLEAR;
                         native_info.store_op = vk::AttachmentStoreOp::DONT_CARE;
                     }
-                    LoadStore::FinalSave => {
+                    LoadStore::FinalStore => {
                         native_info.load_op = vk::AttachmentLoadOp::DONT_CARE;
                         native_info.store_op = vk::AttachmentStoreOp::STORE;
                     }
@@ -1000,9 +1021,9 @@ impl Device {
     pub fn create_pipeline_signature(
         self: &Arc<Self>,
         shaders: &[Arc<Shader>],
-        additional_bindings: &[(BindingLoc, ShaderBinding)],
+        additional_bindings: &[(BindingLoc, ShaderBindingDescription)],
     ) -> Result<Arc<PipelineSignature>, vk::Result> {
-        let mut combined_bindings: HashMap<BindingLoc, ShaderBinding> =
+        let mut combined_bindings: HashMap<BindingLoc, ShaderBindingDescription> =
             additional_bindings.iter().cloned().collect();
 
         let mut push_constants_size = 0u32;
@@ -1167,8 +1188,7 @@ impl Device {
     #[allow(clippy::too_many_arguments)]
     pub fn create_graphics_pipeline(
         self: &Arc<Self>,
-        render_pass: &Arc<RenderPass>,
-        subpass_index: u32,
+        output: PipelineOutputInfo,
         primitive_topology: PrimitiveTopology,
         depth_stencil: PipelineDepthStencil,
         rasterization: PipelineRasterization,
@@ -1287,7 +1307,7 @@ impl Device {
         // Color blend
         let overridden_blends: HashMap<u32, AttachmentColorBlend> =
             attachment_blends.iter().cloned().collect();
-        let n_color_attachments = render_pass.subpasses[subpass_index as usize].color.len();
+        let n_color_attachments = output.num_color_attachments();
         let blend_attachment_states: Vec<_> = (0..n_color_attachments)
             .map(|i| {
                 if let Some(overridden) = overridden_blends.get(&(i as u32)) {
@@ -1319,7 +1339,14 @@ impl Device {
             })
             .collect();
 
-        let create_info = vk::GraphicsPipelineCreateInfo::builder()
+        let (native_render_pass, subpass) = if let PipelineOutputInfo::RenderPass { pass, subpass } = &output
+        {
+            (pass.native, *subpass)
+        } else {
+            (vk::RenderPass::null(), 0)
+        };
+
+        let mut create_info = vk::GraphicsPipelineCreateInfo::builder()
             .stages(&stages)
             .vertex_input_state(&vertex_info)
             .input_assembly_state(&input_assembly_info)
@@ -1330,8 +1357,20 @@ impl Device {
             .color_blend_state(&color_blend_info)
             .dynamic_state(&dynamic_info)
             .layout(signature.pipeline_layout)
-            .render_pass(render_pass.native)
-            .subpass(subpass_index);
+            .render_pass(native_render_pass)
+            .subpass(subpass);
+
+        // Account for dynamic rendering (without renderpass)
+        let dyn_renderer;
+        let dyn_output_native_formats;
+        if let PipelineOutputInfo::DynamicRender(formats) = &output {
+            dyn_output_native_formats = formats.iter().map(|v| v.0).collect::<Vec<_>>();
+            dyn_renderer = vk::PipelineRenderingCreateInfoKHR::builder()
+                .color_attachment_formats(&dyn_output_native_formats)
+                .depth_attachment_format(DEPTH_FORMAT.0)
+                .build();
+            create_info.p_next = addr_of!(dyn_renderer) as *const c_void;
+        }
 
         let pipeline_cache = self.pipeline_cache.lock();
         let native_pipeline = unsafe {
@@ -1346,7 +1385,7 @@ impl Device {
 
         Ok(Arc::new(Pipeline {
             device: Arc::clone(self),
-            _render_pass: Some(Arc::clone(render_pass)),
+            _output_info: output,
             signature: Arc::clone(signature),
             native: pipeline,
             bind_point: vk::PipelineBindPoint::GRAPHICS,
@@ -1381,8 +1420,8 @@ impl Device {
 
         Ok(Arc::new(Pipeline {
             device: Arc::clone(self),
-            _render_pass: None,
             signature: Arc::clone(signature),
+            _output_info: PipelineOutputInfo::None,
             native: pipeline,
             bind_point: vk::PipelineBindPoint::COMPUTE,
         }))
