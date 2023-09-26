@@ -4,7 +4,6 @@ use crate::default_resource_mapping::DefaultResourceMapping;
 use crate::rendering::material_pipelines;
 use crate::rendering::material_pipelines::MaterialPipelines;
 use crate::rendering::overworld_renderer::OverworldRenderer;
-use crate::rendering::ui::image::ImageImpl;
 use crate::rendering::ui::register_ui_elements;
 use approx::AbsDiffEq;
 use base::check_block;
@@ -32,6 +31,7 @@ use common::threading::SafeThreadPool;
 use common::{glm, image};
 use engine::event::{WSIEvent, WSIKeyboardInput};
 use engine::module::input::{Input, Keyboard};
+use engine::module::main_renderer::vertex_mesh::{RawVertexMesh, VertexMeshCreate};
 use engine::module::main_renderer::{camera, MainRenderer, PostProcess, WrapperObject};
 use engine::module::scene::Scene;
 use engine::module::text_renderer::TextRenderer;
@@ -119,6 +119,8 @@ pub struct MainApp {
     cursor_grab: bool,
     root_entity: EntityId,
     ui_reactor: Lrc<UIReactor>,
+
+    test_mesh: Arc<RawVertexMesh>,
 }
 
 const WALK_VELOCITY: f64 = 3.0;
@@ -228,14 +230,19 @@ impl MainApp {
 
         let ui_reactor = { UIReactor::new(move |ctx| ui::overlay_root(ctx, ui_root_element)) };
 
-        let res =
-            engine::gltf::load_simple_gltf(&resources.get("models/material_item_blob.glb").unwrap()).unwrap();
-        println!(
-            "{} {:?} {:?}",
-            res.positions.len(),
-            res.normals.map(|v| v.len()),
-            res.indices.map(|v| v.len()),
-        );
+        let test_mesh = {
+            let gltf_model =
+                engine::gltf::load_simple_gltf(&resources.get("models/material_item_blob.glb").unwrap())
+                    .unwrap();
+            let gltf_vertices: Vec<_> = gltf_model.vertices().collect();
+
+            let renderer = ctx.module::<MainRenderer>();
+
+            renderer
+                .device()
+                .create_vertex_mesh(gltf_vertices.as_slice().into(), gltf_model.indices.as_deref())
+                .unwrap()
+        };
 
         let game = MainApp {
             resources: Arc::clone(&resources),
@@ -251,6 +258,7 @@ impl MainApp {
             cursor_grab: false,
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
+            test_mesh: test_mesh.raw(),
         };
         ctx.register_module(game);
 

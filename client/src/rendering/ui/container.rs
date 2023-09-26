@@ -1,12 +1,14 @@
 use super::ui_callbacks;
 use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
+use by_address::ByAddress;
 use common::glm::{Vec2, Vec4};
 use common::memoffset::offset_of;
 use common::scene::relation::Relation;
 use engine::ecs::component::render_config::{GPUResource, RenderLayer};
 use engine::ecs::component::ui::{RectUniformData, Sizing, UILayoutC};
 use engine::ecs::component::{MeshRenderConfigC, UniformDataC, VertexMeshC};
+use engine::module::main_renderer::vertex_mesh::RawVertexMesh;
 use engine::module::main_renderer::MaterialPipelineId;
 use engine::module::scene::Scene;
 use engine::module::ui::reactive::{Props, UIScopeContext};
@@ -29,17 +31,24 @@ pub struct SolidColorUniformData {
 pub struct ContainerBackground {
     mat_pipe_res_name: &'static str,
     uniform_data: SmallVec<[u8; 128]>,
+    mesh: Option<ByAddress<Arc<RawVertexMesh>>>,
     resources: Vec<GPUResource>,
 }
 
 impl ContainerBackground {
-    pub fn new_raw<U: Copy>(mat_pipe_res_name: &'static str, data: U, resources: Vec<GPUResource>) -> Self {
+    pub fn new_raw<U: Copy>(
+        mat_pipe_res_name: &'static str,
+        data: U,
+        mesh: Option<Arc<RawVertexMesh>>,
+        resources: Vec<GPUResource>,
+    ) -> Self {
         let mut uniform_data: SmallVec<[u8; 128]> = smallvec![0; mem::size_of::<U>()];
         uniform_data.raw_copy_from(data);
 
         Self {
             mat_pipe_res_name,
             uniform_data,
+            mesh: mesh.map(|v| ByAddress(v)),
             resources,
         }
     }
@@ -176,6 +185,7 @@ pub mod background {
             SolidColorUniformData {
                 color: color.into_raw_linear(),
             },
+            None,
             vec![],
         )
     }
@@ -211,7 +221,14 @@ fn container_impl(
             {
                 let ctx = *scope_ctx.ctx();
                 let entity_state = scope_ctx.request_state(STATE_ENTITY_ID, || {
-                    let obj = UIObject::new_raw(props.layout, ()).with_mesh(VertexMeshC::without_data(4, 1));
+                    let obj = UIObject::new_raw(props.layout, ()).with_mesh(
+                        props
+                            .background
+                            .as_ref()
+                            .and_then(|b| b.mesh.as_ref())
+                            .map(|v| VertexMeshC::new(&v.0))
+                            .unwrap_or(VertexMeshC::without_data(4, 1)),
+                    );
                     *ctx.scene().add_object(Some(parent_entity), obj).unwrap()
                 });
 
@@ -277,7 +294,7 @@ where
         ctx,
         props.into_dyn(),
         Arc::new(move |ctx, props| {
-            let props = (&*props).as_any().downcast_ref::<P>().unwrap();
+            let props = (*props).as_any().downcast_ref::<P>().unwrap();
             children_fn(ctx, props.clone());
         }),
     );

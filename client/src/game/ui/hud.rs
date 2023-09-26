@@ -115,6 +115,20 @@ pub fn hud_overlay(ctx: &mut UIScopeContext) {
                         );
                     }
 
+                    let mesh = {
+                        let app = ctx.ctx().app();
+                        app.test_mesh.clone()
+                    };
+
+                    container(
+                        make_static_id!(),
+                        ctx,
+                        container_props()
+                            .layout(UILayoutC::new().with_fixed_size(200.0))
+                            .background(Some(backgrounds::model_3d(mesh))),
+                        |_, ()| {},
+                    );
+
                     expander(make_static_id!(), ctx, 1.0);
                 },
             );

@@ -1791,6 +1791,7 @@ dependencies = [
  "approx",
  "base",
  "bit-vec",
+ "by_address",
  "clipboard",
  "common",
  "dirs",

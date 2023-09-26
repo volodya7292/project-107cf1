@@ -20,6 +20,7 @@ fixedbitset = { workspace = true }
 lazy_static = { workspace = true }
 dirs = { workspace = true }
 clipboard = { workspace = true }
+by_address = { workspace = true }
 
 [build-dependencies]
 common = { path = "../common" }

@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::{
-    DescriptorPool, DescriptorSet, DeviceBuffer, PipelineSignature, PrimitiveTopology, Sampler, Shader,
+    DescriptorPool, DescriptorSet, DeviceBuffer, PipelineSignature, PrimitiveTopology, Sampler,
 };
 
 pub(crate) const N_CUSTOM_DESCRIPTORS: usize = 1;

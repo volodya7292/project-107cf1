@@ -377,6 +377,12 @@ impl<'a, T> VAttributes<'a, T> {
     }
 }
 
+impl<'a, T> From<&'a [T]> for VAttributes<'a, T> {
+    fn from(value: &'a [T]) -> Self {
+        Self::Slice(value)
+    }
+}
+
 pub trait VertexMeshCreate {
     fn create_instanced_vertex_mesh<VertexT, InstanceT: AttributesImpl>(
         self: &Arc<Self>,
@@ -427,15 +433,12 @@ impl VertexMeshCreate for vkw::Device {
             });
         }
 
-        let vertex_size = mem::size_of::<VertexT>();
-        let instance_size = mem::size_of::<InstanceT>();
-        let index_size = mem::size_of::<u32>();
-        let buffer_size = vertices_data.len() * vertex_size
-            + instances_data.len() * instance_size
-            + indices_data.len() * index_size;
+        let buffer_size = std::mem::size_of_val(vertices_data)
+            + std::mem::size_of_val(instances_data)
+            + std::mem::size_of_val(indices_data);
 
-        let instances_offset = vertices_data.len() * vertex_size;
-        let indices_offset = instances_offset + instances_data.len() * instance_size;
+        let instances_offset = std::mem::size_of_val(vertices_data);
+        let indices_offset = instances_offset + std::mem::size_of_val(instances_data);
 
         // Create host buffer
         let mut staging_buffer = self
@@ -489,7 +492,7 @@ impl VertexMeshCreate for vkw::Device {
                     ptr::copy_nonoverlapping(
                         (instance as *const InstanceT as *const u8).add(member_offset),
                         staging_buffer.as_mut_ptr().add(buffer_offset + format_size * i),
-                        format_size as usize,
+                        format_size,
                     );
                 }
             }
@@ -499,11 +502,11 @@ impl VertexMeshCreate for vkw::Device {
         }
 
         // Copy indices
-        if indices_data.len() > 0 {
+        if !indices_data.is_empty() {
             staging_buffer.write(indices_offset as u64, unsafe {
                 slice::from_raw_parts(
                     indices_data.as_ptr() as *const u8,
-                    index_size * indices_data.len(),
+                    std::mem::size_of_val(indices_data),
                 )
             });
         }

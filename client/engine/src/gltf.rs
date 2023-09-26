@@ -1,3 +1,4 @@
+use crate::{attributes_impl, vertex_impl_position};
 use common::glm::Vec3;
 use gltf::mesh::util::ReadIndices;
 
@@ -9,13 +10,36 @@ pub enum GltfLoadError {
     NoMeshes,
     NoPrimitivesInMesh,
     NoPositions,
+    NoNormals,
     SparceIndices,
 }
 
 pub struct SimpleGltfMesh {
     pub positions: Vec<Vec3>,
-    pub normals: Option<Vec<Vec3>>,
+    pub normals: Vec<Vec3>,
     pub indices: Option<Vec<u32>>,
+}
+
+#[derive(Default, Clone, Copy)]
+#[repr(C)]
+pub struct SimpleVertex {
+    pub position: Vec3,
+    pub normal: Vec3,
+}
+
+attributes_impl!(SimpleVertex, position, normal);
+vertex_impl_position!(SimpleVertex);
+
+impl SimpleGltfMesh {
+    pub fn vertices(&self) -> impl Iterator<Item = SimpleVertex> + '_ {
+        self.positions
+            .iter()
+            .zip(&self.normals)
+            .map(|(pos, normal)| SimpleVertex {
+                position: *pos,
+                normal: *normal,
+            })
+    }
 }
 
 /// Loads a single primitive of a single mesh from the file data.
@@ -36,7 +60,10 @@ pub fn load_simple_gltf(file_data: &[u8]) -> Result<SimpleGltfMesh, GltfLoadErro
         .ok_or(GltfLoadError::NoPositions)
         .map(|iter| iter.map(Vec3::from).collect())?;
 
-    let normals: Option<Vec<Vec3>> = reader.read_normals().map(|iter| iter.map(Vec3::from).collect());
+    let normals: Vec<Vec3> = reader
+        .read_normals()
+        .ok_or(GltfLoadError::NoNormals)
+        .map(|iter| iter.map(Vec3::from).collect())?;
 
     let indices: Option<Vec<u32>> = reader.read_indices().map(|indices| match indices {
         ReadIndices::U8(iter) => iter.map(|x| x as u32).collect(),
