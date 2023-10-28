@@ -15,6 +15,7 @@ layout(set = SET_PER_OBJECT, binding = BINDING_OBJECT_INFO) uniform ObjectData {
 layout(location = 0) out Output {
     vec2 texCoord;
     vec3 surfaceNormal;
+    vec3 localPos;
 } vs_out;
 
 void main() {
@@ -23,6 +24,7 @@ void main() {
 
     // vs_out.texCoord = vec2(pos2d.x, 1.0 - pos2d.y);
     vs_out.surfaceNormal = inNormal;
+    vs_out.localPos = localPos;
 
     gl_Position = info.camera.proj_view * worldPos;
 }

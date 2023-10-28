@@ -22,6 +22,7 @@ macro_rules! add_getters {
 
 pub struct DefaultResourceMapping {
     mapping: Arc<ResourceMapping>,
+    material_lawn: u16,
     material_water: u16,
 }
 
@@ -39,7 +40,7 @@ impl DefaultResourceMapping {
         );
 
         // Textures
-        let tex_default = map.register_texture(
+        let tex_lawn = map.register_texture(
             TextureAtlasType::ALBEDO,
             resources.file().get("textures/lawn.basis").unwrap(),
         );
@@ -54,8 +55,7 @@ impl DefaultResourceMapping {
         );
 
         // Materials
-        let material_default =
-            map.register_material(TextureMaterial::new(MatComponent::Texture(tex_default)));
+        let material_lawn = map.register_material(TextureMaterial::new(MatComponent::Texture(tex_lawn)));
         let material_glow = map.register_material(TextureMaterial::new(MatComponent::Texture(tex_glow)));
         let material_water = map.register_material(
             TextureMaterial::new(
@@ -69,7 +69,7 @@ impl DefaultResourceMapping {
             main_reg.block_test.block_id,
             TexturedBlockModel::new(
                 reg.get_block_model(main_reg.model_cube()).unwrap(),
-                &[QuadMaterial::new(material_default); 6],
+                &[QuadMaterial::new(material_lawn); 6],
                 &map,
             ),
         );
@@ -95,6 +95,7 @@ impl DefaultResourceMapping {
         Arc::new(Self {
             mapping: Arc::new(map),
             material_water,
+            material_lawn,
         })
     }
 
@@ -102,5 +103,5 @@ impl DefaultResourceMapping {
         &self.mapping
     }
 
-    add_getters! { u16, material_water }
+    add_getters! { u16, material_lawn material_water }
 }

@@ -281,7 +281,7 @@ mod model_3d {
     #[derive(Default, Copy, Clone)]
     #[repr(C)]
     pub struct UniformData {
-        // pub background_color: Vec4,
+        pub material_id: u32,
     }
 
     pub fn register(ctx: &EngineContext) {
@@ -386,10 +386,10 @@ pub fn material_item(image: ImageSource) -> ContainerBackground {
     )
 }
 
-pub fn model_3d(mesh: Arc<RawVertexMesh>) -> ContainerBackground {
+pub fn model_3d(mesh: Arc<RawVertexMesh>, material_id: u32) -> ContainerBackground {
     ContainerBackground::new_raw(
         model_3d::MATERIAL_PIPE_RES_NAME,
-        model_3d::UniformData {},
+        model_3d::UniformData { material_id },
         Some(mesh),
         vec![],
     )

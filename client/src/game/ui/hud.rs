@@ -1,5 +1,6 @@
 use super::common::*;
 use crate::game::ui::elements::action_button;
+use engine::ecs::component::ui::UITransform;
 
 pub fn hud_overlay(ctx: &mut UIScopeContext) {
     let is_in_game = ctx.subscribe(&ctx.root_state(&ui_root_states::IN_GAME_PROCESS));
@@ -19,6 +20,44 @@ pub fn hud_overlay(ctx: &mut UIScopeContext) {
         let app = ctx.app();
         app.respawn_player();
     }
+
+    container(
+        make_static_id!(),
+        ctx,
+        container_props().layout(
+            UILayoutC::row()
+                .with_grow()
+                .with_position(Position::Relative(Vec2::zeros())),
+        ),
+        |ctx, ()| {
+            let mesh = {
+                let app = ctx.ctx().app();
+                app.test_mesh.clone()
+            };
+            let material = {
+                let app = ctx.ctx().app();
+                app.res_map.material_lawn()
+            };
+
+            expander(make_static_id!(), ctx, 5.0);
+
+            container(
+                make_static_id!(),
+                ctx,
+                container_props()
+                    .layout(
+                        UILayoutC::new()
+                            .with_content_transform(UITransform::new().with_offset(Vec2::new(0.0, 250.0)))
+                            .with_fixed_size(500.0)
+                            .with_align(CrossAlign::End),
+                    )
+                    .background(Some(backgrounds::model_3d(mesh, material as u32))),
+                |_, ()| {},
+            );
+
+            expander(make_static_id!(), ctx, 1.0);
+        },
+    );
 
     container(
         make_static_id!(),
@@ -114,20 +153,6 @@ pub fn hud_overlay(ctx: &mut UIScopeContext) {
                                 .wrap(true),
                         );
                     }
-
-                    let mesh = {
-                        let app = ctx.ctx().app();
-                        app.test_mesh.clone()
-                    };
-
-                    container(
-                        make_static_id!(),
-                        ctx,
-                        container_props()
-                            .layout(UILayoutC::new().with_fixed_size(200.0))
-                            .background(Some(backgrounds::model_3d(mesh))),
-                        |_, ()| {},
-                    );
 
                     expander(make_static_id!(), ctx, 1.0);
                 },
