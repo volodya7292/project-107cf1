@@ -1,5 +1,7 @@
 # project-107cf1
 
+This project is my research platform for Rust/Vulkan computer graphics and game development.
+
 ## Dependencies
 
 - VulkanSDK 1.+
