@@ -10,7 +10,7 @@ use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OB
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{
-    calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, CameraInfo, FrameInfo,
+    calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, FrameInfo,
 };
 use crate::module::scene::N_MAX_OBJECTS;
 use common::glm::{Mat4, Vec2, Vec3, Vec4};
@@ -439,7 +439,7 @@ impl RenderStage for DepthStage {
 
     fn update_frame_infos(
         &mut self,
-        infos: &mut [FrameInfo],
+        _infos: &mut [FrameInfo],
         frame_infos_indices: &[usize],
         ctx: &FrameContext,
     ) {

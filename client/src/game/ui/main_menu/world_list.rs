@@ -98,11 +98,11 @@ fn world_item(local_id: &str, ctx: &mut UIScopeContext, overworld_name: String) 
                 container_props().layout(UILayoutC::row().with_width(Sizing::Grow(1.0))),
                 move |ctx, ()| {
                     let name = overworld_name.clone();
-                    let on_continue = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                    let on_continue = move |_entity: &EntityId, ctx: &EngineContext, _: Vec2| {
                         load_overworld(ctx, &name);
                     };
                     let name = overworld_name.clone();
-                    let on_delete = move |entity: &EntityId, ctx: &EngineContext, _: Vec2| {
+                    let on_delete = move |_entity: &EntityId, ctx: &EngineContext, _: Vec2| {
                         let app = ctx.app();
                         let mut reactor = app.ui_reactor();
                         let name = name.clone();

@@ -133,7 +133,7 @@ impl TrackingCluster {
         self.active_cells.as_slice().iter().any(|v| *v != 0)
     }
 
-    pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData)> + '_ {
+    pub fn active_blocks(&self) -> impl Iterator<Item = (ClusterBlockPos, BlockData<'_>)> + '_ {
         self.active_cells.ones().map(|idx| {
             let block_pos = ClusterBlockPos::from_index(idx);
             (block_pos, self.raw.get(&block_pos))

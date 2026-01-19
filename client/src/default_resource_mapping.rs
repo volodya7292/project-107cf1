@@ -49,7 +49,7 @@ impl DefaultResourceMapping {
             TextureAtlasType::ALBEDO,
             resources.file().get("textures/glow_texture.basis").unwrap(),
         );
-        let tex_water = map.register_texture(
+        let _tex_water = map.register_texture(
             TextureAtlasType::ALBEDO,
             resources.file().get("textures/water.basis").unwrap(),
         );

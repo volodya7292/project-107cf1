@@ -306,7 +306,7 @@ impl RawCluster {
 
     /// Returns block data at `pos`.
     #[inline]
-    pub fn get(&self, pos: &ClusterBlockPos) -> BlockData {
+    pub fn get(&self, pos: &ClusterBlockPos) -> BlockData<'_> {
         BlockData {
             block_storage: &self.block_state_storage,
             info: &self.cells[cell_index(pos.get())],
@@ -315,7 +315,7 @@ impl RawCluster {
 
     /// Returns mutable block data at `pos`.
     #[inline]
-    pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut {
+    pub fn get_mut(&mut self, pos: &ClusterBlockPos) -> BlockDataMut<'_> {
         BlockDataMut {
             block_storage: &mut self.block_state_storage,
             info: &mut self.cells[cell_index(pos.get())],

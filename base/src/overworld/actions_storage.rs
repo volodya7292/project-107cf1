@@ -160,7 +160,7 @@ impl OverworldActionsStorage {
         self.liquid_infos.push(LiquidChangeInfo { pos, liquid });
     }
 
-    pub fn builder(&mut self) -> OverworldActionsBuilder {
+    pub fn builder(&mut self) -> OverworldActionsBuilder<'_> {
         OverworldActionsBuilder { storage: self }
     }
 }

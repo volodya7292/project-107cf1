@@ -7,7 +7,6 @@ use crate::overworld::raw_cluster::RawCluster;
 use bit_vec::BitVec;
 use common::glm;
 use common::glm::{I64Vec3, U64Vec3};
-use common::types::UInt;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};

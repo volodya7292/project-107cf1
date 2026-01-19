@@ -70,7 +70,7 @@ pub struct EngineContext<'a> {
 }
 
 impl EngineContext<'_> {
-    pub fn window(&self) -> Ref<Window> {
+    pub fn window(&self) -> Ref<'_, Window> {
         self.window.borrow()
     }
 
@@ -128,7 +128,7 @@ impl Engine {
         engine
     }
 
-    pub fn context(&self) -> EngineContext {
+    pub fn context(&self) -> EngineContext<'_> {
         EngineContext {
             do_stop: &self.do_stop,
             module_manager: &self.module_manager,
@@ -160,7 +160,7 @@ impl Engine {
 
                     let t0 = Instant::now();
 
-                    for (module_id, module) in module_manger.modules() {
+                    for (module_id, _module) in module_manger.modules() {
                         module_manger.update_module(module_id, self.delta_time, &ctx);
 
                         // Call dispatched callbacks as soon as possible

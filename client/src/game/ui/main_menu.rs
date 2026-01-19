@@ -28,7 +28,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
     let image_source =
         EngineContext::resource_image(&ctx.ctx().scene(), "/textures/main_menu_background.jpg").unwrap();
 
-    fn settings_on_click(entity: &EntityId, ctx: &EngineContext) {}
+    fn settings_on_click(_entity: &EntityId, _ctx: &EngineContext) {}
 
     fn exit_on_click(_: &EntityId, ctx: &EngineContext) {
         ctx.request_stop();
@@ -72,7 +72,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                     make_static_id!(),
                     ctx,
                     "NEW OVERWORLD",
-                    Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
+                    Arc::new(move |_: &EntityId, _ctx: &EngineContext, _| {
                         curr_tab_state2.update(TAB_WORLD_CREATION);
                     }),
                 );
@@ -84,7 +84,7 @@ fn main_menu_controls(local_id: &str, ctx: &mut UIScopeContext, curr_tab_state: 
                 make_static_id!(),
                 ctx,
                 "SETTINGS",
-                Arc::new(move |_: &EntityId, ctx: &EngineContext, _| {
+                Arc::new(move |_: &EntityId, _ctx: &EngineContext, _| {
                     curr_tab_state2.update(TAB_SETTINGS);
                 }),
             );
@@ -205,7 +205,7 @@ fn settings_view(local_id: &str, ctx: &mut UIScopeContext) {
         local_id,
         ctx,
         container_props().layout(UILayoutC::column()),
-        |ctx, ()| {
+        |_ctx, ()| {
             // ui_text(
             //     make_static_id!(),
             //     ctx,

@@ -666,7 +666,7 @@ impl Device {
         let compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Glsl>::new(module)?;
 
         let execution_model = compiler.execution_model()?;
-        let entry_point = compiler
+        let _entry_point = compiler
             .entry_points()?
             .next()
             .ok_or_else(|| DeviceError::InvalidShader("Entry point not found!".to_string()))?;
@@ -727,7 +727,7 @@ impl Device {
             ($res: ident, $desc_type: ident) => {{
                 let type_desc = compiler.type_description($res.type_id).unwrap();
                 let is_array = match type_desc.inner {
-                    spirv_cross2::reflect::TypeInner::Array { dimensions, .. } => true,
+                    spirv_cross2::reflect::TypeInner::Array { .. } => true,
                     _ => false,
                 };
                 (
@@ -820,7 +820,7 @@ impl Device {
 
         let mut push_constants = HashMap::new();
         let mut push_constants_size = 0;
-        let mut push_constant_resource = resources
+        let push_constant_resource = resources
             .resources_for_type(spirv_cross2::reflect::ResourceType::PushConstant)?
             .next();
 

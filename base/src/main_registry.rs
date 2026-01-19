@@ -68,7 +68,7 @@ impl MainRegistry {
                 BlockBuilder::new(model_cube)
                     .with_active_by_default(true)
                     .with_event_handlers(block::EventHandlers::new().with_on_tick(
-                        |_, pos, _, _, _, after_actions| {
+                        |_, _pos, _, _, _, _after_actions| {
                             println!("ON TICK!");
                             false
                         },
@@ -91,62 +91,62 @@ impl MainRegistry {
 
         // Biomes
         // ----------------------------------------------------------------------------------------------------
-        let biome_tundra = reg.register_biome(Biome::new(
+        let _biome_tundra = reg.register_biome(Biome::new(
             MeanTemperature::TNeg30..=MeanTemperature::TPos7,
             MeanHumidity::H0..=MeanHumidity::H25,
             0.0..=1.0,
         ));
-        let biome_taiga = reg.register_biome(Biome::new(
+        let _biome_taiga = reg.register_biome(Biome::new(
             MeanTemperature::TNeg15..=MeanTemperature::TPos15,
             MeanHumidity::H0..=MeanHumidity::H37,
             0.0..=1.0,
         ));
-        let biome_temperate_deciduous_forest = reg.register_biome(Biome::new(
+        let _biome_temperate_deciduous_forest = reg.register_biome(Biome::new(
             MeanTemperature::TNeg7..=MeanTemperature::TPos22,
             MeanHumidity::H12..=MeanHumidity::H50,
             0.0..=1.0,
         ));
-        let biome_temperate_rain_forest = reg.register_biome(Biome::new(
+        let _biome_temperate_rain_forest = reg.register_biome(Biome::new(
             MeanTemperature::TNeg7..=MeanTemperature::TPos22,
             MeanHumidity::H50..=MeanHumidity::H75,
             0.0..=1.0,
         ));
-        let biome_tropical_rain_forest = reg.register_biome(Biome::new(
+        let _biome_tropical_rain_forest = reg.register_biome(Biome::new(
             MeanTemperature::TPos15..=MeanTemperature::TPos30,
             MeanHumidity::H62..=MeanHumidity::H100,
             0.0..=1.0,
         ));
-        let biome_savanna = reg.register_biome(Biome::new(
+        let _biome_savanna = reg.register_biome(Biome::new(
             MeanTemperature::TPos15..=MeanTemperature::TPos30,
             MeanHumidity::H12..=MeanHumidity::H62,
             0.0..=1.0,
         ));
-        let biome_chaparral = reg.register_biome(Biome::new(
+        let _biome_chaparral = reg.register_biome(Biome::new(
             MeanTemperature::TPos7..=MeanTemperature::TPos22,
             MeanHumidity::H12..=MeanHumidity::H37,
             0.0..=1.0,
         ));
-        let biome_grassland = reg.register_biome(Biome::new(
+        let _biome_grassland = reg.register_biome(Biome::new(
             MeanTemperature::TNeg7..=MeanTemperature::TPos22,
             MeanHumidity::H0..=MeanHumidity::H37,
             0.0..=1.0,
         ));
-        let biome_desert = reg.register_biome(Biome::new(
+        let _biome_desert = reg.register_biome(Biome::new(
             MeanTemperature::T0..=MeanTemperature::TPos22,
             MeanHumidity::H0..=MeanHumidity::H25,
             0.0..=1.0,
         ));
-        let biome_subtropical_desert = reg.register_biome(Biome::new(
+        let _biome_subtropical_desert = reg.register_biome(Biome::new(
             MeanTemperature::TPos15..=MeanTemperature::TPos30,
             MeanHumidity::H0..=MeanHumidity::H25,
             0.0..=1.0,
         ));
-        let biome_ocean = reg.register_biome(Biome::new(
+        let _biome_ocean = reg.register_biome(Biome::new(
             MeanTemperature::TNeg30..=MeanTemperature::TPos30,
             MeanHumidity::H0..=MeanHumidity::H100,
             -1.0..=0.0,
         ));
-        let biome_coast = reg.register_biome(Biome::new(
+        let _biome_coast = reg.register_biome(Biome::new(
             MeanTemperature::TNeg30..=MeanTemperature::TPos30,
             MeanHumidity::H0..=MeanHumidity::H100,
             0.0..=0.02,

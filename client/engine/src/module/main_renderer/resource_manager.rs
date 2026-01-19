@@ -47,7 +47,7 @@ impl ResourceManager {
         }
     }
 
-    pub fn scope(&mut self) -> ResourceManagementScope {
+    pub fn scope(&mut self) -> ResourceManagementScope<'_> {
         ResourceManagementScope {
             manager: self,
             used_names: Mutex::new(HashSet::with_capacity(128)),

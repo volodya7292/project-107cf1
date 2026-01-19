@@ -75,9 +75,9 @@ pub fn compile_shader(
     // Optimize shader
     let mut cmd = &mut Command::new("spirv-opt");
     cmd = cmd
-        .arg(dst_path.clone())
+        .arg(dst_path)
         .arg("-o")
-        .arg(dst_path.clone())
+        .arg(dst_path)
         .arg("--target-env=vulkan1.2")
         .arg("--eliminate-dead-variables")
         .arg("--eliminate-dead-input-components")

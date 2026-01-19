@@ -90,7 +90,7 @@ impl FontSet {
         Some(Self { normal, italic })
     }
 
-    pub fn best_for_style(&self, style: FontStyle) -> &Font {
+    pub fn best_for_style(&self, style: FontStyle) -> &Font<'_> {
         if style == FontStyle::Italic && self.italic.is_some() {
             self.italic.as_ref().unwrap()
         } else {
@@ -278,7 +278,7 @@ fn layout_glyphs(
     h_align: TextHAlign,
     long_word_breaking: bool,
     max_width: f32,
-    max_height: f32,
+    _max_height: f32,
     normalize_transforms: bool,
     apply_reverse_fitness_transform: bool,
 ) -> (Vec<PositioningInfo>, BlockSize) {

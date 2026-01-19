@@ -1,12 +1,11 @@
 pub mod biome;
 
-use crate::overworld;
 use crate::overworld::facing::Facing;
 use crate::overworld::generator::{OverworldGenerator, StructureCache};
 use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
-use crate::overworld::position::{BlockPos, ClusterBlockPos, ClusterPos};
-use crate::overworld::raw_cluster::{BlockDataImpl, LightType, RawCluster};
+use crate::overworld::position::{BlockPos, ClusterBlockPos};
+use crate::overworld::raw_cluster::{BlockDataImpl, RawCluster};
 use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::Structure;
 use crate::registry::Registry;
@@ -50,7 +49,7 @@ fn sample_world_size(rng: &mut impl Rng) -> u64 {
 
 /// Gradually localizes smooth blobs into squares.
 /// `value` and `midpoint` are in range [0, 1]; `strength`: [0, +inf]
-fn localize(mut value: f32, midpoint: f32, strength: f32) -> f32 {
+fn localize(value: f32, midpoint: f32, strength: f32) -> f32 {
     let hp = if value > midpoint {
         1.0 / (1.0 + 2.0 * (value - midpoint) * strength)
     } else {
@@ -301,7 +300,7 @@ impl WorldState {
         const WATER_LEVEL_ZO: f32 = 0.5 * GEN_ALTITUDE_RANGE + WATER_LEVEL_ALTITUDE;
 
         // Range [water level height; max altitude]
-        let mut surface_height =
+        let surface_height =
             WATER_LEVEL_ZO + flat_height + hills_height * hills_mask + mountains_height * mountains_mask;
 
         // Range [0; MAX_HEIGHT]
@@ -396,7 +395,7 @@ impl WorldState {
         cache.biomes[rel_pos.x as usize][rel_pos.y as usize]
     }
 
-    pub fn is_land(&self, pos: I64Vec3) -> bool {
+    pub fn is_land(&self, _pos: I64Vec3) -> bool {
         todo!()
     }
 

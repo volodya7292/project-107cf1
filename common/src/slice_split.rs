@@ -42,11 +42,11 @@ impl<T> IndexMut<usize> for SliceSplit<'_, T> {
 }
 
 pub trait SliceSplitImpl<T> {
-    fn split_mid_mut(&mut self, index: usize) -> Option<(&mut T, SliceSplit<T>)>;
+    fn split_mid_mut(&mut self, index: usize) -> Option<(&mut T, SliceSplit<'_, T>)>;
 }
 
 impl<T> SliceSplitImpl<T> for [T] {
-    fn split_mid_mut(&mut self, index: usize) -> Option<(&mut T, SliceSplit<T>)> {
+    fn split_mid_mut(&mut self, index: usize) -> Option<(&mut T, SliceSplit<'_, T>)> {
         let (left, right) = self.split_at_mut(index);
 
         right.split_first_mut().map(move |(mid, right)| {

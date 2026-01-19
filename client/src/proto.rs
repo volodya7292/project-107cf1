@@ -1,6 +1,5 @@
 use base::overworld::generator::OverworldGenerator;
 use base::overworld::position::BlockPos;
-use base::overworld::structure::world::biome::MeanTemperature;
 use base::overworld::structure::world::WorldState;
 use base::registry::Registry;
 use base::utils::noise::HybridNoise;
@@ -8,7 +7,6 @@ use base::utils::voronoi_noise::VoronoiNoise2D;
 use base::utils::white_noise::WhiteNoise;
 use common::glm::{DVec2, DVec3, DVec4, I64Vec2, I64Vec3, Vec3};
 use common::{glm, image};
-use noise::Seedable;
 use rand::Rng;
 use std::sync::Arc;
 use std::time::Instant;
@@ -16,7 +14,7 @@ use std::time::Instant;
 pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let mut buf = vec![0_u8; 1024 * 1024 * 3];
 
-    let land_density = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
+    let _land_density = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
 
     let temp0 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(50));
     let temp1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(51));
@@ -26,15 +24,15 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
     let moist1 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(101));
     let moist2 = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(102));
 
-    let n = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
+    let _n = HybridNoise::<2, 1, noise::SuperSimplex>::new(noise::SuperSimplex::new(0));
 
-    let p_noise = noise::SuperSimplex::new(0);
-    let white_noise = WhiteNoise::new(0);
-    let mut v = VoronoiNoise2D::new();
+    let _p_noise = noise::SuperSimplex::new(0);
+    let _white_noise = WhiteNoise::new(0);
+    let _v = VoronoiNoise2D::new();
 
     // TODO: implement SIMD noise
 
-    let b_freq = 30.0;
+    let _b_freq = 30.0;
 
     let main_registry = generator.main_registry();
     let registry = main_registry.registry();
@@ -45,10 +43,10 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
 
     // let world = WorldState::new(0, registry);
 
-    let mut n_min = f64::MAX;
-    let mut n_max = f64::MIN;
+    let n_min = f64::MAX;
+    let n_max = f64::MIN;
 
-    let mut process = |p: DVec2| -> DVec3 {
+    let process = |p: DVec2| -> DVec3 {
         // let land = land_ocean.sample(p, 10.0, 0.5) * 0.5 + 0.5;
         // let f = temperature.sample(p, 5.0, 0.5) * 0.5 + 0.5;
         // let noise = n.sample(p, 5.0, 0.5) * 0.5 + 0.5;
@@ -118,7 +116,7 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
         // let m = world.sample_humidity(glm::convert_unchecked::<_, I64Vec2>(p * 2048.0));
         // let m = m as f64 / 100.0;
 
-        let m_col: DVec3 = match m {
+        let _m_col: DVec3 = match m {
             0.0..=0.3 => glm::vec3(0.0, 0.0, 1.0),
             0.3..=0.43 => glm::vec3(0.0, 0.5, 0.5),
             0.43..=0.57 => glm::vec3(0.0, 1.0, 0.0),
@@ -129,7 +127,7 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
 
         let rain_precip = DVec4::new(0.0, 0.0, 1.0, 0.4); // t > 0.5
         let snow_precip = DVec4::new(1.0, 1.0, 1.0, 1.0); // t < 0.5
-        let mut precip = if t > 0.5 { rain_precip } else { snow_precip };
+        let precip = if t > 0.5 { rain_precip } else { snow_precip };
 
         // n_min = n_min.min(v);
         // n_max = n_max.max(v);
@@ -137,10 +135,10 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
         // 0C - < 40%
         // -6C - < 100%
 
-        let col = glm::mix(&land_col, &precip.xyz(), if t < 0.5 { 1.0 } else { precip.w * m });
+        let _col = glm::mix(&land_col, &precip.xyz(), if t < 0.5 { 1.0 } else { precip.w * m });
 
         let d = 1.0_f64.min(glm::distance(&DVec2::new(0.5, 0.5), &p) * 2.0);
-        let grad = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
+        let _grad = glm::smoothstep(0.0, 1.0, 4.0 * (1.0 - d));
 
         // y = 0.4 - (0.1 - (x - 0.4)) / 0.1
 
@@ -194,7 +192,7 @@ pub fn make_climate_graph_image(registry: &Arc<Registry>) {
     let world = WorldState::new(0, registry);
     let white_noise = WhiteNoise::new(0);
 
-    let mut process = |p: DVec2| -> Vec3 {
+    let process = |p: DVec2| -> Vec3 {
         let t = p.x * 60.0 - 30.;
         let h = (1.0 - p.y) * 100.0;
         let mut count = 1.0;

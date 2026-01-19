@@ -155,7 +155,7 @@ impl ClustersAccessorCache {
 
 pub trait ReadOnlyOverworldAccessorImpl {
     /// Returns block data or `None` if the respective cluster is not loaded
-    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData>;
+    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData<'_>>;
 
     /// Returns intersection facing and position of the block that specified ray intersect.
     fn get_block_at_ray(
@@ -173,7 +173,7 @@ pub struct OverworldAccessor {
 
 impl ReadOnlyOverworldAccessorImpl for OverworldAccessor {
     /// Returns block data or `None` if the respective cluster is not loaded
-    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData> {
+    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData<'_>> {
         self.cache
             .access_cluster(&pos.cluster_pos())
             .map(|access| access.cluster().raw.get(&pos.cluster_block_pos()))
@@ -362,7 +362,7 @@ pub struct ReadOnlyOverworldAccessor {
 }
 
 impl ReadOnlyOverworldAccessorImpl for ReadOnlyOverworldAccessor {
-    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData> {
+    fn get_block(&mut self, pos: &BlockPos) -> Option<BlockData<'_>> {
         self.inner.get_block(pos)
     }
 
@@ -410,7 +410,7 @@ impl ClusterNeighbourhoodAccessor {
         center.is_some()
     }
 
-    pub fn get_block(&self, pos: &RelativeBlockPos) -> Option<BlockData> {
+    pub fn get_block(&self, pos: &RelativeBlockPos) -> Option<BlockData<'_>> {
         let neighbour_pos = pos.cluster_idx();
 
         let access = self.neighbours[neighbour_pos].as_ref()?;

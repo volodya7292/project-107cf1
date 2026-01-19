@@ -87,7 +87,7 @@ impl Scene {
         &mut self.storage
     }
 
-    pub fn entry_checked(&mut self, entity: &EntityId) -> Option<EntityAccess<()>> {
+    pub fn entry_checked(&mut self, entity: &EntityId) -> Option<EntityAccess<'_, ()>> {
         Some(EntityAccess {
             entry: self.storage.entry_mut(entity)?,
             change_manager: self.change_manager.borrow_mut(),
@@ -96,11 +96,11 @@ impl Scene {
         })
     }
 
-    pub fn entry(&mut self, entity: &EntityId) -> EntityAccess<()> {
+    pub fn entry(&mut self, entity: &EntityId) -> EntityAccess<'_, ()> {
         self.entry_checked(entity).unwrap()
     }
 
-    pub fn object<T: StaticArchetype>(&mut self, entity: &ObjectEntityId<T>) -> EntityAccess<T> {
+    pub fn object<T: StaticArchetype>(&mut self, entity: &ObjectEntityId<T>) -> EntityAccess<'_, T> {
         assert_eq!(
             self.storage.type_id_to_archetype_id(&TypeId::of::<T>()),
             Some(entity.archetype_id)

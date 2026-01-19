@@ -189,7 +189,7 @@ impl MainApp {
                 textures_max_anisotropy: 1.0,
             },
             512,
-            |adapter| 0,
+            |_adapter| 0,
             root_entity,
             ctx,
             renderer_post_processes,
@@ -295,11 +295,11 @@ impl MainApp {
         &self.resources
     }
 
-    pub fn ui_reactor(&self) -> RefMut<UIReactor> {
+    pub fn ui_reactor(&self) -> RefMut<'_, UIReactor> {
         self.ui_reactor.borrow_mut()
     }
 
-    pub fn grab_cursor(&mut self, window: &Window, enabled: bool, ctx: &EngineContext) {
+    pub fn grab_cursor(&mut self, window: &Window, enabled: bool, _ctx: &EngineContext) {
         if self.cursor_grab == enabled {
             return;
         }
@@ -380,7 +380,7 @@ impl MainApp {
             let real_spawn_point: DVec3 = glm::convert(block_spawn_point);
             real_spawn_point + glm::vec3(0.5, 0.5, 0.5)
         });
-        let player_velocity = params.player_state().velocity();
+        let _player_velocity = params.player_state().velocity();
 
         let mut overworld_orchestrator = OverworldOrchestrator::new(&overworld);
         overworld_orchestrator.set_xz_render_distance(256);
@@ -435,9 +435,9 @@ impl MainApp {
             Duration::from_millis(20),
             VirtualProcessor::new(&self.default_queue),
             move || {
-                let t0 = Instant::now();
+                let _t0 = Instant::now();
                 on_tick(new_game_state.clone(), overworld_renderer.clone());
-                let t1 = Instant::now();
+                let _t1 = Instant::now();
                 // println!("tick_inner {}", (t1 - t0).as_millis());
             },
         ));
@@ -817,7 +817,7 @@ impl MainApp {
 }
 
 impl EngineModule for MainApp {
-    fn on_start(&mut self, ctx: &EngineContext) {
+    fn on_start(&mut self, _ctx: &EngineContext) {
         // let mut ui_ctx = UIContext::new(ctx, &self.resources);
 
         // let mut text_renderer = ctx.module_mut::<TextRenderer>();
