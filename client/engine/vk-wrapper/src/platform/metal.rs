@@ -1,11 +1,11 @@
 use core_graphics::base::CGFloat;
-use objc2::runtime::{Object, BOOL, YES};
+use objc2::runtime::{AnyObject, Bool};
 use objc2::{class, msg_send};
 use raw_window_handle::AppKitWindowHandle;
 use std::ffi::c_void;
 use std::mem;
 
-pub type CAMetalLayer = *mut Object;
+pub type CAMetalLayer = *mut AnyObject;
 
 pub enum Layer {
     Existing(CAMetalLayer),
@@ -24,12 +24,12 @@ pub unsafe fn metal_layer_from_handle(handle: AppKitWindowHandle) -> Layer {
 }
 
 pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
-    let view: *mut Object = mem::transmute(view);
+    let view: *mut AnyObject = mem::transmute(view);
 
     // Check if the view is a CAMetalLayer
     let class = class!(CAMetalLayer);
-    let is_actually_layer: BOOL = msg_send![view, isKindOfClass: class];
-    if is_actually_layer == YES {
+    let is_actually_layer: bool = msg_send![view, isKindOfClass: class];
+    if is_actually_layer {
         return Layer::Existing(view);
     }
 
@@ -38,8 +38,8 @@ pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
     let use_current = if existing.is_null() {
         false
     } else {
-        let result: BOOL = msg_send![existing, isKindOfClass: class];
-        result == YES
+        let result: bool = msg_send![existing, isKindOfClass: class];
+        result
     };
 
     let render_layer = if use_current {
@@ -48,9 +48,9 @@ pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
         // Allocate a new CAMetalLayer for the current view
         let layer: CAMetalLayer = msg_send![class, new];
         let () = msg_send![view, setLayer: layer];
-        let () = msg_send![view, setWantsLayer: YES];
+        let () = msg_send![view, setWantsLayer: Bool::YES];
 
-        let window: *mut Object = msg_send![view, window];
+        let window: *mut AnyObject = msg_send![view, window];
         if !window.is_null() {
             let scale_factor: CGFloat = msg_send![window, backingScaleFactor];
             let () = msg_send![layer, setContentsScale: scale_factor];
@@ -59,23 +59,23 @@ pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
         Layer::Allocated(layer)
     };
 
-    let _: *mut Object = msg_send![view, retain];
+    let _: *mut AnyObject = msg_send![view, retain];
     render_layer
 }
 
 pub unsafe fn metal_layer_from_ns_window(window: *mut c_void) -> Layer {
-    let ns_window = window as *mut Object;
+    let ns_window = window as *mut AnyObject;
     let ns_view = msg_send![ns_window, contentView];
     metal_layer_from_ns_view(ns_view)
 }
 
 pub unsafe fn metal_layer_update(handle: AppKitWindowHandle) {
     let contents_scale: CGFloat = if !handle.ns_view.is_null() {
-        let view: *mut Object = mem::transmute(handle.ns_view);
+        let view: *mut AnyObject = mem::transmute(handle.ns_view);
         msg_send![view, backingScaleFactor]
     } else if !handle.ns_window.is_null() {
-        let window: *mut Object = mem::transmute(handle.ns_window);
-        let ns_view: *mut Object = msg_send![window, contentView];
+        let window: *mut AnyObject = mem::transmute(handle.ns_window);
+        let ns_view: *mut AnyObject = msg_send![window, contentView];
         msg_send![ns_view, backingScaleFactor]
     } else {
         panic!("Invalid appkit handle");
