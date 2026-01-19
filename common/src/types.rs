@@ -1,5 +1,5 @@
 use ahash::{AHashMap, AHashSet};
-use std::{hash::Hash, ops::Deref, sync::Arc};
+use std::{hash::Hash, ops::Deref, ptr, sync::Arc};
 
 pub type Hasher = ahash::RandomState;
 pub type HashSet<T> = AHashSet<T>;
@@ -87,7 +87,7 @@ impl<T> CmpArc<T> {
 
 impl<T: ?Sized> PartialEq for CmpArc<T> {
     fn eq(&self, other: &Self) -> bool {
-        Arc::as_ptr(&self.0) == Arc::as_ptr(&other.0)
+        ptr::addr_eq(Arc::as_ptr(&self.0), Arc::as_ptr(&other.0))
     }
 }
 

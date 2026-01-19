@@ -6,11 +6,6 @@ use std::ptr;
 #[allow(non_snake_case)]
 #[cxx::bridge]
 mod sys {
-    #[derive(Default, Copy, Clone)]
-    pub struct Vector2 {
-        pub x: f64,
-        pub y: f64,
-    }
 
     #[namespace = "msdfgen"]
     unsafe extern "C++" {
@@ -27,7 +22,7 @@ mod sys {
     }
 
     unsafe extern "C++" {
-        pub type Vector2;
+        type Vector2 = crate::Vector2;
 
         pub fn create_shape() -> UniquePtr<Shape>;
         pub fn shape_check_last_contour(shape: Pin<&mut Shape>);
@@ -53,7 +48,14 @@ mod sys {
     }
 }
 
-impl sys::Vector2 {
+#[derive(Default, Copy, Clone)]
+#[repr(C)]
+pub struct Vector2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Vector2 {
     pub fn from_f32(x: f32, y: f32) -> Self {
         Self {
             x: x as f64,
@@ -62,7 +64,12 @@ impl sys::Vector2 {
     }
 }
 
-impl PartialEq for sys::Vector2 {
+unsafe impl cxx::ExternType for Vector2 {
+    type Id = cxx::type_id!("Vector2");
+    type Kind = cxx::kind::Trivial;
+}
+
+impl PartialEq for Vector2 {
     fn eq(&self, other: &Self) -> bool {
         self.x == other.x && self.y == other.y
     }
