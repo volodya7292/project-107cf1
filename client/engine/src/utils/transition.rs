@@ -87,6 +87,7 @@ impl<T: Interpolatable + PartialEq> PartialEq for AnimatedValue<T> {
         self.curr == other.curr
             && self.target.value() == other.target.value()
             && self.target.duration() == other.target.duration()
+            && std::ptr::fn_addr_eq(self.target.time_fn, other.target.time_fn)
             && self.time_passed == other.time_passed
     }
 }
