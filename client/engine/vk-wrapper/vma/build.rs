@@ -36,7 +36,7 @@ fn main() {
         .blocklist_type("__darwin_.*")
         .size_t_is_usize(true)
         .prepend_enum_name(false)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .expect("Unable to generate bindings");
 

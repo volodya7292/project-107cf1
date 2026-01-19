@@ -19,7 +19,7 @@ impl Default for Position {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Sizing {
     /// Minimum size that fits tightly interior contents.
     FitContent,
@@ -29,6 +29,17 @@ pub enum Sizing {
     /// The size is proportional to all siblings.
     Grow(Factor),
     ParentBased(fn(&EntityAccess<()>, &EngineContext, parent_size: &Vec2) -> f32),
+}
+
+impl PartialEq for Sizing {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::FitContent, Self::FitContent) => true,
+            (Self::Preferred(l0), Self::Preferred(r0)) => l0 == r0,
+            (Self::Grow(l0), Self::Grow(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
 }
 
 impl Default for Sizing {

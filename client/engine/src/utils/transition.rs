@@ -25,7 +25,7 @@ impl Interpolatable for Color {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct TransitionTarget<T: Interpolatable> {
     value: T,
     time_fn: TimeFn,
@@ -74,12 +74,21 @@ impl<T: Interpolatable + Default> Default for TransitionTarget<T> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub struct AnimatedValue<T: Interpolatable> {
     start: T,
     target: TransitionTarget<T>,
     curr: T,
     time_passed: f64,
+}
+
+impl<T: Interpolatable + PartialEq> PartialEq for AnimatedValue<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.curr == other.curr
+            && self.target.value() == other.target.value()
+            && self.target.duration() == other.target.duration()
+            && self.time_passed == other.time_passed
+    }
 }
 
 impl<T: Interpolatable + Default> Default for AnimatedValue<T> {
