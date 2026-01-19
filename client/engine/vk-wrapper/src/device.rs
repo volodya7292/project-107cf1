@@ -21,8 +21,6 @@ use ash::vk;
 use ash::vk::Handle;
 use common::parking_lot::Mutex;
 use common::types::HashMap;
-use spirv_cross::glsl;
-use spirv_cross::spirv;
 use std::collections::hash_map;
 use std::ffi::{c_void, CString};
 use std::ptr::{self, addr_of};
@@ -36,7 +34,7 @@ pub enum DeviceError {
     ZeroBufferElementSize,
     ZeroBufferSize,
     SwapchainError(String),
-    SpirvError(spirv_cross::ErrorCode),
+    SpirvError(spirv_cross2::SpirvCrossError),
     InvalidShader(String),
     InvalidSignature(&'static str),
 }
@@ -47,8 +45,8 @@ impl From<vk::Result> for DeviceError {
     }
 }
 
-impl From<spirv_cross::ErrorCode> for DeviceError {
-    fn from(err: spirv_cross::ErrorCode) -> Self {
+impl From<spirv_cross2::SpirvCrossError> for DeviceError {
+    fn from(err: spirv_cross2::SpirvCrossError) -> Self {
         DeviceError::SpirvError(err)
     }
 }
@@ -658,21 +656,26 @@ impl Device {
         vertex_inputs: &HashMap<&str, (Format, VInputRate)>,
         name: &str,
     ) -> Result<Arc<Shader>, DeviceError> {
-        #[allow(clippy::cast_ptr_alignment)]
-        let code_words =
-            unsafe { slice::from_raw_parts(code.as_ptr() as *const u32, code.len() / mem::size_of::<u32>()) };
+        // SPIR-V is little-endian
+        let words: Vec<u32> = code
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
 
-        let ast = spirv::Ast::<glsl::Target>::parse(&spirv::Module::from_words(code_words))?;
-        let entry_points = ast.get_entry_points()?;
-        let entry_point = entry_points
-            .first()
+        let module = spirv_cross2::Module::from_words(&words);
+        let compiler = spirv_cross2::Compiler::<spirv_cross2::targets::Glsl>::new(module)?;
+
+        let execution_model = compiler.execution_model()?;
+        let entry_point = compiler
+            .entry_points()?
+            .next()
             .ok_or_else(|| DeviceError::InvalidShader("Entry point not found!".to_string()))?;
-        let resources = ast.get_shader_resources()?;
+        let resources = compiler.shader_resources()?;
 
-        let stage = match entry_point.execution_model {
-            spirv::ExecutionModel::Vertex => ShaderStage::VERTEX,
-            spirv::ExecutionModel::Fragment => ShaderStage::PIXEL,
-            spirv::ExecutionModel::GlCompute => ShaderStage::COMPUTE,
+        let stage = match execution_model {
+            spirv_cross2::spirv::ExecutionModel::Vertex => ShaderStage::VERTEX,
+            spirv_cross2::spirv::ExecutionModel::Fragment => ShaderStage::PIXEL,
+            spirv_cross2::spirv::ExecutionModel::GLCompute => ShaderStage::COMPUTE,
             m => {
                 return Err(DeviceError::InvalidShader(format!(
                     "Unsupported execution model {:?}",
@@ -681,81 +684,82 @@ impl Device {
             }
         };
 
-        macro_rules! binding_image_array_size {
-            ($res: ident, $img_type: ident, $desc_type: ident) => {{
-                let var_type = ast.get_type($res.type_id)?;
+        macro_rules! binding_image {
+            ($res: ident, $desc_type: ident) => {{
+                let type_desc = compiler.type_description($res.type_id)?;
+                let is_array = match type_desc.inner {
+                    spirv_cross2::reflect::TypeInner::Image(img) => match img.class {
+                        spirv_cross2::reflect::ImageClass::Sampled { arrayed, .. } => arrayed,
+                        spirv_cross2::reflect::ImageClass::Texture { arrayed, .. } => arrayed,
+                        spirv_cross2::reflect::ImageClass::Storage { .. } => false,
+                    },
+                    _ => false,
+                };
                 (
                     BindingLoc::new(
-                        ast.get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                        compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::DescriptorSet)?
+                            .unwrap()
+                            .as_literal()
                             .unwrap(),
-                        ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                        compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::Binding)?
+                            .unwrap()
+                            .as_literal()
+                            .unwrap(),
                     ),
                     ShaderBindingDescription {
                         stage_flags: stage,
                         binding_type: BindingType(vk::DescriptorType::$desc_type),
-                        count: match var_type {
-                            spirv::Type::$img_type { array } => {
-                                if array.is_empty() {
-                                    1
-                                } else {
-                                    65536
-                                }
-                            }
-                            _ => unreachable!(),
-                        },
-                        readable: ast
-                            .get_decoration($res.id, spirv::Decoration::NonReadable)
-                            .unwrap_or(1)
-                            != 0,
-                        writable: ast
-                            .get_decoration($res.id, spirv::Decoration::NonWritable)
-                            .unwrap_or(1)
-                            != 0,
+                        count: if is_array { 65536 } else { 1 },
+                        readable: compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::NonReadable)?
+                            .is_none(),
+                        writable: compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::NonWritable)?
+                            .is_none(),
                     },
                 )
             }};
         }
 
-        macro_rules! binding_buffer_array_size {
-            ($res: ident, $desc_type0: ident) => {{
-                let var_type = ast.get_type($res.type_id)?;
+        macro_rules! binding_buffer {
+            ($res: ident, $desc_type: ident) => {{
+                let type_desc = compiler.type_description($res.type_id).unwrap();
+                let is_array = match type_desc.inner {
+                    spirv_cross2::reflect::TypeInner::Array { dimensions, .. } => true,
+                    _ => false,
+                };
                 (
                     BindingLoc::new(
-                        ast.get_decoration($res.id, spirv::Decoration::DescriptorSet)
+                        compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::DescriptorSet)?
+                            .unwrap()
+                            .as_literal()
                             .unwrap(),
-                        ast.get_decoration($res.id, spirv::Decoration::Binding)?,
+                        compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::Binding)?
+                            .unwrap()
+                            .as_literal()
+                            .unwrap(),
                     ),
                     ShaderBindingDescription {
                         stage_flags: stage,
-                        binding_type: BindingType(vk::DescriptorType::$desc_type0),
-                        count: match var_type {
-                            spirv::Type::Struct {
-                                member_types: _,
-                                array,
-                            } => {
-                                if array.is_empty() {
-                                    1
-                                } else {
-                                    65536
-                                }
-                            }
-                            _ => unreachable!(),
-                        },
-                        readable: !ast
-                            .get_decoration($res.id, spirv::Decoration::NonReadable)
-                            .unwrap_or(1)
-                            != 0,
-                        writable: !ast
-                            .get_decoration($res.id, spirv::Decoration::NonWritable)
-                            .unwrap_or(1)
-                            != 0,
+                        binding_type: BindingType(vk::DescriptorType::$desc_type),
+                        count: if is_array { 65536 } else { 1 },
+                        readable: compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::NonReadable)?
+                            .is_none(),
+                        writable: compiler
+                            .decoration($res.id, spirv_cross2::spirv::Decoration::NonWritable)?
+                            .is_none(),
                     },
                 )
             }};
         }
 
-        let mut vertex_loc_inputs =
-            HashMap::<u32, (Format, VInputRate)>::with_capacity(resources.stage_inputs.len());
+        let stage_inputs = resources.resources_for_type(spirv_cross2::reflect::ResourceType::StageInput)?;
+        let mut vertex_loc_inputs = HashMap::<u32, (Format, VInputRate)>::with_capacity(stage_inputs.len());
 
         if stage == ShaderStage::VERTEX {
             for (f, _) in vertex_inputs.values() {
@@ -763,14 +767,21 @@ impl Device {
                     panic!("Unsupported vertex format is used: {:?}", f);
                 }
             }
-            for res in resources.stage_inputs {
+            for res in stage_inputs {
+                let res_name = res.name.to_string();
+
                 let f = *vertex_inputs
-                    .get(res.name.as_str())
+                    .get(res_name.as_str())
                     .ok_or(DeviceError::InvalidShader(format!(
                         "Input format for {} not provided!",
-                        res.name
+                        &res_name
                     )))?;
-                let location = ast.get_decoration(res.id, spirv::Decoration::Location).unwrap();
+
+                let location = compiler
+                    .decoration(res.id, spirv_cross2::spirv::Decoration::Location)?
+                    .unwrap()
+                    .as_literal()
+                    .unwrap();
 
                 vertex_loc_inputs.insert(location, f);
             }
@@ -778,38 +789,63 @@ impl Device {
 
         let mut named_bindings = HashMap::new();
 
-        for res in &resources.sampled_images {
-            let binding = binding_image_array_size!(res, SampledImage, COMBINED_IMAGE_SAMPLER);
-            named_bindings.insert(res.name.clone(), binding);
+        for res in resources
+            .resources_for_type(spirv_cross2::reflect::ResourceType::SampledImage)
+            .unwrap()
+        {
+            let binding = binding_image!(res, COMBINED_IMAGE_SAMPLER);
+            named_bindings.insert(res.name.to_string(), binding);
         }
-        for res in &resources.storage_images {
-            let binding = binding_image_array_size!(res, Image, STORAGE_IMAGE);
-            named_bindings.insert(res.name.clone(), binding);
+        for res in resources
+            .resources_for_type(spirv_cross2::reflect::ResourceType::StorageImage)
+            .unwrap()
+        {
+            let binding = binding_image!(res, STORAGE_IMAGE);
+            named_bindings.insert(res.name.to_string(), binding);
         }
-        for res in &resources.uniform_buffers {
-            let binding = binding_buffer_array_size!(res, UNIFORM_BUFFER);
-            named_bindings.insert(res.name.clone(), binding);
+        for res in resources
+            .resources_for_type(spirv_cross2::reflect::ResourceType::UniformBuffer)
+            .unwrap()
+        {
+            let binding = binding_buffer!(res, UNIFORM_BUFFER);
+            named_bindings.insert(res.name.to_string(), binding);
         }
-        for res in &resources.storage_buffers {
-            let binding = binding_buffer_array_size!(res, STORAGE_BUFFER);
-            named_bindings.insert(res.name.clone(), binding);
+        for res in resources
+            .resources_for_type(spirv_cross2::reflect::ResourceType::StorageBuffer)
+            .unwrap()
+        {
+            let binding = binding_buffer!(res, STORAGE_BUFFER);
+            named_bindings.insert(res.name.to_string(), binding);
         }
 
         let mut push_constants = HashMap::new();
         let mut push_constants_size = 0;
-        if !resources.push_constant_buffers.is_empty() {
-            let id = resources.push_constant_buffers[0].id;
-            let type_id = resources.push_constant_buffers[0].base_type_id;
+        let mut push_constant_resource = resources
+            .resources_for_type(spirv_cross2::reflect::ResourceType::PushConstant)?
+            .next();
 
-            push_constants_size = ast.get_declared_struct_size(type_id)?;
-            let ranges = ast.get_active_buffer_ranges(id)?;
+        if let Some(resource) = push_constant_resource {
+            let id = resource.id;
+            let type_id = resource.base_type_id;
+            let type_desc = compiler.type_description(type_id)?;
+
+            push_constants_size = match type_desc.inner {
+                spirv_cross2::reflect::TypeInner::Struct(strt) => strt.size,
+                _ => {
+                    return Err(DeviceError::InvalidShader(
+                        "Push constant is not a struct!".to_string(),
+                    ));
+                }
+            } as u32;
+            let ranges = compiler.active_buffer_ranges(id)?;
 
             for (i, range) in ranges.iter().enumerate() {
-                push_constants.insert(ast.get_member_name(type_id, i as u32)?, range.clone());
+                let member_name = compiler.member_name(type_id, i as u32)?.unwrap().to_string();
+                push_constants.insert(member_name, range.clone());
             }
         }
 
-        let create_info = vk::ShaderModuleCreateInfo::builder().code(code_words);
+        let create_info = vk::ShaderModuleCreateInfo::builder().code(&words);
         let native = unsafe { self.wrapper.native.create_shader_module(&create_info, None)? };
 
         unsafe {
@@ -821,8 +857,8 @@ impl Device {
             device: Arc::clone(self),
             native,
             stage,
-            vertex_location_inputs: vertex_loc_inputs,
             named_bindings,
+            vertex_location_inputs: vertex_loc_inputs,
             _push_constants: push_constants,
             push_constants_size,
         }))

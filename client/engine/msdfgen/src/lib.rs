@@ -6,7 +6,7 @@ use std::ptr;
 #[allow(non_snake_case)]
 #[cxx::bridge]
 mod sys {
-    #[derive(Default, Copy, Clone, PartialEq)]
+    #[derive(Default, Copy, Clone)]
     pub struct Vector2 {
         pub x: f64,
         pub y: f64,
@@ -59,6 +59,12 @@ impl sys::Vector2 {
             x: x as f64,
             y: y as f64,
         }
+    }
+}
+
+impl PartialEq for sys::Vector2 {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
     }
 }
 

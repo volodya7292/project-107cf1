@@ -11,7 +11,7 @@ lazy_static = { workspace = true }
 smallvec = { workspace = true }
 ash = { workspace = true }
 raw-window-handle = { workspace = true }
-spirv_cross = { workspace = true }
+spirv-cross2 = { workspace = true }
 generational-arena = { workspace = true }
 by_address = { workspace = true }
 

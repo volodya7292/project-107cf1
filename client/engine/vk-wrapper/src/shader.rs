@@ -1,7 +1,6 @@
 use crate::{Device, Format};
 use ash::vk;
 use common::types::HashMap;
-use spirv_cross::spirv;
 use std::sync::Arc;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -107,7 +106,7 @@ pub struct Shader {
     // [location, format]
     pub(crate) vertex_location_inputs: HashMap<u32, (Format, VInputRate)>,
     pub(crate) named_bindings: HashMap<String, (BindingLoc, ShaderBindingDescription)>,
-    pub(crate) _push_constants: HashMap<String, spirv::BufferRange>,
+    pub(crate) _push_constants: HashMap<String, spirv_cross2::reflect::BufferRange>,
     pub(crate) push_constants_size: u32,
 }
 
