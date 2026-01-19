@@ -49,7 +49,8 @@ impl Relation {
     }
 
     pub fn remove_child(&mut self, entity: &EntityId) {
-        self.children.remove(&ChildEntityId {
+        // Ignore order when removing because we have self.ordered_children()
+        self.children.swap_remove(&ChildEntityId {
             value: *entity,
             order: None,
         });
