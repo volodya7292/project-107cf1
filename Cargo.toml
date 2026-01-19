@@ -73,7 +73,7 @@ spirv-cross2 = { version = "0.4", features = [
 ], default-features = false }
 generational-arena = "0.2"
 by_address = "1.1"
-bindgen = "0.68"
+bindgen = "0.72"
 cc = "1.0"
 cxx = "1.0"
 cxx-build = "1.0"
