@@ -1,6 +1,6 @@
+use crate::ecs::component::UniformDataC;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::uniform_data::{MODEL_MATRIX_OFFSET, MODEL_MATRIX_SIZE};
-use crate::ecs::component::UniformDataC;
 use common::glm::Mat4;
 use common::types::HashSet;
 use entity_data::{EntityId, SystemAccess, SystemHandler};

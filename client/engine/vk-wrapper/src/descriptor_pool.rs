@@ -183,135 +183,137 @@ impl Device {
         bindings: &[Binding],
         updates: &[(DescriptorSet, Range<usize>)],
     ) {
-        if updates.is_empty() {
-            return;
-        }
-
-        // Safety: calculate total buffers size to prevent reallocating them
-        let buf_len = updates.iter().fold(0, |c, (_, r)| c + r.len());
-
-        let mut native_buffer_infos = Vec::with_capacity(buf_len);
-        let mut native_image_infos = Vec::with_capacity(buf_len);
-        let mut native_writes = Vec::with_capacity(buf_len);
-
-        for (descriptor_set, range) in updates {
-            if *descriptor_set == DescriptorSet::NULL {
-                panic!("descriptor_set = NULL");
+        unsafe {
+            if updates.is_empty() {
+                return;
             }
 
-            for binding in &bindings[range.clone()] {
-                let mut write_info = vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_set.native)
-                    .dst_binding(binding.id)
-                    .dst_array_element(binding.array_index)
-                    .descriptor_type(binding.ty);
+            // Safety: calculate total buffers size to prevent reallocating them
+            let buf_len = updates.iter().fold(0, |c, (_, r)| c + r.len());
 
-                match &binding.res {
-                    BindingRes::Buffer(handle) => {
-                        native_buffer_infos.push(vk::DescriptorBufferInfo {
-                            buffer: handle.0,
-                            offset: 0,
-                            range: vk::WHOLE_SIZE,
-                        });
-                        write_info =
-                            write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
-                    }
-                    BindingRes::BufferRange(handle, range) => {
-                        native_buffer_infos.push(vk::DescriptorBufferInfo {
-                            buffer: handle.0,
-                            offset: range.start,
-                            range: range.end - range.start,
-                        });
-                        write_info =
-                            write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
-                    }
+            let mut native_buffer_infos = Vec::with_capacity(buf_len);
+            let mut native_image_infos = Vec::with_capacity(buf_len);
+            let mut native_writes = Vec::with_capacity(buf_len);
 
-                    BindingRes::Image(image, sampler, layout) => {
-                        let adapter = self.adapter();
-                        let sampler = sampler
-                            .as_ref()
-                            .map(|sampler| {
-                                if (sampler.mag_filter == SamplerFilter::LINEAR
-                                    && !adapter.is_linear_filter_supported(
-                                        image.wrapper.format.0,
-                                        image.wrapper.tiling,
-                                    ))
-                                    || (sampler.min_filter == SamplerFilter::LINEAR
-                                        && !adapter.is_linear_filter_supported(
-                                            image.wrapper.format.0,
-                                            image.wrapper.tiling,
-                                        ))
-                                    || (sampler.mipmap == SamplerMipmap::LINEAR
-                                        && !adapter.is_linear_filter_supported(
-                                            image.wrapper.format.0,
-                                            image.wrapper.tiling,
-                                        ))
-                                {
-                                    // The sampler is not supported, do not use sampler
-                                    self.default_sampler.native
-                                } else {
-                                    sampler.native
-                                }
-                            })
-                            .unwrap_or(self.default_sampler.native);
-
-                        native_image_infos.push(vk::DescriptorImageInfo {
-                            sampler,
-                            image_view: image.view.native,
-                            image_layout: layout.0,
-                        });
-                        write_info =
-                            write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-                    }
-                    BindingRes::ImageView(image_view, sampler, layout) => {
-                        let adapter = self.adapter();
-                        let sampler = sampler
-                            .as_ref()
-                            .map(|sampler| {
-                                if (sampler.mag_filter == SamplerFilter::LINEAR
-                                    && !adapter.is_linear_filter_supported(
-                                        image_view.image_wrapper.format.0,
-                                        image_view.image_wrapper.tiling,
-                                    ))
-                                    || (sampler.min_filter == SamplerFilter::LINEAR
-                                        && !adapter.is_linear_filter_supported(
-                                            image_view.image_wrapper.format.0,
-                                            image_view.image_wrapper.tiling,
-                                        ))
-                                    || (sampler.mipmap == SamplerMipmap::LINEAR
-                                        && !adapter.is_linear_filter_supported(
-                                            image_view.image_wrapper.format.0,
-                                            image_view.image_wrapper.tiling,
-                                        ))
-                                {
-                                    // The sampler is not supported, do not use sampler
-                                    self.default_sampler.native
-                                } else {
-                                    sampler.native
-                                }
-                            })
-                            .unwrap_or(self.default_sampler.native);
-
-                        native_image_infos.push(vk::DescriptorImageInfo {
-                            sampler,
-                            image_view: image_view.native,
-                            image_layout: layout.0,
-                        });
-                        write_info =
-                            write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
-                    }
+            for (descriptor_set, range) in updates {
+                if *descriptor_set == DescriptorSet::NULL {
+                    panic!("descriptor_set = NULL");
                 }
 
-                native_writes.push(write_info.build());
-            }
-        }
+                for binding in &bindings[range.clone()] {
+                    let mut write_info = vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set.native)
+                        .dst_binding(binding.id)
+                        .dst_array_element(binding.array_index)
+                        .descriptor_type(binding.ty);
 
-        self.wrapper.native.update_descriptor_sets(&native_writes, &[]);
+                    match &binding.res {
+                        BindingRes::Buffer(handle) => {
+                            native_buffer_infos.push(vk::DescriptorBufferInfo {
+                                buffer: handle.0,
+                                offset: 0,
+                                range: vk::WHOLE_SIZE,
+                            });
+                            write_info =
+                                write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
+                        }
+                        BindingRes::BufferRange(handle, range) => {
+                            native_buffer_infos.push(vk::DescriptorBufferInfo {
+                                buffer: handle.0,
+                                offset: range.start,
+                                range: range.end - range.start,
+                            });
+                            write_info =
+                                write_info.buffer_info(slice::from_ref(native_buffer_infos.last().unwrap()));
+                        }
+
+                        BindingRes::Image(image, sampler, layout) => {
+                            let adapter = self.adapter();
+                            let sampler = sampler
+                                .as_ref()
+                                .map(|sampler| {
+                                    if (sampler.mag_filter == SamplerFilter::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image.wrapper.format.0,
+                                            image.wrapper.tiling,
+                                        ))
+                                        || (sampler.min_filter == SamplerFilter::LINEAR
+                                            && !adapter.is_linear_filter_supported(
+                                                image.wrapper.format.0,
+                                                image.wrapper.tiling,
+                                            ))
+                                        || (sampler.mipmap == SamplerMipmap::LINEAR
+                                            && !adapter.is_linear_filter_supported(
+                                                image.wrapper.format.0,
+                                                image.wrapper.tiling,
+                                            ))
+                                    {
+                                        // The sampler is not supported, do not use sampler
+                                        self.default_sampler.native
+                                    } else {
+                                        sampler.native
+                                    }
+                                })
+                                .unwrap_or(self.default_sampler.native);
+
+                            native_image_infos.push(vk::DescriptorImageInfo {
+                                sampler,
+                                image_view: image.view.native,
+                                image_layout: layout.0,
+                            });
+                            write_info =
+                                write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
+                        }
+                        BindingRes::ImageView(image_view, sampler, layout) => {
+                            let adapter = self.adapter();
+                            let sampler = sampler
+                                .as_ref()
+                                .map(|sampler| {
+                                    if (sampler.mag_filter == SamplerFilter::LINEAR
+                                        && !adapter.is_linear_filter_supported(
+                                            image_view.image_wrapper.format.0,
+                                            image_view.image_wrapper.tiling,
+                                        ))
+                                        || (sampler.min_filter == SamplerFilter::LINEAR
+                                            && !adapter.is_linear_filter_supported(
+                                                image_view.image_wrapper.format.0,
+                                                image_view.image_wrapper.tiling,
+                                            ))
+                                        || (sampler.mipmap == SamplerMipmap::LINEAR
+                                            && !adapter.is_linear_filter_supported(
+                                                image_view.image_wrapper.format.0,
+                                                image_view.image_wrapper.tiling,
+                                            ))
+                                    {
+                                        // The sampler is not supported, do not use sampler
+                                        self.default_sampler.native
+                                    } else {
+                                        sampler.native
+                                    }
+                                })
+                                .unwrap_or(self.default_sampler.native);
+
+                            native_image_infos.push(vk::DescriptorImageInfo {
+                                sampler,
+                                image_view: image_view.native,
+                                image_layout: layout.0,
+                            });
+                            write_info =
+                                write_info.image_info(slice::from_ref(native_image_infos.last().unwrap()));
+                        }
+                    }
+
+                    native_writes.push(write_info.build());
+                }
+            }
+
+            self.wrapper.native.update_descriptor_sets(&native_writes, &[]);
+        }
     }
 
     /// # Safety
     /// See [update_descriptor_sets].
     pub unsafe fn update_descriptor_set(&self, set: DescriptorSet, bindings: &[Binding]) {
-        self.update_descriptor_sets(bindings, &[(set, 0..bindings.len())])
+        unsafe { self.update_descriptor_sets(bindings, &[(set, 0..bindings.len())]) }
     }
 }

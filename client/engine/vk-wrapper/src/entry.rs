@@ -1,8 +1,8 @@
-use crate::utils;
 use crate::Instance;
+use crate::utils;
 use ash::vk;
 use common::log::{error, info, warn};
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::sync::Arc;
@@ -47,34 +47,38 @@ unsafe extern "system" fn vk_debug_callback(
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _p_user_data: *mut c_void,
 ) -> vk::Bool32 {
-    let msg = CStr::from_ptr((*p_callback_data).p_message).to_string_lossy();
+    unsafe {
+        let msg = CStr::from_ptr((*p_callback_data).p_message).to_string_lossy();
 
-    if !vk_debug_callback_filter(message_type, &msg) {
-        return vk::FALSE;
-    }
-
-    let msg_type = match message_type {
-        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "VAL",
-        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "PERF",
-        _ => "",
-    };
-
-    match message_severity {
-        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => warn!(target: "vulkan", "[{}] {:?}", msg_type, msg),
-        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
-            error!(target: "vulkan", "[{}] {:?}", msg_type, msg);
-            panic!("Vulkan validation");
+        if !vk_debug_callback_filter(message_type, &msg) {
+            return vk::FALSE;
         }
-        _ => info!(target: "vulkan", "[{}] {:?}", msg_type, msg),
-    }
 
-    vk::FALSE
+        let msg_type = match message_type {
+            vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "VAL",
+            vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "PERF",
+            _ => "",
+        };
+
+        match message_severity {
+            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => {
+                warn!(target: "vulkan", "[{}] {:?}", msg_type, msg)
+            }
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+                error!(target: "vulkan", "[{}] {:?}", msg_type, msg);
+                panic!("Vulkan validation");
+            }
+            _ => info!(target: "vulkan", "[{}] {:?}", msg_type, msg),
+        }
+
+        vk::FALSE
+    }
 }
 
 pub fn enumerate_required_window_extensions(
-    window_handle: &dyn HasRawWindowHandle,
+    window_handle: &dyn HasWindowHandle,
 ) -> Result<Vec<String>, vk::Result> {
-    let extensions = match window_handle.raw_window_handle().unwrap() {
+    let extensions = match window_handle.window_handle().unwrap().as_raw() {
         RawWindowHandle::Win32(_) => {
             const WINDOWS_EXTS: [&CStr; 2] = [
                 ash::extensions::khr::Surface::name(),
@@ -147,7 +151,7 @@ impl Entry {
     pub fn create_instance(
         self: &Arc<Self>,
         app_name: &str,
-        window: Option<&dyn HasRawWindowHandle>,
+        window: Option<&dyn HasWindowHandle>,
     ) -> Result<Arc<Instance>, InstanceError> {
         let c_app_name = CString::new(app_name).unwrap();
         let c_engine_name = CString::new("VULKAN").unwrap();

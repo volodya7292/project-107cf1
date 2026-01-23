@@ -12,8 +12,8 @@ use base::registry::Registry;
 use common::glm;
 use common::glm::{I32Vec3, Vec2, Vec3};
 use common::types::Bool;
-use engine::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use engine::module::main_renderer::VertexMesh;
+use engine::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use engine::vkw;
 use std::sync::Arc;
 

@@ -1,14 +1,14 @@
+use crate::ecs::component::MeshRenderConfigC;
 use crate::ecs::component::render_config::GPUResource;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::MaterialPipelineSet;
-use crate::module::main_renderer::resources::{Renderable, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::module::main_renderer::resources::{GENERAL_OBJECT_DESCRIPTOR_IDX, Renderable};
 use crate::module::main_renderer::{BufferUpdate, BufferUpdate1, ImageUpdate};
 use crate::module::scene::change_manager::{ChangeType, ComponentChange};
 use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use index_pool::IndexPool;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;

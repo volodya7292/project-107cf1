@@ -1,16 +1,16 @@
+use crate::ecs::component::MeshRenderConfigC;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::render_config::RenderLayer;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
-use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
 use crate::module::main_renderer::resource_manager::{CmdListParams, ResourceManagementScope};
-use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::module::main_renderer::resources::{GENERAL_OBJECT_DESCRIPTOR_IDX, MaterialPipelineParams};
 use crate::module::main_renderer::stage::depth::{DepthStage, VisibilityType};
 use crate::module::main_renderer::stage::{
     FrameContext, RenderStage, RenderStageId, StageContext, StageRunResult,
 };
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
-use crate::module::main_renderer::{camera, compose_descriptor_sets, CameraInfo, FrameInfo};
+use crate::module::main_renderer::{CameraInfo, FrameInfo, camera, compose_descriptor_sets};
 use common::glm::Vec4;
 use common::rayon::prelude::*;
 use common::{glm, rayon};

@@ -5,8 +5,8 @@ use crate::overworld::occluder::Occluder;
 use crate::overworld::raw_cluster::BlockData;
 use crate::registry::Registry;
 use entity_data::{AnyState, ArchetypeState, EntityId, EntityStorage, StaticArchetype};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Copy, Clone)]
 pub struct Block {

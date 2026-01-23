@@ -17,7 +17,7 @@ use engine::utils::transition::AnimatedValue;
 use engine::utils::transition::TransitionTarget;
 use engine::winit::event::ElementState;
 use engine::winit::keyboard::KeyCode;
-use engine::{remember_state, EngineContext};
+use engine::{EngineContext, remember_state};
 use entity_data::EntityId;
 use std::sync::Arc;
 
@@ -175,7 +175,9 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                     let mut new_cursor_offset = 0_isize;
 
                     if let WSIKeyboardInput::Virtual(keycode, state, ch) = input {
-                        if let Some(keycode) = keycode && state == ElementState::Pressed {
+                        if let Some(keycode) = keycode
+                            && state == ElementState::Pressed
+                        {
                             if keycode == KeyCode::ArrowLeft {
                                 new_cursor_offset = -1;
                             } else if keycode == KeyCode::ArrowRight {

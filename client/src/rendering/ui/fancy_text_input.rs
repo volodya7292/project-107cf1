@@ -2,7 +2,7 @@ use crate::rendering::ui::backgrounds;
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
 use crate::rendering::ui::container::container;
 use crate::rendering::ui::text::reactive::ui_text;
-use crate::rendering::ui::text_input::{ui_text_input, TextInputProps};
+use crate::rendering::ui::text_input::{TextInputProps, ui_text_input};
 use common::make_static_id;
 use engine::ecs::component::simple_text::TextStyle;
 use engine::ecs::component::ui::{Padding, UILayoutC};

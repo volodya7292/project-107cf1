@@ -70,7 +70,7 @@ pub fn make_world_prototype_image(generator: &OverworldGenerator) {
         //     .next(b_pos.x as u64)
         //     .next(b_pos.y as u64)
         //     .rng()
-        //     .gen_range(0..10);
+        //     .random_range(0..10);
 
         // let col = white_noise.state().next(pivot.x).next(pivot.y).rng().gen::<f64>();
 
@@ -201,7 +201,7 @@ pub fn make_climate_graph_image(registry: &Arc<Registry>) {
             .biomes_by_climate()
             .locate_all_at_point(&[t as f32, h as f32, 0.5])
             .map(|v| {
-                let mut rng_state = white_noise.state().next(v.biome_id as u64);
+                let rng_state = white_noise.state().next(v.biome_id as u64);
                 let mut rng = rng_state.rng();
                 Vec3::new(rng.random::<f32>(), rng.random::<f32>(), rng.random::<f32>())
             })

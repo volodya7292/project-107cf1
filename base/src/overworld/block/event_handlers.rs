@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::overworld::Overworld;
 use crate::overworld::accessor::ReadOnlyOverworldAccessor;
 use crate::overworld::actions_storage::OverworldActionsBuilder;
 use crate::overworld::block::BlockData;
 use crate::overworld::position::BlockPos;
-use crate::overworld::Overworld;
 use crate::registry::Registry;
 
 /// Collects actions to perform after the tick.

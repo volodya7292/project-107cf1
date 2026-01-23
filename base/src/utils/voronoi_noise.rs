@@ -37,7 +37,7 @@ impl VoronoiNoise2D {
                 let rng_state = self.white_noise.state().next(x).next(y);
                 let mut rng = rng_state.rng();
 
-                let jitter = DVec2::new(rng.gen_range(POINT_RANGE), rng.gen_range(POINT_RANGE));
+                let jitter = DVec2::new(rng.random_range(POINT_RANGE), rng.random_range(POINT_RANGE));
                 let v = glm::convert::<_, DVec2>(glm::vec2(x, y)) + jitter * 0.39614353;
 
                 let dist = glm::distance2(&v, &p);
@@ -65,9 +65,9 @@ impl VoronoiNoise2D {
     //                 let mut rng = self.white_noise.state().next(g.x).next(g.y).next(g.z).rng();
     //
     //                 let jitter = DVec3::new(
-    //                     rng.gen_range(POINT_RANGE),
-    //                     rng.gen_range(POINT_RANGE),
-    //                     rng.gen_range(POINT_RANGE),
+    //                     rng.random_range(POINT_RANGE),
+    //                     rng.random_range(POINT_RANGE),
+    //                     rng.random_range(POINT_RANGE),
     //                 );
     //                 let v = glm::convert::<_, DVec3>(g) + jitter * 0.39614353;
     //

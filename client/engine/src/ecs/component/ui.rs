@@ -1,6 +1,6 @@
+use crate::EngineContext;
 use crate::event::WSIKeyboardInput;
 use crate::module::scene::EntityAccess;
-use crate::EngineContext;
 use common::glm::Vec2;
 use entity_data::EntityId;
 use std::sync::Arc;

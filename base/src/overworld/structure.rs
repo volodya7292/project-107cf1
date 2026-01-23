@@ -91,7 +91,7 @@ impl Structure {
         self.max_size.max() + self.max_spacing() / 2
     }
 
-    pub fn calc_gen_range(&self) -> Range<u64> {
+    pub fn calc_random_range(&self) -> Range<u64> {
         let gen_padding = (self.max_size.max() / 2).max(self.min_spacing() / 2);
         gen_padding..(self.octant_size() - gen_padding)
     }

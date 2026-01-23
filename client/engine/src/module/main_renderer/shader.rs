@@ -3,7 +3,7 @@ use common::{
     types::HashMap,
 };
 use std::sync::Arc;
-use vk_wrapper::{shader::VInputRate, Device, DeviceError, Format, Shader};
+use vk_wrapper::{Device, DeviceError, Format, Shader, shader::VInputRate};
 
 pub struct VkwShaderBundle {
     pub variants: HashMap<ShaderVariantConfig, Arc<Shader>>,

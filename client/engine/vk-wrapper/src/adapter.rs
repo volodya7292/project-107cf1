@@ -1,7 +1,7 @@
 use crate::device::DeviceWrapper;
 use crate::entry::VK_API_VERSION;
 use crate::sampler::SamplerClamp;
-use crate::{device::Device, surface::Surface, Instance, Queue, QueueType, SamplerFilter, SamplerMipmap};
+use crate::{Instance, Queue, QueueType, SamplerFilter, SamplerMipmap, device::Device, surface::Surface};
 use ash::vk;
 use ash::vk::Handle;
 use common::parking_lot::{Mutex, RwLock};

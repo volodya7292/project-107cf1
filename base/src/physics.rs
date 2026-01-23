@@ -1,9 +1,9 @@
 pub mod aabb;
 
+use crate::overworld::Overworld;
 use crate::overworld::accessor::ReadOnlyOverworldAccessorImpl;
 use crate::overworld::position::BlockPos;
 use crate::overworld::raw_cluster::BlockDataImpl;
-use crate::overworld::Overworld;
 use aabb::AABB;
 use approx::AbsDiffEq;
 use common::glm;

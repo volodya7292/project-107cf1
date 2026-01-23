@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::format::DEPTH_FORMAT;
 use crate::image::ImageParams;
 use crate::{
-    device::DeviceError, AccessFlags, Device, Format, Framebuffer, Image, ImageLayout, ImageUsageFlags,
-    ImageView, PipelineStageFlags,
+    AccessFlags, Device, Format, Framebuffer, Image, ImageLayout, ImageUsageFlags, ImageView,
+    PipelineStageFlags, device::DeviceError,
 };
 
 #[derive(Copy, Clone)]

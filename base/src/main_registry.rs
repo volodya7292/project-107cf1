@@ -1,9 +1,9 @@
 use crate::overworld::block::{BlockBuilder, BlockState, BlockStateArchetype};
 use crate::overworld::block_model::BlockModel;
 use crate::overworld::item::Item;
-use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::world::Biome;
-use crate::overworld::structure::{world, Structure};
+use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
+use crate::overworld::structure::{Structure, world};
 use crate::overworld::{block, block_model};
 use crate::physics::aabb::AABB;
 use crate::registry::{Registry, StatelessBlock};

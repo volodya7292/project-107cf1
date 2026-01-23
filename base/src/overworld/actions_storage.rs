@@ -53,7 +53,9 @@ pub struct LiquidChangeInfo {
 }
 
 unsafe fn drop_typed<T>(data: *mut u8) {
-    ptr::drop_in_place(data as *mut T);
+    unsafe {
+        ptr::drop_in_place(data as *mut T);
+    }
 }
 
 /// Contains actions to perform after the tick.

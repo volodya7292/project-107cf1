@@ -25,7 +25,6 @@ pub use winit;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
 use winit::window::Window;
 
 lazy_static! {
@@ -141,13 +140,13 @@ impl Engine {
     }
 
     pub fn run(mut self) {
-        let mut event_loop = self.event_loop.take().unwrap();
+        let event_loop = self.event_loop.take().unwrap();
         event_loop.run_app(&mut self).unwrap();
     }
 }
 
 impl ApplicationHandler for Engine {
-    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {}
+    fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 
     fn new_events(
         &mut self,
@@ -166,7 +165,7 @@ impl ApplicationHandler for Engine {
             let sizing_info = WSizingInfo::get(&main_window);
 
             let curr_monitor = main_window.current_monitor().unwrap();
-            let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
+            let _curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
             self.main_window = Some(RefCell::new(main_window));
             self.curr_sizing_info = Some(sizing_info);
@@ -208,7 +207,7 @@ impl ApplicationHandler for Engine {
 
     fn device_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         device_id: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
@@ -226,7 +225,7 @@ impl ApplicationHandler for Engine {
 
     fn window_event(
         &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
         window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {

@@ -143,10 +143,12 @@ impl GPUJobDeviceExt for Device {
 
     /// Runs jobs and wait for completion.
     unsafe fn run_jobs_sync(&self, jobs: &mut [GPUJobExecInfo]) -> Result<(), DeviceError> {
-        self.run_jobs(jobs)?;
-        for job in jobs {
-            job.job.wait()?;
+        unsafe {
+            self.run_jobs(jobs)?;
+            for job in jobs {
+                job.job.wait()?;
+            }
+            Ok(())
         }
-        Ok(())
     }
 }

@@ -5,7 +5,7 @@ use crate::main_registry::MainRegistry;
 use crate::overworld::generator::OverworldGenerator;
 use crate::overworld::interface::{LoadedType, OverworldInterface};
 use crate::overworld::position::ClusterPos;
-use crate::overworld::raw_cluster::{deserialize_cluster, serialize_cluster, RawCluster};
+use crate::overworld::raw_cluster::{RawCluster, deserialize_cluster, serialize_cluster};
 use crate::overworld::{ClusterState, OverworldState};
 use crate::registry::Registry;
 use common::glm::{I64Vec3, TVec3};

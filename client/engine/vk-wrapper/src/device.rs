@@ -1,31 +1,31 @@
-use crate::format::{FormatFeatureFlags, BUFFER_FORMATS};
+use crate::FORMAT_SIZES;
+use crate::IMAGE_FORMATS;
+use crate::format::{BUFFER_FORMATS, FormatFeatureFlags};
 use crate::image::ImageParams;
 use crate::pipeline::PipelineOutputInfo;
 use crate::sampler::{SamplerClamp, SamplerFilter, SamplerMipmap};
 use crate::shader::{BindingLoc, ShaderStage, VInputRate};
-use crate::FORMAT_SIZES;
-use crate::IMAGE_FORMATS;
-use crate::{
-    utils, BindingType, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain,
-    {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
-};
 use crate::{Adapter, PipelineDepthStencil, SubpassDependency};
 use crate::{Attachment, Pipeline, PipelineRasterization, PrimitiveTopology, ShaderBindingDescription};
 use crate::{AttachmentColorBlend, ImageWrapper};
+use crate::{BC_IMAGE_FORMATS, SwapchainWrapper};
+use crate::{
+    BindingType, Format, Image, Queue, QueueType, Semaphore, Surface, Swapchain, utils,
+    {Buffer, BufferUsageFlags, DeviceBuffer, HostBuffer},
+};
+use crate::{DEPTH_FORMAT, Sampler};
 use crate::{Fence, PipelineSignature};
 use crate::{LoadStore, RenderPass, Shader};
 use crate::{QueryPool, Subpass};
-use crate::{Sampler, DEPTH_FORMAT};
-use crate::{SwapchainWrapper, BC_IMAGE_FORMATS};
 use ash::vk;
 use ash::vk::Handle;
 use common::parking_lot::Mutex;
 use common::types::HashMap;
 use std::collections::hash_map;
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::ptr::{self, addr_of};
 use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::{ffi::CStr, marker::PhantomData, mem, slice};
 
 #[derive(Debug)]
@@ -63,21 +63,23 @@ impl DeviceWrapper {
         handle: u64,
         name: &str,
     ) -> Result<(), vk::Result> {
-        if cfg!(debug_assertions) {
-            let c_name = CString::new(name).unwrap();
+        unsafe {
+            if cfg!(debug_assertions) {
+                let c_name = CString::new(name).unwrap();
 
-            let info = vk::DebugUtilsObjectNameInfoEXT::builder()
-                .object_type(ty)
-                .object_handle(handle)
-                .object_name(c_name.as_c_str());
+                let info = vk::DebugUtilsObjectNameInfoEXT::builder()
+                    .object_type(ty)
+                    .object_handle(handle)
+                    .object_name(c_name.as_c_str());
 
-            if let Some(debug_utils) = &self.adapter.instance.debug_utils_ext {
-                debug_utils.set_debug_utils_object_name(self.native.handle(), &info)
+                if let Some(debug_utils) = &self.adapter.instance.debug_utils_ext {
+                    debug_utils.set_debug_utils_object_name(self.native.handle(), &info)
+                } else {
+                    unreachable!()
+                }
             } else {
-                unreachable!()
+                Ok(())
             }
-        } else {
-            Ok(())
         }
     }
 

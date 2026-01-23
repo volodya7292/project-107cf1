@@ -9,11 +9,11 @@ pub mod text_input;
 
 use crate::rendering::ui::image::{ImageImpl, UIImage};
 use crate::rendering::ui::text::{UIText, UITextImpl};
+use engine::EngineContext;
 use engine::ecs::component::ui::{
     BasicEventCallback, ClickedCallback, KeyboardCallback, ScrollCallback, SizeUpdateCallback,
     UIEventHandlerC,
 };
-use engine::EngineContext;
 
 pub const STATE_ENTITY_ID: &str = "__entity_id";
 pub const LOCAL_VAR_OPACITY: &str = "__opacity";

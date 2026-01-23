@@ -1,5 +1,5 @@
 use std::ops::{Index, IndexMut};
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 use std::{marker::PhantomData, mem, ptr, slice};
 
 use ash::vk;

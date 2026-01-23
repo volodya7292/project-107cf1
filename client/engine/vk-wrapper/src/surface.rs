@@ -2,7 +2,7 @@
 use crate::platform::metal;
 use crate::{DeviceError, Instance};
 use ash::vk;
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::sync::Arc;
 
 pub struct Surface {
@@ -13,8 +13,8 @@ pub struct Surface {
 impl Surface {
     /// Updates surface backing properties such as scale factor if necessary.
     /// # Safety
-    pub fn update(window: impl HasRawWindowHandle) -> Result<(), DeviceError> {
-        match window.raw_window_handle().unwrap() {
+    pub fn update(window: impl HasWindowHandle) -> Result<(), DeviceError> {
+        match window.window_handle().unwrap().as_raw() {
             #[cfg(target_os = "macos")]
             RawWindowHandle::AppKit(handle) => unsafe { metal::metal_layer_update(handle) },
             _ => {}

@@ -4,8 +4,8 @@ use self::context::{
     CPUBufferId, CPUBufferInfo, GPUBufferId, GPUContext, GPUImageId, GPUPipelineId, GPUResourceId,
 };
 use crate::{
-    buffer::BufferHandleImpl, AccessFlags, Binding, BindingRes, BufferHandle, ClearValue, DeviceError,
-    ImageLayout, LoadStore, PipelineStageFlags, Semaphore, SignalSemaphore, SubmitInfo, WaitSemaphore,
+    AccessFlags, Binding, BindingRes, BufferHandle, ClearValue, DeviceError, ImageLayout, LoadStore,
+    PipelineStageFlags, Semaphore, SignalSemaphore, SubmitInfo, WaitSemaphore, buffer::BufferHandleImpl,
 };
 use common::types::HashMap;
 use smallvec::SmallVec;

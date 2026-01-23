@@ -3,7 +3,7 @@ use crate::overworld::block_model::Quad;
 use crate::overworld::facing::Facing;
 use crate::overworld::interface::local_interface;
 use crate::overworld::position::{ClusterBlockPos, RelativeBlockPos};
-use crate::overworld::raw_cluster::{deserialize_cluster, serialize_cluster, BlockDataImpl, RawCluster};
+use crate::overworld::raw_cluster::{BlockDataImpl, RawCluster, deserialize_cluster, serialize_cluster};
 use approx::assert_abs_diff_eq;
 use common::glm;
 use common::glm::{I32Vec3, Vec3};

@@ -1,12 +1,12 @@
 use crate::rendering::ui::backgrounds::DEFAULT_FANCY_COLOR;
 use crate::rendering::ui::container::{
-    background, container, container_props, container_props_init, ContainerProps,
+    ContainerProps, background, container, container_props, container_props_init,
 };
 use common::glm::Vec2;
 use common::make_static_id;
 use engine::ecs::component::ui::{ContentFlow, Padding, Position, Sizing, UILayoutC};
 use engine::module::ui::reactive::UIScopeContext;
-use engine::{remember_state, EngineContext};
+use engine::{EngineContext, remember_state};
 use entity_data::EntityId;
 use std::sync::Arc;
 

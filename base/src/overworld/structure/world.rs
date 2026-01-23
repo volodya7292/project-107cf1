@@ -329,7 +329,7 @@ impl WorldState {
             .next(pivot.x as i64)
             .next(pivot.y as i64)
             .rng()
-            .gen_range(0..max)
+            .random_range(0..max)
     }
 
     fn calc_biome_at(&self, pos: I64Vec2, altitude: f32) -> u32 {

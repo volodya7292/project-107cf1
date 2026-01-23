@@ -2,10 +2,10 @@ use common::resource_file::BufferedResourceReader;
 use engine::module::main_renderer::shader::{VkwShaderBundle, VkwShaderBundleDeviceExt};
 use engine::module::main_renderer::{MainRenderer, MaterialPipelineId};
 use engine::module::text_renderer::{self, TextRenderer};
+use engine::vkw::PrimitiveTopology;
 use engine::vkw::pipeline::CullMode;
 use engine::vkw::shader::VInputRate;
-use engine::vkw::PrimitiveTopology;
-use engine::{vkw, EngineContext};
+use engine::{EngineContext, vkw};
 use std::sync::Arc;
 
 pub struct MaterialPipelines {

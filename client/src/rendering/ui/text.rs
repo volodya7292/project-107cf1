@@ -1,6 +1,7 @@
 use crate::game::EngineCtxGameExt;
 use common::glm::Vec2;
 use common::memoffset::offset_of;
+use engine::EngineContext;
 use engine::ecs::component::render_config::RenderLayer;
 use engine::ecs::component::simple_text::{StyledString, TextHAlign};
 use engine::ecs::component::ui::{
@@ -13,7 +14,6 @@ use engine::module::scene::{EntityAccess, ObjectEntityId, Scene, SceneObject};
 use engine::module::text_renderer::{self, RawTextObject, TextRenderer};
 use engine::module::ui::UIState;
 use engine::module::ui::{UIObject, UIObjectEntityImpl};
-use engine::EngineContext;
 use entity_data::EntityId;
 use std::sync::Arc;
 
@@ -259,16 +259,16 @@ pub mod reactive {
     use super::UniformData;
     use crate::game::EngineCtxGameExt;
     use crate::rendering::ui::container::{container, container_props_init};
-    use crate::rendering::ui::text::{on_size_update, UIText, UITextImpl};
-    use crate::rendering::ui::{UICallbacks, LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
+    use crate::rendering::ui::text::{UIText, UITextImpl, on_size_update};
+    use crate::rendering::ui::{LOCAL_VAR_OPACITY, STATE_ENTITY_ID, UICallbacks};
     use common::make_static_id;
     use common::memoffset::offset_of;
+    use engine::ecs::component::UniformDataC;
     use engine::ecs::component::simple_text::{StyledString, TextHAlign, TextStyle};
     use engine::ecs::component::ui::UILayoutC;
-    use engine::ecs::component::UniformDataC;
     use engine::module::scene::Scene;
-    use engine::module::ui::reactive::UIScopeContext;
     use engine::module::ui::UIObjectEntityImpl;
+    use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
 
     #[derive(Default, Clone, PartialEq)]

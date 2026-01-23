@@ -1,5 +1,5 @@
 use crate::platform::{Platform, PlatformImpl};
-use core_graphics::display::{kDisplayModeNativeFlag, CGDisplay, CGDisplayMode};
+use core_graphics::display::{CGDisplay, CGDisplayMode, kDisplayModeNativeFlag};
 use std::ptr;
 use winit::monitor::MonitorHandle;
 use winit::platform::macos::MonitorHandleExtMacOS;

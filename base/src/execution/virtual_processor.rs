@@ -1,11 +1,11 @@
-use crate::execution::{spawn_coroutine, Task};
+use crate::execution::{Task, spawn_coroutine};
+use common::MO_RELAXED;
 use common::parking_lot::Mutex;
 use common::threading::SafeThreadPool;
 use common::tokio::sync::mpsc::error::TryRecvError;
-use common::tokio::sync::{mpsc, Notify};
-use common::MO_RELAXED;
-use std::sync::atomic::AtomicBool;
+use common::tokio::sync::{Notify, mpsc};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 struct ScheduledTask {
     func: Box<dyn FnOnce() + Send + 'static>,

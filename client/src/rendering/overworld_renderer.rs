@@ -2,13 +2,13 @@ use crate::client::overworld::raw_cluster_ext::{ClusterMeshBuilder, ClusterMeshe
 use crate::resource_mapping::ResourceMapping;
 use base::execution;
 use base::execution::virtual_processor::{VirtualProcessor, VirtualTask};
-use base::execution::{default_queue, Task};
-use base::overworld::accessor::ClusterNeighbourhoodAccessor;
-use base::overworld::cluster_part_set::{part_idx_to_dir, ClusterPartSet};
-use base::overworld::orchestrator::get_side_clusters;
-use base::overworld::orchestrator::OverworldUpdateResult;
-use base::overworld::position::ClusterPos;
+use base::execution::{Task, default_queue};
 use base::overworld::LoadedClusters;
+use base::overworld::accessor::ClusterNeighbourhoodAccessor;
+use base::overworld::cluster_part_set::{ClusterPartSet, part_idx_to_dir};
+use base::overworld::orchestrator::OverworldUpdateResult;
+use base::overworld::orchestrator::get_side_clusters;
+use base::overworld::position::ClusterPos;
 use base::registry::Registry;
 use common::glm::{DVec3, I64Vec3};
 use common::parking_lot::Mutex;
@@ -16,7 +16,7 @@ use common::rayon::prelude::*;
 use common::threading::SafeThreadPool;
 use common::tokio::sync::Notify;
 use common::types::{HashMap, HashSet};
-use common::{glm, MO_RELAXED};
+use common::{MO_RELAXED, glm};
 use engine::ecs::component::{MeshRenderConfigC, TransformC, VertexMeshC};
 use engine::module::main_renderer::VertexMeshObject;
 use engine::module::scene::{ObjectEntityId, Scene};
@@ -24,8 +24,8 @@ use engine::vkw;
 use entity_data::EntityId;
 use smallvec::SmallVec;
 use std::collections::hash_map;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub struct OverworldRenderer {
     default_queue: Arc<SafeThreadPool>,

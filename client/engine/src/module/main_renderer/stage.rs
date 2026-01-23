@@ -1,9 +1,9 @@
+use crate::module::main_renderer::FrameInfo;
 use crate::module::main_renderer::camera::{OrthoCamera, PerspectiveCamera};
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineKindId};
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::resources::{MaterialPipelineParams, Renderable};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
-use crate::module::main_renderer::FrameInfo;
 use common::glm::Vec3;
 use common::types::HashMap;
 use entity_data::{EntityId, EntityStorage};

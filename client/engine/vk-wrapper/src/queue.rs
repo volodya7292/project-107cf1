@@ -1,5 +1,5 @@
 use crate::device::DeviceWrapper;
-use crate::{pipeline::PipelineStageFlags, swapchain, CmdList, Fence, Semaphore};
+use crate::{CmdList, Fence, Semaphore, pipeline::PipelineStageFlags, swapchain};
 use crate::{DeviceError, SwapchainImage};
 use ash::vk;
 use ash::vk::Handle;

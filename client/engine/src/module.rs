@@ -5,8 +5,8 @@ pub mod text_renderer;
 pub mod ui;
 pub mod ui_interaction_manager;
 
-use crate::event::WSIEvent;
 use crate::EngineContext;
+use crate::event::WSIEvent;
 use common::any::AsAny;
 use common::lrc::{Lrc, LrcExt, LrcExtSized, OwnedRef, OwnedRefMut};
 use common::types::{HashMap, IndexMap};

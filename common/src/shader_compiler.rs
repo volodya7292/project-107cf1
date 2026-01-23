@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
-use std::collections::{hash_map, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, hash_map};
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Write;
@@ -18,9 +18,10 @@ impl ShaderVariantConfig {
     pub fn new(definitions: Vec<String>) -> Self {
         for def in &definitions {
             assert!(def.chars().count() > 0);
-            assert!(def
-                .chars()
-                .all(|v| (v.is_ascii_alphanumeric() || v == '_') && !v.is_whitespace()));
+            assert!(
+                def.chars()
+                    .all(|v| (v.is_ascii_alphanumeric() || v == '_') && !v.is_whitespace())
+            );
             assert_eq!(def, &def.to_uppercase());
         }
         Self {

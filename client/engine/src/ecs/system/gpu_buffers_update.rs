@@ -1,7 +1,7 @@
 use crate::ecs::component::VertexMeshC;
+use crate::module::main_renderer::ParallelJob;
 use crate::module::main_renderer::gpu_executor::{GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::vertex_mesh::RawVertexMesh;
-use crate::module::main_renderer::ParallelJob;
 use common::types::{HashMap, HashSet};
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::sync::Arc;

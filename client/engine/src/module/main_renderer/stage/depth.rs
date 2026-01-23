@@ -1,16 +1,16 @@
+use crate::ecs::component::MeshRenderConfigC;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::render_config::RenderLayer;
-use crate::ecs::component::MeshRenderConfigC;
 use crate::module::main_renderer::camera::Frustum;
 use crate::module::main_renderer::material_pipeline::{MaterialPipelineSet, PipelineConfig, PipelineKindId};
 use crate::module::main_renderer::resource_manager::{
     CmdListParams, DeviceBufferParams, HostBufferParams, ResourceManagementScope,
 };
-use crate::module::main_renderer::resources::{MaterialPipelineParams, GENERAL_OBJECT_DESCRIPTOR_IDX};
+use crate::module::main_renderer::resources::{GENERAL_OBJECT_DESCRIPTOR_IDX, MaterialPipelineParams};
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext, StageRunResult};
 use crate::module::main_renderer::vertex_mesh::VertexMeshCmdList;
 use crate::module::main_renderer::{
-    calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets, FrameInfo,
+    FrameInfo, calc_group_count_1d, calc_group_count_2d, camera, compose_descriptor_sets,
 };
 use crate::module::scene::N_MAX_OBJECTS;
 use common::glm::{Mat4, Vec2, Vec3, Vec4};

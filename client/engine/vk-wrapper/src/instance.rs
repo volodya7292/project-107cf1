@@ -1,11 +1,11 @@
+use crate::FORMAT_SIZES;
 use crate::adapter::{Adapter, QueueId};
 use crate::entry::VK_API_VERSION;
 #[cfg(target_os = "macos")]
 use crate::platform::metal;
-use crate::FORMAT_SIZES;
-use crate::{format, surface::Surface, utils, Entry};
+use crate::{Entry, format, surface::Surface, utils};
 use ash::vk;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use std::ptr::addr_of_mut;
 use std::sync::Arc;
 use std::{collections::HashMap, os::raw::c_void};
@@ -21,10 +21,10 @@ pub struct Instance {
 impl Instance {
     pub fn create_surface<H>(self: &Arc<Self>, window: &H) -> Result<Arc<Surface>, vk::Result>
     where
-        H: HasRawWindowHandle + HasRawDisplayHandle,
+        H: HasWindowHandle + HasDisplayHandle,
     {
-        let window_handle = window.raw_window_handle().unwrap();
-        let surface = match window_handle {
+        let window_handle = window.window_handle().unwrap();
+        let surface = match window_handle.as_raw() {
             RawWindowHandle::Win32(handle) => {
                 let surface_desc = vk::Win32SurfaceCreateInfoKHR::builder()
                     .hinstance(handle.hinstance.unwrap().get() as *const _)
@@ -33,12 +33,13 @@ impl Instance {
                 unsafe { surface_fn.create_win32_surface(&surface_desc, None) }
             }
             RawWindowHandle::Wayland(handle) => {
-                let display =
-                    if let RawDisplayHandle::Wayland(display_handle) = window.raw_display_handle().unwrap() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Wayland(display_handle) =
+                    window.display_handle().unwrap().as_raw()
+                {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::WaylandSurfaceCreateInfoKHR::builder()
                     .display(display.display.as_ptr())
                     .surface(handle.surface.as_ptr());
@@ -47,12 +48,13 @@ impl Instance {
                 unsafe { surface_fn.create_wayland_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xlib(handle) => {
-                let display =
-                    if let RawDisplayHandle::Xlib(display_handle) = window.raw_display_handle().unwrap() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Xlib(display_handle) =
+                    window.display_handle().unwrap().as_raw()
+                {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::XlibSurfaceCreateInfoKHR::builder()
                     .dpy(display.display.unwrap().as_ptr() as *mut _)
                     .window(handle.window);
@@ -60,12 +62,13 @@ impl Instance {
                 unsafe { surface_fn.create_xlib_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xcb(handle) => {
-                let display =
-                    if let RawDisplayHandle::Xcb(display_handle) = window.raw_display_handle().unwrap() {
-                        display_handle
-                    } else {
-                        unreachable!()
-                    };
+                let display = if let RawDisplayHandle::Xcb(display_handle) =
+                    window.display_handle().unwrap().as_raw()
+                {
+                    display_handle
+                } else {
+                    unreachable!()
+                };
                 let surface_desc = vk::XcbSurfaceCreateInfoKHR::builder()
                     .connection(display.connection.unwrap().as_ptr())
                     .window(handle.window.get());

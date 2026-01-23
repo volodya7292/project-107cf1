@@ -3,8 +3,8 @@ use crate::rendering::texture_material::TextureMaterial;
 use crate::rendering::textured_block_model::{QuadMaterial, TexturedBlockModel};
 use base::overworld::block_model::BlockModel;
 use common::resource_file::ResourceRef;
-use engine::module::main_renderer::material::MatComponent;
 use engine::module::main_renderer::TextureAtlasType;
+use engine::module::main_renderer::material::MatComponent;
 
 pub struct ResourceMapping {
     textures: Vec<(TextureAtlasType, ResourceRef)>,

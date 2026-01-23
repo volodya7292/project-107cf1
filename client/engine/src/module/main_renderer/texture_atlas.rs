@@ -1,8 +1,8 @@
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use std::sync::Arc;
 use vk_wrapper as vkw;
-use vk_wrapper::image::ImageParams;
 use vk_wrapper::QueueType;
+use vk_wrapper::image::ImageParams;
 use vkw::buffer::BufferHandleImpl;
 
 #[derive(Debug)]

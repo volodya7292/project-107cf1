@@ -1,8 +1,8 @@
+use crate::module::main_renderer::UniformsBlock;
 use crate::module::main_renderer::resource_manager::ResourceManagementScope;
 use crate::module::main_renderer::stage::depth::DepthStage;
 use crate::module::main_renderer::stage::g_buffer::GBufferStage;
 use crate::module::main_renderer::stage::{RenderStage, RenderStageId, StageContext, StageRunResult};
-use crate::module::main_renderer::UniformsBlock;
 use common::glm;
 use common::glm::{Mat4, Vec2, Vec4};
 use common::parking_lot::Mutex;

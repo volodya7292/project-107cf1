@@ -2,7 +2,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 pub(crate) unsafe fn c_ptr_to_string(ptr: *const c_char) -> String {
-    String::from(CStr::from_ptr(ptr).to_str().unwrap())
+    unsafe { String::from(CStr::from_ptr(ptr).to_str().unwrap()) }
 }
 
 pub(crate) fn filter_names(v: &[String], f: &[&str], required: bool) -> Result<Vec<CString>, String> {
@@ -22,11 +22,7 @@ pub(crate) fn filter_names(v: &[String], f: &[&str], required: bool) -> Result<V
         })
         .collect();
 
-    if err_str.is_empty() {
-        Ok(v)
-    } else {
-        Err(err_str)
-    }
+    if err_str.is_empty() { Ok(v) } else { Err(err_str) }
 }
 
 /// Make number multiple of another number

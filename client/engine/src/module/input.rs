@@ -1,6 +1,6 @@
+use crate::EngineContext;
 use crate::event::{WSIEvent, WSIKeyboardInput};
 use crate::module::EngineModule;
-use crate::EngineContext;
 use common::types::HashSet;
 use winit::event::{ElementState, MouseButton};
 use winit::keyboard::{KeyCode, ModifiersState};

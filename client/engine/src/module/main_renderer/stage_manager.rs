@@ -150,78 +150,80 @@ impl StageManager {
     }
 
     pub unsafe fn run(&mut self, ctx: &StageContext) -> Result<(), DeviceError> {
-        // Safety: waiting for completion of pending cmd lists
-        // is done inside Device::run_jobs()
+        unsafe {
+            // Safety: waiting for completion of pending cmd lists
+            // is done inside Device::run_jobs()
 
-        let scope = self.res_manager.scope();
-        let mut last_stage_timings = vec![];
-        last_stage_timings.clear();
+            let scope = self.res_manager.scope();
+            let mut last_stage_timings = vec![];
+            last_stage_timings.clear();
 
-        for submit_batch in &self.submits {
-            let run_results: Vec<_> = submit_batch
-                .stages
-                .iter()
-                .map(|id| {
-                    let mut stage = self.stages[id].lock();
-                    let info = &self.stages_infos[id];
+            for submit_batch in &self.submits {
+                let run_results: Vec<_> = submit_batch
+                    .stages
+                    .iter()
+                    .map(|id| {
+                        let mut stage = self.stages[id].lock();
+                        let info = &self.stages_infos[id];
 
-                    let mut job = info.job.lock();
-                    let cmd_list = job.get_cmd_list_for_recording();
+                        let mut job = info.job.lock();
+                        let cmd_list = job.get_cmd_list_for_recording();
 
-                    let t0 = Instant::now();
-                    let result = stage.run(cmd_list, &scope, ctx);
-                    let t1 = Instant::now();
+                        let t0 = Instant::now();
+                        let result = stage.run(cmd_list, &scope, ctx);
+                        let t1 = Instant::now();
 
-                    let time = (t1 - t0).as_secs_f64();
-                    last_stage_timings.push((stage.name().to_owned(), time));
+                        let time = (t1 - t0).as_secs_f64();
+                        last_stage_timings.push((stage.name().to_owned(), time));
 
-                    result
-                })
-                .collect();
+                        result
+                    })
+                    .collect();
 
-            let stages_wait_semaphores: Vec<_> = submit_batch
-                .stages
-                .iter()
-                .zip(&run_results)
-                .map(|(id, run_result)| {
-                    let info = &self.stages_infos[id];
-                    info.execution_dependencies
-                        .iter()
-                        .map(|dep_id| {
-                            let dep_info = &self.stages_infos[dep_id];
-                            let dep_job = dep_info.job.lock();
-                            // TODO: fix this shrubbery. Wait value (that is +1 inside wait_semaphore_next())
-                            //   must be calculated automatically inside `device.run_jobs_sync()` function.
-                            dep_job.wait_semaphore_next()
-                        })
-                        .chain(run_result.wait_semaphores.iter().cloned())
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-            let mut submit_jobs: Vec<_> = submit_batch
-                .stages
-                .iter()
-                .map(|id| self.stages_infos[id].job.lock())
-                .collect();
+                let stages_wait_semaphores: Vec<_> = submit_batch
+                    .stages
+                    .iter()
+                    .zip(&run_results)
+                    .map(|(id, run_result)| {
+                        let info = &self.stages_infos[id];
+                        info.execution_dependencies
+                            .iter()
+                            .map(|dep_id| {
+                                let dep_info = &self.stages_infos[dep_id];
+                                let dep_job = dep_info.job.lock();
+                                // TODO: fix this shrubbery. Wait value (that is +1 inside wait_semaphore_next())
+                                //   must be calculated automatically inside `device.run_jobs_sync()` function.
+                                dep_job.wait_semaphore_next()
+                            })
+                            .chain(run_result.wait_semaphores.iter().cloned())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect();
+                let mut submit_jobs: Vec<_> = submit_batch
+                    .stages
+                    .iter()
+                    .map(|id| self.stages_infos[id].job.lock())
+                    .collect();
 
-            let mut exec_infos: Vec<_> = submit_jobs
-                .iter_mut()
-                .zip(stages_wait_semaphores)
-                .zip(run_results)
-                .map(|((job, wait_semaphores), run_results)| GPUJobExecInfo {
-                    job: &mut *job,
-                    wait_semaphores: wait_semaphores.into(),
-                    signal_semaphores: run_results.signal_semaphores.into(),
-                })
-                .collect();
+                let mut exec_infos: Vec<_> = submit_jobs
+                    .iter_mut()
+                    .zip(stages_wait_semaphores)
+                    .zip(run_results)
+                    .map(|((job, wait_semaphores), run_results)| GPUJobExecInfo {
+                        job: &mut *job,
+                        wait_semaphores: wait_semaphores.into(),
+                        signal_semaphores: run_results.signal_semaphores.into(),
+                    })
+                    .collect();
 
-            // Use _sync to wait for the completion because the next batch recording depends on these jobs.
-            self.device.run_jobs_sync(&mut exec_infos)?;
+                // Use _sync to wait for the completion because the next batch recording depends on these jobs.
+                self.device.run_jobs_sync(&mut exec_infos)?;
+            }
+
+            self.last_stage_timings = last_stage_timings;
+
+            Ok(())
         }
-
-        self.last_stage_timings = last_stage_timings;
-
-        Ok(())
     }
 
     pub fn last_stage_timings(&self) -> &[(String, f64)] {

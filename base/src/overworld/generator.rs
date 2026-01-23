@@ -7,7 +7,7 @@ use bit_vec::BitVec;
 use common::glm::I64Vec3;
 use common::types::ConcurrentCache;
 use common::types::ConcurrentCacheExt;
-use rand::{Rng, rngs};
+use rand::Rng;
 use rand_distr::num_traits::Zero;
 use std::any::Any;
 use std::collections::VecDeque;
@@ -82,10 +82,10 @@ impl OverworldGenerator {
         let mut rng = rng_state.rng();
         let mut present = rng.random::<bool>();
 
-        let gen_range = structure.calc_gen_range();
-        let dx = rng.gen_range(gen_range.clone()) as i64;
-        let dy = rng.gen_range(gen_range.clone()) as i64;
-        let dz = rng.gen_range(gen_range.clone()) as i64;
+        let random_range = structure.calc_random_range();
+        let dx = rng.random_range(random_range.clone()) as i64;
+        let dy = rng.random_range(random_range.clone()) as i64;
+        let dz = rng.random_range(random_range.clone()) as i64;
 
         let center_pos = octant * (octant_size as i64) + I64Vec3::new(dx, dy, dz);
         let center_pos = BlockPos(center_pos);

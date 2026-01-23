@@ -1,7 +1,7 @@
-use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::UniformDataC;
-use crate::module::main_renderer::resources::Renderable;
+use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::module::main_renderer::BufferUpdate2;
+use crate::module::main_renderer::resources::Renderable;
 use common::types::HashMap;
 use entity_data::{EntityId, SystemAccess, SystemHandler};
 use std::time::Instant;

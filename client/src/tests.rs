@@ -1,4 +1,4 @@
-use approx::{abs_diff_eq, assert_abs_diff_eq, AbsDiff};
+use approx::{AbsDiff, abs_diff_eq, assert_abs_diff_eq};
 use common::nalgebra as na;
 use engine::module::main_renderer::vertex_mesh::{VAttributes, VertexMeshCreate};
 use engine::{attributes_impl, vertex_impl_position, vkw, winit};

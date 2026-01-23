@@ -7,8 +7,8 @@ use crate::resource_mapping::ResourceMapping;
 use base::main_registry::MainRegistry;
 use base::registry::Registry;
 use common::resource_file::BufferedResourceReader;
-use engine::module::main_renderer::material::MatComponent;
 use engine::module::main_renderer::TextureAtlasType;
+use engine::module::main_renderer::material::MatComponent;
 use engine::module::ui::color::Color;
 use std::sync::Arc;
 

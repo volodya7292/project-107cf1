@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::Formatter;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};

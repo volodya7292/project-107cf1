@@ -2,7 +2,7 @@ use crate::swapchain::SwapchainWrapper;
 use crate::{AccessFlags, Device, DeviceError, Format, ImageView, Queue};
 use ash::vk;
 use ash::vk::Handle;
-use std::sync::{atomic, Arc};
+use std::sync::{Arc, atomic};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ImageUsageFlags(pub(crate) vk::ImageUsageFlags);

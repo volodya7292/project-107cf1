@@ -1,5 +1,5 @@
 use crate::execution::virtual_processor::VirtualProcessor;
-use crate::execution::{spawn_coroutine, Task};
+use crate::execution::{Task, spawn_coroutine};
 use common::tokio;
 use common::tokio::time::MissedTickBehavior;
 use std::sync::Arc;
