@@ -6,8 +6,8 @@ use crate::overworld::light_state::LightLevel;
 use crate::overworld::liquid_state::LiquidState;
 use crate::overworld::position::{BlockPos, ClusterBlockPos};
 use crate::overworld::raw_cluster::{BlockDataImpl, RawCluster};
-use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::overworld::structure::Structure;
+use crate::overworld::structure::world::biome::{MeanHumidity, MeanTemperature};
 use crate::registry::Registry;
 use crate::utils::noise::{HybridNoise, ParamNoise};
 use crate::utils::voronoi_noise::VoronoiNoise2D;
@@ -163,15 +163,16 @@ pub struct WorldState {
 impl WorldState {
     pub fn new(seed: u64, registry: &Arc<Registry>) -> Self {
         let white_noise = WhiteNoise::new(seed);
-        let mut seed_gen = white_noise.state().rng();
+        let rng_state = white_noise.state();
+        let mut seed_gen = rng_state.rng();
 
         let biome_partition_noise = BiomePartitionNoise {
-            voronoi: VoronoiNoise2D::new().set_seed(seed_gen.gen::<u64>()),
+            voronoi: VoronoiNoise2D::new().set_seed(seed_gen.random::<u64>()),
             warp: [
-                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
-                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.random::<u32>()),
+                noise::SuperSimplex::new(seed_gen.random::<u32>()),
             ],
-            white_noise: WhiteNoise::new(seed_gen.gen::<u64>()),
+            white_noise: WhiteNoise::new(seed_gen.random::<u64>()),
         };
 
         let biome_climate_ranges = registry.biomes().iter().enumerate().map(|(i, b)| {
@@ -203,30 +204,30 @@ impl WorldState {
         Self {
             registry: Arc::clone(registry),
             temperature_noise: ParamNoise::new(
-                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.random::<u32>()),
                 &[(1.0, 1.0), (1.0, 1.0), (1.0, 1.0)],
             ),
             humidity_noise: ParamNoise::new(
-                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.random::<u32>()),
                 &[(1.0, 1.0), (1.0, 1.0), (1.0, 1.0)],
             ),
             biome_partition_noise,
             biomes_by_climate,
             cluster_xz_caches: ConcurrentCache::new(512),
             flat_noise: ParamNoise::new(
-                noise::SuperSimplex::new(seed_gen.gen::<u32>()),
+                noise::SuperSimplex::new(seed_gen.random::<u32>()),
                 &[(1.0, 1.0), (2.0, 0.4), (4.0, 0.2)],
             ),
-            hills_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            hills_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            mountains_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            mountains_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            mountains_midpoint_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            mountains_ridges_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            mountains_power_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            oceans_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            oceans_loc_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
-            oceans_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.gen::<u32>())),
+            hills_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            hills_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            mountains_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            mountains_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            mountains_midpoint_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            mountains_ridges_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            mountains_power_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            oceans_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            oceans_loc_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
+            oceans_mask_noise: HybridNoise::new(noise::SuperSimplex::new(seed_gen.random::<u32>())),
         }
     }
 

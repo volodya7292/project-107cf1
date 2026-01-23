@@ -14,7 +14,7 @@ impl Surface {
     /// Updates surface backing properties such as scale factor if necessary.
     /// # Safety
     pub fn update(window: impl HasRawWindowHandle) -> Result<(), DeviceError> {
-        match window.raw_window_handle() {
+        match window.raw_window_handle().unwrap() {
             #[cfg(target_os = "macos")]
             RawWindowHandle::AppKit(handle) => unsafe { metal::metal_layer_update(handle) },
             _ => {}

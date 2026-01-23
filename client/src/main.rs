@@ -64,8 +64,7 @@ fn main() {
         .init()
         .unwrap();
 
-    let engine = Engine::init(MainApp::create_window);
-    MainApp::init(&engine.context());
+    let engine = Engine::init(MainApp::create_window, MainApp::init);
 
     base::execution::spawn_coroutine(async {
         println!("coroutine test!");

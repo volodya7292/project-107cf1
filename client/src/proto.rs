@@ -201,8 +201,9 @@ pub fn make_climate_graph_image(registry: &Arc<Registry>) {
             .biomes_by_climate()
             .locate_all_at_point(&[t as f32, h as f32, 0.5])
             .map(|v| {
-                let mut rng = white_noise.state().next(v.biome_id as u64).rng();
-                Vec3::new(rng.gen::<f32>(), rng.gen::<f32>(), rng.gen::<f32>())
+                let mut rng_state = white_noise.state().next(v.biome_id as u64);
+                let mut rng = rng_state.rng();
+                Vec3::new(rng.random::<f32>(), rng.random::<f32>(), rng.random::<f32>())
             })
             .reduce(|accum, v| {
                 count += 1.0;

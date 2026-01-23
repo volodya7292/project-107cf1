@@ -23,49 +23,52 @@ impl Instance {
     where
         H: HasRawWindowHandle + HasRawDisplayHandle,
     {
-        let window_handle = window.raw_window_handle();
+        let window_handle = window.raw_window_handle().unwrap();
         let surface = match window_handle {
             RawWindowHandle::Win32(handle) => {
                 let surface_desc = vk::Win32SurfaceCreateInfoKHR::builder()
-                    .hinstance(handle.hinstance)
-                    .hwnd(handle.hwnd);
+                    .hinstance(handle.hinstance.unwrap().get() as *const _)
+                    .hwnd(handle.hwnd.get() as *const _);
                 let surface_fn = ash::extensions::khr::Win32Surface::new(&self.entry.ash_entry, &self.native);
                 unsafe { surface_fn.create_win32_surface(&surface_desc, None) }
             }
             RawWindowHandle::Wayland(handle) => {
-                let display = if let RawDisplayHandle::Wayland(display_handle) = window.raw_display_handle() {
-                    display_handle
-                } else {
-                    unreachable!()
-                };
+                let display =
+                    if let RawDisplayHandle::Wayland(display_handle) = window.raw_display_handle().unwrap() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
                 let surface_desc = vk::WaylandSurfaceCreateInfoKHR::builder()
-                    .display(display.display)
-                    .surface(handle.surface);
+                    .display(display.display.as_ptr())
+                    .surface(handle.surface.as_ptr());
                 let surface_fn =
                     ash::extensions::khr::WaylandSurface::new(&self.entry.ash_entry, &self.native);
                 unsafe { surface_fn.create_wayland_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xlib(handle) => {
-                let display = if let RawDisplayHandle::Xlib(display_handle) = window.raw_display_handle() {
-                    display_handle
-                } else {
-                    unreachable!()
-                };
+                let display =
+                    if let RawDisplayHandle::Xlib(display_handle) = window.raw_display_handle().unwrap() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
                 let surface_desc = vk::XlibSurfaceCreateInfoKHR::builder()
-                    .dpy(display.display as *mut _)
+                    .dpy(display.display.unwrap().as_ptr() as *mut _)
                     .window(handle.window);
                 let surface_fn = ash::extensions::khr::XlibSurface::new(&self.entry.ash_entry, &self.native);
                 unsafe { surface_fn.create_xlib_surface(&surface_desc, None) }
             }
             RawWindowHandle::Xcb(handle) => {
-                let display = if let RawDisplayHandle::Xcb(display_handle) = window.raw_display_handle() {
-                    display_handle
-                } else {
-                    unreachable!()
-                };
+                let display =
+                    if let RawDisplayHandle::Xcb(display_handle) = window.raw_display_handle().unwrap() {
+                        display_handle
+                    } else {
+                        unreachable!()
+                    };
                 let surface_desc = vk::XcbSurfaceCreateInfoKHR::builder()
-                    .connection(display.connection)
-                    .window(handle.window);
+                    .connection(display.connection.unwrap().as_ptr())
+                    .window(handle.window.get());
                 let surface_fn = ash::extensions::khr::XcbSurface::new(&self.entry.ash_entry, &self.native);
                 unsafe { surface_fn.create_xcb_surface(&surface_desc, None) }
             }

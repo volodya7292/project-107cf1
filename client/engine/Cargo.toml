@@ -2,7 +2,7 @@
 name = "engine"
 version = "0.1.0"
 authors = ["volodya7292 <a7292969@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 vk-wrapper = { path = "vk-wrapper" }
@@ -26,7 +26,7 @@ gltf = { workspace = true }
 common = { path = "../../common" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.23"
+core-graphics = "0.25"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.48", features = [

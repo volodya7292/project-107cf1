@@ -2,7 +2,8 @@ use crate::event::{WSIEvent, WSIKeyboardInput};
 use crate::module::EngineModule;
 use crate::EngineContext;
 use common::types::HashSet;
-use winit::event::{ElementState, ModifiersState, MouseButton, VirtualKeyCode};
+use winit::event::{ElementState, MouseButton};
+use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
 pub struct Input {
@@ -11,7 +12,7 @@ pub struct Input {
 }
 
 pub struct Keyboard {
-    pub(crate) pressed_keys: HashSet<VirtualKeyCode>,
+    pub(crate) pressed_keys: HashSet<KeyCode>,
     pub(crate) modifiers: ModifiersState,
 }
 
@@ -27,16 +28,16 @@ impl Keyboard {
         }
     }
 
-    pub fn is_key_pressed(&self, keycode: VirtualKeyCode) -> bool {
+    pub fn is_key_pressed(&self, keycode: KeyCode) -> bool {
         self.pressed_keys.contains(&keycode)
     }
 
     /// Super key is `Command` on macos, `Control` otherwise.
     pub fn is_super_key_pressed(&self) -> bool {
         if cfg!(target_os = "macos") {
-            self.modifiers.contains(ModifiersState::LOGO)
+            self.modifiers.contains(ModifiersState::SUPER)
         } else {
-            self.modifiers.contains(ModifiersState::CTRL)
+            self.modifiers.contains(ModifiersState::CONTROL)
         }
     }
 }
@@ -80,11 +81,13 @@ impl EngineModule for Input {
     fn on_wsi_event(&mut self, _: &Window, event: &WSIEvent, _: &EngineContext) {
         match event {
             WSIEvent::KeyboardInput { input, .. } => {
-                if let WSIKeyboardInput::Virtual(keycode, state) = input {
-                    if *state == ElementState::Pressed {
-                        self.keyboard.pressed_keys.insert(*keycode);
-                    } else {
-                        self.keyboard.pressed_keys.remove(keycode);
+                if let WSIKeyboardInput::Virtual(keycode, state, _) = input {
+                    if let Some(keycode) = keycode {
+                        if *state == ElementState::Pressed {
+                            self.keyboard.pressed_keys.insert(*keycode);
+                        } else {
+                            self.keyboard.pressed_keys.remove(keycode);
+                        }
                     }
                 }
                 if let WSIKeyboardInput::Modifiers(state) = input {

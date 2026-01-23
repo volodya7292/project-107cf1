@@ -6,12 +6,12 @@ pub use crate::rendering::ui::container::{
     background, container, container_props, container_props_init, expander, height_spacer, width_spacer,
 };
 pub use crate::rendering::ui::fancy_button::fancy_button;
-pub use crate::rendering::ui::fancy_text_input::{fancy_text_input, FancyTextInputProps};
-pub use crate::rendering::ui::image::reactive::{ui_image, ui_image_props, UIImageProps};
+pub use crate::rendering::ui::fancy_text_input::{FancyTextInputProps, fancy_text_input};
+pub use crate::rendering::ui::image::reactive::{UIImageProps, ui_image, ui_image_props};
 pub use crate::rendering::ui::image::{ImageFitness, ImageSource};
 pub use crate::rendering::ui::scrollable_container::scrollable_container;
 pub use crate::rendering::ui::text::reactive::{ui_text, ui_text_props};
-pub use crate::rendering::ui::{backgrounds, ui_callbacks, STATE_ENTITY_ID};
+pub use crate::rendering::ui::{STATE_ENTITY_ID, backgrounds, ui_callbacks};
 pub use base::overworld::item::ItemStack;
 pub use base::player::{self, NUM_INTENTORY_ITEM_SLOTS};
 pub use common::glm::Vec2;
@@ -23,8 +23,9 @@ pub use engine::event::WSIKeyboardInput;
 pub use engine::module::ui::color::Color;
 pub use engine::module::ui::reactive::{ReactiveState, UIReactor, UIScopeContext};
 pub use engine::utils::transition::{AnimatedValue, TransitionTarget};
-pub use engine::winit::event::{ElementState, VirtualKeyCode};
-pub use engine::{remember_state, EngineContext};
+pub use engine::winit::event::ElementState;
+use engine::winit::keyboard::KeyCode;
+pub use engine::{EngineContext, remember_state};
 pub use entity_data::EntityId;
 pub use std::sync::Arc;
 

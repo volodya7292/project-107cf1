@@ -22,9 +22,10 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 pub use vk_wrapper as vkw;
 pub use winit;
+use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
 use winit::window::Window;
 
 lazy_static! {
@@ -53,8 +54,10 @@ pub struct Engine {
     last_frame_end_time: Instant,
     delta_time: f64,
     event_loop: Option<EventLoop<()>>,
-    main_window: RefCell<Window>,
-    curr_sizing_info: WSizingInfo,
+    on_init: Box<dyn Fn(&EngineContext)>,
+    create_window_fn: Box<dyn Fn(&ActiveEventLoop) -> Window>,
+    main_window: Option<RefCell<Window>>,
+    curr_sizing_info: Option<WSizingInfo>,
     curr_mode_refresh_rate: u32,
     curr_statistics: EngineStatistics,
     module_manager: RefCell<ModuleManager>,
@@ -100,26 +103,26 @@ impl EngineContext<'_> {
 }
 
 impl Engine {
-    pub fn init<F: FnOnce(&EventLoop<()>) -> Window>(window_init: F) -> Self {
+    pub fn init<F: Fn(&ActiveEventLoop) -> Window + 'static, IF: Fn(&EngineContext) + 'static>(
+        window_init: F,
+        on_init: IF,
+    ) -> Self {
         if ENGINE_INITIALIZED.swap(true, MO_RELAXED) {
             panic!("Engine has already been initialized!");
         }
 
-        let event_loop = EventLoop::new();
-        let main_window = window_init(&event_loop);
-        let sizing_info = WSizingInfo::get(&main_window);
-
-        let curr_monitor = main_window.current_monitor().unwrap();
-        let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
+        let event_loop = EventLoop::new().unwrap();
 
         let engine = Self {
             do_stop: Default::default(),
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
             event_loop: Some(event_loop),
-            main_window: RefCell::new(main_window),
-            curr_sizing_info: sizing_info,
-            curr_mode_refresh_rate,
+            on_init: Box::new(on_init),
+            create_window_fn: Box::new(window_init),
+            main_window: None,
+            curr_sizing_info: None,
+            curr_mode_refresh_rate: 60,
             curr_statistics: Default::default(),
             module_manager: Default::default(),
             callbacks: RefCell::new(vec![]),
@@ -132,103 +135,122 @@ impl Engine {
         EngineContext {
             do_stop: &self.do_stop,
             module_manager: &self.module_manager,
-            window: &self.main_window,
+            window: self.main_window.as_ref().unwrap(),
             callbacks: &self.callbacks,
         }
     }
 
     pub fn run(mut self) {
-        self.module_manager.borrow().on_start(&self.context());
-
         let mut event_loop = self.event_loop.take().unwrap();
+        event_loop.run_app(&mut self).unwrap();
+    }
+}
 
-        event_loop.run_return(move |event, _, control_flow| {
-            *control_flow = if self.do_stop.load(MO_SEQCST) {
-                ControlFlow::ExitWithCode(0)
-            } else {
-                ControlFlow::Poll
-            };
+impl ApplicationHandler for Engine {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {}
 
-            match &event {
-                WEvent::MainEventsCleared => {
-                    // let t0 = Instant::now();
+    fn new_events(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        cause: winit::event::StartCause,
+    ) {
+        event_loop.set_control_flow(ControlFlow::Poll);
 
-                    // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
+        if self.do_stop.load(MO_SEQCST) {
+            event_loop.exit();
+            return;
+        }
 
-                    let module_manger = &*self.module_manager.borrow();
-                    let ctx = self.context();
+        if cause == winit::event::StartCause::Init {
+            let main_window = (self.create_window_fn)(event_loop);
+            let sizing_info = WSizingInfo::get(&main_window);
 
-                    let t0 = Instant::now();
+            let curr_monitor = main_window.current_monitor().unwrap();
+            let curr_mode_refresh_rate = curr_monitor.refresh_rate_millihertz().unwrap() / 1000;
 
-                    for (module_id, _module) in module_manger.modules() {
-                        module_manger.update_module(module_id, self.delta_time, &ctx);
+            self.main_window = Some(RefCell::new(main_window));
+            self.curr_sizing_info = Some(sizing_info);
 
-                        // Call dispatched callbacks as soon as possible
-                        let callbacks: Vec<_> = self.callbacks.borrow_mut().drain(..).collect();
-                        for callback in callbacks {
-                            callback(&ctx, self.delta_time);
-                        }
-                    }
+            self.module_manager.borrow().on_start(&self.context());
+            (self.on_init)(&self.context());
+        }
 
-                    let t1 = Instant::now();
-                    self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
+        if cause == winit::event::StartCause::Poll {
+            // let t0 = Instant::now();
 
-                    let curr_end_t = Instant::now();
-                    self.delta_time = (curr_end_t - self.last_frame_end_time).as_secs_f64().min(1.0);
-                    self.last_frame_end_time = curr_end_t;
+            // println!("HIDDEN {}", (t0 - self.frame_end_time).as_secs_f64());
 
-                    // let t1 = Instant::now();
-                    // self.curr_statistics.total = (t1 - t0).as_secs_f64();
+            let module_manger = &*self.module_manager.borrow();
+            let ctx = self.context();
+
+            let t0 = Instant::now();
+
+            for (module_id, _module) in module_manger.modules() {
+                module_manger.update_module(module_id, self.delta_time, &ctx);
+
+                // Call dispatched callbacks as soon as possible
+                let callbacks: Vec<_> = self.callbacks.borrow_mut().drain(..).collect();
+                for callback in callbacks {
+                    callback(&ctx, self.delta_time);
                 }
-                // WEvent::RedrawEventsCleared => {
-                //     let expected_dt;
-                //
-                //     if let FPSLimit::Limit(limit) = self.renderer.settings().fps_limit {
-                //         expected_dt = 1.0 / (limit as f64);
-                //         let to_wait = (expected_dt - self.delta_time).max(0.0);
-                //         base::utils::high_precision_sleep(
-                //             Duration::from_secs_f64(to_wait),
-                //             Duration::from_micros(50),
-                //         );
-                //         self.delta_time += to_wait;
-                //     } else {
-                //         // expected_dt = 1.0 / self.curr_mode_refresh_rate as f64;
-                //     }
-                //
-                //     // if self.delta_time >= (1.0 / self.curr_mode_refresh_rate as f64) {
-                //     let total_frame_time = self.curr_statistics.total();
-                //     if total_frame_time >= 0.017 {
-                //         println!(
-                //             "dt {:.5}| total {:.5} | {}",
-                //             self.delta_time, total_frame_time, self.curr_statistics
-                //         );
-                //     }
-                //
-                //     // println!("dt {}", self.delta_time);
-                //     self.last_frame_end_time = Instant::now();
-                //     self.frame_start_time = self.last_frame_end_time;
-                // }
-                WEvent::WindowEvent { window_id: _, event } => match event {
-                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                        self.curr_sizing_info = WSizingInfo::get(&self.main_window.borrow());
-                    }
-                    WindowEvent::CloseRequested => {
-                        self.do_stop.store(true, MO_SEQCST);
-                    }
-                    _ => {}
-                },
-                _ => {}
             }
 
-            if let Some(event) =
-                WSIEvent::from_winit(&event, &self.main_window.borrow(), &self.curr_sizing_info)
-            {
-                self.module_manager.borrow().on_wsi_event(
-                    &self.main_window.borrow(),
-                    &event,
-                    &self.context(),
-                );
+            let t1 = Instant::now();
+            self.curr_statistics.update_time = (t1 - t0).as_secs_f64();
+
+            let curr_end_t = Instant::now();
+            self.delta_time = (curr_end_t - self.last_frame_end_time).as_secs_f64().min(1.0);
+            self.last_frame_end_time = curr_end_t;
+
+            // let t1 = Instant::now();
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        let event = WEvent::DeviceEvent { device_id, event };
+        let main_window = self.main_window.as_ref().unwrap().borrow();
+
+        if let Some(event) =
+            WSIEvent::from_winit(&event, &main_window, self.curr_sizing_info.as_ref().unwrap())
+        {
+            self.module_manager
+                .borrow()
+                .on_wsi_event(&main_window, &event, &self.context());
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        match &event {
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                let main_window = self.main_window.as_ref().unwrap().borrow();
+                self.curr_sizing_info = Some(WSizingInfo::get(&main_window));
             }
-        });
+            WindowEvent::CloseRequested => {
+                self.do_stop.store(true, MO_SEQCST);
+            }
+            _ => {} // },
+                    // _ => {}
+        }
+
+        let event = WEvent::WindowEvent { window_id, event };
+        let main_window = self.main_window.as_ref().unwrap().borrow();
+
+        if let Some(event) =
+            WSIEvent::from_winit(&event, &main_window, self.curr_sizing_info.as_ref().unwrap())
+        {
+            self.module_manager
+                .borrow()
+                .on_wsi_event(&main_window, &event, &self.context());
+        }
     }
 }

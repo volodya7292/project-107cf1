@@ -42,9 +42,10 @@ use engine::module::{main_renderer, EngineModule};
 use engine::utils::transition::{AnimatedValue, TransitionTarget};
 use engine::utils::wsi::find_best_video_mode;
 use engine::vkw::utils::GLSLBool;
-use engine::winit::event::{MouseButton, VirtualKeyCode};
-use engine::winit::event_loop::EventLoop;
-use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowBuilder};
+use engine::winit::event::MouseButton;
+use engine::winit::event_loop::{ActiveEventLoop, EventLoop};
+use engine::winit::keyboard::KeyCode;
+use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowAttributes};
 use engine::{winit, EngineContext};
 use entity_data::EntityId;
 use std::cell::RefMut;
@@ -272,12 +273,14 @@ impl MainApp {
         }
     }
 
-    pub fn create_window(event_loop: &EventLoop<()>) -> Window {
-        let window = WindowBuilder::new()
-            .with_title(PROGRAM_NAME)
-            .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
-            .with_resizable(true)
-            .build(event_loop)
+    pub fn create_window(event_loop: &ActiveEventLoop) -> Window {
+        let window = event_loop
+            .create_window(
+                WindowAttributes::default()
+                    .with_title(PROGRAM_NAME)
+                    .with_inner_size(winit::dpi::LogicalSize::new(DEF_WINDOW_SIZE.0, DEF_WINDOW_SIZE.1))
+                    .with_resizable(true),
+            )
             .unwrap();
 
         // Center the window
@@ -526,7 +529,7 @@ impl MainApp {
 
         match event {
             WSIEvent::KeyboardInput { input } => {
-                let WSIKeyboardInput::Virtual(virtual_keycode, state) = input else {
+                let WSIKeyboardInput::Virtual(virtual_keycode, state, _) = input else {
                     return;
                 };
 
@@ -536,20 +539,24 @@ impl MainApp {
 
                 let mut curr_state = main_state.lock_arc();
 
+                let Some(virtual_keycode) = virtual_keycode else {
+                    return;
+                };
+
                 match virtual_keycode {
-                    VirtualKeyCode::L => {
+                    KeyCode::KeyL => {
                         curr_state.change_stream_pos = !curr_state.change_stream_pos;
                     }
-                    VirtualKeyCode::C => {
+                    KeyCode::KeyC => {
                         curr_state.player_collision_enabled = !curr_state.player_collision_enabled;
                     }
-                    VirtualKeyCode::P => {
+                    KeyCode::KeyP => {
                         println!("{:?}", player_state.position());
                     }
-                    VirtualKeyCode::T => {
+                    KeyCode::KeyT => {
                         self.grab_cursor(main_window, !self.cursor_grab, ctx);
                     }
-                    VirtualKeyCode::J => {
+                    KeyCode::KeyJ => {
                         // TODO: move into on_tick
                         // let camera = renderer.active_camera();
                         // let mut access = curr_state.overworld.access();
@@ -568,15 +575,15 @@ impl MainApp {
                         //     }
                         // }
                     }
-                    VirtualKeyCode::Key1 => {
+                    KeyCode::Digit1 => {
                         curr_state.curr_block = self.main_registry.block_test.into_any();
                         curr_state.set_water = false;
                     }
-                    VirtualKeyCode::Key2 => {
+                    KeyCode::Digit2 => {
                         curr_state.curr_block = self.main_registry.block_glow.into_any();
                         curr_state.set_water = false;
                     }
-                    VirtualKeyCode::Key3 => {
+                    KeyCode::Digit3 => {
                         curr_state.set_water = true;
                     }
                     _ => {}
@@ -594,24 +601,24 @@ impl MainApp {
         let mut vel_left_right = 0;
         let mut vel_up_down = 0;
 
-        if kb.is_key_pressed(VirtualKeyCode::W) {
+        if kb.is_key_pressed(KeyCode::KeyW) {
             vel_front_back += 1;
         }
-        if kb.is_key_pressed(VirtualKeyCode::S) {
+        if kb.is_key_pressed(KeyCode::KeyS) {
             vel_front_back -= 1;
         }
-        if kb.is_key_pressed(VirtualKeyCode::A) {
+        if kb.is_key_pressed(KeyCode::KeyA) {
             vel_left_right -= 1;
         }
-        if kb.is_key_pressed(VirtualKeyCode::D) {
+        if kb.is_key_pressed(KeyCode::KeyD) {
             vel_left_right += 1;
         }
-        if kb.is_key_pressed(VirtualKeyCode::Space) {
+        if kb.is_key_pressed(KeyCode::Space) {
             if !state.player_collision_enabled {
                 vel_up_down += 1;
             }
         }
-        if kb.is_key_pressed(VirtualKeyCode::LShift) {
+        if kb.is_key_pressed(KeyCode::ShiftLeft) {
             vel_up_down -= 1;
         }
 
@@ -643,7 +650,7 @@ impl MainApp {
             return;
         };
 
-        if kb.is_key_pressed(VirtualKeyCode::Space) && curr_state.fall_time == 0.0 {
+        if kb.is_key_pressed(KeyCode::Space) && curr_state.fall_time == 0.0 {
             curr_state.curr_jump_force = MainApp::PLAYER_MASS * 5.5 / delta_time as f32;
         }
 
@@ -920,20 +927,24 @@ impl EngineModule for MainApp {
 
         match event {
             WSIEvent::KeyboardInput { input } => {
-                let WSIKeyboardInput::Virtual(virtual_keycode, state) = input else {
+                let WSIKeyboardInput::Virtual(virtual_keycode, state, _) = input else {
                     return;
                 };
                 if *state != ElementState::Released {
                     return;
                 }
 
+                let Some(virtual_keycode) = *virtual_keycode else {
+                    return;
+                };
+
                 match virtual_keycode {
-                    VirtualKeyCode::Escape => {
+                    KeyCode::Escape => {
                         if self.is_in_game() {
                             self.show_main_menu(!self.is_menu_visible().unwrap_or(false));
                         }
                     }
-                    VirtualKeyCode::F11 => {
+                    KeyCode::F11 => {
                         if let Some(_) = main_window.fullscreen() {
                             main_window.set_fullscreen(None);
                         } else {

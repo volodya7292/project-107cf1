@@ -32,7 +32,7 @@ pub struct State(pub u64);
 impl State {
     pub fn next<S: AsSeed>(mut self, perm: S) -> State {
         self.0 ^= Xoshiro256PlusPlus::seed_from_u64(perm.as_u64_seed())
-            .gen::<u64>()
+            .random::<u64>()
             .wrapping_add(0x9e3779b9)
             .wrapping_add(self.0 << 6)
             .wrapping_add(self.0 >> 2);
@@ -47,7 +47,7 @@ impl State {
 impl WhiteNoise {
     pub fn new(seed: u64) -> WhiteNoise {
         WhiteNoise {
-            main_state: Xoshiro256PlusPlus::seed_from_u64(seed).gen::<u64>(),
+            main_state: Xoshiro256PlusPlus::seed_from_u64(seed).random::<u64>(),
         }
     }
 

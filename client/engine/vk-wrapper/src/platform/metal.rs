@@ -14,13 +14,7 @@ pub enum Layer {
 }
 
 pub unsafe fn metal_layer_from_handle(handle: AppKitWindowHandle) -> Layer {
-    if !handle.ns_view.is_null() {
-        metal_layer_from_ns_view(handle.ns_view)
-    } else if !handle.ns_window.is_null() {
-        metal_layer_from_ns_window(handle.ns_window)
-    } else {
-        Layer::None
-    }
+    metal_layer_from_ns_view(handle.ns_view.as_ptr())
 }
 
 pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
@@ -70,16 +64,8 @@ pub unsafe fn metal_layer_from_ns_window(window: *mut c_void) -> Layer {
 }
 
 pub unsafe fn metal_layer_update(handle: AppKitWindowHandle) {
-    let contents_scale: CGFloat = if !handle.ns_view.is_null() {
-        let view: *mut AnyObject = mem::transmute(handle.ns_view);
-        msg_send![view, backingScaleFactor]
-    } else if !handle.ns_window.is_null() {
-        let window: *mut AnyObject = mem::transmute(handle.ns_window);
-        let ns_view: *mut AnyObject = msg_send![window, contentView];
-        msg_send![ns_view, backingScaleFactor]
-    } else {
-        panic!("Invalid appkit handle");
-    };
+    let view: *mut AnyObject = mem::transmute(handle.ns_view.as_ptr());
+    let contents_scale: CGFloat = msg_send![view, backingScaleFactor];
 
     let Layer::Existing(layer) = metal_layer_from_handle(handle) else {
         panic!("CAMetalLayer does not exist");

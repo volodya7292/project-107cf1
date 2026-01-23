@@ -1,15 +1,13 @@
 use crate::utils::wsi::vec2::WSizingInfo;
 use crate::utils::wsi::{WSIPosition, WSISize};
 use common::glm::DVec2;
-use winit::event::{
-    DeviceEvent, ElementState, ModifiersState, MouseButton, MouseScrollDelta, VirtualKeyCode,
-};
+use winit::event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta};
+use winit::keyboard::{KeyCode, ModifiersState};
 use winit::window::Window;
 
 #[derive(Copy, Clone)]
 pub enum WSIKeyboardInput {
-    Virtual(VirtualKeyCode, ElementState),
-    Char(char),
+    Virtual(Option<KeyCode>, ElementState, Option<char>),
     Modifiers(ModifiersState),
 }
 
@@ -33,8 +31,8 @@ pub enum WSIEvent {
     },
 }
 
-pub(crate) type WEvent<'a> = winit::event::Event<'a, ()>;
-pub(crate) type WWindowEvent<'a> = winit::event::WindowEvent<'a>;
+pub(crate) type WEvent = winit::event::Event<()>;
+pub(crate) type WWindowEvent = winit::event::WindowEvent;
 
 impl WSIEvent {
     pub(crate) fn from_winit(
@@ -71,16 +69,24 @@ impl WSIEvent {
                     state: *state,
                     button: *button,
                 },
-                WWindowEvent::KeyboardInput { input, .. } if input.virtual_keycode.is_some() => {
+                WWindowEvent::KeyboardInput { event, .. } => {
+                    let keycode = if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                        Some(code)
+                    } else {
+                        None
+                    };
+                    let ch = if let winit::keyboard::Key::Character(s) = &event.logical_key {
+                        s.chars().next()
+                    } else {
+                        None
+                    };
+
                     WSIEvent::KeyboardInput {
-                        input: WSIKeyboardInput::Virtual(input.virtual_keycode.unwrap(), input.state),
+                        input: WSIKeyboardInput::Virtual(keycode, event.state, ch),
                     }
                 }
                 WWindowEvent::ModifiersChanged(state) => WSIEvent::KeyboardInput {
-                    input: WSIKeyboardInput::Modifiers(*state),
-                },
-                WWindowEvent::ReceivedCharacter(ch) => WSIEvent::KeyboardInput {
-                    input: WSIKeyboardInput::Char(*ch),
+                    input: WSIKeyboardInput::Modifiers(state.state()),
                 },
                 WWindowEvent::MouseWheel { delta, .. } => WSIEvent::MouseWheel {
                     delta: {

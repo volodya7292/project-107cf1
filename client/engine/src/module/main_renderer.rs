@@ -36,11 +36,13 @@ mod stage_manager;
 //
 
 use self::shader::VkwShaderBundle;
+use crate::EngineContext;
 use crate::ecs::component::internal::HierarchyCacheC;
 use crate::ecs::component::uniform_data::BASIC_UNIFORM_BLOCK_MAX_SIZE;
 use crate::ecs::component::{MeshRenderConfigC, TransformC, UniformDataC, VertexMeshC};
 use crate::ecs::system;
 use crate::event::WSIEvent;
+use crate::module::EngineModule;
 use crate::module::main_renderer::camera::OrthoCamera;
 use crate::module::main_renderer::gpu_executor::{GPUJob, GPUJobDeviceExt, GPUJobExecInfo};
 use crate::module::main_renderer::material::MatComponent;
@@ -54,12 +56,10 @@ use crate::module::main_renderer::stage::present_queue_transition::PresentQueueT
 use crate::module::main_renderer::stage::{FrameContext, RenderStage, StageContext};
 use crate::module::main_renderer::stage_manager::StageManager;
 use crate::module::main_renderer::texture_atlas::TextureAtlas;
-use crate::module::scene::change_manager::ComponentChangesHandle;
 use crate::module::scene::SceneObject;
-use crate::module::scene::{Scene, N_MAX_OBJECTS};
-use crate::module::EngineModule;
-use crate::utils::wsi::{real_window_size, WSISize};
-use crate::EngineContext;
+use crate::module::scene::change_manager::ComponentChangesHandle;
+use crate::module::scene::{N_MAX_OBJECTS, Scene};
+use crate::utils::wsi::{WSISize, real_window_size};
 use basis_universal::{TranscodeParameters, TranscoderTextureFormat};
 use camera::PerspectiveCamera;
 use common::glm;
@@ -75,7 +75,7 @@ use entity_data::{Archetype, EntityId, System, SystemHandler};
 use index_pool::IndexPool;
 use lazy_static::lazy_static;
 use shader_ids::shader_variant;
-use smallvec::{smallvec, SmallVec, ToSmallVec};
+use smallvec::{SmallVec, ToSmallVec, smallvec};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -87,10 +87,10 @@ use vk_wrapper::buffer::{BufferHandle, BufferHandleImpl};
 use vk_wrapper::pipeline::CullMode;
 use vk_wrapper::sampler::SamplerClamp;
 use vk_wrapper::{
-    swapchain, AccessFlags, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet,
-    Device, Format, HostBuffer, Image, ImageLayout, PipelineStageFlags, PrimitiveTopology, QueueType,
+    AccessFlags, BindingLoc, BindingRes, BindingType, BufferUsageFlags, CopyRegion, DescriptorSet, Device,
+    FORMAT_SIZES, Format, HostBuffer, Image, ImageLayout, PipelineStageFlags, PrimitiveTopology, QueueType,
     SamplerFilter, SamplerMipmap, Semaphore, Shader, ShaderBinding, ShaderStageFlags, Surface, Swapchain,
-    SwapchainImage, FORMAT_SIZES,
+    SwapchainImage, swapchain,
 };
 use vkw::{PipelineSignature, ShaderBindingDescription};
 use winit::window::Window;
@@ -1113,9 +1113,11 @@ impl MainRenderer {
 
             cl.end().unwrap();
 
-            self.device
-                .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
-                .unwrap();
+            unsafe {
+                self.device
+                    .run_jobs_sync(&mut [GPUJobExecInfo::new(&mut self.staging_job)])
+                    .unwrap()
+            };
         }
     }
 

@@ -37,13 +37,13 @@ use common::glm::{DVec3, Vec3};
 use common::parking_lot::lock_api::{ArcRwLockReadGuard, ArcRwLockUpgradableReadGuard, ArcRwLockWriteGuard};
 use common::parking_lot::{Mutex, RawRwLock, RwLock};
 use common::types::HashMap;
-use common::{glm, MO_RELAXED};
+use common::{MO_RELAXED, glm};
 use fixedbitset::FixedBitSet;
 use glm::{I64Vec3, U32Vec3};
 use serde::{Deserialize, Serialize};
 use std::mem;
-use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::time::Instant;
 
 // TODO Main world - 'The Origin'

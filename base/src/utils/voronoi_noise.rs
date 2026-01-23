@@ -34,7 +34,8 @@ impl VoronoiNoise2D {
 
         for x in (ri.x - 1)..=(ri.x + 1) {
             for y in (ri.y - 1)..=(ri.y + 1) {
-                let mut rng = self.white_noise.state().next(x).next(y).rng();
+                let rng_state = self.white_noise.state().next(x).next(y);
+                let mut rng = rng_state.rng();
 
                 let jitter = DVec2::new(rng.gen_range(POINT_RANGE), rng.gen_range(POINT_RANGE));
                 let v = glm::convert::<_, DVec2>(glm::vec2(x, y)) + jitter * 0.39614353;

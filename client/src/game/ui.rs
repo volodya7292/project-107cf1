@@ -47,14 +47,18 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
     );
 
     fn on_keyboard(_: &EntityId, ctx: &EngineContext, input: WSIKeyboardInput) {
-        let WSIKeyboardInput::Virtual(code, state) = input else {
+        let WSIKeyboardInput::Virtual(code, state, _) = input else {
             return;
         };
 
         let app = ctx.app();
         let ui_reactor = app.ui_reactor();
 
-        if code == VirtualKeyCode::RBracket {
+        let Some(code) = code else {
+            return;
+        };
+
+        if code == KeyCode::BracketRight {
             let debug_info_visible = ui_reactor
                 .root_state(&ui_root_states::DEBUG_INFO_VISIBLE)
                 .unwrap();
@@ -62,18 +66,18 @@ pub fn overlay_root(ctx: &mut UIScopeContext, root_entity: EntityId) {
                 debug_info_visible.update_with(|visible| !*visible);
             }
         }
-        if code == VirtualKeyCode::Tab {
+        if code == KeyCode::Tab {
             let inventory_state = ui_reactor.root_state(&ui_root_states::INVENTORY_VISIBLE).unwrap();
             inventory_state.update(state == ElementState::Pressed);
         }
-        if code == VirtualKeyCode::Q {
+        if code == KeyCode::KeyQ {
             let selected_item_idx = ui_reactor
                 .root_state(&ui_root_states::SELECTED_INVENTORY_ITEM_IDX)
                 .unwrap();
             selected_item_idx
                 .update_with(|v| (*v as i32 - 1).rem_euclid(NUM_INTENTORY_ITEM_SLOTS as i32) as u32);
         }
-        if code == VirtualKeyCode::E {
+        if code == KeyCode::KeyE {
             let selected_item_idx = ui_reactor
                 .root_state(&ui_root_states::SELECTED_INVENTORY_ITEM_IDX)
                 .unwrap();

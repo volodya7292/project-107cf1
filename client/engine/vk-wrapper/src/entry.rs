@@ -74,7 +74,7 @@ unsafe extern "system" fn vk_debug_callback(
 pub fn enumerate_required_window_extensions(
     window_handle: &dyn HasRawWindowHandle,
 ) -> Result<Vec<String>, vk::Result> {
-    let extensions = match window_handle.raw_window_handle() {
+    let extensions = match window_handle.raw_window_handle().unwrap() {
         RawWindowHandle::Win32(_) => {
             const WINDOWS_EXTS: [&CStr; 2] = [
                 ash::extensions::khr::Surface::name(),
