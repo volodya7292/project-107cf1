@@ -204,7 +204,9 @@ pub fn ui_text_input(local_name: &str, ctx: &mut UIScopeContext, props: TextInpu
                             }
                         }
 
-                        if let Some(ch) = ch {
+                        if let Some(ch) = ch
+                            && state == ElementState::Pressed
+                        {
                             if ch.is_control() || super_key_pressed {
                                 return new_text;
                             }
