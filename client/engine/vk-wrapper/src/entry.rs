@@ -38,6 +38,12 @@ fn vk_debug_callback_filter(message_type: vk::DebugUtilsMessageTypeFlagsEXT, msg
         return false;
     }
 
+    if message_type == vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+        && msg.contains("Metal does not support disabling primitive restart")
+    {
+        return false;
+    }
+
     true
 }
 
@@ -167,10 +173,10 @@ impl Entry {
 
         let mut required_layers: Vec<&str> = vec![];
         let mut required_extensions: Vec<&str> = required_extensions.iter().map(|a| a.as_ref()).collect();
-        let preferred_extensions: Vec<&str> = vec!["VK_KHR_portability_enumeration"];
+        let mut preferred_extensions: Vec<&str> = vec!["VK_KHR_portability_enumeration"];
 
         if cfg!(debug_assertions) {
-            required_layers.push("VK_LAYER_KHRONOS_validation");
+            preferred_extensions.push("VK_LAYER_KHRONOS_validation");
             required_extensions.push("VK_EXT_debug_utils");
         }
         required_extensions.push("VK_KHR_surface");

@@ -158,7 +158,7 @@ impl StageManager {
             let mut last_stage_timings = vec![];
             last_stage_timings.clear();
 
-            for submit_batch in &self.submits {
+            for (batch_idx, submit_batch) in self.submits.iter().enumerate() {
                 let run_results: Vec<_> = submit_batch
                     .stages
                     .iter()
@@ -216,8 +216,13 @@ impl StageManager {
                     })
                     .collect();
 
+                let t0 = Instant::now();
                 // Use _sync to wait for the completion because the next batch recording depends on these jobs.
                 self.device.run_jobs_sync(&mut exec_infos)?;
+                let t1 = Instant::now();
+
+                let time = (t1 - t0).as_secs_f64();
+                last_stage_timings.push(("exec".to_owned(), time));
             }
 
             self.last_stage_timings = last_stage_timings;
