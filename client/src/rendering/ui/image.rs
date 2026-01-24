@@ -1,7 +1,6 @@
 use crate::game::EngineCtxGameExt;
 use common::glm::Vec2;
 use common::image;
-use common::memoffset::offset_of;
 use common::resource_cache::ResourceCache;
 use engine::EngineContext;
 use engine::ecs::component::render_config::{GPUImageResource, GPUResource, RenderLayer};
@@ -17,6 +16,7 @@ use engine::vkw::pipeline::CullMode;
 use engine::vkw::{Format, ImageUsageFlags, PrimitiveTopology};
 use entity_data::EntityId;
 use smallvec::smallvec;
+use std::mem::offset_of;
 use std::sync::Arc;
 
 struct ImageImplContext {
@@ -271,13 +271,13 @@ pub mod reactive {
     use crate::game::EngineCtxGameExt;
     use crate::rendering::ui::image::{ImageAccess, ImageFitness, ImageImpl, ImageSource, UIImage};
     use crate::rendering::ui::{LOCAL_VAR_OPACITY, STATE_ENTITY_ID};
-    use common::memoffset::offset_of;
     use common::scene::relation::Relation;
     use engine::ecs::component::UniformDataC;
     use engine::ecs::component::ui::UILayoutC;
     use engine::module::scene::Scene;
     use engine::module::ui::reactive::UIScopeContext;
     use entity_data::EntityId;
+    use std::mem::offset_of;
 
     #[derive(Default, Clone, PartialEq)]
     pub struct UIImageProps<P> {

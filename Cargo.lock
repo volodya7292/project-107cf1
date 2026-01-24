@@ -477,7 +477,6 @@ dependencies = [
  "indexmap",
  "log",
  "macos",
- "memoffset",
  "moka",
  "nalgebra",
  "nalgebra-glm",
@@ -779,23 +778,22 @@ dependencies = [
 
 [[package]]
 name = "entity_data"
-version = "1.11.1"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92aa8194e8e941479e92d4796e33c7868e78e7f9b8bb3f13449660d0b3957237"
+checksum = "aed60d5eb7e3e951fb89bf607534f753ff4640a34b1e2b64403b128ac2081cc4"
 dependencies = [
  "ahash",
  "entity_data-macros",
  "index-pool",
- "memoffset",
  "rayon",
  "smallvec",
 ]
 
 [[package]]
 name = "entity_data-macros"
-version = "1.7.0"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23939bae03e822ee7753b764c35dde6142d10211bee910e81d8144509a381080"
+checksum = "e2112ae19f1decf1fe097cbc971fb85f0bf7d8c92527a29b09f05101f1d605ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1405,15 +1403,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "memoffset"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]

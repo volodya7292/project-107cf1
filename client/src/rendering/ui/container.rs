@@ -3,7 +3,6 @@ use crate::game::EngineCtxGameExt;
 use crate::rendering::ui::{LOCAL_VAR_OPACITY, STATE_ENTITY_ID, UICallbacks};
 use by_address::ByAddress;
 use common::glm::{Vec2, Vec4};
-use common::memoffset::offset_of;
 use common::scene::relation::Relation;
 use engine::EngineContext;
 use engine::ecs::component::render_config::{GPUResource, RenderLayer};
@@ -19,6 +18,7 @@ use engine::utils::U8SliceHelper;
 use entity_data::EntityId;
 use smallvec::{SmallVec, smallvec};
 use std::mem;
+use std::mem::offset_of;
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]

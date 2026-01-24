@@ -22,7 +22,6 @@ nalgebra-glm = { workspace = true }
 tokio = { workspace = true }
 futures-lite = { workspace = true }
 bumpalo = { workspace = true }
-memoffset = { workspace = true }
 index-pool = { workspace = true }
 ring = { workspace = true }
 image = { workspace = true }
