@@ -645,10 +645,16 @@ impl Device {
         })
         .collect();
 
+        let images = images?;
+        let semaphores: Result<Vec<Arc<Semaphore>>, DeviceError> = (0..images.len())
+            .map(|_| Ok(Arc::new(create_binary_semaphore(&self.wrapper)?)))
+            .collect();
+
         Ok(Swapchain {
             wrapper: swapchain_wrapper,
-            readiness_semaphore: Arc::new(create_binary_semaphore(&self.wrapper)?),
-            images: images?,
+            fence: Mutex::new(create_fence(&self.wrapper)?),
+            images: images,
+            image_completion_semaphores: semaphores?,
         })
     }
 

@@ -49,6 +49,7 @@ use engine::winit::window::{CursorGrabMode, Fullscreen, Window, WindowAttributes
 use engine::{EngineContext, winit};
 use entity_data::EntityId;
 use std::cell::RefMut;
+use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 use std::f64::consts::PI;
 use std::fs;
@@ -122,6 +123,7 @@ pub struct MainApp {
     ui_reactor: Lrc<UIReactor>,
 
     test_mesh: Arc<RawVertexMesh>,
+    fps_samples: VecDeque<f64>,
 }
 
 const WALK_VELOCITY: f64 = 3.0;
@@ -260,6 +262,7 @@ impl MainApp {
             root_entity,
             ui_reactor: Lrc::wrap(ui_reactor),
             test_mesh: test_mesh.raw(),
+            fps_samples: VecDeque::with_capacity(300),
         };
         ctx.register_module(game);
 
@@ -596,6 +599,22 @@ impl MainApp {
         }
     }
 
+    fn calculate_p_fps(&mut self, current_fps: f64, p: f64) -> f64 {
+        self.fps_samples.push_back(current_fps);
+        if self.fps_samples.len() > 300 {
+            self.fps_samples.pop_front();
+        }
+
+        if self.fps_samples.is_empty() {
+            return current_fps;
+        }
+
+        let mut sorted_samples: Vec<f64> = self.fps_samples.iter().copied().collect();
+        sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p_index = ((1.0 - sorted_samples.len() as f64 * p) as usize).min(sorted_samples.len() - 1);
+        sorted_samples[p_index]
+    }
+
     fn calc_player_velocity(kb: &Keyboard, state: &GameProcessState, orientation: Vec3) -> Vec3 {
         let mut vel_front_back = 0;
         let mut vel_left_right = 0;
@@ -861,6 +880,9 @@ impl EngineModule for MainApp {
             });
         }
 
+        let fps = 1.0 / delta_time;
+        let p99_fps = self.calculate_p_fps(fps, 0.99);
+
         if let Some(curr_state) = self.game_state.as_ref().map(|v| v.lock()) {
             let reactor = self.ui_reactor();
             // Update HUD
@@ -875,7 +897,6 @@ impl EngineModule for MainApp {
 
             // Update debug info
             {
-                let fps = 1.0 / delta_time;
                 let app_time = ctx.module_last_update_time::<MainApp>();
                 let input_time = ctx.module_last_update_time::<Input>();
                 let ui_inter_manager_time = ctx.module_last_update_time::<UIInteractionManager>();
@@ -887,7 +908,7 @@ impl EngineModule for MainApp {
 
                 let debug_info_state = reactor.root_state(&ui_root_states::DEBUG_INFO).unwrap();
                 debug_info_state.update(vec![
-                    format!("{fps:.1} fps"),
+                    format!("{fps:.1} fps (p99: {p99_fps:.1})"),
                     format!("MainApp: {:.1} ms", app_time * 1000.0),
                     format!("Input: {:.1} ms", input_time * 1000.0),
                     format!("UIInteractionManager: {:.1} ms", ui_inter_manager_time * 1000.0),

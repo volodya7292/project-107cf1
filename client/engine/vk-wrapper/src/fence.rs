@@ -11,7 +11,6 @@ pub struct Fence {
 
 impl Fence {
     pub(crate) fn reset(&mut self) -> Result<(), vk::Result> {
-        self.wait()?;
         unsafe { self.device_wrapper.native.reset_fences(&[self.native]) }
     }
 
@@ -21,6 +20,11 @@ impl Fence {
                 .native
                 .wait_for_fences(&[self.native], true, u64::MAX)
         }
+    }
+
+    pub(crate) fn wait_and_reset(&mut self) -> Result<(), vk::Result> {
+        self.wait()?;
+        self.reset()
     }
 }
 

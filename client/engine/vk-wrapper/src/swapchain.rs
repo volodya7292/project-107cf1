@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
+use crate::{Device, Fence, Image, Semaphore, Surface};
 use ash::vk;
 use common::parking_lot::Mutex;
-
-use crate::{Device, Image, Semaphore, Surface};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -36,8 +34,9 @@ impl Drop for SwapchainWrapper {
 
 pub struct Swapchain {
     pub(crate) wrapper: Arc<SwapchainWrapper>,
-    pub(crate) readiness_semaphore: Arc<Semaphore>,
+    pub(crate) fence: Mutex<Fence>,
     pub(crate) images: Vec<Arc<Image>>,
+    pub(crate) image_completion_semaphores: Vec<Arc<Semaphore>>,
 }
 
 impl Swapchain {
@@ -46,20 +45,25 @@ impl Swapchain {
     }
 
     pub fn acquire_image(&self) -> Result<(SwapchainImage, bool), Error> {
+        let mut fence = self.fence.lock();
+        fence.reset().unwrap();
+
         let result = unsafe {
             let native = self.wrapper.native.lock();
             self.wrapper.device.swapchain_khr.acquire_next_image(
                 *native,
                 u64::MAX,
-                self.readiness_semaphore.native,
-                vk::Fence::default(),
+                vk::Semaphore::null(),
+                fence.native,
             )
         };
+        fence.wait().unwrap();
 
         match result {
             Ok(a) => Ok((
                 SwapchainImage {
                     image: Arc::clone(&self.images[a.0 as usize]),
+                    completion_semaphore: Arc::clone(&self.image_completion_semaphores[a.0 as usize]),
                     index: a.0,
                 },
                 a.1,
@@ -67,10 +71,6 @@ impl Swapchain {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(Error::IncompatibleSurface),
             Err(e) => Err(Error::VkError(e)),
         }
-    }
-
-    pub fn readiness_semaphore(&self) -> &Arc<Semaphore> {
-        &self.readiness_semaphore
     }
 }
 
@@ -82,12 +82,17 @@ impl PartialEq for Swapchain {
 
 pub struct SwapchainImage {
     pub(crate) image: Arc<Image>,
+    pub(crate) completion_semaphore: Arc<Semaphore>,
     pub(crate) index: u32,
 }
 
 impl SwapchainImage {
     pub fn get(&self) -> &Arc<Image> {
         &self.image
+    }
+
+    pub fn completion_semaphore(&self) -> &Arc<Semaphore> {
+        &self.completion_semaphore
     }
 
     pub fn index(&self) -> u32 {

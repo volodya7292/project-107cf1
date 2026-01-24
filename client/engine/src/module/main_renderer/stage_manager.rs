@@ -149,7 +149,7 @@ impl StageManager {
         &self.stages
     }
 
-    pub unsafe fn run(&mut self, ctx: &StageContext) -> Result<(), DeviceError> {
+    pub unsafe fn execute_to_completion(&mut self, ctx: &StageContext) -> Result<(), DeviceError> {
         unsafe {
             // Safety: waiting for completion of pending cmd lists
             // is done inside Device::run_jobs()
@@ -230,7 +230,7 @@ impl StageManager {
         &self.last_stage_timings
     }
 
-    pub fn wait_idle(&self) {
+    fn wait_idle(&self) {
         let queue = self.device.get_queue(QueueType::Graphics);
         queue.wait_idle().unwrap();
     }

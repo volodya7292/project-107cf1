@@ -191,19 +191,13 @@ impl RenderStage for ComposeStage {
 
         let signal_semaphores = if graphics_queue == present_queue {
             vec![SignalSemaphore {
-                semaphore: Arc::clone(ctx.frame_completion_semaphore),
+                semaphore: Arc::clone(ctx.render_sw_image.completion_semaphore()),
                 signal_value: 0,
             }]
         } else {
             vec![]
         };
 
-        StageRunResult::new()
-            .with_wait_semaphores(vec![WaitSemaphore {
-                semaphore: Arc::clone(ctx.swapchain.readiness_semaphore()),
-                wait_dst_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                wait_value: 0,
-            }])
-            .with_signal_semaphores(signal_semaphores)
+        StageRunResult::new().with_signal_semaphores(signal_semaphores)
     }
 }

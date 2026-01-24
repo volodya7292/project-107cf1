@@ -36,7 +36,6 @@ pub(crate) struct StageContext<'a> {
     pub render_size: (u32, u32),
     pub swapchain: &'a Arc<Swapchain>,
     pub render_sw_image: &'a SwapchainImage,
-    pub frame_completion_semaphore: &'a Arc<Semaphore>,
 }
 
 pub(crate) struct FrameContext<'a> {

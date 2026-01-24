@@ -160,7 +160,6 @@ pub struct MainRenderer {
 
     surface: Arc<Surface>,
     swapchain: Option<Arc<Swapchain>>,
-    frame_completion_semaphore: Arc<Semaphore>,
     surface_changed: bool,
     surface_size: U32Vec2,
     render_size: U32Vec2,
@@ -747,8 +746,6 @@ impl MainRenderer {
             .create_job("renderer-staging", QueueType::Graphics)
             .unwrap();
 
-        let frame_completion_semaphore = Arc::new(device.create_binary_semaphore().unwrap());
-
         let resources = RendererResources {
             texture_atlases,
             _tex_atlas_sampler: tex_atlas_sampler,
@@ -807,7 +804,6 @@ impl MainRenderer {
             relative_camera_pos: Default::default(),
             surface,
             swapchain: None,
-            frame_completion_semaphore,
             surface_changed: false,
             surface_size: glm::convert_unchecked(curr_size.real()),
             render_size: glm::convert_unchecked(curr_size.real()),
@@ -1458,11 +1454,10 @@ impl MainRenderer {
             render_size: (self.render_size.x, self.render_size.y),
             swapchain: self.swapchain.as_ref().unwrap(),
             render_sw_image: sw_image,
-            frame_completion_semaphore: &self.frame_completion_semaphore,
         };
 
         unsafe {
-            self.stage_manager.run(&stage_ctx).unwrap();
+            self.stage_manager.execute_to_completion(&stage_ctx).unwrap();
         }
         let t1 = Instant::now();
 
@@ -1482,9 +1477,6 @@ impl MainRenderer {
         }
 
         if self.surface_changed {
-            // Wait for previous frame completion
-            self.stage_manager.wait_idle();
-
             Surface::update(&*ctx.window.borrow()).unwrap();
 
             self.swapchain = Some(Arc::new(
@@ -1512,14 +1504,11 @@ impl MainRenderer {
             Ok((sw_image, suboptimal)) => {
                 self.surface_changed |= suboptimal;
 
-                // Wait for previous frame completion
-                self.stage_manager.wait_idle();
-
                 timings.update = self.on_update(ctx);
                 timings.render = self.on_render(&sw_image, ctx);
 
                 let present_queue = self.device.get_queue(QueueType::Present);
-                let present_result = present_queue.present(&self.frame_completion_semaphore, sw_image);
+                let present_result = present_queue.present(sw_image);
 
                 match present_result {
                     Ok(suboptimal) => {

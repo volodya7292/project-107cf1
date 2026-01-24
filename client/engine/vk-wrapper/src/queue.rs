@@ -162,7 +162,7 @@ impl Queue {
         let queue = self.native.write();
 
         let fence_native = if let Some(fence) = fence {
-            fence.reset()?;
+            fence.wait_and_reset()?;
             fence.native
         } else {
             vk::Fence::null()
@@ -178,11 +178,7 @@ impl Queue {
     }
 
     /// Returns whether the swapchain is in suboptimal state.
-    pub fn present(
-        &self,
-        wait_semaphore: &Semaphore,
-        sw_image: SwapchainImage,
-    ) -> Result<bool, swapchain::Error> {
+    pub fn present(&self, sw_image: SwapchainImage) -> Result<bool, swapchain::Error> {
         let queue = self.native.write();
         let swapchain = sw_image
             .image
@@ -194,7 +190,7 @@ impl Queue {
             .lock();
 
         let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(slice::from_ref(&wait_semaphore.native))
+            .wait_semaphores(slice::from_ref(&sw_image.completion_semaphore.native))
             .swapchains(slice::from_ref(&*swapchain))
             .image_indices(slice::from_ref(&sw_image.index));
         let result = unsafe { self.swapchain_khr.queue_present(*queue, &present_info) };
