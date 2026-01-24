@@ -1,4 +1,4 @@
-use common::glm::{U8Vec4, UVec3, UVec4, Vec2, Vec3, Vec4};
+use common::glm::{U8Vec4, UVec2, UVec3, UVec4, Vec2, Vec3, Vec4};
 use common::nalgebra as na;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -149,6 +149,12 @@ impl VertexMember for Vec3 {
 impl VertexMember for Vec4 {
     fn vk_format() -> Format {
         Format::RGBA32_FLOAT
+    }
+}
+
+impl VertexMember for UVec2 {
+    fn vk_format() -> Format {
+        Format::RGBA32_UINT
     }
 }
 

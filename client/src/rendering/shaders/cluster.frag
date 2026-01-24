@@ -193,10 +193,14 @@ void main() {
     triplan_coord[1] = vs_in.world_pos.zx;
     triplan_coord[2] = vs_in.world_pos.xy;
 
-    triplan_coord2 = vs_in.surface_normal.z * vs_in.world_pos.xy
-                    + vs_in.surface_normal.y * vs_in.world_pos.xz
-                    + vs_in.surface_normal.x * vs_in.world_pos.yz;
-
+    // local_pos is more precise than world_pos
+    triplan_coord2 = vs_in.surface_normal.z * vs_in.local_pos.xy
+                    + vs_in.surface_normal.y * vs_in.local_pos.xz
+                    + vs_in.surface_normal.x * vs_in.local_pos.yz;
+    
+    // better pixel-aligned visuals
+    float tile_size = float(info.tex_atlas_info.x);
+    triplan_coord2 = floor(triplan_coord2 * tile_size) / tile_size;
 
     normal_coord[0] = vs_in.surface_normal.yz;
     normal_coord[1] = vs_in.surface_normal.zx;

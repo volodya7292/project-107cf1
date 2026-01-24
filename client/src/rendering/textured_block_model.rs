@@ -45,8 +45,12 @@ pub struct Vertex {
 impl Vertex {
     pub fn pack(&self) -> PackedVertex {
         let enc_pos: U32Vec3 = glm::convert_unchecked(self.position / (RawCluster::SIZE as f32) * 65535.0);
-        let enc_normal: U32Vec3 =
-            glm::convert_unchecked(glm::min(&(self.normal.add_scalar(1.0) * 0.5 * 255.0), 255.0));
+        // 254 (instead of 255) for proper precision of zeros
+        let enc_normal: U32Vec3 = glm::convert_unchecked(glm::clamp(
+            &(self.normal.add_scalar(1.0) * 254.0 / 2.0),
+            0.0,
+            254.0,
+        ));
         let enc_tex_uv: U32Vec2 = glm::convert_unchecked(self.tex_uv / 64.0 * 65535.0);
 
         let pack1_0 = ((enc_pos[0] & 0xffff) << 16) | (enc_pos[1] & 0xffff);

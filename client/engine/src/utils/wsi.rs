@@ -12,7 +12,7 @@ pub type WSISize<T> = WSIVec2<T>;
 /// `real_scale_factor()` for monitor with this DPI is equal to 1.
 pub const DEFAULT_DPI: u32 = 109;
 
-pub fn find_best_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::monitor::VideoMode {
+pub fn find_best_video_mode(monitor: &winit::monitor::MonitorHandle) -> winit::monitor::VideoModeHandle {
     let curr_refresh_rate = monitor.refresh_rate_millihertz().unwrap();
 
     monitor

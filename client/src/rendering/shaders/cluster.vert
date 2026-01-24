@@ -38,7 +38,7 @@ void main() {
     vec3 inPosition = vec3(uvec3((inPack1[0] >> 16) & 0xffffu, (inPack1[0]) & 0xffffu, (inPack1[1] >> 16) & 0xffffu));
     inPosition = inPosition / 65535.0 * CLUSTER_SIZE;
     vec3 inNormal = vec3(uvec3((inPack1[1] >> 8) & 0xffu, inPack1[1] & 0xffu, (inPack1[2] >> 24) & 0xffu));
-    inNormal = inNormal / 255.0 * 2.0 - 1.0;
+    inNormal = inNormal / 254.0 * 2.0 - 1.0;
     vec2 inTexUV = vec2(uvec2((inPack1[3] >> 16) & 0xffffu, inPack1[3] & 0xffffu));
     inTexUV = inTexUV / 65535.0 * 64.0;
     float inAO = float((inPack1[2] >> 16) & 0xffu) / 255.0;

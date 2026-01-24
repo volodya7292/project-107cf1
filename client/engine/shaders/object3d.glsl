@@ -56,7 +56,7 @@ layout(set = SET_GENERAL_PER_FRAME, binding = BINDING_TRANSPARENCY_COLORS, rgba8
 /// tex_coord: regular texture coordinates
 vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile_index) {
     ivec2 atlas_size = textureSize(atlas, 0);
-    float mip_levels = max(log2(float(tile_width)), 3) - 2; // account for BC block size (4x4)
+    float max_mip_level = max(log2(float(tile_width)), 3) - 2; // account for BC block size (4x4)
     uint size_in_tiles = atlas_size.x / tile_width;
     float tile_width_norm = 1.0 / size_in_tiles;
     float pixel_size = 1.0 / tile_width;
@@ -67,7 +67,7 @@ vec4 textureAtlas(in sampler2D atlas, uint tile_width, vec2 tex_coord, uint tile
     vec2 dx = dFdx(tex_coord_pixels);
     vec2 dy = dFdy(tex_coord_pixels);
     float d = max(dot(dx, dx), dot(dy, dy));
-    float lod = clamp(0.5 * log2(d), 0, mip_levels - 1);
+    float lod = clamp(0.5 * log2(d), 0, max_mip_level);
 
     // Calculate texture coordinates
     float pixel_offset = pixel_size * pow(2.0, lod);
