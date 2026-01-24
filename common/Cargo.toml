@@ -10,7 +10,7 @@ serde_yaml = { workspace = true }
 serde_bytes = { workspace = true }
 glob = { workspace = true }
 byteorder = { workspace = true }
-bincode = { workspace = true }
+postcard = { workspace = true }
 entity_data = { workspace = true }
 indexmap = { workspace = true }
 moka = { workspace = true }

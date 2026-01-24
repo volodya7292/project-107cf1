@@ -190,12 +190,12 @@ pub fn compile_shader_bundle(
 }
 
 pub fn save_shader_bundle<P: AsRef<Path>>(path: P, bundle: &ShaderBundle) {
-    let data = bincode::serialize(&bundle).unwrap();
+    let data = postcard::to_stdvec(&bundle).unwrap();
     fs::write(path, data).unwrap();
 }
 
 pub fn read_shader_bundle(data: &[u8]) -> ShaderBundle {
-    bincode::deserialize::<ShaderBundle>(data).unwrap()
+    postcard::from_bytes::<ShaderBundle>(data).unwrap()
 }
 
 pub fn is_shader_source_ext(ext: &str) -> bool {

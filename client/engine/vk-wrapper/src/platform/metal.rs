@@ -59,12 +59,6 @@ pub unsafe fn metal_layer_from_ns_view(view: *mut c_void) -> Layer {
     }
 }
 
-pub unsafe fn metal_layer_from_ns_window(window: *mut c_void) -> Layer {
-    let ns_window = window as *mut AnyObject;
-    let ns_view = msg_send![ns_window, contentView];
-    unsafe { metal_layer_from_ns_view(ns_view) }
-}
-
 pub unsafe fn metal_layer_update(handle: AppKitWindowHandle) {
     unsafe {
         let view: *mut AnyObject = mem::transmute(handle.ns_view.as_ptr());

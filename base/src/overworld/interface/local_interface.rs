@@ -12,9 +12,10 @@ use common::glm::{I64Vec3, TVec3};
 use common::moka;
 use common::parking_lot::{Mutex, RwLock};
 use common::types::{ConcurrentCache, HashMap};
-use lazy_static::lazy_static;
+use postcard::ser_flavors::Flavor;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,10 +25,6 @@ const SECTOR_SIZE_1D: usize = 5;
 const SECTOR_SIZE_CELLS_1D: usize = SECTOR_SIZE_1D * RawCluster::SIZE;
 const SECTORS_DIR_NAME: &'static str = "matter";
 const OVERWORLD_STATE_FILE_NAME: &'static str = "state.json";
-
-lazy_static! {
-    pub static ref BINCODE_OPTIONS: bincode::DefaultOptions = bincode::options();
-}
 
 fn make_sector_file_name(pos: &SectorPos) -> String {
     let raw_pos = pos.get();
@@ -59,9 +56,11 @@ fn on_commit(
         let ready_cluster = ClusterState::ready(&cl).unwrap();
         let t_cluster = ready_cluster.unwrap();
 
-        let mut out_data = Vec::with_capacity(64_000);
-        let mut serializer = bincode::Serializer::new(&mut out_data, *BINCODE_OPTIONS);
+        let mut serializer = postcard::Serializer {
+            output: postcard::ser_flavors::StdVec::new(),
+        };
         serialize_cluster(&t_cluster.raw, registry, &mut serializer).unwrap();
+        let out_data = serializer.output.finalize().unwrap();
         let decompressed_size = out_data.len();
         let compressed_data = lz4_flex::compress(&out_data);
 
@@ -78,7 +77,7 @@ fn on_commit(
     // Create/replace sector files
     for (sector_pos, sector) in by_sectors {
         let sector = sector.read();
-        let sector_bytes = bincode::serialize(&*sector).unwrap();
+        let sector_bytes = postcard::to_stdvec(&*sector).unwrap();
         let file_name = make_sector_file_name(&sector_pos);
         fs::write(folder.join(SECTORS_DIR_NAME).join(file_name), sector_bytes).unwrap();
     }
@@ -116,7 +115,7 @@ impl SectorsCache {
             let file_name = make_sector_file_name(sector_pos);
             let file = fs::File::open(self.folder.join(SECTORS_DIR_NAME).join(file_name));
 
-            let file = match file {
+            let mut file = match file {
                 Ok(file) => file,
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {
                     return Arc::new(RwLock::new(SectorData::new()));
@@ -124,8 +123,11 @@ impl SectorsCache {
                 err => err.unwrap(),
             };
 
-            let data = bincode::deserialize_from::<_, SectorData>(file).unwrap();
-            Arc::new(RwLock::new(data))
+            let mut data = vec![];
+            file.read_to_end(&mut data).unwrap();
+
+            let sector_data = postcard::from_bytes::<SectorData>(&data).unwrap();
+            Arc::new(RwLock::new(sector_data))
         })
     }
 }
@@ -243,7 +245,7 @@ pub struct ClusterData {
 impl ClusterData {
     pub fn load(&self, registry: &Registry) -> RawCluster {
         let bytes = lz4_flex::decompress(&self.compressed_data, self.decompressed_size).unwrap();
-        let mut deserializer = bincode::Deserializer::from_slice(&bytes, *BINCODE_OPTIONS);
+        let mut deserializer = postcard::Deserializer::from_bytes(&bytes);
         return deserialize_cluster(registry, &mut deserializer).unwrap();
     }
 }

@@ -7,6 +7,7 @@ use crate::overworld::raw_cluster::{BlockDataImpl, RawCluster, deserialize_clust
 use approx::assert_abs_diff_eq;
 use common::glm;
 use common::glm::{I32Vec3, Vec3};
+use postcard::ser_flavors::Flavor;
 
 #[test]
 fn cluster_serialization() {
@@ -21,12 +22,14 @@ fn cluster_serialization() {
         s
     });
 
-    let mut data = vec![];
-    let mut ser = bincode::Serializer::new(&mut data, *local_interface::BINCODE_OPTIONS);
+    let mut ser = postcard::Serializer {
+        output: postcard::ser_flavors::StdVec::new(),
+    };
     serialize_cluster(&cluster, main_registry.registry(), &mut ser).unwrap();
+    let data = ser.output.finalize().unwrap();
     assert!(!data.is_empty());
 
-    let mut deser = bincode::Deserializer::from_slice(&data, *local_interface::BINCODE_OPTIONS);
+    let mut deser = postcard::Deserializer::from_flavor(postcard::de_flavors::Slice::new(&data));
     let cluster = deserialize_cluster(main_registry.registry(), &mut deser).unwrap();
 
     let b_data = cluster.get(&ClusterBlockPos::new(1, 4, 9));

@@ -147,9 +147,12 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
 
     // Read timestamp file
     let mut timestamps: HashMap<String, SystemTime> = fs::read(&ts_path)
-        .map(|v| bincode::deserialize::<HashMap<String, SystemTime>>(&v).ok())
-        .ok()
-        .flatten()
+        .map(|v| {
+            postcard::from_bytes::<HashMap<String, SystemTime>>(&v).unwrap_or_else(|err| {
+                println!("Cannot read timestamp file ({err}), regenerating...");
+                Default::default()
+            })
+        })
         .unwrap_or(Default::default());
 
     // Create destination directories
@@ -231,7 +234,7 @@ pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) 
     }
 
     // Write timestamp file
-    let timestamps = bincode::serialize(&timestamps).unwrap();
+    let timestamps = postcard::to_stdvec(&timestamps).unwrap();
     fs::write(&ts_path, timestamps).unwrap();
 
     println!(
