@@ -1218,7 +1218,7 @@ impl MainRenderer {
 
         scene.storage_mut().dispatch_par([
             System::new(&mut renderer_events_system).with_mut::<MeshRenderConfigC>(),
-            System::new(&mut vertex_mesh_system).with_mut::<VertexMeshC>(),
+            System::new(&mut vertex_mesh_system).with::<VertexMeshC>(),
             System::new(&mut hierarchy_propagation_system)
                 .with::<Relation>()
                 .with::<TransformC>()

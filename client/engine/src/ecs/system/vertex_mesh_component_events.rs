@@ -18,7 +18,7 @@ pub(crate) struct VertexMeshCompEvents<'a> {
 impl SystemHandler for VertexMeshCompEvents<'_> {
     fn run(&mut self, data: SystemAccess) {
         let t0 = Instant::now();
-        let vertex_mesh_comps = data.component_mut::<VertexMeshC>();
+        let vertex_mesh_comps = data.component::<VertexMeshC>();
 
         // Update device buffers of vertex meshes
         for change in &self.component_changes {

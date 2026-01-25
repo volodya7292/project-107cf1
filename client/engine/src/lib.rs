@@ -49,6 +49,7 @@ impl Display for EngineStatistics {
 }
 
 pub struct Engine {
+    initialized: bool,
     do_stop: AtomicBool,
     last_frame_end_time: Instant,
     delta_time: f64,
@@ -113,6 +114,7 @@ impl Engine {
         let event_loop = EventLoop::new().unwrap();
 
         let engine = Self {
+            initialized: false,
             do_stop: Default::default(),
             last_frame_end_time: Instant::now(),
             delta_time: 1.0,
@@ -160,7 +162,8 @@ impl ApplicationHandler for Engine {
             return;
         }
 
-        if cause == winit::event::StartCause::Init {
+        // we don't use StartCause::Init here as it stalls the process if initialization panics
+        if cause == winit::event::StartCause::Poll && self.initialized == false {
             let main_window = (self.create_window_fn)(event_loop);
             let sizing_info = WSizingInfo::get(&main_window);
 
@@ -172,6 +175,7 @@ impl ApplicationHandler for Engine {
 
             self.module_manager.borrow().on_start(&self.context());
             (self.on_init)(&self.context());
+            self.initialized = true;
         }
 
         if cause == winit::event::StartCause::Poll {
