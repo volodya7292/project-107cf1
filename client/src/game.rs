@@ -611,7 +611,7 @@ impl MainApp {
 
         let mut sorted_samples: Vec<f64> = self.fps_samples.iter().copied().collect();
         sorted_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p_index = ((1.0 - sorted_samples.len() as f64 * p) as usize).min(sorted_samples.len() - 1);
+        let p_index = ((sorted_samples.len() as f64 * (1.0 - p)) as usize).min(sorted_samples.len() - 1);
         sorted_samples[p_index]
     }
 
