@@ -25,6 +25,3 @@ by_address = { workspace = true }
 [build-dependencies]
 common = { path = "../common" }
 shader_ids = { path = "engine/shader_ids" }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-embed_plist = "1.2"

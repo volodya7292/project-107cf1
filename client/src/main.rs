@@ -14,9 +14,6 @@ use engine::Engine;
 use simple_logger::SimpleLogger;
 use std::thread;
 
-#[cfg(target_os = "macos")]
-embed_plist::embed_info_plist!("../Info.plist");
-
 fn parking_lot_deadlock_detection() {
     use common::parking_lot::deadlock;
     use std::time::Duration;

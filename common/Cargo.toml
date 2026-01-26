@@ -28,3 +28,4 @@ image = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos = { path = "../common/macos" }
+core-foundation = { workspace = true }

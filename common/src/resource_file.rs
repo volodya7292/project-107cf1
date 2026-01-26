@@ -7,7 +7,7 @@ use std::ffi::CStr;
 use std::fmt::Formatter;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, io};
 
@@ -113,6 +113,10 @@ impl ResourceFile {
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Arc<ResourceFile>, Error> {
+        Self::open_direct(resource_path(path))
+    }
+
+    pub fn open_direct<P: AsRef<Path>>(path: P) -> Result<Arc<ResourceFile>, Error> {
         let mut res_file = ResourceFile {
             buf_reader: Mutex::new(BufReader::new(File::open(path)?)),
             main_entry: ResourceEntry {
@@ -218,4 +222,23 @@ impl BufferedResourceReader {
             Arc::new(dyn_img.into_rgba8())
         })
     }
+}
+
+pub fn resource_path<P: AsRef<Path>>(path: P) -> PathBuf {
+    let mut url: Option<PathBuf> = None;
+
+    if cfg!(target_os = "macos") {
+        let bundle = core_foundation::bundle::CFBundle::main_bundle();
+        url = bundle
+            .bundle_resources_url()
+            .map(|url| url.to_path())
+            .flatten()
+            .map(|root| root.join(path.as_ref()));
+    }
+
+    if url.is_none() {
+        url = Some(PathBuf::from(path.as_ref()));
+    }
+
+    url.unwrap()
 }

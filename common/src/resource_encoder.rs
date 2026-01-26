@@ -130,7 +130,7 @@ fn read_resources(read_dir: fs::ReadDir, timestamps: &mut HashMap<String, System
     res_file
 }
 
-pub fn encode_resources<P: AsRef<Path>>(resources_path: P, output_file_path: P) {
+pub fn encode_resources<P1: AsRef<Path>, P2: AsRef<Path>>(resources_path: P1, output_file_path: P2) {
     let resources_path = resources_path.as_ref();
     let output_file_path = output_file_path.as_ref();
 

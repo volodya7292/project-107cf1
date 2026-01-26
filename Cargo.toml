@@ -76,6 +76,7 @@ bindgen = "0.72"
 cc = "1.2"
 cxx = "1.0"
 cxx-build = "1.0"
+core-foundation = "0.10"
 
 
 [profile.dev.package."*"]
